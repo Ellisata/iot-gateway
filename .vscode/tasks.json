@@ -1,0 +1,31 @@
+{
+    // 开发模式一键启动: 终端 -> 运行任务 -> dev
+    // 同时启动 Go 后端(9081) 与 Vite 前端(3000)
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "dev-backend",
+            "type": "shell",
+            "command": "go run .",
+            "options": {
+                "cwd": "${workspaceFolder}/backend"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "dev-frontend",
+            "type": "shell",
+            "command": "npm run dev",
+            "options": {
+                "cwd": "${workspaceFolder}/frontend"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "dev",
+            "dependsOn": ["dev-backend", "dev-frontend"],
+            "dependsOrder": "parallel",
+            "problemMatcher": []
+        }
+    ]
+}

@@ -1,0 +1,9 @@
+{
+  "gopls": {
+    "build.buildFlags": ["-tags=wireinject"]
+  },
+  "[bat]": {
+    "files.encoding": "gbk",
+    "files.eol": "\r\n"
+  }
+}

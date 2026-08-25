@@ -1,0 +1,16 @@
+server:
+  port: 9081
+
+jwt:
+  secret: 573ce5969e9884d49d4fab77b09a306a
+  expireHour: 24
+  issuer: iot-gateway
+
+log:
+  level: DEBUG
+  outputDir: log
+  maxSizeMB: 10   # 单个日志文件大小上限（MB），超过后滚动为 app-日期-N.log
+  maxDays: 30     # 日志文件最大保留天数，超过后自动删除
+
+sqlite:
+  path: data/iot-gateway.db              # SQLite 数据库文件路径

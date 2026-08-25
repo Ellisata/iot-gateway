@@ -1,0 +1,30 @@
+# 编译输出
+iot-hand-gateway
+iot-hand-gateway.exe
+*.exe
+
+# 日志
+log/
+*.log
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+*.iml
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 临时文件
+tmp/
+temp/
+
+data/
+*.db
+
+# Claude Code 设置
+.claude/settings.json
+.claude/settings.local.json
