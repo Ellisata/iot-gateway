@@ -184,3 +184,31 @@ export function monitorDeviceData(data) {
     data,
   })
 }
+
+/**
+ * 批量导入设备（Excel .xlsx）
+ * @param {File} file - 选择的 Excel 文件
+ * @returns {Promise<{total:number, success:number, failed:number, errors:Array<{row:number, name:string, reason:string}>}>}
+ * total=总数据行数, success=成功, failed=失败, errors=失败明细（含 Excel 行号/名称/原因）
+ */
+export function importDeviceObjects(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request({
+    url: '/device/importDevice',
+    method: 'post',
+    data: formData,
+  })
+}
+
+/**
+ * 下载设备导入模板（.xlsx，三列：名称/协议/描述）
+ * @returns {Promise<Blob>}
+ */
+export function downloadDeviceTemplate() {
+  return request({
+    url: '/device/importTemplate',
+    method: 'get',
+    responseType: 'blob',
+  })
+}

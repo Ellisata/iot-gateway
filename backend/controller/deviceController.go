@@ -113,3 +113,32 @@ func (ctr *DeviceController) PageDevice(c *gin.Context) {
 	}
 	c.JSON(200, response.Success(data))
 }
+
+// ImportDevice 批量导入设备（Excel .xlsx，上传字段名 file）
+func (ctr *DeviceController) ImportDevice(c *gin.Context) {
+	ctx := c.Request.Context()
+	data, err := readXlsxUpload(c, "file")
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	result, err := ctr.deviceService.ImportDevices(ctx, data)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(result))
+}
+
+// ImportTemplate 下载设备导入模板（.xlsx）
+func (ctr *DeviceController) ImportTemplate(c *gin.Context) {
+	ctx := c.Request.Context()
+	buf, err := ctr.deviceService.GenerateImportTemplate()
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", `attachment; filename="device-import-template.xlsx"`)
+	c.Data(200, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
+}

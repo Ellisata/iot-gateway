@@ -19,7 +19,10 @@
           <el-button @click="handleReset">重置</el-button>
         </div>
         <div class="flex items-center gap-3">
+          <el-button :icon="Download" @click="handleDownloadTemplate">下载模板</el-button>
+          <el-button type="primary" :icon="Upload" :loading="importing" @click="handleImport">导入</el-button>
           <el-button type="primary" @click="handleAdd">新增设备对象</el-button>
+          <input ref="fileInputRef" type="file" accept=".xlsx" class="hidden" @change="handleFileChange" />
         </div>
       </div>
     </el-card>
@@ -263,6 +266,9 @@
       </template>
     </el-dialog>
 
+    <!-- ========== Excel 导入结果对话框 ========== -->
+    <ImportResultDialog v-model:visible="importResultVisible" :result="importResult" />
+
 	  </div>
 </template>
 
@@ -270,7 +276,7 @@
 import { ref, reactive, computed, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, ArrowRight, Check, Connection, CopyDocument, Delete, EditPen, Position } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Check, Connection, CopyDocument, Delete, Download, EditPen, Position, Upload } from '@element-plus/icons-vue'
 import {
   getDeviceObjectList,
   getDeviceObjectById,
@@ -278,9 +284,13 @@ import {
   updateDeviceObject,
   deleteDeviceObject,
   testDeviceConnection,
+  importDeviceObjects,
+  downloadDeviceTemplate,
 } from '@/api/modules/deviceObject'
 import { getProtocolById } from '@/api/modules/protocol'
 import ProtocolSelector from '@/components/ProtocolSelector.vue'
+import ImportResultDialog from '@/components/ImportResultDialog.vue'
+import { useExcelImport } from '@/composables/useExcelImport'
 
 // ---------- 路由 ----------
 const router = useRouter()
@@ -353,6 +363,22 @@ function handleReset() {
   currentPage.value = 1
   fetchList()
 }
+
+// ---------- Excel 导入 / 模板下载 ----------
+const {
+  fileInputRef,
+  importing,
+  importResultVisible,
+  importResult,
+  handleImport,
+  handleFileChange,
+  handleDownloadTemplate,
+} = useExcelImport({
+  importFn: (file) => importDeviceObjects(file),
+  downloadFn: downloadDeviceTemplate,
+  templateName: '设备导入模板.xlsx',
+  refresh: fetchList,
+})
 
 // ---------- 对话框 / 向导状态 ----------
 const dialogVisible = ref(false)

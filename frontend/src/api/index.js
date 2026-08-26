@@ -3,12 +3,11 @@ import { ElMessage } from 'element-plus'
 import router from '@/router'
 
 // 创建 axios 实例
+// 注意：不在此处设置全局 Content-Type，axios 会自动为对象请求设置
+// application/json；若全局固定为 json，FormData 上传会被序列化成 JSON 导致丢失文件
 const request = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   timeout: 15000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 })
 
 // 请求拦截器
@@ -29,8 +28,14 @@ request.interceptors.request.use(
 // 响应拦截器
 request.interceptors.response.use(
   (response) => {
-    const res = response.data
     const config = response.config
+
+    // 二进制响应（文件下载）直接返回 Blob，不按 JSON 解析
+    if (config?.responseType === 'blob') {
+      return response.data
+    }
+
+    const res = response.data
 
     // 如果请求配置了 silent，跳过错误提示
     if (config?.silent) return res

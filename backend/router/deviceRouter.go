@@ -17,5 +17,7 @@ func DeviceRoutes(r *gin.Engine, dc *controller.DeviceController) {
 		device.POST("/testDeviceConnection", dc.TestDeviceConnection)
 		device.GET("/pageDevice", dc.PageDevice)
 		device.GET("/overview", dc.GetDeviceOverview)
+		device.POST("/importDevice", dc.ImportDevice)
+		device.GET("/importTemplate", dc.ImportTemplate)
 	}
 }

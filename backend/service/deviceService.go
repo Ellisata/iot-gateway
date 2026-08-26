@@ -1,10 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 
@@ -13,6 +16,7 @@ import (
 	"iot-gateway/collector"
 	"iot-gateway/driver"
 	"iot-gateway/enums"
+	"iot-gateway/excelutil"
 	"iot-gateway/logger"
 	"iot-gateway/model/dto"
 	"iot-gateway/model/po"
@@ -356,4 +360,80 @@ func (s *DeviceService) deviceLastSuccess(deviceID string) string {
 		return ""
 	}
 	return s.collector.DeviceLastSuccessTime(deviceID)
+}
+
+// ==================== Excel 批量导入设备 ====================
+
+// ImportDevices 从 Excel(.xlsx) 批量导入设备。
+// 模板三列：名称 / 协议 / 描述。协议列按 iot_protocol.name 匹配，未知协议跳过该行并记录原因；
+// 名称重复（库内或文件内）跳过该行；其余行部分导入并返回汇总，供前端展示失败明细。
+// 导入仅建基本信息，协议参数留空 "{}"，连接参数后续在编辑界面补填。
+func (s *DeviceService) ImportDevices(ctx context.Context, data []byte) (*vo.ExcelImportResultVO, error) {
+	// 预加载现有设备名，用于去重
+	var names []string
+	if err := s.sqliteDB.WithContext(ctx).Model(&po.Device{}).Pluck("name", &names).Error; err != nil {
+		return nil, err
+	}
+
+	// 预加载协议名 → ID 映射
+	protocolMap := make(map[string]string)
+	var protocols []po.IotProtocol
+	if err := s.sqliteDB.WithContext(ctx).Select("id", "name").Find(&protocols).Error; err != nil {
+		return nil, err
+	}
+	for _, p := range protocols {
+		protocolMap[p.Name] = p.ID
+	}
+
+	now := time.Now().Format("2006-01-02 15:04:05")
+	return excelutil.Import(ctx, s.sqliteDB, data, excelutil.Options[po.Device]{
+		Headers:      []string{"名称", "协议", "描述"},
+		ExistingKeys: names,
+		Cols:         3,
+		DupMsg:       enums.DeviceExistsEnum.GetMessage(),
+		Parse: func(row []string) (*po.Device, string, string) {
+			name := excelutil.Cell(row, 0)
+			protocolName := excelutil.Cell(row, 1)
+			desc := excelutil.Cell(row, 2)
+			if reason := validateImportRow(name, protocolName, protocolMap); reason != "" {
+				return nil, name, reason
+			}
+			return &po.Device{
+				Name:         name,
+				ProtocolID:   protocolMap[protocolName],
+				ProtocolJSON: "{}",
+				Description:  desc,
+				Status:       1,
+				CreatedAt:    now,
+				UpdatedAt:    now,
+			}, name, ""
+		},
+	})
+}
+
+// validateImportRow 校验单行设备导入数据（纯函数，便于单测；去重由 excelutil.Import 统一处理）。
+// 返回 "" 表示通过，否则返回中文失败原因。
+func validateImportRow(name, protocolName string, protocolMap map[string]string) string {
+	if name == "" {
+		return "名称为空"
+	}
+	if utf8.RuneCountInString(name) > 100 {
+		return "名称不能超过100个字符"
+	}
+	if protocolName == "" {
+		return "协议为空"
+	}
+	if _, ok := protocolMap[protocolName]; !ok {
+		return fmt.Sprintf("协议不存在：%s", protocolName)
+	}
+	return ""
+}
+
+// GenerateImportTemplate 生成设备导入模板（.xlsx）：表头「名称/协议/描述」+ 示例行 + 冻结首行。
+func (s *DeviceService) GenerateImportTemplate() (*bytes.Buffer, error) {
+	return excelutil.BuildTemplate(
+		[]string{"名称", "协议", "描述"},
+		[]string{"示例：1号注塑机", "ModBus.TCP", "示例数据，可删除或覆盖"},
+		[]float64{32, 22, 40},
+	)
 }

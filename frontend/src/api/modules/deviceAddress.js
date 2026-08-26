@@ -102,3 +102,32 @@ export function monitorTagData(params = {}) {
     data: params,
   })
 }
+
+/**
+ * 批量导入设备地址（Excel .xlsx）
+ * @param {File} file - 选择的 Excel 文件
+ * @param {string} deviceId - 所属设备对象 ID
+ * @returns {Promise<{total:number, success:number, failed:number, errors:Array<{row:number, name:string, reason:string}>}>}
+ */
+export function importDeviceAddresses(file, deviceId) {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('deviceId', deviceId)
+  return request({
+    url: '/deviceAddress/importDeviceAddress',
+    method: 'post',
+    data: formData,
+  })
+}
+
+/**
+ * 下载设备地址导入模板（.xlsx，六列：名称/标签/通用数据类型/读写权限/扫描频率/描述）
+ * @returns {Promise<Blob>}
+ */
+export function downloadDeviceAddressTemplate() {
+  return request({
+    url: '/deviceAddress/importDeviceAddressTemplate',
+    method: 'get',
+    responseType: 'blob',
+  })
+}

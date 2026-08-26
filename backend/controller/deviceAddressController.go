@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"iot-gateway/appError"
+	"iot-gateway/enums"
 	"iot-gateway/model/dto"
 	"iot-gateway/response"
 	"iot-gateway/service"
@@ -86,4 +87,38 @@ func (ctr *DeviceAddressController) PageDeviceAddress(c *gin.Context) {
 		return
 	}
 	c.JSON(200, response.Success(data))
+}
+
+// ImportDeviceAddress 批量导入设备地址（Excel .xlsx，上传字段名 file，deviceId 指定所属设备）
+func (ctr *DeviceAddressController) ImportDeviceAddress(c *gin.Context) {
+	ctx := c.Request.Context()
+	deviceID := c.PostForm("deviceId")
+	if deviceID == "" {
+		c.JSON(200, appError.HandleErrorCtx(ctx, appError.NewAppError(enums.ParamValidEnum.GetCode(), "缺少参数 deviceId")))
+		return
+	}
+	data, err := readXlsxUpload(c, "file")
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	result, err := ctr.deviceAddressService.ImportDeviceAddresses(ctx, deviceID, data)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(result))
+}
+
+// ImportDeviceAddressTemplate 下载设备地址导入模板（.xlsx）
+func (ctr *DeviceAddressController) ImportDeviceAddressTemplate(c *gin.Context) {
+	ctx := c.Request.Context()
+	buf, err := ctr.deviceAddressService.GenerateDeviceAddressImportTemplate()
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", `attachment; filename="device-address-import-template.xlsx"`)
+	c.Data(200, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
 }

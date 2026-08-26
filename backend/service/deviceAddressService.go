@@ -1,15 +1,20 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 
 	"iot-gateway/appError"
 	"iot-gateway/driver"
 	"iot-gateway/enums"
+	"iot-gateway/excelutil"
 	"iot-gateway/model/dto"
 	"iot-gateway/model/po"
 	"iot-gateway/model/vo"
@@ -273,4 +278,111 @@ func (s *DeviceAddressService) resolveDataType(protocolName, commonType string) 
 		return "", appError.NewAppErrorCtx(enums.DeviceAddressDataTypeErrEnum.GetCode(), enums.DeviceAddressDataTypeErrEnum.GetMessage(), enums.DeviceAddressDataTypeErrEnum.GetMsgKey())
 	}
 	return internal, nil
+}
+
+// ==================== Excel 批量导入设备地址 ====================
+
+// ImportDeviceAddresses 从 Excel(.xlsx) 批量导入指定设备下的地址点位。
+// 模板六列：名称 / 标签 / 通用数据类型 / 读写权限 / 扫描频率 / 描述。
+// 按当前设备的协议将通用数据类型映射为协议内部类型；字段不合法或协议不支持该类型时跳过该行，
+// 名称重复（库内或文件内）跳过该行；其余行部分导入并返回汇总，供前端展示失败明细。
+func (s *DeviceAddressService) ImportDeviceAddresses(ctx context.Context, deviceID string, data []byte) (*vo.ExcelImportResultVO, error) {
+	// 设备必须存在（决定协议与数据类型映射）
+	var device po.Device
+	if err := s.sqliteDB.WithContext(ctx).Where("id = ?", deviceID).First(&device).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appError.NewAppErrorCtx(enums.DeviceNotExistsEnum.GetCode(), enums.DeviceNotExistsEnum.GetMessage(), enums.DeviceNotExistsEnum.GetMsgKey())
+		}
+		return nil, err
+	}
+	protocolName := s.getProtocolName(ctx, device.ProtocolID)
+
+	// 预加载该设备已有地址名，用于去重
+	var names []string
+	if err := s.sqliteDB.WithContext(ctx).Model(&po.DeviceAddress{}).Where("device_id = ?", deviceID).Pluck("name", &names).Error; err != nil {
+		return nil, err
+	}
+
+	now := time.Now().Format("2006-01-02 15:04:05")
+	return excelutil.Import(ctx, s.sqliteDB, data, excelutil.Options[po.DeviceAddress]{
+		Headers:      []string{"名称", "标签", "通用数据类型", "读写权限", "扫描频率", "描述"},
+		ExistingKeys: names,
+		Cols:         6,
+		DupMsg:       enums.DeviceAddressExistsEnum.GetMessage(),
+		Parse: func(row []string) (*po.DeviceAddress, string, string) {
+			name := excelutil.Cell(row, 0)
+			label := excelutil.Cell(row, 1)
+			commonType := excelutil.Cell(row, 2)
+			rwPermission := excelutil.Cell(row, 3)
+			scanFreq := excelutil.Cell(row, 4)
+			desc := excelutil.Cell(row, 5)
+			reason, frequency := validateAddressImportRow(name, label, commonType, rwPermission, scanFreq)
+			if reason != "" {
+				return nil, name, reason
+			}
+			// 通用数据类型 → 协议内部类型（与单条创建走同一套映射）
+			internal, ok := driver.LookupDataType(protocolName, commonType)
+			if !ok {
+				return nil, name, fmt.Sprintf("协议不支持该数据类型：%s", commonType)
+			}
+			return &po.DeviceAddress{
+				DeviceID:       deviceID,
+				Name:           name,
+				Label:          label,
+				CommonDataType: commonType,
+				DataType:       internal,
+				RwPermission:   rwPermission,
+				ScanFrequency:  frequency,
+				Description:    desc,
+				Status:         1,
+				CreatedAt:      now,
+				UpdatedAt:      now,
+			}, name, ""
+		},
+	})
+}
+
+// validateAddressImportRow 校验单行地址导入数据（纯函数，便于单测；去重由 excelutil.Import 统一处理）。
+// 返回 (失败原因, 扫描频率)；reason 为 "" 表示通过，frequency 为解析后的扫描频率
+// （空/缺省或 <=0 时按默认 1000 处理，与单条创建逻辑一致）。
+func validateAddressImportRow(name, label, commonType, rwPermission, scanFreq string) (string, int) {
+	if name == "" {
+		return "名称为空", 0
+	}
+	if utf8.RuneCountInString(name) > 100 {
+		return "名称不能超过100个字符", 0
+	}
+	if label == "" {
+		return "标签为空", 0
+	}
+	if utf8.RuneCountInString(label) > 100 {
+		return "标签不能超过100个字符", 0
+	}
+	if commonType == "" {
+		return "通用数据类型为空", 0
+	}
+	if rwPermission != "R" && rwPermission != "W" && rwPermission != "RW" {
+		return "读写权限须为 R/W/RW", 0
+	}
+	if scanFreq == "" {
+		return "", 1000
+	}
+	freq, err := strconv.Atoi(scanFreq)
+	if err != nil {
+		return "扫描频率格式不正确", 0
+	}
+	if freq <= 0 {
+		return "", 1000
+	}
+	return "", freq
+}
+
+// GenerateDeviceAddressImportTemplate 生成设备地址导入模板（.xlsx）：
+// 表头「名称/标签/通用数据类型/读写权限/扫描频率/描述」+ 示例行 + 冻结首行。
+func (s *DeviceAddressService) GenerateDeviceAddressImportTemplate() (*bytes.Buffer, error) {
+	return excelutil.BuildTemplate(
+		[]string{"名称", "标签", "通用数据类型", "读写权限", "扫描频率", "描述"},
+		[]string{"D0", "车间温度", "Float", "R", "1000", "示例数据，可删除或覆盖"},
+		[]float64{24, 24, 18, 14, 14, 36},
+	)
 }
