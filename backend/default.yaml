@@ -1,5 +1,5 @@
 server:
-  port: 9082
+  port: 9081
 
 jwt:
   secret: 573ce5969e9884d49d4fab77b09a306a
