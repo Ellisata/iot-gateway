@@ -17,7 +17,7 @@ MQTT 通道按**设备分组**推送，payload 为 JSON 数组，数组内每条
     "deviceAddressId": "019fb1137da076a4ac97af5e51f2e22c",
     "deviceAddressName": "411115",
     "value": "0",
-    "protocol": "ModBus.Net.TCP",
+    "protocol": "ModBus.TCP",
     "dataType": "word",
     "kind": "uint",
     "quality": 192,
@@ -33,7 +33,7 @@ MQTT 通道按**设备分组**推送，payload 为 JSON 数组，数组内每条
 | `deviceId` / `deviceName` | string | 设备标识与名称 |
 | `deviceAddressId` / `deviceAddressName` | string | 点位标识与地址名（如 `411115`） |
 | `value` | string | **已解码**的采集值字符串（协议、字节序、字序已在网关侧完成） |
-| `protocol` | string | 协议名称（`iot_protocol.name`，如 `ModBus.Net.TCP`），命名空间标识，见 §4 |
+| `protocol` | string | 协议名称（`iot_protocol.name`，如 `ModBus.TCP`），命名空间标识，见 §4 |
 | `dataType` | string | 协议的**内部数据类型名**（如 `word`、`int16`），与 `protocol` 组合确定精确 PLC 类型，见 §4 |
 | `kind` | string | 数据类型类别（6 类之一），`value` 解析的**唯一事实来源** |
 | `quality` | int | 192=正常，0=异常（区间读取失败时置 0，value 为空串） |
@@ -58,7 +58,7 @@ MQTT 通道按**设备分组**推送，payload 为 JSON 数组，数组内每条
 
 ## 4. `protocol` + `dataType` 说明
 
-- `protocol` 为协议名称（`iot_protocol.name`，如 `ModBus.Net.TCP`、`Siemens.Net.S7`），
+- `protocol` 为协议名称（`iot_protocol.name`，如 `ModBus.TCP`、`Siemens.Net.S7`），
   是类型的**命名空间**；`dataType` 为该协议作用域下的**内部数据类型名**
   （`word`、`int16`、`uint8`…），来自地址配置的 `data_type` 字段，已归一化
   （`Word`/`WORD`/`word` 均落为 `word`）。

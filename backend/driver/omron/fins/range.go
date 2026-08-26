@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 
-	"iot-gateway/driver"
 	"iot-gateway/logger"
 	"iot-gateway/model/po"
 )
@@ -136,8 +135,7 @@ func CalcFINSRanges(addrs []po.DeviceAddress, cfg *FINSConfig) ([]FINSRange, err
 // finsTypeWords 计算数据类型占用的字数（每 2 字节一字，向上取整）。
 // 通过 TypeRegistry 查询；动态长度类型（string）按配置 stringLen；未注册类型默认 1 字。
 func finsTypeWords(dataType string, stringLen int) uint16 {
-	f := driver.GetTypeRegistry().ForProtocol(protocolName)
-	dt, ok := f.Get(dataType)
+	dt, ok := finsLookup(dataType)
 	if !ok {
 		return 1
 	}

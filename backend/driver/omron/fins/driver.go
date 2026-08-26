@@ -43,6 +43,12 @@ type finsDriver struct {
 	transport string // 传输层：TransportUDP / TransportTCP / TransportSerial（注册名固定）
 	config    *FINSConfig
 	client    finsTransport
+
+	// rangeCache 区间内容指纹缓存：规避每轮重复解析地址与计算区间。
+	// 区间计算是 (addrs, cfg) 的纯函数，轮询间批次内容不变即可命中；
+	// 驱动实例在配置热刷新时由采集引擎重建，Connect 时也显式清空，缓存随之失效。
+	rangeCacheMu sync.Mutex
+	rangeCache   map[uint64][]FINSRange
 }
 
 // SerialExclusive 串口传输独占串行总线，需整轮持锁（重连+全部批次读取+转换+推送）；
@@ -61,6 +67,11 @@ func (d *finsDriver) Connect(protocolJSON string) error {
 	}
 	// 传输层由协议注册名固定，覆盖 JSON 中的 transport 字段
 	cfg.Transport = d.transport
+
+	// 任何重连尝试都使区间缓存失效：配置可能已变化，新连接必须使用重新计算的区间
+	d.rangeCacheMu.Lock()
+	d.rangeCache = nil
+	d.rangeCacheMu.Unlock()
 
 	client, err := newTransport(cfg)
 	if err != nil {
@@ -135,7 +146,7 @@ func (d *finsDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error)
 		return nil, fmt.Errorf("fins: not connected")
 	}
 
-	ranges, err := CalcFINSRanges(addrs, cfg)
+	ranges, err := d.rangesFor(driver.RangeSig(addrs), addrs, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("fins: calc address ranges failed: %w", err)
 	}
@@ -172,6 +183,39 @@ func (d *finsDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error)
 		results = append(results, byID[a.ID])
 	}
 	return results, nil
+}
+
+// rangesFor 返回批次的读取区间：命中内容指纹缓存直接返回，未命中则计算并缓存。
+// 区间计算结果只读共享（解码路径不修改 FINSRange），并发 Read 复用同一缓存安全。
+// 缓存大小有界：超上限时清空重建，正确性不受影响（仅失去命中）。
+func (d *finsDriver) rangesFor(sig uint64, addrs []po.DeviceAddress, cfg *FINSConfig) ([]FINSRange, error) {
+	d.rangeCacheMu.Lock()
+	if d.rangeCache == nil {
+		d.rangeCache = make(map[uint64][]FINSRange)
+	}
+	cached, ok := d.rangeCache[sig]
+	d.rangeCacheMu.Unlock()
+	if ok {
+		return cached, nil
+	}
+
+	ranges, err := CalcFINSRanges(addrs, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	d.rangeCacheMu.Lock()
+	// 再次检查，避免并发首轮重复计算同批区间
+	if cached, ok := d.rangeCache[sig]; ok {
+		d.rangeCacheMu.Unlock()
+		return cached, nil
+	}
+	if len(d.rangeCache) >= driver.RangeCacheMaxEntries {
+		d.rangeCache = make(map[uint64][]FINSRange)
+	}
+	d.rangeCache[sig] = ranges
+	d.rangeCacheMu.Unlock()
+	return ranges, nil
 }
 
 // parseRangeResults 将区间读取数据按 AddressMap 解码回填到 byID。

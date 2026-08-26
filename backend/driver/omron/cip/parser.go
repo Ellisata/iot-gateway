@@ -3,8 +3,6 @@ package cip
 import (
 	"encoding/binary"
 	"fmt"
-
-	"iot-gateway/driver"
 )
 
 // ParseCIPValue 将 Data Table Read 响应的原始字节解码为指定类型的 Go 值。
@@ -16,8 +14,7 @@ func ParseCIPValue(raw []byte, dataType string, cfg *CIPConfig) (any, error) {
 		return nil, fmt.Errorf("cip parser: empty raw data")
 	}
 
-	f := driver.GetTypeRegistry().ForProtocol(protocolName)
-	dt, ok := f.Get(dataType)
+	dt, ok := cipLookup(dataType)
 	if !ok {
 		return nil, fmt.Errorf("cip parser: unsupported data type: %q", dataType)
 	}
@@ -43,8 +40,7 @@ func ParseCIPValue(raw []byte, dataType string, cfg *CIPConfig) (any, error) {
 
 // FormatCIPValue 将解码后的值格式化为字符串（用于存储和展示）。
 func FormatCIPValue(v any, dataType string) string {
-	f := driver.GetTypeRegistry().ForProtocol(protocolName)
-	dt, ok := f.Get(dataType)
+	dt, ok := cipLookup(dataType)
 	if !ok || dt.Format == nil {
 		return fmt.Sprintf("%v", v)
 	}

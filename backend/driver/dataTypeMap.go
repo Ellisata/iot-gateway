@@ -40,7 +40,7 @@ var CommonDataTypes = []string{
 // ==================== 各协议数据类型映射 ====================
 
 // modbusTypes Modbus 通用数据类型 → 内部类型名。
-// ModBus.Net.TCP / ModBus.Net.RTU 共用同一套类型注册。
+// ModBus.TCP / ModBus.Net.RTU 共用同一套类型注册。
 // Int / Real 为 PLC 风格命名（仅 Modbus 开放，不在 CommonDataTypes 通用列表中）：
 // Modbus 无独立 16 位 INT，统一按 int32 处理；Real 等价于 Float。
 var modbusTypes = map[string]string{
@@ -113,6 +113,24 @@ var finsTypes = map[string]string{
 	TypeLBCD:    "lbcd",
 }
 
+// mcTypes Mitsubishi MC 通用数据类型 → 内部类型名。
+// MC 无原生日期类型，故不映射 Date（对齐 CIP）；字数据小端、16 位字寻址，
+// 类型覆盖与 Modbus/CIP 保持一致（含 BCD/LBCD——三菱 D 区常用 BCD 存储）。
+var mcTypes = map[string]string{
+	TypeBoolean: "bool",
+	TypeString:  "string",
+	TypeByte:    "uint8",
+	TypeChar:    "int8",
+	TypeShort:   "int16",
+	TypeWord:    "word",
+	TypeDWord:   "uint32",
+	TypeLong:    "int32",
+	TypeFloat:   "float32",
+	TypeDouble:  "float64",
+	TypeBCD:     "bcd",
+	TypeLBCD:    "lbcd",
+}
+
 // ==================== 协议作用域（scope）组织 ====================
 
 // scopeTypeMap 可配置类型的唯一真源：TypeRegistry scope 前缀 → 通用/扩展类型映射。
@@ -121,19 +139,21 @@ var finsTypes = map[string]string{
 // （如 Modbus 的 "Int" / "Real"）；在表内新增 key，校验（LookupDataType）
 // 与类型列表接口（AvailableTypes）即同时生效。
 var scopeTypeMap = map[string]map[string]string{
-	"modbus": modbusTypes,
-	"s7":     s7Types,
-	"cip":    cipTypes,
-	"fins":   finsTypes,
+	"modbus":     modbusTypes,
+	"s7":         s7Types,
+	"cip":        cipTypes,
+	"fins":       finsTypes,
+	"mitsubishi": mcTypes,
 }
 
 // scopeProtocols scope 前缀 → 该 scope 下的 config 协议名（driver.Register / iot_protocol.name）。
 // 一个 scope 可能对应多个 config 协议名（如 modbus 的 TCP 与 RTU 共用同一套类型注册）。
 var scopeProtocols = map[string][]string{
-	"modbus": {"ModBus.TCP", "ModBus.RTU"},
-	"s7":     {"Siemens.S7"},
-	"cip":    {"Omron.CIP"},
-	"fins":   {"Omron.FINS.UDP", "Omron.FINS.TCP", "Omron.FINS.Serial", "Omron.FINS.HostLinkTCP"},
+	"modbus":     {"ModBus.TCP", "ModBus.RTU"},
+	"s7":         {"Siemens.S7"},
+	"cip":        {"Omron.CIP"},
+	"fins":       {"Omron.FINS.UDP", "Omron.FINS.TCP", "Omron.FINS.Serial", "Omron.FINS.HostLinkTCP"},
+	"mitsubishi": {"Mitsubishi.MC.TCP", "Mitsubishi.MC.Serial"},
 }
 
 // protocolScope config 协议名 → scope 前缀（由 scopeProtocols 派生）。
@@ -165,7 +185,7 @@ var scopeLookup = func() map[string]string {
 //
 // 协议名与 driver.Register() 注册的协议名保持一致，例如：
 //
-//	DataTypeMap["ModBus.Net.TCP@Boolean"] == "bool"
+//	DataTypeMap["ModBus.TCP@Boolean"] == "bool"
 var DataTypeMap = func() map[string]string {
 	m := make(map[string]string, len(protocolScope)*len(CommonDataTypes))
 	for protocol, scope := range protocolScope {
@@ -176,7 +196,7 @@ var DataTypeMap = func() map[string]string {
 	return m
 }()
 
-// ScopeOf 返回 config 协议名对应的 TypeRegistry scope 前缀（如 "ModBus.Net.TCP" → "modbus"）。
+// ScopeOf 返回 config 协议名对应的 TypeRegistry scope 前缀（如 "ModBus.TCP" → "modbus"）。
 // 协议名不区分大小写；未知协议（无驱动注册）返回空串。
 func ScopeOf(protocol string) string {
 	return scopeLookup[strings.ToLower(protocol)]
@@ -199,7 +219,7 @@ func LookupScopeType(scope, commonType string) (string, bool) {
 }
 
 // LookupDataType 根据协议名和通用数据类型名查询该协议对应的内部类型名。
-// 协议名与类型名均不区分大小写（如 "ModBus.Net.TCP@Boolean" 与 "modbus.net.tcp@boolean" 等价）。
+// 协议名与类型名均不区分大小写（如 "ModBus.TCP@Boolean" 与 "modbus.tcp@boolean" 等价）。
 // 协议不支持该通用类型时返回 false。
 func LookupDataType(protocol, commonType string) (string, bool) {
 	scope := ScopeOf(protocol)

@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"iot-gateway/driver"
+	_ "iot-gateway/driver/mitsubishi" // 注册三菱 MC 驱动
 	_ "iot-gateway/driver/modbus"     // 注册 Modbus 驱动
 	_ "iot-gateway/driver/omron/cip"  // 注册欧姆龙 CIP 驱动
 	_ "iot-gateway/driver/omron/fins" // 注册欧姆龙 FINS 驱动
@@ -68,7 +69,7 @@ type gatewayTask struct {
 	// addrLabelMap: deviceID -> addressID -> 地址 name 的中文说明（如温度、电流）
 	addrLabelMap map[string]map[string]string
 
-	// protocols: deviceID -> 协议名称（iot_protocol.name，如 "ModBus.Net.TCP"）。
+	// protocols: deviceID -> 协议名称（iot_protocol.name，如 "ModBus.TCP"）。
 	// 透传到采集记录，供下游区分协议命名空间（dataType 为协议内部类型名）。
 	protocols map[string]string
 
@@ -550,7 +551,7 @@ func (g *frequencyGroup) doPollDevice(deviceID string, addrs []po.DeviceAddress)
 		}
 
 		// 转换为采集记录
-		recs := t.toRecords(dev, results)
+		recs := t.toRecords(dev, batch, results)
 		// 将采集数据交给接收者（推送引擎等），非阻塞
 		if len(recs) > 0 && t.sink != nil {
 			t.sink.PushRecords(recs)
@@ -619,7 +620,7 @@ func (g *frequencyGroup) doPollDeviceConcurrent(deviceID string, addrs []po.Devi
 		}
 
 		// 转换为采集记录
-		recs := t.toRecords(dev, results)
+		recs := t.toRecords(dev, batch, results)
 		// 将采集数据交给接收者（推送引擎等），非阻塞
 		if len(recs) > 0 && t.sink != nil {
 			t.sink.PushRecords(recs)
@@ -666,28 +667,39 @@ func (t *gatewayTask) ensureConnected(drv driver.Driver, dev *po.Device) bool {
 	return true
 }
 
-// toRecords 将驱动返回的 ReadResult 转换为 CollectorRecord
-func (t *gatewayTask) toRecords(dev *po.Device, results []driver.ReadResult) []CollectedRecord {
+// toRecords 将驱动返回的 ReadResult 转换为 CollectorRecord。
+//
+// 驱动保证返回结果与 addrs 按索引一一对应（各协议驱动重建结果时保持原始点位顺序），
+// 名称/说明直接取 addrs[i]，避免每记录两次字符串 map 查询——海量点位下这是主要 CPU 开销
+// （profile 实测 toRecords + mapaccess 合计 ~20%）。仅当驱动返回顺序与 addrs 不一致
+// （防御异常驱动）时回退到按 DeviceAddressID 的 map 查询。
+func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, results []driver.ReadResult) []CollectedRecord {
 	records := make([]CollectedRecord, 0, len(results))
-	for _, r := range results {
-		addrName := ""
-		if nameMap, ok := t.addrNameMap[dev.ID]; ok {
-			addrName = nameMap[r.DeviceAddressID]
-		}
-		addrLabel := ""
-		if labelMap, ok := t.addrLabelMap[dev.ID]; ok {
-			addrLabel = labelMap[r.DeviceAddressID]
+	protocol := t.protocols[dev.ID]
+	for i, r := range results {
+		name, label := "", ""
+		if i < len(addrs) && addrs[i].ID == r.DeviceAddressID {
+			name = addrs[i].Name
+			label = addrs[i].Label
+		} else {
+			// 索引未对齐：回退 map 查询（正常驱动不会走到这里）
+			if nameMap, ok := t.addrNameMap[dev.ID]; ok {
+				name = nameMap[r.DeviceAddressID]
+			}
+			if labelMap, ok := t.addrLabelMap[dev.ID]; ok {
+				label = labelMap[r.DeviceAddressID]
+			}
 		}
 		records = append(records, CollectedRecord{
 			DeviceID:           dev.ID,
 			DeviceName:         dev.Name,
 			DeviceAddressID:    r.DeviceAddressID,
-			DeviceAddressName:  addrName,
-			DeviceAddressLabel: addrLabel,
+			DeviceAddressName:  name,
+			DeviceAddressLabel: label,
 			Value:              r.Value,
 			DataType:           r.DataType,
 			Kind:               r.Kind,
-			Protocol:           t.protocols[dev.ID],
+			Protocol:           protocol,
 			Quality:            r.Quality,
 		})
 	}

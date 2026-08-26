@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"iot-gateway/driver"
+	_ "iot-gateway/driver/mitsubishi"
 	_ "iot-gateway/driver/modbus"
 	_ "iot-gateway/driver/omron/cip"
 	_ "iot-gateway/driver/omron/fins"
@@ -56,6 +57,16 @@ func TestKindOfProtocolMapping(t *testing.T) {
 		{"fins", "int32", driver.KindInt},
 		{"fins", "float64", driver.KindFloat},
 		{"fins", "date", driver.KindTime},
+		// mitsubishi(无 date)
+		{"mitsubishi", "bool", driver.KindBool},
+		{"mitsubishi", "int16", driver.KindInt},
+		{"mitsubishi", "int8", driver.KindInt},
+		{"mitsubishi", "word", driver.KindUInt},
+		{"mitsubishi", "bcd", driver.KindUInt},
+		{"mitsubishi", "lbcd", driver.KindUInt},
+		{"mitsubishi", "float32", driver.KindFloat},
+		{"mitsubishi", "float64", driver.KindFloat},
+		{"mitsubishi", "string", driver.KindString},
 		// 未注册/其他协议裸名 → 空(推送通道回退为数值推断)
 		{"modbus", "nope", ""},
 		{"s7", "int16", ""}, // S7 无 int16(只有 int)

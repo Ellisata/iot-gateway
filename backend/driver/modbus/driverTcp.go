@@ -25,6 +25,11 @@ type modbusDriver struct {
 	mu     sync.RWMutex
 	config *ModbusTcpConfig
 	client *ModbusClient
+
+	// plans 批次区间规划缓存：规避每轮重复解析地址、按功能码分组与计算区间。
+	// 规划是 (addrs, cfg) 的纯函数，轮询间批次内容不变即可命中；
+	// 驱动实例在配置热刷新时由采集引擎重建，Connect 时也显式清空，缓存随之失效。
+	plans planCache
 }
 
 func (d *modbusDriver) Connect(protocolJSON string) error {
@@ -37,6 +42,9 @@ func (d *modbusDriver) Connect(protocolJSON string) error {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
+
+	// 任何重连尝试都使规划缓存失效：配置可能已变化，新连接必须使用重新计算的规划
+	d.plans.clear()
 
 	client, err := NewModbusTCPClient(cfg.Host, cfg.Port, timeout)
 	if err != nil {
@@ -101,15 +109,15 @@ func (d *modbusDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, erro
 
 	client.SetUnitID(cfg.UnitID)
 
-	// 按功能码分组：线圈/保持寄存器等是不同的地址空间，
-	// 同一设备混合点位时分组各自读取，而非整组报错。
-	groups, err := groupAddrsByFC(addrs, cfg)
+	// 按功能码分组 + 每组区间计算一次性规划并缓存（内容指纹命中则跳过重复解析）。
+	// 线圈/保持寄存器等是不同的地址空间，同一设备混合点位时分组各自读取，而非整组报错。
+	plan, err := d.plans.planFor(driver.RangeSig(addrs), addrs, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("modbus: group addresses by function code failed: %w", err)
+		return nil, fmt.Errorf("modbus: calc address ranges failed: %w", err)
 	}
 
-	fcs := make([]byte, 0, len(groups))
-	for fc := range groups {
+	fcs := make([]byte, 0, len(plan.groups))
+	for fc := range plan.groups {
 		fcs = append(fcs, fc)
 	}
 	sort.Slice(fcs, func(i, j int) bool { return fcs[i] < fcs[j] })
@@ -118,17 +126,8 @@ func (d *modbusDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, erro
 	// 这样单组（或单区间）失败不影响其它组点位。
 	byID := make(map[string]driver.ReadResult, len(addrs))
 	for _, fc := range fcs {
-		gAddrs := groups[fc]
-		opts := CalcReadRangeOptions{
-			StartAddress: cfg.StartAddress,
-			Quantity:     cfg.Quantity,
-			MergeWindow:  cfg.MergeWindow,
-			StringLen:    cfg.StringLen,
-		}
-		ranges, err := CalcReadRanges(gAddrs, opts)
-		if err != nil {
-			return nil, fmt.Errorf("modbus: calc address ranges (fc=%d) failed: %w", fc, err)
-		}
+		gAddrs := plan.groups[fc]
+		ranges := plan.ranges[fc]
 
 		var groupResults []driver.ReadResult
 		switch fc {
@@ -520,8 +519,7 @@ func readBitsChunked(readFn func(uint16, uint16) ([]byte, error), startAddr uint
 // 通过 TypeRegistry 查询，未注册类型默认返回 2（一个寄存器）；
 // 动态长度类型（string）返回配置的 stringLen（默认 16）。
 func getDataTypeBytes(dataType string, stringLen int) int {
-	mb := driver.GetTypeRegistry().ForProtocol(protocolName)
-	dt, ok := mb.Get(dataType)
+	dt, ok := mbLookup(dataType)
 	if !ok {
 		return 2
 	}

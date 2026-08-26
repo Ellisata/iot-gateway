@@ -31,7 +31,7 @@ func TestNewGatewayTaskSelfHealDataType(t *testing.T) {
 		}
 	}
 
-	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: "ModBus.Net.TCP", Status: 1}).Error; err != nil {
+	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: "ModBus.TCP", Status: 1}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Create(&po.Device{

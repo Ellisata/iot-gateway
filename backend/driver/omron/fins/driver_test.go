@@ -105,7 +105,7 @@ func TestLookupDataType(t *testing.T) {
 		}
 	}
 	// 大小写不敏感
-	if got, ok := driver.LookupDataType("omron.net.fins.udp", "short"); !ok || got != "int16" {
+	if got, ok := driver.LookupDataType("omron.fins.udp", "short"); !ok || got != "int16" {
 		t.Errorf("case-insensitive lookup = %s/%v", got, ok)
 	}
 }

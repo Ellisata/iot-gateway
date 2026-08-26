@@ -27,6 +27,12 @@ type s7Driver struct {
 	mu     sync.RWMutex
 	config *S7Config
 	client *S7Client
+
+	// rangeCache 区间内容指纹缓存：规避每轮重复解析地址与计算区间。
+	// 区间计算是 (addrs, cfg) 的纯函数，轮询间批次内容不变即可命中；
+	// 驱动实例在配置热刷新时由采集引擎重建，Connect 时也显式清空，缓存随之失效。
+	rangeCacheMu sync.Mutex
+	rangeCache   map[uint64][]S7Range
 }
 
 func (d *s7Driver) Connect(protocolJSON string) error {
@@ -39,6 +45,12 @@ func (d *s7Driver) Connect(protocolJSON string) error {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
+
+	// 任何重连尝试都使区间缓存失效：配置可能已变化（MaxGap/StringLen/…），
+	// 新连接必须使用重新计算的区间
+	d.rangeCacheMu.Lock()
+	d.rangeCache = nil
+	d.rangeCacheMu.Unlock()
 
 	client, err := NewS7Client(cfg.Host, strconv.Itoa(cfg.Port), cfg.Rack, cfg.Slot, cfg.ConnectionType, timeout)
 	if err != nil {
@@ -93,7 +105,7 @@ func (d *s7Driver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error) {
 		return nil, fmt.Errorf("s7: not connected")
 	}
 
-	ranges, err := CalcS7Ranges(addrs, cfg.StringLen, cfg.MaxGap)
+	ranges, err := d.rangesFor(driver.RangeSig(addrs), addrs, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("s7: calc address ranges failed: %w", err)
 	}
@@ -179,6 +191,39 @@ func (d *s7Driver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error) {
 	}
 
 	return results, nil
+}
+
+// rangesFor 返回批次的读取区间：命中内容指纹缓存直接返回，未命中则计算并缓存。
+// 区间计算结果只读共享（读取路径不修改 S7Range），并发 Read 复用同一缓存安全。
+// 缓存大小有界：超上限时清空重建，正确性不受影响（仅失去命中）。
+func (d *s7Driver) rangesFor(sig uint64, addrs []po.DeviceAddress, cfg *S7Config) ([]S7Range, error) {
+	d.rangeCacheMu.Lock()
+	if d.rangeCache == nil {
+		d.rangeCache = make(map[uint64][]S7Range)
+	}
+	cached, ok := d.rangeCache[sig]
+	d.rangeCacheMu.Unlock()
+	if ok {
+		return cached, nil
+	}
+
+	ranges, err := CalcS7Ranges(addrs, cfg.StringLen, cfg.MaxGap)
+	if err != nil {
+		return nil, err
+	}
+
+	d.rangeCacheMu.Lock()
+	// 再次检查，避免并发首轮重复计算同批区间
+	if cached, ok := d.rangeCache[sig]; ok {
+		d.rangeCacheMu.Unlock()
+		return cached, nil
+	}
+	if len(d.rangeCache) >= driver.RangeCacheMaxEntries {
+		d.rangeCache = make(map[uint64][]S7Range)
+	}
+	d.rangeCache[sig] = ranges
+	d.rangeCacheMu.Unlock()
+	return ranges, nil
 }
 
 func (d *s7Driver) IsConnected() bool {

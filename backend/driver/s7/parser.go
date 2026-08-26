@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"iot-gateway/driver"
 )
 
 // maxOffset 24 位地址上限（S7 地址字段为 3 字节）
@@ -210,8 +208,7 @@ func parseOffset(s string) (int, error) {
 // raw 已按地址跨度切好（至少含该点位的 Span 字节）。
 // 位类型先提取所在位为 1 字节再走 bool 解码。
 func ParseS7Value(raw []byte, addr S7Address, dataType string) (any, error) {
-	s7 := driver.GetTypeRegistry().ForProtocol(protocolName)
-	dt, ok := s7.Get(dataType)
+	dt, ok := s7Lookup(dataType)
 	if !ok {
 		return nil, fmt.Errorf("s7 parser: unsupported data type: %q", dataType)
 	}
@@ -243,8 +240,7 @@ func ParseS7Value(raw []byte, addr S7Address, dataType string) (any, error) {
 
 // FormatS7Value 将解码后的值格式化为字符串（用于存储和展示）。
 func FormatS7Value(v any, dataType string) string {
-	s7 := driver.GetTypeRegistry().ForProtocol(protocolName)
-	dt, ok := s7.Get(dataType)
+	dt, ok := s7Lookup(dataType)
 	if !ok || dt.Format == nil {
 		return fmt.Sprintf("%v", v)
 	}

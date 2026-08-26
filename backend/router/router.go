@@ -23,6 +23,8 @@ func SetupRouter(opts []RouteOption) *gin.Engine {
 	r.Use(middleware.CorsMiddleware())
 	r.Use(middleware.RequestLogMiddleware())
 	r.Use(middleware.AreaMiddleware())
+	// 全局 JWT 认证：除登录/健康检查/前端静态资源外，所有 API 统一校验 token
+	r.Use(middleware.AuthMiddleware())
 
 	// 健康检查
 	r.GET("/health", func(c *gin.Context) {

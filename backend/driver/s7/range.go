@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 
-	"iot-gateway/driver"
 	"iot-gateway/logger"
 	"iot-gateway/model/po"
 )
@@ -178,13 +177,12 @@ func calcSpan(addr S7Address, typeSize int, isString bool, cfgStringLen int) int
 // s7TypeInfo 查询 S7 数据类型的字节数与是否为动态（STRING）类型。
 // 未注册类型返回 (0, false)，解码阶段会因此失败并标 Quality=0。
 func s7TypeInfo(dataType string) (size int, isString bool) {
-	s7 := driver.GetTypeRegistry().ForProtocol(protocolName)
-	dt, ok := s7.Get(dataType)
+	dt, ok := s7Lookup(dataType)
 	if !ok {
 		return 0, false
 	}
 	// 以类型身份（而非 Size==0 启发式）判定 STRING：
 	// Size==0 仅表示"动态长度"，将来注册其它动态类型时不应被误判为 STRING。
-	strDT, _ := s7.Get("string")
+	strDT, _ := s7Lookup("string")
 	return dt.Size, dt == strDT
 }

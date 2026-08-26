@@ -11,16 +11,28 @@ import (
 
 // mockCIPTransport 注入用 mock 传输层（cipTransport 接口实现）。
 type mockCIPTransport struct {
-	connected bool
-	readFn    func(tag string, code uint16) ([]byte, error)
-	closed    bool
+	connected   bool
+	readFn      func(tag string, code uint16) ([]byte, error)
+	readTagsFn  func(specs []TagSpec) ([]TagResult, error)
+	closed      bool
+	batchCalls  int // 批量读调用次数（统计批量是否生效）
+	singleCalls int // 单读调用次数
 }
 
 func (m *mockCIPTransport) ReadTag(tag string, code uint16) ([]byte, error) {
+	m.singleCalls++
 	if m.readFn == nil {
 		return nil, fmt.Errorf("mock: no readFn configured")
 	}
 	return m.readFn(tag, code)
+}
+
+func (m *mockCIPTransport) ReadTags(specs []TagSpec) ([]TagResult, error) {
+	m.batchCalls++
+	if m.readTagsFn == nil {
+		return nil, fmt.Errorf("mock: no readTagsFn configured")
+	}
+	return m.readTagsFn(specs)
 }
 
 func (m *mockCIPTransport) IsConnected() bool { return m.connected }
@@ -95,7 +107,7 @@ func TestLookupDataType(t *testing.T) {
 		t.Error("Date should not be supported for CIP")
 	}
 	// 大小写不敏感
-	if got, ok := driver.LookupDataType("omron.net.cip", "short"); !ok || got != "int16" {
+	if got, ok := driver.LookupDataType("omron.cip", "short"); !ok || got != "int16" {
 		t.Errorf("case-insensitive lookup = %q, %v, want int16, true", got, ok)
 	}
 }
@@ -103,6 +115,7 @@ func TestLookupDataType(t *testing.T) {
 func TestDriverReadPipeline(t *testing.T) {
 	d := newCIPDriver()
 	d.config = DefaultCIPConfig()
+	d.config.MaxTagsPerRequest = 0 // 本测试走单读路径（mock 仅配 readFn）
 	calls := map[string]int{}
 	d.client = &mockCIPTransport{connected: true, readFn: func(tag string, code uint16) ([]byte, error) {
 		calls[tag]++
@@ -150,6 +163,7 @@ func TestDriverReadPipeline(t *testing.T) {
 func TestDriverReadGeneralStatusError(t *testing.T) {
 	d := newCIPDriver()
 	d.config = DefaultCIPConfig()
+	d.config.MaxTagsPerRequest = 0 // 单读路径（mock 仅配 readFn）
 	d.client = &mockCIPTransport{connected: true, readFn: func(tag string, code uint16) ([]byte, error) {
 		return nil, cipcore.NewGeneralStatusError(0x04)
 	}}
@@ -180,6 +194,7 @@ func TestDriverReadNetworkError(t *testing.T) {
 func TestDriverReadTagDedup(t *testing.T) {
 	d := newCIPDriver()
 	d.config = DefaultCIPConfig()
+	d.config.MaxTagsPerRequest = 0 // 单读路径（验证标签去重，不涉及批量）
 	calls := 0
 	d.client = &mockCIPTransport{connected: true, readFn: func(tag string, code uint16) ([]byte, error) {
 		calls++
@@ -196,6 +211,110 @@ func TestDriverReadTagDedup(t *testing.T) {
 	if calls != 2 {
 		t.Errorf("ReadTag called %d times, want 2", calls)
 	}
+}
+
+func TestDriverReadBatchMaxTags(t *testing.T) {
+	// maxTagsPerRequest=3：5 个定长标签应分 2 批（3+2）走 ReadTags，不走单读
+	d := newCIPDriver()
+	cfg := DefaultCIPConfig()
+	cfg.MaxTagsPerRequest = 3
+	d.config = cfg
+	mock := &mockCIPTransport{connected: true, readTagsFn: func(specs []TagSpec) ([]TagResult, error) {
+		res := make([]TagResult, len(specs))
+		for i := range specs {
+			res[i] = TagResult{Data: []byte{0x64, 0x00}}
+		}
+		return res, nil
+	}}
+	d.client = mock
+	addrs := []po.DeviceAddress{
+		mkCIPAddr("a1", "T1", "int16", "Short"),
+		mkCIPAddr("a2", "T2", "int16", "Short"),
+		mkCIPAddr("a3", "T3", "int16", "Short"),
+		mkCIPAddr("a4", "T4", "int16", "Short"),
+		mkCIPAddr("a5", "T5", "int16", "Short"),
+	}
+	results, err := d.Read(addrs)
+	if err != nil {
+		t.Fatalf("Read error: %v", err)
+	}
+	if mock.batchCalls != 2 {
+		t.Errorf("ReadTags called %d times, want 2 (3+2)", mock.batchCalls)
+	}
+	if mock.singleCalls != 0 {
+		t.Errorf("ReadTag called %d times, want 0 (all batched)", mock.singleCalls)
+	}
+	for i := range results {
+		assertResult(t, results[i], fmt.Sprintf("a%d", i+1), "100", "int16", 192)
+	}
+}
+
+func TestDriverReadBatchSkipsStringTag(t *testing.T) {
+	// string 标签不参与批量：定长标签走 ReadTags，string 标签单读
+	d := newCIPDriver()
+	cfg := DefaultCIPConfig()
+	cfg.MaxTagsPerRequest = 3
+	d.config = cfg
+	mock := &mockCIPTransport{
+		connected: true,
+		readTagsFn: func(specs []TagSpec) ([]TagResult, error) {
+			res := make([]TagResult, len(specs))
+			for i := range specs {
+				res[i] = TagResult{Data: []byte{0x64, 0x00}}
+			}
+			return res, nil
+		},
+		readFn: func(tag string, code uint16) ([]byte, error) {
+			return []byte{0x41, 0x42}, nil // string 数据
+		},
+	}
+	d.client = mock
+	addrs := []po.DeviceAddress{
+		mkCIPAddr("a1", "T1", "int16", "Short"),
+		mkCIPAddr("a2", "T2", "int16", "Short"),
+		mkCIPAddr("a3", "S1", "string", "String"),
+	}
+	if _, err := d.Read(addrs); err != nil {
+		t.Fatalf("Read error: %v", err)
+	}
+	if mock.batchCalls != 1 {
+		t.Errorf("ReadTags called %d times, want 1 (fixed tags batched, string single)", mock.batchCalls)
+	}
+	if mock.singleCalls != 1 {
+		t.Errorf("ReadTag called %d times, want 1 (string tag single read)", mock.singleCalls)
+	}
+}
+
+func TestDriverReadBatchGeneralStatusError(t *testing.T) {
+	// 批量中某个标签被拒绝 → 该标签 Quality=0，其余正常，Read 不报错
+	d := newCIPDriver()
+	cfg := DefaultCIPConfig()
+	cfg.MaxTagsPerRequest = 3
+	d.config = cfg
+	mock := &mockCIPTransport{connected: true, readTagsFn: func(specs []TagSpec) ([]TagResult, error) {
+		res := make([]TagResult, len(specs))
+		for i := range specs {
+			if specs[i].Name == "T2" {
+				res[i] = TagResult{Err: cipcore.NewGeneralStatusError(0x04)}
+				continue
+			}
+			res[i] = TagResult{Data: []byte{0x64, 0x00}}
+		}
+		return res, nil
+	}}
+	d.client = mock
+	addrs := []po.DeviceAddress{
+		mkCIPAddr("a1", "T1", "int16", "Short"),
+		mkCIPAddr("a2", "T2", "int16", "Short"),
+		mkCIPAddr("a3", "T3", "int16", "Short"),
+	}
+	results, err := d.Read(addrs)
+	if err != nil {
+		t.Fatalf("Read should not error on per-tag general status, got: %v", err)
+	}
+	assertResult(t, results[0], "a1", "100", "int16", 192)
+	assertResult(t, results[1], "a2", "", "int16", 0)
+	assertResult(t, results[2], "a3", "100", "int16", 192)
 }
 
 func TestDriverReadNotConnected(t *testing.T) {

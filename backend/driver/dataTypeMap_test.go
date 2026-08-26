@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"iot-gateway/driver"
+	_ "iot-gateway/driver/mitsubishi" // 注册 Mitsubishi MC 类型
 	_ "iot-gateway/driver/modbus"     // 注册 Modbus 类型
 	_ "iot-gateway/driver/omron/cip"  // 注册 CIP 类型
 	_ "iot-gateway/driver/omron/fins" // 注册 FINS 类型
@@ -18,11 +19,13 @@ func TestScopeOf(t *testing.T) {
 		protocol string
 		want     string
 	}{
-		{"ModBus.Net.TCP", "modbus"},
-		{"modbus.net.rtu", "modbus"}, // 大小写不敏感
-		{"Siemens.Net.S7", "s7"},
-		{"Omron.Net.CIP", "cip"},
-		{"Omron.Net.FINS.HostLinkTCP", "fins"},
+		{"ModBus.TCP", "modbus"},
+		{"modbus.rtu", "modbus"}, // 大小写不敏感
+		{"Siemens.S7", "s7"},
+		{"Omron.CIP", "cip"},
+		{"Omron.FINS.HostLinkTCP", "fins"},
+		{"Mitsubishi.MC.TCP", "mitsubishi"},
+		{"mitsubishi.mc.serial", "mitsubishi"}, // 大小写不敏感
 		{"nope", ""},
 		{"", ""},
 	}
@@ -45,6 +48,9 @@ func TestLookupScopeType(t *testing.T) {
 		{"s7", "Short", "int", true},
 		{"s7", "BCD", "", false},   // S7 无 BCD 映射
 		{"cip", "Date", "", false}, // CIP 无 Date 映射
+		{"mitsubishi", "Float", "float32", true},
+		{"mitsubishi", "BCD", "bcd", true},   // 三菱 D 区常用 BCD
+		{"mitsubishi", "Date", "", false},    // MC 无 Date 映射
 		{"nope", "Float", "", false},
 	}
 	for _, c := range cases {
@@ -62,11 +68,14 @@ func TestLookupDataType(t *testing.T) {
 		protocol, name, want string
 		ok                   bool
 	}{
-		{"ModBus.Net.TCP", "Float", "float32", true},
-		{"ModBus.Net.RTU", "Int", "int32", true}, // 扩展类型经 config 名同样可查
-		{"Siemens.Net.S7", "Short", "int", true},
-		{"Omron.Net.CIP", "Date", "", false},
-		{"ModBus.Net.TCP", "Nope", "", false},
+		{"ModBus.TCP", "Float", "float32", true},
+		{"ModBus.RTU", "Int", "int32", true}, // 扩展类型经 config 名同样可查
+		{"Siemens.S7", "Short", "int", true},
+		{"Omron.CIP", "Date", "", false},
+		{"Mitsubishi.MC.TCP", "Short", "int16", true},
+		{"Mitsubishi.MC.Serial", "Double", "float64", true},
+		{"Mitsubishi.MC.TCP", "Date", "", false}, // MC 无 Date
+		{"ModBus.TCP", "Nope", "", false},
 		{"nope", "Float", "", false},
 	}
 	for _, c := range cases {
@@ -106,6 +115,11 @@ func TestAvailableTypes(t *testing.T) {
 			wantExtended: nil,
 		},
 		{
+			scope:        "mitsubishi",
+			wantCommon:   []string{"Boolean", "String", "Byte", "Char", "Short", "Word", "DWord", "Long", "Float", "Double", "BCD", "LBCD"},
+			wantExtended: nil, // MC 无 Date
+		},
+		{
 			scope:        "nope",
 			wantCommon:   nil,
 			wantExtended: nil,
@@ -131,12 +145,12 @@ func TestNormalizeAddressType(t *testing.T) {
 		commonDataType string
 		want           string
 	}{
-		{"有效内部名保留", "ModBus.Net.TCP", "int16", "Short", "int16"},
-		{"漂移回退", "ModBus.Net.TCP", "bogus", "Float", "float32"},
-		{"扩展类型漂移回退", "ModBus.Net.TCP", "bogus", "Int", "int32"},
-		{"s7 漂移回退", "Siemens.Net.S7", "bogus", "Long", "dint"},
+		{"有效内部名保留", "ModBus.TCP", "int16", "Short", "int16"},
+		{"漂移回退", "ModBus.TCP", "bogus", "Float", "float32"},
+		{"扩展类型漂移回退", "ModBus.TCP", "bogus", "Int", "int32"},
+		{"s7 漂移回退", "Siemens.S7", "bogus", "Long", "dint"},
 		{"协议未知原样", "nope", "bogus", "Float", "bogus"},
-		{"两者都坏原样", "ModBus.Net.TCP", "bogus", "", "bogus"},
+		{"两者都坏原样", "ModBus.TCP", "bogus", "", "bogus"},
 	}
 	for _, c := range cases {
 		addr := po.DeviceAddress{DataType: c.dataType, CommonDataType: c.commonDataType}

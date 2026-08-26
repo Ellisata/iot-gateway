@@ -16,6 +16,7 @@ const (
 // CIP 服务码
 const (
 	cipServiceDataTableRead = 0x4C // Omron 专有：数据表读取（Data Table Read）
+	cipServiceMultipleRead  = 0x0A // 多服务请求：一个报文内拼接多个 0x4C 读服务
 )
 
 // Omron 数据表读取专有类型码。
@@ -60,4 +61,33 @@ var cipTypeCodeByTypeName = map[string]uint16{
 func cipTypeCode(dataType string) (uint16, bool) {
 	code, ok := cipTypeCodeByTypeName[dataType]
 	return code, ok
+}
+
+// cipTypeSizeByCode Omron 数据表类型码 → 固定字节数（0x0A 多服务响应按此切分各标签数据）。
+// 与 cipTypeCodeByTypeName 互逆；string 等动态长度类型不在其中（批量读不收纳）。
+var cipTypeSizeByCode = map[uint16]int{
+	cipTypeBool:   1,
+	cipTypeSINT:   1,
+	cipTypeINT:    2,
+	cipTypeDINT:   4,
+	cipTypeUSINT:  1,
+	cipTypeUINT:   2,
+	cipTypeUDINT:  4,
+	cipTypeWORD:   2,
+	cipTypeDWORD:  4,
+	cipTypeREAL:   4,
+	cipTypeLREAL:  8,
+}
+
+// cipTypeSize 查询类型码对应的固定数据字节数。
+func cipTypeSize(code uint16) (int, bool) {
+	size, ok := cipTypeSizeByCode[code]
+	return size, ok
+}
+
+// cipFixedSizeType 判断类型是否为固定字节长度（非 string 等动态长度类型）。
+// 0x0A 批量读响应按固定尺寸切分，动态长度类型只能单读。
+func cipFixedSizeType(dataType string) bool {
+	dt, ok := cipLookup(dataType)
+	return ok && dt.Size > 0
 }

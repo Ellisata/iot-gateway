@@ -19,6 +19,9 @@ type cipTransport interface {
 	// 通用状态错误返回 cipcore.GeneralStatusError（连接是通的，设备拒绝）；
 	// 网络/超时错误返回普通 error。
 	ReadTag(tagName string, dataTypeCode uint16) ([]byte, error)
+	// ReadTags 批量读取多个标签（0x0A 多服务报文），返回与 specs 顺序对应的逐标签结果。
+	// 单标签调用退化为 ReadTag 语义。结果 Err 非 nil 表示该标签被设备拒绝（连接仍通）。
+	ReadTags(specs []TagSpec) ([]TagResult, error)
 	// IsConnected 返回连接状态
 	IsConnected() bool
 	// Close 关闭连接释放资源
@@ -102,7 +105,11 @@ func (c *cipClient) registerSession() error {
 func (c *cipClient) ReadTag(tagName string, dataTypeCode uint16) ([]byte, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.readTagLocked(tagName, dataTypeCode)
+}
 
+// readTagLocked 单标签 0x4C 读（调用方需持有 c.mu）。
+func (c *cipClient) readTagLocked(tagName string, dataTypeCode uint16) ([]byte, error) {
 	if c.conn == nil || !c.connected {
 		return nil, fmt.Errorf("cip: not connected")
 	}
@@ -141,11 +148,69 @@ func (c *cipClient) ReadTag(tagName string, dataTypeCode uint16) ([]byte, error)
 	}
 
 	// 通用状态错误（设备响应但拒绝）不置 connected=false —— 连接是通的
-	data, err := parseDataTableRead(cipResp)
+	return parseDataTableRead(cipResp)
+}
+
+// ReadTags 通过一个 0x0A 多服务报文批量读取多个标签。
+//
+// 把 N 次 SendRRData 往返收敛为 1 次，是 CIP 点位容量扩展的关键（帧数从 1 点/往返
+// 降到 batch 点/往返）。各子响应无长度分隔，按标签类型码的固定尺寸切分；单标签调用
+// 退化为 ReadTag。
+func (c *cipClient) ReadTags(specs []TagSpec) ([]TagResult, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.conn == nil || !c.connected {
+		return nil, fmt.Errorf("cip: not connected")
+	}
+	if len(specs) == 1 {
+		data, err := c.readTagLocked(specs[0].Name, specs[0].Code)
+		if err != nil {
+			return nil, err
+		}
+		return []TagResult{{Data: data}}, nil
+	}
+
+	// 各标签固定数据尺寸（响应解析按此切分）
+	sizes := make([]int, len(specs))
+	for i := range specs {
+		size, ok := cipTypeSize(specs[i].Code)
+		if !ok {
+			return nil, fmt.Errorf("cip: no fixed size for type code 0x%04X", specs[i].Code)
+		}
+		sizes[i] = size
+	}
+
+	cipReq := buildMultipleDataTableRead(specs)
+	frame := cipcore.BuildSendRRData(c.session, cipReq)
+
+	if err := c.writeAll(frame); err != nil {
+		c.connected = false
+		return nil, fmt.Errorf("cip: write failed: %w", err)
+	}
+	resp, err := c.readFrame()
+	if err != nil {
+		c.connected = false
+		return nil, fmt.Errorf("cip: read failed: %w", err)
+	}
+	cmd, _, status, payload, err := cipcore.ParseEncapResponse(resp)
+	if err != nil {
+		c.connected = false
+		return nil, err
+	}
+	if status != 0 {
+		c.connected = false
+		return nil, fmt.Errorf("cip: encap status 0x%08X", status)
+	}
+	if cmd != cipcore.CmdSendRRData {
+		c.connected = false
+		return nil, fmt.Errorf("cip: unexpected data response command 0x%04X", cmd)
+	}
+	cipResp, err := cipcore.ParseSendRRData(payload)
 	if err != nil {
 		return nil, err
 	}
-	return data, nil
+	return parseMultipleDataTableRead(cipResp, sizes)
 }
 
 // readFrame 读取一个完整封装帧（24 字节头 + 载荷）。

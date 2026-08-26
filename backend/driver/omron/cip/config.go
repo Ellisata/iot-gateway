@@ -16,27 +16,34 @@ type CIPConfig struct {
 	TimeoutMS int           `json:"timeoutMs"` // 超时毫秒数，默认 5000
 	Timeout   time.Duration `json:"-"`         // 超时时间（由 TimeoutMS 转换）
 	StringLen int           `json:"stringLen"` // string 类型单点读取最大字节数，默认 80
+	// MaxTagsPerRequest 单个 0x0A 多服务报文携带的标签数（0/1 = 关闭批量，逐标签单读）。
+	// >1 时把定长类型标签分批合入一个 SendRRData，网络往返从 N 次收敛到 ceil(N/batch) 次，
+	// 是 CIP 点位容量扩展的关键（帧数从「1 点/往返」降到「batch 点/往返」）。
+	// 【真机核实】0x0A 多服务报文需在目标 NJ/NX 上验证后再在生产开启。
+	MaxTagsPerRequest int `json:"maxTagsPerRequest"`
 }
 
 // DefaultCIPConfig 返回默认 CIP 配置
 func DefaultCIPConfig() *CIPConfig {
 	return &CIPConfig{
-		Host:      "127.0.0.1",
-		Port:      defaultPort,
-		TimeoutMS: defaultTimeoutMS,
-		Timeout:   time.Duration(defaultTimeoutMS) * time.Millisecond,
-		StringLen: defaultStringLen,
+		Host:              "127.0.0.1",
+		Port:              defaultPort,
+		TimeoutMS:         defaultTimeoutMS,
+		Timeout:           time.Duration(defaultTimeoutMS) * time.Millisecond,
+		StringLen:         defaultStringLen,
+		MaxTagsPerRequest: 64,
 	}
 }
 
-// cipConfigRaw 匹配 protocol_json 原始数据格式（port 为数字，其余值为字符串）
+// cipConfigRaw 匹配 protocol_json 原始数据格式（port/maxTagsPerRequest 为数字，其余值为字符串）
 type cipConfigRaw struct {
-	Host      string `json:"host"`
-	Port      int    `json:"port"`
-	PingTag   string `json:"pingTag"`
-	Timeout   string `json:"timeout"`   // 兼容字段名
-	TimeoutMS string `json:"timeoutMs"` // 标准字段名
-	StringLen string `json:"stringLen"`
+	Host              string `json:"host"`
+	Port              int    `json:"port"`
+	PingTag           string `json:"pingTag"`
+	Timeout           string `json:"timeout"`   // 兼容字段名
+	TimeoutMS         string `json:"timeoutMs"` // 标准字段名
+	StringLen         string `json:"stringLen"`
+	MaxTagsPerRequest int    `json:"maxTagsPerRequest"`
 }
 
 // ParseCIPConfig 从 device.protocol_json JSON 字符串解析 CIP 配置。
@@ -80,6 +87,13 @@ func ParseCIPConfig(protocolJSON string) (*CIPConfig, error) {
 			cfg.StringLen = v
 		}
 	}
+	// maxTagsPerRequest：>=1 时启用批量读（0/负值回退默认关闭）；上限 64 防超大报文
+	if raw.MaxTagsPerRequest > 0 {
+		cfg.MaxTagsPerRequest = raw.MaxTagsPerRequest
+		if cfg.MaxTagsPerRequest > 64 {
+			cfg.MaxTagsPerRequest = 64
+		}
+	}
 
 	// 设置 Timeout
 	if cfg.TimeoutMS <= 0 {
@@ -101,5 +115,6 @@ func sameConfig(a, b *CIPConfig) bool {
 		return false
 	}
 	return a.Host == b.Host && a.Port == b.Port &&
-		a.PingTag == b.PingTag && a.StringLen == b.StringLen
+		a.PingTag == b.PingTag && a.StringLen == b.StringLen &&
+		a.MaxTagsPerRequest == b.MaxTagsPerRequest
 }

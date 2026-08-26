@@ -8,9 +8,9 @@ import (
 
 // TestDriverRegistration 验证驱动已注册且可通过注册表创建
 func TestDriverRegistration(t *testing.T) {
-	d, err := driver.Create("Siemens.Net.S7")
+	d, err := driver.Create("Siemens.S7")
 	if err != nil {
-		t.Fatalf("driver.Create(Siemens.Net.S7) = %v", err)
+		t.Fatalf("driver.Create(Siemens.S7) = %v", err)
 	}
 	if d == nil {
 		t.Fatal("driver is nil")
@@ -25,7 +25,7 @@ func TestDriverRegistration(t *testing.T) {
 
 // TestPingUnreachableHost 验证对未监听端口 Ping 快速失败且不修改驱动状态
 func TestPingUnreachableHost(t *testing.T) {
-	d, err := driver.Create("Siemens.Net.S7")
+	d, err := driver.Create("Siemens.S7")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -157,7 +157,7 @@ export function publishAll() {
 /**
  * 监测设备对象连接状态
  * @param {Object} data - 连接测试参数
- * @param {string} data.protocolName - 协议名称（如 ModBus.Net.TCP）
+ * @param {string} data.protocolName - 协议名称（如 ModBus.TCP）
  * @param {Object} data.protocolJson - 协议配置 JSON（host/port/batch 等）
  * @returns {Promise<{connected: boolean}>}
  */

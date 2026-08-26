@@ -3,10 +3,6 @@ iot-hand-gateway
 iot-hand-gateway.exe
 *.exe
 
-# 日志
-log/
-*.log
-
 # IDE
 .idea/
 *.swp

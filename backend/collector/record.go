@@ -13,7 +13,7 @@ type CollectedRecord struct {
 	// 携带 json tag 以保证断网缓存（push/spool）序列化回放后不丢失。
 	// MQTT 通道自行构建 pushPoint，不受本字段影响。
 	Kind string `json:"kind"`
-	// Protocol 协议名称（iot_protocol.name，如 "ModBus.Net.TCP"），由 collector 填充，
+	// Protocol 协议名称（iot_protocol.name，如 "ModBus.TCP"），由 collector 填充，
 	// 供下游区分协议命名空间（dataType 为协议内部类型名）。
 	Protocol string `json:"protocol"`
 	Quality  int    `json:"quality"`

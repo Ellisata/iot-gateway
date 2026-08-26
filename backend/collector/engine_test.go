@@ -50,7 +50,7 @@ func TestEngineWatchLoopHotReload(t *testing.T) {
 	}
 
 	// 造数据：1 个协议 + 1 台活跃设备 + 1 个活跃地址
-	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: "ModBus.Net.TCP", Status: 1}).Error; err != nil {
+	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: "ModBus.TCP", Status: 1}).Error; err != nil {
 		t.Fatal(err)
 	}
 	port := reserveClosedPort(t)
@@ -147,7 +147,7 @@ func startWatchTestEngine(t *testing.T, db *gorm.DB) *Engine {
 // watcher 应检测到 checksum 变化并热加载，新任务开始采集该设备的地址。
 func TestEngineWatchLoopDeviceActivate(t *testing.T) {
 	db := newWatchTestDB(t)
-	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: "ModBus.Net.TCP", Status: 1}).Error; err != nil {
+	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: "ModBus.TCP", Status: 1}).Error; err != nil {
 		t.Fatal(err)
 	}
 	port := reserveClosedPort(t)
@@ -216,7 +216,7 @@ func TestEngineWatchLoopDeviceActivate(t *testing.T) {
 // watchLoop 检测不到变化、设备无法恢复采集。修复后应能正常热加载。
 func TestEngineWatchLoopReactivateAfterDeactivateAll(t *testing.T) {
 	db := newWatchTestDB(t)
-	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: "ModBus.Net.TCP", Status: 1}).Error; err != nil {
+	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: "ModBus.TCP", Status: 1}).Error; err != nil {
 		t.Fatal(err)
 	}
 	port := reserveClosedPort(t)
@@ -288,7 +288,7 @@ func TestEngineWatchLoopReactivateAfterDeactivateAll(t *testing.T) {
 // DeviceLastSuccessTime 应为空（尚无成功记录）。
 func TestEngineActiveDeviceIDs(t *testing.T) {
 	db := newWatchTestDB(t)
-	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: "ModBus.Net.TCP", Status: 1}).Error; err != nil {
+	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: "ModBus.TCP", Status: 1}).Error; err != nil {
 		t.Fatal(err)
 	}
 	port := reserveClosedPort(t)

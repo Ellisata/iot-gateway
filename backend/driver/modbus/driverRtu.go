@@ -27,6 +27,11 @@ type modbusRTUDriver struct {
 	mu     sync.RWMutex
 	config *ModbusRTUConfig
 	client *ModbusRTUClient
+
+	// plans 批次区间规划缓存：规避每轮重复解析地址、按功能码分组与计算区间。
+	// 规划是 (addrs, cfg) 的纯函数，轮询间批次内容不变即可命中；
+	// 驱动实例在配置热刷新时由采集引擎重建，Connect 时也显式清空，缓存随之失效。
+	plans planCache
 }
 
 // SerialExclusive 标记 RTU 驱动独占串口总线。
@@ -48,6 +53,9 @@ func (d *modbusRTUDriver) Connect(protocolJSON string) error {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
+
+	// 任何重连尝试都使规划缓存失效：配置可能已变化，新连接必须使用重新计算的规划
+	d.plans.clear()
 
 	// 先关闭旧连接、释放串口，再建立新连接。
 	// 否则读超时后旧 handler 仍占用端口，新连接会报 Access is denied。
@@ -154,15 +162,15 @@ func (d *modbusRTUDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, e
 
 	client.SetUnitID(cfg.UnitID)
 
-	// 按功能码分组：线圈/保持寄存器等是不同的地址空间，
-	// 同一设备混合点位时分组各自读取，而非整组报错。
-	groups, err := groupAddrsByFC(addrs, sharedCfg)
+	// 按功能码分组 + 每组区间计算一次性规划并缓存（内容指纹命中则跳过重复解析）。
+	// 线圈/保持寄存器等是不同的地址空间，同一设备混合点位时分组各自读取，而非整组报错。
+	plan, err := d.plans.planFor(driver.RangeSig(addrs), addrs, sharedCfg)
 	if err != nil {
-		return nil, fmt.Errorf("modbus rtu: group addresses by function code failed: %w", err)
+		return nil, fmt.Errorf("modbus rtu: calc address ranges failed: %w", err)
 	}
 
-	fcs := make([]byte, 0, len(groups))
-	for fc := range groups {
+	fcs := make([]byte, 0, len(plan.groups))
+	for fc := range plan.groups {
 		fcs = append(fcs, fc)
 	}
 	sort.Slice(fcs, func(i, j int) bool { return fcs[i] < fcs[j] })
@@ -170,17 +178,8 @@ func (d *modbusRTUDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, e
 	// 按 FC 逐组读取：每组独立算范围/读/解析，汇总后按原始点位顺序重组。
 	byID := make(map[string]driver.ReadResult, len(addrs))
 	for _, fc := range fcs {
-		gAddrs := groups[fc]
-		opts := CalcReadRangeOptions{
-			StartAddress: cfg.StartAddress,
-			Quantity:     cfg.Quantity,
-			MergeWindow:  cfg.MergeWindow,
-			StringLen:    cfg.StringLen,
-		}
-		ranges, err := CalcReadRanges(gAddrs, opts)
-		if err != nil {
-			return nil, fmt.Errorf("modbus rtu: calc address ranges (fc=%d) failed: %w", fc, err)
-		}
+		gAddrs := plan.groups[fc]
+		ranges := plan.ranges[fc]
 
 		var groupResults []driver.ReadResult
 		switch fc {

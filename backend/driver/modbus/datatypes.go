@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"iot-gateway/driver"
@@ -16,6 +17,42 @@ const protocolName = "modbus"
 
 // protocolPrefix Modbus 类型注册前缀，避免跨协议类型名冲突。
 const protocolPrefix = protocolName + "."
+
+// mbScope Modbus 类型注册表作用域缓存。
+// protocolName 为常量，作用域前缀固定；每点位直接复用该作用域，避免反复
+// 构造 ProtocolScope 与拼接 "{protocol}." 前缀。
+var mbScope = driver.GetTypeRegistry().ForProtocol(protocolName)
+
+var (
+	mbLookupOnce sync.Once
+	mbTypes      map[string]*driver.DataType
+)
+
+// mbLookup 按裸名查 DataType：优先命中静态缓存（零分配、无锁），
+// 未命中回退注册表查询（兼容大小写变体，保持原有不区分大小写语义）。
+// 类型注册表在 init() 后不再变化（dataTypeMap 仅查询不注册），
+// 按裸名缓存可消除每点位对全局注册表 RWMutex 的查询与锁竞争。
+func mbLookup(name string) (*driver.DataType, bool) {
+	mbLookupOnce.Do(func() {
+		m := make(map[string]*driver.DataType)
+		for _, full := range driver.GetTypeRegistry().Names() {
+			bare, ok := strings.CutPrefix(full, protocolPrefix)
+			if !ok {
+				continue
+			}
+			dt, ok := mbScope.Get(bare)
+			if !ok {
+				continue
+			}
+			m[bare] = dt
+		}
+		mbTypes = m
+	})
+	if dt, ok := mbTypes[name]; ok {
+		return dt, true
+	}
+	return mbScope.Get(name)
+}
 
 // Modbus 数据类型内部名（带协议前缀，注册后 dt.Name 即为此值）
 const (
@@ -172,7 +209,10 @@ func init() {
 // typeKind 解析(裸)内部类型名对应的类别 Kind，供构建 ReadResult 时填充。
 // 未注册类型返回 ""（推送通道回退为数值推断）。
 func typeKind(name string) string {
-	return driver.GetTypeRegistry().ForProtocol(protocolName).KindOf(name)
+	if dt, ok := mbLookup(name); ok {
+		return dt.Kind
+	}
+	return ""
 }
 
 // ==================== 解码函数 ====================

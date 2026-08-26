@@ -6,8 +6,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-
-	"iot-gateway/driver"
 )
 
 // ParseReadResult 将 Modbus 原始字节解析为指定类型的值。
@@ -26,8 +24,7 @@ func ParseReadResult(raw []byte, dataType, byteOrder, wordOrder string) (any, er
 		return nil, fmt.Errorf("modbus parser: empty raw data")
 	}
 
-	mb := driver.GetTypeRegistry().ForProtocol(protocolName)
-	dt, ok := mb.Get(dataType)
+	dt, ok := mbLookup(dataType)
 	if !ok {
 		return nil, fmt.Errorf("modbus parser: unsupported data type: %q", dataType)
 	}
@@ -73,8 +70,7 @@ func ParseReadResult(raw []byte, dataType, byteOrder, wordOrder string) (any, er
 // FormatValue 将解析后的值格式化为字符串（用于存储和展示）。
 // 通过 TypeRegistry 查找类型的格式化函数。
 func FormatValue(v any, dataType string) string {
-	mb := driver.GetTypeRegistry().ForProtocol(protocolName)
-	dt, ok := mb.Get(dataType)
+	dt, ok := mbLookup(dataType)
 	if !ok || dt.Format == nil {
 		return fmt.Sprintf("%v", v)
 	}
@@ -126,8 +122,7 @@ func parseByteOrder(s string) binary.ByteOrder {
 // EncodeWriteValue 将写入值编码为 Modbus 寄存器字。
 // 通过 TypeRegistry 查找类型的编码函数。
 func EncodeWriteValue(value interface{}, dataType, byteOrder, wordOrder string) ([]uint16, error) {
-	mb := driver.GetTypeRegistry().ForProtocol(protocolName)
-	dt, ok := mb.Get(dataType)
+	dt, ok := mbLookup(dataType)
 	if !ok {
 		return nil, fmt.Errorf("modbus parser: unsupported write data type: %q", dataType)
 	}

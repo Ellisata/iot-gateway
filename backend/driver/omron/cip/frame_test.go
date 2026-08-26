@@ -87,3 +87,69 @@ func TestParseDataTableReadBadServiceEcho(t *testing.T) {
 		t.Fatal("expected error for bad service echo")
 	}
 }
+
+func TestBuildMultipleDataTableRead(t *testing.T) {
+	specs := []TagSpec{{Name: "MotorSpeed", Code: cipTypeINT}, {Name: "Temp", Code: cipTypeDINT}}
+	req := buildMultipleDataTableRead(specs)
+	want := append([]byte{0x0A, 0x02}, buildDataTableRead("MotorSpeed", cipTypeINT)...)
+	want = append(want, buildDataTableRead("Temp", cipTypeDINT)...)
+	if !bytes.Equal(req, want) {
+		t.Fatalf("req = % X, want % X", req, want)
+	}
+}
+
+func TestParseMultipleDataTableReadSuccess(t *testing.T) {
+	// 2 个标签（int16=2 字节、int32=4 字节），各子响应均为成功 0xCC
+	resp := []byte{
+		0x8A, 0x02,
+		0xCC, 0x00, 0x00, 0xC3, 0x00, 0x00, 0x64, // int16: 值 0x6400
+		0xCC, 0x00, 0x00, 0xC4, 0x00, 0x00, 0x00, 0x00, 0x01, // int32
+	}
+	results, err := parseMultipleDataTableRead(resp, []int{2, 4})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want 2", len(results))
+	}
+	if results[0].Err != nil || len(results[0].Data) != 2 {
+		t.Errorf("result[0] = %+v, want 2-byte data", results[0])
+	}
+	if results[1].Err != nil || len(results[1].Data) != 4 {
+		t.Errorf("result[1] = %+v, want 4-byte data", results[1])
+	}
+}
+
+func TestParseMultipleDataTableReadMixedStatus(t *testing.T) {
+	// 第 1 个标签被拒绝（4 字节错误响应），第 2 个成功 —— 验证错误子响应边界自定位
+	resp := []byte{
+		0x8A, 0x02,
+		0xCC, 0x00, 0x04, 0x00, // 错误：状态 0x04 tag not found，附加状态字数 0
+		0xCC, 0x00, 0x00, 0xC3, 0x00, 0x00, 0x64,
+	}
+	results, err := parseMultipleDataTableRead(resp, []int{2, 2})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !cipcore.IsGeneralStatusError(results[0].Err) {
+		t.Errorf("result[0] should carry GeneralStatusError, got %v", results[0].Err)
+	}
+	if results[1].Err != nil || len(results[1].Data) != 2 {
+		t.Errorf("result[1] should be success with 2-byte data, got %+v", results[1])
+	}
+}
+
+func TestParseMultipleDataTableReadErrors(t *testing.T) {
+	// 服务回显错误
+	if _, err := parseMultipleDataTableRead([]byte{0x4C, 0x01, 0xCC}, []int{2}); err == nil {
+		t.Fatal("expected error for bad service echo")
+	}
+	// 数量不匹配
+	if _, err := parseMultipleDataTableRead([]byte{0x8A, 0x03, 0xCC}, []int{2}); err == nil {
+		t.Fatal("expected error for count mismatch")
+	}
+	// 截断
+	if _, err := parseMultipleDataTableRead([]byte{0x8A, 0x01, 0xCC, 0x00}, []int{2}); err == nil {
+		t.Fatal("expected error for truncated response")
+	}
+}

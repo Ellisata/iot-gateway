@@ -4,8 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
-
-	"iot-gateway/driver"
 )
 
 // ParseFINSValue 将读取到的原始字节解码为指定类型的 Go 值。
@@ -20,8 +18,7 @@ func ParseFINSValue(raw []byte, addr FINSAddress, dataType string, cfg *FINSConf
 		return nil, fmt.Errorf("fins parser: empty raw data")
 	}
 
-	f := driver.GetTypeRegistry().ForProtocol(protocolName)
-	dt, ok := f.Get(dataType)
+	dt, ok := finsLookup(dataType)
 	if !ok {
 		return nil, fmt.Errorf("fins parser: unsupported data type: %q", dataType)
 	}
@@ -73,8 +70,7 @@ func ParseFINSValue(raw []byte, addr FINSAddress, dataType string, cfg *FINSConf
 
 // FormatFINSValue 将解码后的值格式化为字符串（用于存储和展示）。
 func FormatFINSValue(v any, dataType string) string {
-	f := driver.GetTypeRegistry().ForProtocol(protocolName)
-	dt, ok := f.Get(dataType)
+	dt, ok := finsLookup(dataType)
 	if !ok || dt.Format == nil {
 		return fmt.Sprintf("%v", v)
 	}

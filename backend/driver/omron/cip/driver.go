@@ -127,6 +127,39 @@ func (d *cipDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error) 
 	// 继续读其它标签，单个异常标签不拖垮整台设备；
 	// 网络/超时错误 → 向上返回，由采集引擎判定断连并重连。
 	byID := make(map[string]driver.ReadResult, len(addrs))
+	batch := cfg.MaxTagsPerRequest
+
+	// 批量读：定长类型标签按 maxTagsPerRequest 合入 0x0A 多服务报文（1 次往返读 batch 个标签）；
+	// string 等动态长度类型与 batch<=1 时保持单读。批量是 CIP 点位容量扩展的关键：
+	// 帧数从「1 点/往返」降到「batch 点/往返」。见 config.MaxTagsPerRequest 真机核实说明。
+	var pending []CIPTag
+	flush := func() error {
+		if len(pending) == 0 {
+			return nil
+		}
+		specs := make([]TagSpec, len(pending))
+		for i := range pending {
+			code, _ := cipTypeCode(pending[i].Addrs[0].DataType)
+			specs[i] = TagSpec{Name: pending[i].Name, Code: code}
+		}
+		results, err := client.ReadTags(specs)
+		if err != nil {
+			return fmt.Errorf("cip: batch read %d tags failed: %w", len(pending), err)
+		}
+		for i := range pending {
+			t := &pending[i]
+			if results[i].Err != nil {
+				logger.Warn("cip: tag %q unreadable, mark %d points quality=0: %v",
+					t.Name, len(t.Addrs), results[i].Err)
+				markTagZero(addrByID, t, byID)
+				continue
+			}
+			parseTagResults(t, results[i].Data, cfg, byID)
+		}
+		pending = pending[:0]
+		return nil
+	}
+
 	for i := range tags {
 		t := &tags[i]
 		// 用组内第一个点位的类型码发请求，各点位按自己的类型解码
@@ -137,17 +170,35 @@ func (d *cipDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error) 
 			markTagZero(addrByID, t, byID)
 			continue
 		}
-		data, err := client.ReadTag(t.Name, code)
-		if err != nil {
-			if cipcore.IsGeneralStatusError(err) {
-				logger.Warn("cip: tag %q unreadable, mark %d points quality=0: %v",
-					t.Name, len(t.Addrs), err)
-				markTagZero(addrByID, t, byID)
-				continue
+
+		// 动态长度类型（string）或未开启批量 → 冲刷待批后单读
+		if batch <= 1 || !cipFixedSizeType(t.Addrs[0].DataType) {
+			if err := flush(); err != nil {
+				return nil, err
 			}
-			return nil, fmt.Errorf("cip: read tag %q failed: %w", t.Name, err)
+			data, err := client.ReadTag(t.Name, code)
+			if err != nil {
+				if cipcore.IsGeneralStatusError(err) {
+					logger.Warn("cip: tag %q unreadable, mark %d points quality=0: %v",
+						t.Name, len(t.Addrs), err)
+					markTagZero(addrByID, t, byID)
+					continue
+				}
+				return nil, fmt.Errorf("cip: read tag %q failed: %w", t.Name, err)
+			}
+			parseTagResults(t, data, cfg, byID)
+			continue
 		}
-		parseTagResults(t, data, cfg, byID)
+
+		pending = append(pending, *t)
+		if len(pending) >= batch {
+			if err := flush(); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := flush(); err != nil {
+		return nil, err
 	}
 
 	// 按原始 addrs 顺序重组，保证返回结果与 addrs 一一对应
