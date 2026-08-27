@@ -14,4 +14,6 @@ var ControllerProviderSet = wire.NewSet(
 	NewPushController,
 	NewAlarmController,
 	NewLogFileController,
+	NewOpenApiSecretController,
+	NewOpenApiController,
 )

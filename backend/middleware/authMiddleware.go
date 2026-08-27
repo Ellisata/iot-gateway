@@ -19,12 +19,16 @@ var publicPaths = map[string]bool{
 }
 
 // isPublicPath 判断请求路径是否免认证（含 /admin 前缀的前端静态资源）。
-// 内嵌 Vue 前端的 index.html 与 assets/* 由浏览器直接加载，不会携带 token。
+// 内嵌 Vue 前端的 index.html 与 assets/* 由浏览器直接加载，不会携带 token；
+// /openApi/* 走独立的 X-Api-Key 密钥校验（openApiAuthMiddleware），同样不走 JWT。
 func isPublicPath(path string) bool {
 	if publicPaths[path] {
 		return true
 	}
-	return path == "/admin" || strings.HasPrefix(path, "/admin/")
+	if path == "/admin" || strings.HasPrefix(path, "/admin/") {
+		return true
+	}
+	return strings.HasPrefix(path, "/openApi/")
 }
 
 // AuthMiddleware JWT 认证中间件。由 SetupRouter 全局挂载，

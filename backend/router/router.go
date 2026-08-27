@@ -5,6 +5,7 @@ import (
 
 	"iot-gateway/controller"
 	"iot-gateway/middleware"
+	"iot-gateway/service"
 	"iot-gateway/web"
 )
 
@@ -110,5 +111,19 @@ func WithAlarmRoutes(ac *controller.AlarmController) RouteOption {
 func WithLogFileRoutes(lc *controller.LogFileController) RouteOption {
 	return func(r *gin.Engine) {
 		LogFileRoutes(r, lc)
+	}
+}
+
+// WithOpenApiSecretRoutes 开放接口密钥模块路由选项
+func WithOpenApiSecretRoutes(oasc *controller.OpenApiSecretController) RouteOption {
+	return func(r *gin.Engine) {
+		OpenApiSecretRoutes(r, oasc)
+	}
+}
+
+// WithOpenApiRoutes 开放接口路由选项（X-Api-Key 密钥鉴权，不走 JWT）
+func WithOpenApiRoutes(oass *service.OpenApiSecretService, oac *controller.OpenApiController) RouteOption {
+	return func(r *gin.Engine) {
+		OpenApiRoutes(r, oass, oac)
 	}
 }

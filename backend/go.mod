@@ -15,6 +15,8 @@ require (
 	github.com/robinson/gos7 v0.0.0-20260622162611-2d6806f80c8b
 	github.com/spf13/viper v1.19.0
 	github.com/taosdata/driver-go/v3 v3.8.2
+	github.com/xuri/excelize/v2 v2.11.0
+	github.com/yuin/goldmark v1.7.13
 	golang.org/x/crypto v0.53.0
 	golang.org/x/sys v0.46.0
 	gorm.io/gorm v1.25.12
@@ -30,7 +32,6 @@ require (
 	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/xuri/efp v0.0.1 // indirect
-	github.com/xuri/excelize/v2 v2.11.0 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect

@@ -84,9 +84,23 @@ const routes = [
         path: 'log/file',
         name: 'LogFile',
         component: () => import('@/views/log/IndexView.vue'),
-        meta: { title: '日志文件查看', icon: 'Tickets' },
+        meta: { title: '日志文件查看', icon: 'Tickets', roles: ['admin'] },
+      },
+      // ---- 密钥管理路由 ----
+      {
+        path: 'secret/api-key',
+        name: 'SecretApiKey',
+        component: () => import('@/views/secret/api-key/IndexView.vue'),
+        meta: { title: 'API Key', icon: 'Key', roles: ['admin'] },
       },
     ],
+  },
+  // 开放接口文档：独立于主布局的全页阅读页，从侧边栏菜单新窗口打开
+  {
+    path: '/open-api/doc',
+    name: 'OpenApiDoc',
+    component: () => import('@/views/open-api/doc/IndexView.vue'),
+    meta: { title: '开放接口文档' },
   },
 ]
 

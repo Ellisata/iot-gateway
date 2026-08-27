@@ -21,5 +21,9 @@
     "err.push_channel_form_exists": "数据推送通道表单名称已存在",
     "err.push_channel_form_not_found": "数据推送通道表单不存在",
     "err.device_address_data_type": "协议不支持该数据类型",
+    "err.open_api_secret_exists": "开放接口密钥名称已存在",
+    "err.open_api_secret_not_found": "开放接口密钥不存在",
+    "err.open_api_secret_key_empty": "开放接口密钥为空",
+    "err.open_api_secret_invalid": "开放接口密钥无效",
     "success": "操作成功"
 }

@@ -56,7 +56,11 @@ func InitializeApp() (*AppDependencies, func()) {
 	alarmController := controller.NewAlarmController(alarmService)
 	logFileService := service.NewLogFileService(config)
 	logFileController := controller.NewLogFileController(logFileService)
-	v := ProvideRouteOptions(userController, deviceController, deviceAddressController, collectionController, protocolController, pushChannelController, pushChannelFormController, pushController, alarmController, logFileController)
+	openApiSecretService := service.NewOpenApiSecretService(db)
+	openApiSecretController := controller.NewOpenApiSecretController(openApiSecretService)
+	openApiService := service.NewOpenApiService(deviceService, deviceAddressService)
+	openApiController := controller.NewOpenApiController(openApiService)
+	v := ProvideRouteOptions(userController, deviceController, deviceAddressController, collectionController, protocolController, pushChannelController, pushChannelFormController, pushController, alarmController, logFileController, openApiSecretController, openApiSecretService, openApiController)
 	ginEngine := router.SetupRouter(v)
 	channelMonitor := alarm.NewChannelMonitor(db, engine)
 	appDependencies := &AppDependencies{
@@ -98,6 +102,9 @@ func ProvideRouteOptions(
 	pus *controller.PushController,
 	ac2 *controller.AlarmController,
 	lc *controller.LogFileController,
+	oasc *controller.OpenApiSecretController,
+	oass *service.OpenApiSecretService,
+	oac *controller.OpenApiController,
 ) []router.RouteOption {
-	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectionRoutes(cc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithLogFileRoutes(lc)}
+	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectionRoutes(cc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac)}
 }

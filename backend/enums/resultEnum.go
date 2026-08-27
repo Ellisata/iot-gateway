@@ -83,4 +83,10 @@ var (
 	// 数据推送通道表单相关错误码
 	PushChannelFormExistsEnum    = NewBusinessEnum("60011", "数据推送通道表单名称已存在", "err.push_channel_form_exists")
 	PushChannelFormNotExistsEnum = NewBusinessEnum("60012", "数据推送通道表单不存在", "err.push_channel_form_not_found")
+
+	// 开放接口密钥相关错误码
+	OpenApiSecretExistsEnum    = NewBusinessEnum("70001", "开放接口密钥名称已存在", "err.open_api_secret_exists")
+	OpenApiSecretNotExistsEnum = NewBusinessEnum("70002", "开放接口密钥不存在", "err.open_api_secret_not_found")
+	OpenApiSecretKeyEmptyEnum  = NewBusinessEnum("70003", "开放接口密钥为空", "err.open_api_secret_key_empty")
+	OpenApiSecretInvalidEnum   = NewBusinessEnum("70004", "开放接口密钥无效", "err.open_api_secret_invalid")
 )

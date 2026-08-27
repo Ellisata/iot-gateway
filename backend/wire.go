@@ -78,6 +78,9 @@ func ProvideRouteOptions(
 	pus *controller.PushController,
 	ac2 *controller.AlarmController,
 	lc *controller.LogFileController,
+	oasc *controller.OpenApiSecretController,
+	oass *service.OpenApiSecretService,
+	oac *controller.OpenApiController,
 ) []router.RouteOption {
 	return []router.RouteOption{
 		router.WithUserRoutes(uc),
@@ -90,5 +93,7 @@ func ProvideRouteOptions(
 		router.WithPushRoutes(pus),
 		router.WithAlarmRoutes(ac2),
 		router.WithLogFileRoutes(lc),
+		router.WithOpenApiSecretRoutes(oasc),
+		router.WithOpenApiRoutes(oass, oac),
 	}
 }

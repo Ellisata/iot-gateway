@@ -18,8 +18,8 @@
       background-color="#304156"
       text-color="#bfcbd9"
       active-text-color="#409eff"
-      router
       class="flex-1 border-r-0"
+      @select="handleMenuSelect"
     >
       <el-menu-item index="/dashboard">
         <el-icon><Odometer /></el-icon>
@@ -79,7 +79,7 @@
       </el-sub-menu>
 
       <!-- 日志管理 -->
-      <el-sub-menu index="/log">
+      <el-sub-menu v-if="userStore.isAdmin" index="/log">
         <template #title>
           <el-icon><Memo /></el-icon>
           <span>日志管理</span>
@@ -90,13 +90,34 @@
         </el-menu-item>
       </el-sub-menu>
 
+      <!-- 密钥管理 -->
+      <el-sub-menu v-if="userStore.isAdmin" index="/secret">
+        <template #title>
+          <el-icon><Key /></el-icon>
+          <span>密钥管理</span>
+        </template>
+        <el-menu-item index="/secret/api-key">
+          <el-icon><Key /></el-icon>
+          <template #title>API Key</template>
+        </el-menu-item>
+      </el-sub-menu>
+
+      <!-- 开放接口文档（独立顶级入口，全员可见，新窗口打开） -->
+      <el-menu-item index="/open-api/doc">
+        <el-icon><Document /></el-icon>
+        <template #title>开放接口文档</template>
+      </el-menu-item>
+
     </el-menu>
   </el-aside>
 </template>
 
 <script setup>
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/store'
+
+// 新窗口打开的页面（全页阅读型内容，不在管理端布局内展示）
+const NEW_WINDOW_ROUTES = ['/open-api/doc']
 
 defineProps({
   collapsed: {
@@ -106,5 +127,19 @@ defineProps({
 })
 
 const route = useRoute()
+const router = useRouter()
 const userStore = useUserStore()
+
+/**
+ * 菜单点击处理：常规项当前窗口跳转，阅读型文档项新开窗口。
+ * 由 el-menu 的 @select 统一接管（替代 router 模式），便于按 index 分流。
+ */
+function handleMenuSelect(index) {
+  if (NEW_WINDOW_ROUTES.includes(index)) {
+    const { href } = router.resolve(index)
+    window.open(href, '_blank')
+    return
+  }
+  router.push(index)
+}
 </script>

@@ -21,5 +21,9 @@
     "err.push_channel_form_exists": "Push channel form name already exists",
     "err.push_channel_form_not_found": "Push channel form not found",
     "err.device_address_data_type": "Data type not supported by protocol",
+    "err.open_api_secret_exists": "Open API secret name already exists",
+    "err.open_api_secret_not_found": "Open API secret not found",
+    "err.open_api_secret_key_empty": "Open API secret key is empty",
+    "err.open_api_secret_invalid": "Invalid Open API secret key",
     "success": "Operation successful"
 }
