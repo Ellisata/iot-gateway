@@ -10,7 +10,7 @@
 - **语言**: Go 1.26
 - **HTTP 框架**: Gin v1.12
 - **ORM / 存储**: GORM + SQLite(纯 Go 实现 `glebarez/sqlite`,免 CGO;配置存储,路径见 `default.yaml`)
-- **协议驱动**: `goburrow/modbus`(Modbus RTU/TCP)、`robinson/gos7`(Siemens S7)
+- **协议驱动**: `goburrow/modbus`(Modbus RTU/TCP)、`robinson/gos7`(Siemens S7)、`gopcua/opcua`(OPC UA)
 - **推送**: `eclipse/paho.mqtt.golang`(MQTT)
 - **依赖注入**: Google Wire(编译期 DI,`wire.go` / `wire_gen.go`)
 - **其他**: Viper(配置)、golang-jwt(认证)、go-redis(缓存)、自定义 i18n(JSON)
@@ -32,7 +32,8 @@
 ├── collector/           # 采集引擎(核心): 轮询任务 + 配置热加载 watcher
 ├── driver/              # 协议驱动注册表 + 数据类型注册表(TypeRegistry)
 │   ├── modbus/          # Modbus RTU / TCP 驱动
-│   └── s7/              # 西门子 S7 驱动
+│   ├── s7/              # 西门子 S7 驱动
+│   └── opcua/           # OPC UA 驱动（gopcua）
 ├── push/                # 推送引擎: 接收采集数据,分发到各推送通道
 │   └── mqtt/            # MQTT 推送通道
 ├── web/                 # 前端构建产物(仅 dist/,go:embed 嵌入,无前端源码)

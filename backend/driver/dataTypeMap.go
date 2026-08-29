@@ -131,6 +131,24 @@ var mcTypes = map[string]string{
 	TypeLBCD:    "lbcd",
 }
 
+// opcuaTypes OPC UA 通用数据类型 → 内部类型名。
+// OPC UA 为节点寻址，无位/寄存器概念，仅声明值的类别；解码由服务器返回的
+// 原生值决定（驱动按实际值类型推断 Kind，配置类型仅作默认展示）。
+// OPC UA 无独立 BCD 类型，故不映射；Long 对应 Int64（64 位有符号）。
+var opcuaTypes = map[string]string{
+	TypeBoolean: "bool",
+	TypeDate:    "datetime",
+	TypeString:  "string",
+	TypeByte:    "byte",
+	TypeChar:    "char",
+	TypeShort:   "int16",
+	TypeWord:    "uint16",
+	TypeDWord:   "uint32",
+	TypeLong:    "int64",
+	TypeFloat:   "float32",
+	TypeDouble:  "float64",
+}
+
 // ==================== 协议作用域（scope）组织 ====================
 
 // scopeTypeMap 可配置类型的唯一真源：TypeRegistry scope 前缀 → 通用/扩展类型映射。
@@ -144,6 +162,7 @@ var scopeTypeMap = map[string]map[string]string{
 	"cip":        cipTypes,
 	"fins":       finsTypes,
 	"mitsubishi": mcTypes,
+	"opcua":      opcuaTypes,
 }
 
 // scopeProtocols scope 前缀 → 该 scope 下的 config 协议名（driver.Register / iot_protocol.name）。
@@ -154,6 +173,7 @@ var scopeProtocols = map[string][]string{
 	"cip":        {"Omron.CIP"},
 	"fins":       {"Omron.FINS.UDP", "Omron.FINS.TCP", "Omron.FINS.Serial", "Omron.FINS.HostLinkTCP"},
 	"mitsubishi": {"Mitsubishi.MC.TCP", "Mitsubishi.MC.Serial"},
+	"opcua":      {"OPC.UA"},
 }
 
 // protocolScope config 协议名 → scope 前缀（由 scopeProtocols 派生）。

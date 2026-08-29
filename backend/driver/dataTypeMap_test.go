@@ -9,6 +9,7 @@ import (
 	_ "iot-gateway/driver/modbus"     // 注册 Modbus 类型
 	_ "iot-gateway/driver/omron/cip"  // 注册 CIP 类型
 	_ "iot-gateway/driver/omron/fins" // 注册 FINS 类型
+	_ "iot-gateway/driver/opcua"      // 注册 OPC UA 类型
 	_ "iot-gateway/driver/s7"         // 注册 S7 类型
 	"iot-gateway/model/po"
 )
@@ -26,6 +27,8 @@ func TestScopeOf(t *testing.T) {
 		{"Omron.FINS.HostLinkTCP", "fins"},
 		{"Mitsubishi.MC.TCP", "mitsubishi"},
 		{"mitsubishi.mc.serial", "mitsubishi"}, // 大小写不敏感
+		{"OPC.UA", "opcua"},
+		{"opc.ua", "opcua"}, // 大小写不敏感
 		{"nope", ""},
 		{"", ""},
 	}
@@ -49,8 +52,11 @@ func TestLookupScopeType(t *testing.T) {
 		{"s7", "BCD", "", false},   // S7 无 BCD 映射
 		{"cip", "Date", "", false}, // CIP 无 Date 映射
 		{"mitsubishi", "Float", "float32", true},
-		{"mitsubishi", "BCD", "bcd", true},   // 三菱 D 区常用 BCD
-		{"mitsubishi", "Date", "", false},    // MC 无 Date 映射
+		{"mitsubishi", "BCD", "bcd", true}, // 三菱 D 区常用 BCD
+		{"mitsubishi", "Date", "", false},  // MC 无 Date 映射
+		{"opcua", "Float", "float32", true},
+		{"opcua", "Long", "int64", true}, // OPC UA Int64（64 位有符号）
+		{"opcua", "BCD", "", false},      // OPC UA 无 BCD
 		{"nope", "Float", "", false},
 	}
 	for _, c := range cases {
@@ -75,6 +81,10 @@ func TestLookupDataType(t *testing.T) {
 		{"Mitsubishi.MC.TCP", "Short", "int16", true},
 		{"Mitsubishi.MC.Serial", "Double", "float64", true},
 		{"Mitsubishi.MC.TCP", "Date", "", false}, // MC 无 Date
+		{"OPC.UA", "Float", "float32", true},
+		{"OPC.UA", "Long", "int64", true},
+		{"OPC.UA", "Date", "datetime", true},
+		{"OPC.UA", "BCD", "", false}, // OPC UA 无 BCD
 		{"ModBus.TCP", "Nope", "", false},
 		{"nope", "Float", "", false},
 	}
@@ -120,6 +130,11 @@ func TestAvailableTypes(t *testing.T) {
 			wantExtended: nil, // MC 无 Date
 		},
 		{
+			scope:        "opcua",
+			wantCommon:   []string{"Boolean", "Date", "String", "Byte", "Char", "Short", "Word", "DWord", "Long", "Float", "Double"},
+			wantExtended: nil, // OPC UA 无 BCD/LBCD，也无扩展
+		},
+		{
 			scope:        "nope",
 			wantCommon:   nil,
 			wantExtended: nil,
@@ -149,6 +164,8 @@ func TestNormalizeAddressType(t *testing.T) {
 		{"漂移回退", "ModBus.TCP", "bogus", "Float", "float32"},
 		{"扩展类型漂移回退", "ModBus.TCP", "bogus", "Int", "int32"},
 		{"s7 漂移回退", "Siemens.S7", "bogus", "Long", "dint"},
+		{"opcua 有效内部名保留", "OPC.UA", "float32", "Float", "float32"},
+		{"opcua 漂移回退", "OPC.UA", "bogus", "Long", "int64"},
 		{"协议未知原样", "nope", "bogus", "Float", "bogus"},
 		{"两者都坏原样", "ModBus.TCP", "bogus", "", "bogus"},
 	}
