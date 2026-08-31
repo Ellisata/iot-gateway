@@ -8,11 +8,12 @@ import (
 	"gorm.io/gorm"
 
 	"iot-gateway/driver"
-	_ "iot-gateway/driver/mitsubishi" // 注册三菱 MC 驱动
-	_ "iot-gateway/driver/modbus"     // 注册 Modbus 驱动
-	_ "iot-gateway/driver/omron/cip"  // 注册欧姆龙 CIP 驱动
-	_ "iot-gateway/driver/omron/fins" // 注册欧姆龙 FINS 驱动
-	_ "iot-gateway/driver/s7"         // 注册 S7 驱动
+	_ "iot-gateway/driver/mitsubishi"   // 注册三菱 MC 驱动
+	_ "iot-gateway/driver/modbus"       // 注册 Modbus 驱动
+	_ "iot-gateway/driver/omron/cip"    // 注册欧姆龙 CIP 驱动
+	_ "iot-gateway/driver/omron/fins"   // 注册欧姆龙 FINS 驱动
+	_ "iot-gateway/driver/rockwell/cip" // 注册罗克韦尔 CIP 驱动
+	_ "iot-gateway/driver/s7"           // 注册 S7 驱动
 	"iot-gateway/logger"
 	"iot-gateway/model/po"
 	"iot-gateway/workerPool"

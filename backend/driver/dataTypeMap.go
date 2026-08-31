@@ -131,6 +131,20 @@ var mcTypes = map[string]string{
 	TypeLBCD:    "lbcd",
 }
 
+// rockwellTypes Rockwell Logix 通用数据类型 → 内部类型名。
+// Logix 数值类型原生有符号（SINT/INT/DINT/LINT），无 CIP 标准无符号类型码，
+// Byte/Word/DWord 不映射（位访问用 TagName.N 语法）；Date/BCD/LBCD 无 CIP
+// 原生类型，不映射（对齐 CIP）。
+var rockwellTypes = map[string]string{
+	TypeBoolean: "bool",
+	TypeString:  "string",
+	TypeChar:    "int8",   // SINT
+	TypeShort:   "int16",  // INT
+	TypeLong:    "int32",  // DINT
+	TypeFloat:   "float32", // REAL
+	TypeDouble:  "float64", // LREAL
+}
+
 // ==================== 协议作用域（scope）组织 ====================
 
 // scopeTypeMap 可配置类型的唯一真源：TypeRegistry scope 前缀 → 通用/扩展类型映射。
@@ -144,6 +158,7 @@ var scopeTypeMap = map[string]map[string]string{
 	"cip":        cipTypes,
 	"fins":       finsTypes,
 	"mitsubishi": mcTypes,
+	"rockwell":   rockwellTypes,
 }
 
 // scopeProtocols scope 前缀 → 该 scope 下的 config 协议名（driver.Register / iot_protocol.name）。
@@ -154,6 +169,7 @@ var scopeProtocols = map[string][]string{
 	"cip":        {"Omron.CIP"},
 	"fins":       {"Omron.FINS.UDP", "Omron.FINS.TCP", "Omron.FINS.Serial", "Omron.FINS.HostLinkTCP"},
 	"mitsubishi": {"Mitsubishi.MC.TCP", "Mitsubishi.MC.Serial"},
+	"rockwell":   {"Rockwell.CIP"},
 }
 
 // protocolScope config 协议名 → scope 前缀（由 scopeProtocols 派生）。

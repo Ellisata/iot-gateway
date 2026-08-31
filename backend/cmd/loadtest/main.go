@@ -41,7 +41,7 @@ log:
 `
 
 func main() {
-	protocol := flag.String("protocol", "modbus", "protocol: modbus | mc | fins | s7 | cip")
+	protocol := flag.String("protocol", "modbus", "protocol: modbus | mc | fins | s7 | cip | rockwell")
 	devices := flag.String("devices", "10,50,100", "comma-separated device counts")
 	points := flag.String("points", "500,2000,5000", "comma-separated points per device")
 	scan := flag.Int("scan", 1000, "scan frequency in ms")
@@ -50,6 +50,7 @@ func main() {
 	servers := flag.Int("servers", 4, "fake PLC server count")
 	sparse := flag.Bool("sparse", false, "sparse address layout (breaks range merging)")
 	cipBatch := flag.Int("cip-batch", 0, "CIP 0x0A multi-service read: tags per request (>1 enables batching)")
+	latency := flag.Int("latency", 0, "artificial per-transaction latency in ms (CIP fake servers only)")
 	workers := flag.Int("workers", 0, "worker pool concurrency (0 = NumCPU*2)")
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file for the largest case")
 	memprofile := flag.String("memprofile", "", "write heap profile to file for the largest case")
@@ -83,14 +84,26 @@ func main() {
 		os.Exit(2)
 	}
 
-	// 启动假 PLC 服务器池
+	// 启动假 PLC 服务器池。-latency>0 时 CIP 系假服务器（cip/rockwell）换用
+	// 带延迟构造，模拟真实 RTT；其它协议不支持该选项，配置了直接报错退出。
 	srvCount := *servers
 	if srvCount < 1 {
 		srvCount = 1
 	}
+	latencyDur := time.Duration(*latency) * time.Millisecond
+	if *latency < 0 || (*latency > 0 && pa.newServerWithLatency == nil) {
+		fmt.Fprintf(os.Stderr, "-latency is not supported for protocol %q\n", *protocol)
+		os.Exit(2)
+	}
 	srvs := make([]*fake.Server, 0, srvCount)
 	for i := 0; i < srvCount; i++ {
-		s, err := pa.newServer()
+		var s *fake.Server
+		var err error
+		if latencyDur > 0 {
+			s, err = pa.newServerWithLatency(latencyDur)
+		} else {
+			s, err = pa.newServer()
+		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "start fake server: %v\n", err)
 			os.Exit(2)
@@ -124,6 +137,9 @@ func main() {
 	}
 	if *workers > 0 {
 		layout = fmt.Sprintf("%s+workers-%d", layout, *workers)
+	}
+	if latencyDur > 0 {
+		layout = fmt.Sprintf("%s+latency-%dms", layout, *latency)
 	}
 	fmt.Printf("protocol=%s scan=%dms layout=%s devices=%v points=%v servers=%d workers=%d queue=1024\n",
 		pa.name, *scan, layout, devList, ptList, srvCount, runtime.NumCPU()*2)

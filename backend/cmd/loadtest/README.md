@@ -14,13 +14,14 @@ go run ./cmd/loadtest -protocol modbus -devices 10,50,100 -points 500,2000,5000
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `-protocol` | `modbus` | `modbus` / `mc` / `fins` / `s7` / `cip` |
+| `-protocol` | `modbus` | `modbus` / `mc` / `fins` / `s7` / `cip` / `rockwell` |
 | `-devices` | `10,50,100` | 设备数矩阵（逗号分隔） |
 | `-points` | `500,2000,5000` | 单设备点位矩阵 |
 | `-scan` | `1000` | 采集频率（毫秒），收紧到 200/100 探测饱和点 |
 | `-run` / `-warmup` | `5` / `2` | 测量窗口 / 预热秒数 |
 | `-servers` | `4` | 假 PLC 服务器池大小（设备轮询分配） |
 | `-sparse` | `false` | 稀疏地址布局（间隙 > 合并窗口，**1 帧/点**，帧数最坏情况） |
+| `-latency` | `0` | 每事务注入固定延迟毫秒（模拟真实 RTT，仅 CIP 系：`cip` / `rockwell`） |
 | `-cpuprofile` / `-memprofile` | - | 覆盖最大组合的 pprof 画像 |
 
 ## 指标含义
@@ -43,7 +44,8 @@ testutil/fake/           假 PLC 服务器（真实 TCP 监听，逐帧解析请
   mc3e.go                MC 3E（SLMP）帧批量读（字单位 / 位单位）
   fins.go                FINS/TCP（连接握手 + 内存区读 0x0101）
   s7.go                  S7（ISO CR/CC + PDU 协商 + 读变量，与 gos7 逐字节对齐）
-  cip.go                 EtherNet/IP（Register Session + SendRRData + 0x4C Data Table Read）
+  cip.go                 EtherNet/IP（Register Session + SendRRData + 0x4C 读；
+                         欧姆龙方言 NewCIP / AB 方言 NewCIPAB / 带 RTT 的 *WithLatency）
   integration_test.go    真实驱动连假服务器互操作测试（防帧格式漂移）
 cmd/loadtest/
   harness.go             造数 seeder（真实迁移建库）+ 计数 sink + 测量采样器 + 协议适配器
@@ -133,6 +135,41 @@ scan=1000ms 全矩阵 **0% 掉点**（最高 100×5000 ≈ 50 万记录/秒）�
 OmronCipNet 简洁格式为参照（`0x0A | 服务数 | 拼接的 0x4C 请求`），**上线前必须在目标
 NJ/NX 上验证**；若与真机不符，仅需调整 `driver/omron/cip/frame.go` 的
 `buildMultipleDataTableRead` / `parseMultipleDataTableRead` 两处。
+
+### Rockwell.CIP（Logix 标签寻址；数组标签 ≤125 元素/帧合并，独立标签逐点串行往返）
+
+驱动按标签名分组读：`Arr[N]` 形态的同基数组点位按下标排序切成 ≤125 元素的
+Read Tag Elements 分块（`maxTagElements`，PDU 508 字节上限）合并读；
+`Tag_x` 独立标签每点 1 次 0x4C 串行往返（客户端适配器互斥锁，无 0x0A 多服务）。
+
+**连续布局（Arr[i]，数组合并最好情况，scan=1000ms）**：全矩阵 **0% 掉点**，
+50 设备 × 5000 点（25 万点，≈40 帧/设备/周期）实际 29.3 万记录/秒，与 Modbus 基线同级。
+
+| 设备 | 点/台 | 布局 | 预期记录/秒 | 实际记录/秒 | drop% |
+|---|---|---|---|---|---|
+| 50 | 5000 | 连续 | 250k | 293k | 0.0 |
+| 10 | 5000 | 连续+RTT 1ms | 50k | 60k | 0.0（40 帧×1.4ms≈56ms/周期，余量充足） |
+| 50 | 5000 | 连续+RTT 1ms | 250k | 300k | 0.0 |
+
+**稀疏布局（Tag_i 独立标签，1 帧/点，串行往返最坏情况，scan=1000ms）**：
+零 RTT 时 50×5000 掉 35%（每周期 5000 次串行往返 ≈ 2s，超过 1s 采集频率即跳轮）；
+RTT 1ms 时单设备 1000 点即开始掉点（周期 ≈ 1.2s）。
+
+| 设备 | 点/台 | 布局 | 预期记录/秒 | 实际记录/秒 | drop% |
+|---|---|---|---|---|---|
+| 50 | 2000 | 稀疏 | 100k | 120k | 0.0（边界） |
+| 50 | 5000 | 稀疏 | 250k | 162k | **35.2**（周期 2s） |
+| 1 | 1000 | 稀疏+RTT 1ms | 1k | 0.6k | **40.0**（周期 2s） |
+| 10 | 2000 | 稀疏+RTT 1ms | 20k | 8k | **60.0** |
+
+**边界结论**：
+- 数组规整布局（推荐）：点位容量与 Modbus 同级（本机 25 万点 @1s 零掉点），
+  帧数 = ceil(同基数组点数/125) 之和；
+- 独立标签布局：单设备容量 ≈ 采集频率 / 单次往返时延（1s 周期、1ms RTT 下
+  约 800 点/台封顶），多设备受 worker 池与 CPU 共同约束。生产配置应尽量把
+  连续采集点规划为 `Base[N..N+k]` 数组标签；
+- 修复记录：>125 点的数组组此前整组放弃合并退化为逐点读（5000 点 = 5000 往返），
+  已改为按下标排序分块合并（5000 点 = 40 帧），修复前 50×5000 连续布局掉点 35.2%。
 
 ## 已知观察（供后续优化）
 

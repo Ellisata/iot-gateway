@@ -5,11 +5,12 @@ import (
 	"testing"
 
 	"iot-gateway/driver"
-	_ "iot-gateway/driver/mitsubishi" // 注册 MC 驱动
-	_ "iot-gateway/driver/modbus"     // 注册 Modbus 驱动
-	_ "iot-gateway/driver/omron/cip"  // 注册 CIP 驱动
-	_ "iot-gateway/driver/omron/fins" // 注册 FINS 驱动
-	_ "iot-gateway/driver/s7"         // 注册 S7 驱动
+	_ "iot-gateway/driver/mitsubishi"   // 注册 MC 驱动
+	_ "iot-gateway/driver/modbus"       // 注册 Modbus 驱动
+	_ "iot-gateway/driver/omron/cip"    // 注册 CIP 驱动
+	_ "iot-gateway/driver/omron/fins"   // 注册 FINS 驱动
+	_ "iot-gateway/driver/rockwell/cip" // 注册 Rockwell CIP 驱动
+	_ "iot-gateway/driver/s7"           // 注册 S7 驱动
 	"iot-gateway/model/po"
 )
 
@@ -186,6 +187,53 @@ func TestCIPDriverBatchAgainstFake(t *testing.T) {
 			DataType: "int16",
 		})
 	}
+	results, err := d.Read(addrs)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(results) != len(addrs) {
+		t.Fatalf("got %d results, want %d", len(results), len(addrs))
+	}
+	for _, r := range results {
+		if r.Quality != 192 {
+			t.Errorf("address %s quality=%d, want 192", r.DeviceAddressID, r.Quality)
+		}
+	}
+}
+
+// TestRockwellDriverAgainstFake 用真实 Rockwell CIP 驱动连 AB 假服务器读取，
+// 覆盖两条读路径：独立标签逐个 0x4C 单读 + base[N] 数组区间合并 Read Tag Elements
+//（请求带 ElementCount，验证假服务器按元素数回数据与驱动切片解码一致）。
+func TestRockwellDriverAgainstFake(t *testing.T) {
+	srv, err := NewCIPAB()
+	if err != nil {
+		t.Fatalf("new fake cip: %v", err)
+	}
+	defer srv.Close()
+
+	d, err := driver.Create("Rockwell.CIP")
+	if err != nil {
+		t.Fatalf("create rockwell driver: %v", err)
+	}
+	if err := d.Connect(fmt.Sprintf(`{"host":"127.0.0.1","port":%d}`, srv.Port())); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer d.Close()
+
+	// Arr[0..7] 同基数组合并成 1 次 Read Tag Elements（8 元素）；
+	// Tag_9/Tag_10 独立标签走单读
+	addrs := make([]po.DeviceAddress, 0, 10)
+	for i := 0; i < 8; i++ {
+		addrs = append(addrs, po.DeviceAddress{
+			ID:       fmt.Sprintf("a%d", i),
+			Name:     fmt.Sprintf("Arr[%d]", i),
+			DataType: "int16",
+		})
+	}
+	addrs = append(addrs,
+		po.DeviceAddress{ID: "t9", Name: "Tag_9", DataType: "int16"},
+		po.DeviceAddress{ID: "t10", Name: "Tag_10", DataType: "int16"},
+	)
 	results, err := d.Read(addrs)
 	if err != nil {
 		t.Fatalf("read: %v", err)
