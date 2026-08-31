@@ -14,14 +14,15 @@ go run ./cmd/loadtest -protocol modbus -devices 10,50,100 -points 500,2000,5000
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `-protocol` | `modbus` | `modbus` / `mc` / `fins` / `s7` / `cip` / `rockwell` |
+| `-protocol` | `modbus` | `modbus` / `mc` / `fins` / `s7` / `cip` / `rockwell` / `opcua` |
 | `-devices` | `10,50,100` | 设备数矩阵（逗号分隔） |
 | `-points` | `500,2000,5000` | 单设备点位矩阵 |
 | `-scan` | `1000` | 采集频率（毫秒），收紧到 200/100 探测饱和点 |
 | `-run` / `-warmup` | `5` / `2` | 测量窗口 / 预热秒数 |
 | `-servers` | `4` | 假 PLC 服务器池大小（设备轮询分配） |
 | `-sparse` | `false` | 稀疏地址布局（间隙 > 合并窗口，**1 帧/点**，帧数最坏情况） |
-| `-latency` | `0` | 每事务注入固定延迟毫秒（模拟真实 RTT，仅 CIP 系：`cip` / `rockwell`） |
+| `-latency` | `0` | 每事务注入固定延迟毫秒（模拟真实 RTT，仅 CIP 系与 `opcua`） |
+| `-opcua-batch` | `0` | OPC UA maxBatch（单 ReadRequest 节点数，0 = 驱动默认 100） |
 | `-cpuprofile` / `-memprofile` | - | 覆盖最大组合的 pprof 画像 |
 
 ## 指标含义
@@ -46,6 +47,8 @@ testutil/fake/           假 PLC 服务器（真实 TCP 监听，逐帧解析请
   s7.go                  S7（ISO CR/CC + PDU 协商 + 读变量，与 gos7 逐字节对齐）
   cip.go                 EtherNet/IP（Register Session + SendRRData + 0x4C 读；
                          欧姆龙方言 NewCIP / AB 方言 NewCIPAB / 带 RTT 的 *WithLatency）
+  opcua.go               OPC UA（复用 gopcua 进程内 server 包 + Read 覆盖处理器注值；
+                         地址空间 ns=1;i=≥1001 全公式化，带 RTT 的 NewOpcUaWithLatency）
   integration_test.go    真实驱动连假服务器互操作测试（防帧格式漂移）
 cmd/loadtest/
   harness.go             造数 seeder（真实迁移建库）+ 计数 sink + 测量采样器 + 协议适配器
@@ -171,8 +174,37 @@ RTT 1ms 时单设备 1000 点即开始掉点（周期 ≈ 1.2s）。
 - 修复记录：>125 点的数组组此前整组放弃合并退化为逐点读（5000 点 = 5000 往返），
   已改为按下标排序分块合并（5000 点 = 40 帧），修复前 50×5000 连续布局掉点 35.2%。
 
-## 已知观察（供后续优化）
+### OPC.UA（maxBatch 批量 Read，默认 100 节点/帧；直接 NodeID 寻址）
 
+驱动把地址解析为 NodeID（本地无 I/O）后按 `maxBatch` 分批 ReadRequest，
+帧数 = ceil(N/maxBatch)，与点位布局无关（数值 NodeID 无区间合并概念）。
+假服务器复用 gopcua 进程内 server 包（与 driver/opcua 集成测试同方案），
+Read 覆盖处理器按 NodeID 公式返值（详细结论见 specs/capacity-testing.md）。
+
+**连续布局（`ns=1;i=<n>`，scan=1000ms）**：全矩阵 **0% 掉点**（最高 100×5000
+= 50 万点，实际 56 万记录/秒），与 Modbus 基线同级。
+
+| 设备 | 点/台 | 布局 | 预期记录/秒 | 实际记录/秒 | drop% |
+|---|---|---|---|---|---|
+| 50 | 5000 | 连续 | 250k | 281k | 0.0 |
+| 100 | 5000 | 连续 | 500k | 562k | 0.0 |
+| 50 | 5000 | 连续 + RTT 1ms | 250k | 269k | 0.0 |
+| 10 | 5000 | 连续 + RTT 5ms | 50k | 56k | 0.0（边界，100 帧 × 10ms ≈ 1s） |
+| 50 | 5000 | 连续 + RTT 5ms | 250k | 97k | **61.1**（帧数 × RTT 超采集频率） |
+| 50 | 5000 | 500ms | 500k | 531k | 0.0 |
+| 100 | 2000 | 200ms | 100万 | 968k | 3.2（边界） |
+| 50 | 5000 | 200ms | 125万 | 944k | **24.5** |
+| 50 | 5000 | 200ms + maxBatch 500 | 125万 | 1237k | 1.0 |
+| 100 | 5000 | 200ms + maxBatch 500 | 250万 | 1217k | **51.3**（CPU 上限） |
+
+**边界结论**：
+- 点位容量公式 `ceil(N/maxBatch) × 2×RTT < 采集频率`；RTT 1ms 时 50×5000 零掉点，
+  RTT 5ms 时 100 帧/周期即到边界——RTT 敏感度显著高于 Modbus 系（125 点/帧）。
+- `maxBatch` 调大（≤1000）是本协议唯一的帧数杠杆，50×5000@200ms 从 24.5% 降到 1.0%。
+- 浏览路径地址（`Device/Tag` 形式）首轮需 Translate 往返且重连失效，压测未覆盖，
+  生产建议直接 NodeID 寻址。
+
+### 优化方向
 1. **帧数决定点位容量**：Modbus 125 寄存器/帧、MC 960 字/帧、FINS 100 字/帧、
    S7 462 字节/PDU、CIP 默认 1 点/往返。同点数下帧数差 1~2 个数量级，容量随帧数线性走。
    CIP 开 `maxTagsPerRequest` 批量后帧数降到 batch 点/往返，回到通用档位（本仓库实测

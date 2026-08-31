@@ -115,6 +115,26 @@ var adapters = map[string]protocolAdapter{
 		maxSparse:  0,
 		dataType:   "int16",
 	},
+	"opcua": {
+		name:                 "OPC.UA",
+		newServer:            fake.NewOpcUa,
+		newServerWithLatency: fake.NewOpcUaWithLatency,
+		deviceJSON: func(port int, opts Options) string {
+			// -opcua-batch N>1 时注入 maxBatch（单 ReadRequest 节点数，驱动默认 100）
+			if opts.OpcUaBatch > 0 {
+				return fmt.Sprintf(`{"host":"127.0.0.1","port":%d,"maxBatch":%d}`, port, opts.OpcUaBatch)
+			}
+			return fmt.Sprintf(`{"host":"127.0.0.1","port":%d}`, port)
+		},
+		// 连续布局：ns=1;i=<n> 数值 NodeID 直接解析（无 I/O），驱动按 maxBatch
+		// 分批 Read（默认 100 节点/帧）。「连续」与「稀疏」对 OPC UA 均为
+		// 100 节点/帧的批量读，区别仅在帧内 NodeID 是否连续（对服务器寻址
+		// 效率有影响，对网关侧帧数无影响），故 sparse 复用同一地址公式。
+		addrName:   func(i int) string { return fmt.Sprintf("ns=1;i=%d", i+1001) },
+		sparseName: func(i int) string { return fmt.Sprintf("ns=1;i=%d", i+1001) },
+		maxSparse:  0,
+		dataType:   "int32",
+	},
 }
 
 // countingSink 实现 collector.RecordSink，只计数不阻塞，量化采集引擎实际产出的记录量。
@@ -149,15 +169,16 @@ func (s *countingSink) counts() (total, good int64) {
 
 // Options 压测参数。
 type Options struct {
-	Protocol string // 驱动注册名（仅用于展示）
-	Devices  []int  // 设备数矩阵
-	Points   []int  // 单设备点位矩阵
-	ScanMs   int    // 采集频率（毫秒）
-	RunSec   time.Duration
-	Warmup   time.Duration
-	Sparse   bool
-	CIPBatch int // CIP 0x0A 多服务批量读：每个报文携带标签数（>1 启用，0/1=单读）
-	Workers  int // worker 池并发数（0=默认 NumCPU*2）
+	Protocol   string // 驱动注册名（仅用于展示）
+	Devices    []int  // 设备数矩阵
+	Points     []int  // 单设备点位矩阵
+	ScanMs     int    // 采集频率（毫秒）
+	RunSec     time.Duration
+	Warmup     time.Duration
+	Sparse     bool
+	CIPBatch   int // CIP 0x0A 多服务批量读：每个报文携带标签数（>1 启用，0/1=单读）
+	OpcUaBatch int // OPC UA 单 ReadRequest 节点数（0=驱动默认 100）
+	Workers    int // worker 池并发数（0=默认 NumCPU*2）
 }
 
 // seedDB 用真实迁移建库并造数：1 个协议 + devices 台设备 + devices×points 个点位。

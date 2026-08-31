@@ -17,10 +17,21 @@ type Server struct {
 	ln      net.Listener
 	handler func(net.Conn)
 
+	// externalAddr/externalClose 非标准 TCP 骨架协议（如 OPC UA 复用
+	// gopcua 进程内服务器自带监听）时的端口与关闭入口；设置后
+	// Port/Addr/Close 走外部路径，conn 跟踪不生效（由外部服务器自理）。
+	externalAddr  net.Addr
+	externalClose func()
+
 	mu    sync.Mutex
 	conns map[net.Conn]struct{}
 	done  chan struct{}
 	once  sync.Once
+}
+
+// newManagedServer 构造一个由外部机制监听/关闭的 Server（无 conn 跟踪）。
+func newManagedServer(addr net.Addr, closeFn func()) *Server {
+	return &Server{externalAddr: addr, externalClose: closeFn, conns: map[net.Conn]struct{}{}, done: make(chan struct{})}
 }
 
 // newServer 创建监听 127.0.0.1 随机端口的 TCP 服务器。
@@ -62,14 +73,30 @@ func (s *Server) acceptLoop() {
 }
 
 // Addr 返回 "127.0.0.1:port"。
-func (s *Server) Addr() string { return s.ln.Addr().String() }
+func (s *Server) Addr() string {
+	if s.externalAddr != nil {
+		return s.externalAddr.String()
+	}
+	return s.ln.Addr().String()
+}
 
 // Port 返回监听端口。
-func (s *Server) Port() int { return s.ln.Addr().(*net.TCPAddr).Port }
+func (s *Server) Port() int {
+	if s.externalAddr != nil {
+		if tcp, ok := s.externalAddr.(*net.TCPAddr); ok {
+			return tcp.Port
+		}
+	}
+	return s.ln.Addr().(*net.TCPAddr).Port
+}
 
 // Close 关闭监听器并关闭所有活动连接。
 func (s *Server) Close() {
 	s.once.Do(func() {
+		if s.externalClose != nil {
+			s.externalClose()
+			return
+		}
 		close(s.done)
 		s.ln.Close()
 		s.mu.Lock()

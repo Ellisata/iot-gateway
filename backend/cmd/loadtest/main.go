@@ -8,7 +8,7 @@
 //
 //	go run ./cmd/loadtest -protocol modbus -devices 10,50,100 -points 500,2000,5000
 //
-// 支持协议：modbus / mc / fins / s7 / cip（各协议假服务器见 testutil/fake）。
+// 支持协议：modbus / mc / fins / s7 / cip / opcua（各协议假服务器见 testutil/fake）。
 // 常用选项：
 //
 //	-sparse    稀疏地址布局（地址间隙超过合并窗口，每个点位一个请求帧，探测帧数最坏情况）
@@ -41,7 +41,7 @@ log:
 `
 
 func main() {
-	protocol := flag.String("protocol", "modbus", "protocol: modbus | mc | fins | s7 | cip | rockwell")
+	protocol := flag.String("protocol", "modbus", "protocol: modbus | mc | fins | s7 | cip | rockwell | opcua")
 	devices := flag.String("devices", "10,50,100", "comma-separated device counts")
 	points := flag.String("points", "500,2000,5000", "comma-separated points per device")
 	scan := flag.Int("scan", 1000, "scan frequency in ms")
@@ -50,7 +50,8 @@ func main() {
 	servers := flag.Int("servers", 4, "fake PLC server count")
 	sparse := flag.Bool("sparse", false, "sparse address layout (breaks range merging)")
 	cipBatch := flag.Int("cip-batch", 0, "CIP 0x0A multi-service read: tags per request (>1 enables batching)")
-	latency := flag.Int("latency", 0, "artificial per-transaction latency in ms (CIP fake servers only)")
+	opcuaBatch := flag.Int("opcua-batch", 0, "OPC UA maxBatch: nodes per ReadRequest (0 = driver default 100)")
+	latency := flag.Int("latency", 0, "artificial per-transaction latency in ms (CIP / OPC UA fake servers only)")
 	workers := flag.Int("workers", 0, "worker pool concurrency (0 = NumCPU*2)")
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file for the largest case")
 	memprofile := flag.String("memprofile", "", "write heap profile to file for the largest case")
@@ -84,7 +85,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	// 启动假 PLC 服务器池。-latency>0 时 CIP 系假服务器（cip/rockwell）换用
+	// 启动假 PLC 服务器池。-latency>0 时 CIP 系与 OPC UA 假服务器换用
 	// 带延迟构造，模拟真实 RTT；其它协议不支持该选项，配置了直接报错退出。
 	srvCount := *servers
 	if srvCount < 1 {
@@ -117,15 +118,16 @@ func main() {
 	}()
 
 	opts := Options{
-		Protocol: pa.name,
-		Devices:  devList,
-		Points:   ptList,
-		ScanMs:   *scan,
-		RunSec:   time.Duration(*run * float64(time.Second)),
-		Warmup:   time.Duration(*warmup * float64(time.Second)),
-		Sparse:   *sparse,
-		CIPBatch: *cipBatch,
-		Workers:  *workers,
+		Protocol:   pa.name,
+		Devices:    devList,
+		Points:     ptList,
+		ScanMs:     *scan,
+		RunSec:     time.Duration(*run * float64(time.Second)),
+		Warmup:     time.Duration(*warmup * float64(time.Second)),
+		Sparse:     *sparse,
+		CIPBatch:   *cipBatch,
+		OpcUaBatch: *opcuaBatch,
+		Workers:    *workers,
 	}
 
 	layout := "contiguous"
@@ -134,6 +136,9 @@ func main() {
 	}
 	if *cipBatch > 1 {
 		layout = fmt.Sprintf("%s+cip-batch-%d", layout, *cipBatch)
+	}
+	if *opcuaBatch > 0 && *opcuaBatch != 100 {
+		layout = fmt.Sprintf("%s+maxBatch-%d", layout, *opcuaBatch)
 	}
 	if *workers > 0 {
 		layout = fmt.Sprintf("%s+workers-%d", layout, *workers)
