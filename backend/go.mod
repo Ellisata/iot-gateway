@@ -13,6 +13,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/google/wire v0.7.0
 	github.com/gopcua/opcua v0.9.1
+	github.com/iceisfun/goindustrial v0.3.0
 	github.com/robinson/gos7 v0.0.0-20260622162611-2d6806f80c8b
 	github.com/spf13/viper v1.19.0
 	github.com/taosdata/driver-go/v3 v3.8.2

@@ -131,6 +131,20 @@ var mcTypes = map[string]string{
 	TypeLBCD:    "lbcd",
 }
 
+// rockwellTypes Rockwell Logix 通用数据类型 → 内部类型名。
+// Logix 数值类型原生有符号（SINT/INT/DINT/LINT），无 CIP 标准无符号类型码，
+// Byte/Word/DWord 不映射（位访问用 TagName.N 语法）；Date/BCD/LBCD 无 CIP
+// 原生类型，不映射（对齐 CIP）。
+var rockwellTypes = map[string]string{
+	TypeBoolean: "bool",
+	TypeString:  "string",
+	TypeChar:    "int8",    // SINT
+	TypeShort:   "int16",   // INT
+	TypeLong:    "int32",   // DINT
+	TypeFloat:   "float32", // REAL
+	TypeDouble:  "float64", // LREAL
+}
+
 // opcuaTypes OPC UA 通用数据类型 → 内部类型名。
 // OPC UA 为节点寻址，无位/寄存器概念，仅声明值的类别；解码由服务器返回的
 // 原生值决定（驱动按实际值类型推断 Kind，配置类型仅作默认展示）。
@@ -162,6 +176,7 @@ var scopeTypeMap = map[string]map[string]string{
 	"cip":        cipTypes,
 	"fins":       finsTypes,
 	"mitsubishi": mcTypes,
+	"rockwell":   rockwellTypes,
 	"opcua":      opcuaTypes,
 }
 
@@ -173,6 +188,7 @@ var scopeProtocols = map[string][]string{
 	"cip":        {"Omron.CIP"},
 	"fins":       {"Omron.FINS.UDP", "Omron.FINS.TCP", "Omron.FINS.Serial", "Omron.FINS.HostLinkTCP"},
 	"mitsubishi": {"Mitsubishi.MC.TCP", "Mitsubishi.MC.Serial"},
+	"rockwell":   {"Rockwell.CIP"},
 	"opcua":      {"OPC.UA"},
 }
 

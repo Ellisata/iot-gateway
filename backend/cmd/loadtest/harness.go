@@ -23,14 +23,16 @@ import (
 // 假服务器工厂 + 设备连接配置生成 + 点位地址名生成 + 数据类型。
 // 采集引擎通过 iot_protocol.name（驱动注册名）匹配驱动，name 必须与 driver.Register 完全一致。
 type protocolAdapter struct {
-	name         string                            // iot_protocol.name（驱动注册名）
-	newServer    func() (*fake.Server, error)
-	deviceJSON   func(port int, opts Options) string // 生成指向某假服务器端口的 protocol_json
-	addrName     func(i int) string                  // 连续布局：第 i 个点位的地址名
-	sparseName   func(i int) string                  // 稀疏布局：第 i 个点位的地址名（间隙 > 合并窗口）
-	sparseStride int                                 // 稀疏步长（地址间隙，用于地址空间上限估算）
-	maxSparse    int                                 // 稀疏布局点数上限（地址空间限制，0=不限制）
-	dataType     string                              // 点位数据类型（驱动内部类型名）
+	name      string // iot_protocol.name（驱动注册名）
+	newServer func() (*fake.Server, error)
+	// newServerWithLatency 带 RTT 模拟的假服务器工厂（可选，nil = 该协议不支持 -latency）
+	newServerWithLatency func(time.Duration) (*fake.Server, error)
+	deviceJSON           func(port int, opts Options) string // 生成指向某假服务器端口的 protocol_json
+	addrName             func(i int) string                  // 连续布局：第 i 个点位的地址名
+	sparseName           func(i int) string                  // 稀疏布局：第 i 个点位的地址名（间隙 > 合并窗口）
+	sparseStride         int                                 // 稀疏步长（地址间隙，用于地址空间上限估算）
+	maxSparse            int                                 // 稀疏布局点数上限（地址空间限制，0=不限制）
+	dataType             string                              // 点位数据类型（驱动内部类型名）
 }
 
 var adapters = map[string]protocolAdapter{
@@ -39,7 +41,7 @@ var adapters = map[string]protocolAdapter{
 		newServer:  fake.NewModbusTCP,
 		deviceJSON: func(port int, opts Options) string { return fmt.Sprintf(`{"host":"127.0.0.1","port":%d}`, port) },
 		// 传统 Modicon 保持寄存器：4%05d → FC3, 0-based addr = i（连续可合并）
-		addrName:   func(i int) string { return fmt.Sprintf("4%05d", i+1) },
+		addrName: func(i int) string { return fmt.Sprintf("4%05d", i+1) },
 		// 稀疏：步长 126 > 合并窗口 125，每个点位自成单点区间（1 帧/点）
 		sparseName: func(i int) string { return fmt.Sprintf("4%05d", i*126+1) },
 		maxSparse:  520, // 寄存器地址空间 65535 / 126
@@ -50,41 +52,42 @@ var adapters = map[string]protocolAdapter{
 		newServer:  fake.NewMC3E,
 		deviceJSON: func(port int, opts Options) string { return fmt.Sprintf(`{"host":"127.0.0.1","port":%d}`, port) },
 		// 字设备 D：连续（默认 maxReadWords=100，逐 100 字一帧）
-		addrName:   func(i int) string { return fmt.Sprintf("D%d", i) },
+		addrName: func(i int) string { return fmt.Sprintf("D%d", i) },
 		// 稀疏：步长 10 > 默认 maxGap=8，每个点位自成单点区间（1 帧/点）
 		sparseName: func(i int) string { return fmt.Sprintf("D%d", i*10) },
 		maxSparse:  0, // D 设备地址空间 0xFFFFFF，现实点数远达不到上限
 		dataType:   "int16",
 	},
 	"fins": {
-		name:       "Omron.FINS.TCP",
-		newServer:  fake.NewFINSTCP,
+		name:      "Omron.FINS.TCP",
+		newServer: fake.NewFINSTCP,
 		deviceJSON: func(port int, opts Options) string {
 			return fmt.Sprintf(`{"host":"127.0.0.1","port":%d,"transport":"TCP"}`, port)
 		},
 		// 字设备 D（DM 区）：连续（默认 maxReadWords=100，逐 100 字一帧）
-		addrName:   func(i int) string { return fmt.Sprintf("D%d", i) },
+		addrName: func(i int) string { return fmt.Sprintf("D%d", i) },
 		// 稀疏：步长 101 > 合并窗口 100，每个点位自成单点区间
 		sparseName: func(i int) string { return fmt.Sprintf("D%d", i*101) },
 		maxSparse:  0, // D 字地址 0xFFFF，现实点数远达不到上限
 		dataType:   "int16",
 	},
 	"s7": {
-		name:       "Siemens.S7",
-		newServer:  fake.NewS7,
+		name:      "Siemens.S7",
+		newServer: fake.NewS7,
 		deviceJSON: func(port int, opts Options) string {
 			return fmt.Sprintf(`{"host":"127.0.0.1","port":%d,"rack":"0","slot":"1"}`, port)
 		},
 		// DB1 字节区：连续（gos7 按 PDU 480 分块，每块 ≤462 字节）
-		addrName:   func(i int) string { return fmt.Sprintf("DB1.DBB%d", i) },
+		addrName: func(i int) string { return fmt.Sprintf("DB1.DBB%d", i) },
 		// 稀疏：步长 10 > 默认 maxGap=8，每个点位自成单点区间
 		sparseName: func(i int) string { return fmt.Sprintf("DB1.DBB%d", i*10) },
 		maxSparse:  0, // DB 字节地址 24 位，现实点数远达不到上限
 		dataType:   "byte",
 	},
 	"cip": {
-		name:      "Omron.CIP",
-		newServer: fake.NewCIP,
+		name:                 "Omron.CIP",
+		newServer:            fake.NewCIP,
+		newServerWithLatency: fake.NewCIPWithLatency,
 		deviceJSON: func(port int, opts Options) string {
 			// CIP 批量读：-cip-batch N>1 时注入 maxTagsPerRequest（0x0A 多服务报文）
 			if opts.CIPBatch > 1 {
@@ -94,6 +97,20 @@ var adapters = map[string]protocolAdapter{
 		},
 		// 每点一个独立标签（0x4C 读服务按标签名读，无区间合并概念），连续=稀疏
 		addrName:   func(i int) string { return fmt.Sprintf("Tag_%d", i) },
+		sparseName: func(i int) string { return fmt.Sprintf("Tag_%d", i) },
+		maxSparse:  0,
+		dataType:   "int16",
+	},
+	"rockwell": {
+		name:                 "Rockwell.CIP",
+		newServer:            fake.NewCIPAB,
+		newServerWithLatency: fake.NewCIPABWithLatency,
+		deviceJSON: func(port int, opts Options) string {
+			return fmt.Sprintf(`{"host":"127.0.0.1","port":%d}`, port)
+		},
+		// 连续布局：同一基数组的下标点位，驱动合并为 ≤125 元素/帧的 Read Tag Elements
+		addrName: func(i int) string { return fmt.Sprintf("Arr[%d]", i) },
+		// 稀疏布局：独立标签，每点 1 次 0x4C 串行事务（最坏情况）
 		sparseName: func(i int) string { return fmt.Sprintf("Tag_%d", i) },
 		maxSparse:  0,
 		dataType:   "int16",
@@ -264,12 +281,12 @@ func runCase(pa protocolAdapter, opts Options, servers []*fake.Server, devices, 
 	// 测量窗口：清空预热计数，采样器记录堆/协程/错误/设备轮询周期
 	sink.reset()
 	var (
-		mu              sync.Mutex
-		peakHeap        uint64
-		peakGoroutine   uint64
-		errCount        int
-		cycSum, cycN    float64
-		lastSuccess     time.Time
+		mu            sync.Mutex
+		peakHeap      uint64
+		peakGoroutine uint64
+		errCount      int
+		cycSum, cycN  float64
+		lastSuccess   time.Time
 	)
 	stop := make(chan struct{})
 	go func() {
