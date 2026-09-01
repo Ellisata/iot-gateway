@@ -1,7 +1,7 @@
 <template>
   <el-select
     :model-value="modelValue"
-    :placeholder="placeholder"
+    :placeholder="resolvedPlaceholder"
     :disabled="disabled"
     style="width: 280px"
     @update:model-value="handleChange"
@@ -16,16 +16,19 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 defineOptions({ name: 'ChannelSelector' })
 
-defineProps({
+const props = defineProps({
   modelValue: {
     type: String,
     default: '',
   },
   placeholder: {
     type: String,
-    default: '请选择通道',
+    default: '',
   },
   disabled: {
     type: Boolean,
@@ -33,7 +36,12 @@ defineProps({
   },
 })
 
+const { t } = useI18n()
+
 const emit = defineEmits(['update:modelValue', 'select'])
+
+// 未传入 placeholder 时使用当前语言的默认文案
+const resolvedPlaceholder = computed(() => props.placeholder || t('selector.selectChannel'))
 
 // 可选通道（固定协议）
 const channelOptions = ['mqtt', 'tdengine-v3', 'influxdb-v3']

@@ -7,7 +7,7 @@
       class="collect-card mb-4 cursor-pointer"
       shadow="never"
       v-loading="loading"
-      element-loading-text="统计加载中..."
+      :element-loading-text="t('dashboard.deviceStatusLoading')"
       @click="goDeviceList"
     >
       <template #header>
@@ -37,31 +37,31 @@
       class="collect-card mb-4"
       shadow="never"
       v-loading="colLoading"
-      element-loading-text="采集状态加载中..."
+      :element-loading-text="t('dashboard.collectionLoading')"
     >
       <template #header>
         <div class="flex items-center justify-between">
-          <span class="font-bold text-gray-700">数据采集状态</span>
+          <span class="font-bold text-gray-700">{{ t('dashboard.collectionStatus') }}</span>
           <el-tag :type="collection?.running ? 'success' : 'danger'" size="small" effect="dark">
-            {{ collection?.running ? '运行中' : '已停止' }}
+            {{ collection?.running ? t('dashboard.running') : t('dashboard.stopped') }}
           </el-tag>
         </div>
       </template>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div class="collect-item">
-          <div class="collect-label">最近轮询</div>
+          <div class="collect-label">{{ t('dashboard.lastPoll') }}</div>
           <div class="collect-value">{{ collection?.lastPollTime || '—' }}</div>
         </div>
         <div class="collect-item">
-          <div class="collect-label">最近成功采集</div>
+          <div class="collect-label">{{ t('dashboard.lastSuccess') }}</div>
           <div class="collect-value">{{ collection?.lastSuccessTime || '—' }}</div>
         </div>
         <div class="collect-item">
-          <div class="collect-label">采集地址数</div>
+          <div class="collect-label">{{ t('dashboard.addressCount') }}</div>
           <div class="collect-value">{{ collection?.addressCount ?? 0 }}</div>
         </div>
         <div class="collect-item">
-          <div class="collect-label">累计错误</div>
+          <div class="collect-label">{{ t('dashboard.totalErrors') }}</div>
           <div
             class="collect-value"
             :class="{ 'text-red-500': (collection?.errorCount ?? 0) > 0 }"
@@ -78,7 +78,10 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getDeviceOverview } from '@/api/modules/deviceObject'
+import { useI18n } from 'vue-i18n'
 import { getCollectionStatus } from '@/api/modules/collection'
+
+const { t } = useI18n()
 
 const router = useRouter()
 
@@ -95,21 +98,21 @@ const deviceCards = computed(() => {
   const o = overview.value || {}
   return [
     {
-      title: '设备在线情况',
+      title: t('dashboard.deviceOnline'),
       items: [
-        { label: '全部设备', value: o.total ?? 0, color: '#606266' },
-        { label: '在线', value: o.online ?? 0, color: '#67c23a' },
-        { label: '离线', value: o.offline ?? 0, color: '#f56c6c' },
-        { label: '在线率', value: `${Math.round((o.onlineRate || 0) * 100)}%`, color: '#409eff' },
+        { label: t('dashboard.allDevices'), value: o.total ?? 0, color: '#606266' },
+        { label: t('dashboard.online'), value: o.online ?? 0, color: '#67c23a' },
+        { label: t('dashboard.offline'), value: o.offline ?? 0, color: '#f56c6c' },
+        { label: t('dashboard.onlineRate'), value: `${Math.round((o.onlineRate || 0) * 100)}%`, color: '#409eff' },
       ],
     },
     {
-      title: '设备明细',
+      title: t('dashboard.deviceDetail'),
       items: [
-        { label: '启用', value: o.enabled ?? 0 },
-        { label: '禁用', value: o.disabled ?? 0 },
-        { label: '已接入采集', value: o.collected ?? 0 },
-        { label: '未接入采集', value: o.unCollected ?? 0 },
+        { label: t('dashboard.detailEnabled'), value: o.enabled ?? 0 },
+        { label: t('dashboard.detailDisabled'), value: o.disabled ?? 0 },
+        { label: t('dashboard.collected'), value: o.collected ?? 0 },
+        { label: t('dashboard.unCollected'), value: o.unCollected ?? 0 },
       ],
     },
   ]

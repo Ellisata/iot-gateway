@@ -2,18 +2,18 @@
   <div class="flex items-center gap-2">
     <el-input
       :model-value="modelValue"
-      :placeholder="placeholder"
+      :placeholder="resolvedPlaceholder"
       readonly
       style="width: 280px"
     />
     <el-button type="primary" @click="handleOpen">
-      {{ buttonText }}
+      {{ resolvedButtonText }}
     </el-button>
 
     <!-- 协议选择对话框 -->
     <el-dialog
       v-model="visible"
-      title="选择协议"
+      :title="t('selector.selectProtocolBtn')"
       width="560px"
       :close-on-click-modal="false"
       append-to-body
@@ -22,12 +22,12 @@
       <div class="flex items-center gap-3 mb-4">
         <el-input
           v-model="query.keyword"
-          placeholder="请输入协议名称搜索"
+          :placeholder="t('selector.searchPlaceholder')"
           clearable
           style="width: 240px"
           @keyup.enter="handleSearch"
         />
-        <el-button type="primary" @click="handleSearch">查询</el-button>
+        <el-button type="primary" @click="handleSearch">{{ t('selector.search') }}</el-button>
       </div>
       <el-table
         :data="list"
@@ -38,9 +38,9 @@
         highlight-current-row
         @row-click="handleRowClick"
       >
-        <el-table-column type="index" label="序号" width="60" align="center" />
-        <el-table-column prop="name" label="名称" min-width="140" />
-        <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
+        <el-table-column type="index" :label="t('selector.index')" width="60" align="center" />
+        <el-table-column prop="name" :label="t('selector.name')" min-width="140" />
+        <el-table-column prop="description" :label="t('selector.description')" min-width="200" show-overflow-tooltip />
       </el-table>
       <div class="flex justify-end mt-4">
         <el-pagination
@@ -56,17 +56,20 @@
         />
       </div>
       <template #footer>
-        <el-button @click="visible = false">取消</el-button>
+        <el-button @click="visible = false">{{ t('selector.cancel') }}</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { computed, ref, reactive } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getProtocolList } from '@/api/modules/protocol'
 
 defineOptions({ name: 'ProtocolSelector' })
+
+const { t } = useI18n()
 
 const props = defineProps({
   modelValue: {
@@ -75,15 +78,19 @@ const props = defineProps({
   },
   placeholder: {
     type: String,
-    default: '请选择协议',
+    default: '',
   },
   buttonText: {
     type: String,
-    default: '选择协议',
+    default: '',
   },
 })
 
 const emit = defineEmits(['update:modelValue', 'select'])
+
+// 未传入时使用当前语言的默认文案
+const resolvedPlaceholder = computed(() => props.placeholder || t('selector.selectProtocol'))
+const resolvedButtonText = computed(() => props.buttonText || t('selector.selectProtocolBtn'))
 
 // ---------- 对话框状态 ----------
 const visible = ref(false)

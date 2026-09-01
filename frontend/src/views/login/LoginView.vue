@@ -4,6 +4,11 @@
       <!-- 顶部渐变色装饰条 -->
       <div class="absolute top-0 left-6 right-6 h-[2px] bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-500 rounded-full" />
 
+      <!-- 语言切换 -->
+      <div class="absolute top-4 right-5 text-gray-400">
+        <LocaleSwitcher />
+      </div>
+
       <!-- Logo & 标题 -->
       <div class="flex flex-col items-center mb-9 mt-3">
         <div
@@ -26,7 +31,7 @@
           </svg>
         </div>
         <h1 class="text-2xl font-bold text-gray-900 tracking-tight">IoT Admin</h1>
-        <p class="text-sm text-gray-400 mt-1.5">设备管理后台 · 请登录您的账号</p>
+        <p class="text-sm text-gray-400 mt-1.5">{{ t('login.subtitle') }}</p>
       </div>
 
       <!-- 登录表单 -->
@@ -42,7 +47,7 @@
         <el-form-item prop="username">
           <el-input
             v-model="form.username"
-            placeholder="请输入用户名"
+            :placeholder="t('login.usernamePlaceholder')"
             :prefix-icon="User"
             class="custom-input"
             clearable
@@ -54,7 +59,7 @@
             ref="passwordRef"
             v-model="form.password"
             type="password"
-            placeholder="请输入密码"
+            :placeholder="t('login.passwordPlaceholder')"
             :prefix-icon="Lock"
             show-password
             class="custom-input"
@@ -67,7 +72,7 @@
                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                 <path d="M7 11V7a5 5 0 0 1 10 0v4" />
               </svg>
-              大写锁定已开启 — 请注意密码大小写
+              {{ t('login.capsLock') }}
             </p>
           </transition>
         </el-form-item>
@@ -81,7 +86,7 @@
             :loading="loading"
             :disabled="loading"
           >
-            <span v-if="!loading">登 录</span>
+            <span v-if="!loading">{{ t('login.loginBtn') }}</span>
           </el-button>
         </el-form-item>
       </el-form>
@@ -91,14 +96,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, nextTick } from 'vue'
+import { ref, reactive, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { User, Lock } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store'
 import { loginApi } from '@/api/modules/user'
 import { rsaEncrypt } from '@/utils/rsa'
+import LocaleSwitcher from '@/components/LocaleSwitcher.vue'
 
+const { t } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
 const formRef = ref(null)
@@ -111,16 +119,17 @@ const form = reactive({
   password: '',
 })
 
-const rules = {
+// 校验文案随语言切换实时更新
+const rules = computed(() => ({
   username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 2, max: 32, message: '用户名长度为 2~32 个字符', trigger: 'blur' },
+    { required: true, message: t('login.usernameRequired'), trigger: 'blur' },
+    { min: 2, max: 32, message: t('login.usernameLength'), trigger: 'blur' },
   ],
   password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, max: 64, message: '密码长度不少于 6 位', trigger: 'blur' },
+    { required: true, message: t('login.passwordRequired'), trigger: 'blur' },
+    { min: 6, max: 64, message: t('login.passwordMinLength'), trigger: 'blur' },
   ],
-}
+}))
 
 /** 检测 Caps Lock */
 function checkCapslock(e) {
@@ -157,13 +166,13 @@ async function handleLogin() {
     })
 
     ElMessage.success({
-      message: '登录成功',
+      message: t('login.success'),
       duration: 1500,
     })
 
     router.push('/dashboard')
   } catch (err) {
-    const errorMsg = err?.message || String(err) || '登录失败，请重试'
+    const errorMsg = err?.message || String(err) || t('login.failed')
     ElMessage.error(errorMsg)
   } finally {
     loading.value = false

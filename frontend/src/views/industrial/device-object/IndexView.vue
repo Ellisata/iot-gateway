@@ -1,7 +1,7 @@
 <template>
   <div class="p-6">
     <h1 class="text-2xl font-bold text-gray-800 mb-6">
-      设备对象管理
+      {{ t('menu.deviceObject') }}
     </h1>
 
     <!-- 工具栏 -->
@@ -10,18 +10,18 @@
         <div class="flex items-center gap-3">
           <el-input
             v-model="queryForm.name"
-            placeholder="请输入设备对象名称搜索"
+            :placeholder="t('deviceObject.searchPlaceholder')"
             clearable
             style="width: 240px"
             @keyup.enter="handleSearch"
           />
-          <el-button type="primary" @click="handleSearch">查询</el-button>
-          <el-button @click="handleReset">重置</el-button>
+          <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
+          <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
         </div>
         <div class="flex items-center gap-3">
-          <el-button :icon="Download" @click="handleDownloadTemplate">下载模板</el-button>
-          <el-button type="primary" :icon="Upload" :loading="importing" @click="handleImport">导入</el-button>
-          <el-button type="primary" @click="handleAdd">新增设备对象</el-button>
+          <el-button :icon="Download" @click="handleDownloadTemplate">{{ t('common.downloadTemplate') }}</el-button>
+          <el-button type="primary" :icon="Upload" :loading="importing" @click="handleImport">{{ t('common.import') }}</el-button>
+          <el-button type="primary" @click="handleAdd">{{ t('deviceObject.add') }}</el-button>
           <input ref="fileInputRef" type="file" accept=".xlsx" class="hidden" @change="handleFileChange" />
         </div>
       </div>
@@ -36,7 +36,7 @@
         style="width: 100%"
         border
       >
-        <el-table-column type="index" label="序号" width="70" align="center" />
+        <el-table-column type="index" :label="t('common.index')" width="70" align="center" />
         <el-table-column label="ID" width="190" align="center">
           <template #default="{ row }">
             <div class="flex items-center justify-center gap-1">
@@ -55,27 +55,27 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="name" label="名称" min-width="140" />
-        <el-table-column prop="protocolName" label="协议" width="120" />
-        <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="status" label="状态" width="100" align="center">
+        <el-table-column prop="name" :label="t('common.name')" min-width="140" />
+        <el-table-column prop="protocolName" :label="t('deviceObject.protocol')" width="120" />
+        <el-table-column prop="description" :label="t('common.description')" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="status" :label="t('common.status')" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">
-              {{ row.status === 1 ? '启用' : '禁用' }}
+              {{ row.status === 1 ? t('common.enabled') : t('common.enableDisable.off') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" label="创建时间" width="180" align="center" />
-        <el-table-column label="操作" width="130" align="center" fixed="right">
+        <el-table-column prop="createdAt" :label="t('common.createdAt')" width="180" align="center" />
+        <el-table-column :label="t('common.action')" width="130" align="center" fixed="right">
           <template #default="{ row }">
             <div class="flex items-center justify-center gap-2">
-              <el-tooltip content="地址管理" placement="top">
+              <el-tooltip :content="t('deviceObject.addressManage')" placement="top">
                 <el-button type="primary" link size="small" :icon="Position" @click="handleViewAddresses(row)" />
               </el-tooltip>
-              <el-tooltip content="编辑" placement="top">
+              <el-tooltip :content="t('common.edit')" placement="top">
                 <el-button type="primary" link size="small" :icon="EditPen" @click="handleEdit(row)" />
               </el-tooltip>
-              <el-tooltip content="删除" placement="top">
+              <el-tooltip :content="t('common.delete')" placement="top">
                 <el-button type="danger" link size="small" :icon="Delete" @click="handleDelete(row)" />
               </el-tooltip>
             </div>
@@ -101,7 +101,7 @@
     <!-- ========== 新增 / 编辑 两步向导对话框 ========== -->
     <el-dialog
       v-model="dialogVisible"
-      :title="isEdit ? '编辑设备对象' : '新增设备对象'"
+      :title="isEdit ? t('deviceObject.editTitle') : t('deviceObject.addTitle')"
       width="620px"
       :close-on-click-modal="false"
       @close="handleDialogClose"
@@ -124,7 +124,7 @@
             class="ml-2 text-sm whitespace-nowrap"
             :class="currentStep === 1 ? 'text-blue-600 font-medium' : 'text-gray-500'"
           >
-            基本信息
+            {{ t('deviceObject.stepBasicInfo') }}
           </span>
         </div>
         <div
@@ -144,7 +144,7 @@
             class="ml-2 text-sm whitespace-nowrap"
             :class="currentStep === 2 ? 'text-blue-600 font-medium' : 'text-gray-500'"
           >
-            协议配置
+            {{ t('deviceObject.stepProtocolConfig') }}
           </span>
         </div>
       </div>
@@ -159,31 +159,31 @@
           label-position="right"
           status-icon
         >
-          <el-form-item label="名称" prop="name">
+          <el-form-item :label="t('common.name')" prop="name">
             <el-input
               v-model="formData.name"
-              placeholder="请输入设备对象名称（1-100 个字符）"
+              :placeholder="t('deviceObject.namePlaceholder')"
               maxlength="100"
               show-word-limit
             />
           </el-form-item>
-          <el-form-item label="描述" prop="description">
+          <el-form-item :label="t('common.description')" prop="description">
             <el-input
               v-model="formData.description"
-              placeholder="请输入设备对象描述（可选）"
+              :placeholder="t('deviceObject.descPlaceholder')"
               type="textarea"
               :rows="3"
               maxlength="200"
               show-word-limit
             />
           </el-form-item>
-          <el-form-item label="状态" prop="status">
+          <el-form-item :label="t('common.status')" prop="status">
             <el-switch
               v-model="formData.status"
               :active-value="1"
               :inactive-value="0"
-              active-text="启用"
-              inactive-text="禁用"
+              :active-text="t('common.enabled')"
+              :inactive-text="t('common.enableDisable.off')"
             />
           </el-form-item>
         </el-form>
@@ -194,13 +194,13 @@
         <el-form label-width="100px" label-position="right">
           <!-- 协议选择（使用公共组件） -->
           <el-form-item
-            label="协议"
+            :label="t('deviceObject.protocol')"
             required
             :validate-status="protocolSelected ? 'success' : undefined"
           >
             <ProtocolSelector
               v-model="formData.protocol"
-              button-text="选择协议"
+              :button-text="t('deviceObject.selectProtocol')"
               @select="handleProtocolSelect"
             />
           </el-form-item>
@@ -208,14 +208,14 @@
           <!-- 分隔线 & 动态表单标题 -->
           <template v-if="protocolSelected">
             <div class="flex items-center justify-between mb-4">
-              <span class="text-sm font-medium text-gray-600">协议参数配置</span>
+              <span class="text-sm font-medium text-gray-600">{{ t('deviceObject.protocolParams') }}</span>
               <el-button
                 type="primary"
                 link
                 :loading="testingConnection"
                 @click="handleTestConnection"
               >
-                <el-icon class="mr-1"><Connection /></el-icon> 测试连接
+                <el-icon class="mr-1"><Connection /></el-icon> {{ t('deviceObject.testConnection') }}
               </el-button>
             </div>
 
@@ -239,18 +239,18 @@
           <!-- 左侧：上一步 -->
           <div>
             <el-button v-if="currentStep === 2" @click="prevStep">
-              <el-icon><ArrowLeft /></el-icon> 上一步
+              <el-icon><ArrowLeft /></el-icon> {{ t('common.prevStep') }}
             </el-button>
           </div>
           <!-- 右侧：下一步 / 提交 -->
           <div class="flex items-center gap-2">
-            <el-button @click="dialogVisible = false">取消</el-button>
+            <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
             <el-button
               v-if="currentStep === 1"
               type="primary"
               @click="nextStep"
             >
-              下一步
+              {{ t('common.nextStep') }}
               <el-icon class="ml-1"><ArrowRight /></el-icon>
             </el-button>
             <el-button
@@ -259,7 +259,7 @@
               :loading="submitting"
               @click="handleSubmit"
             >
-              {{ isEdit ? '保存' : '提交' }}
+              {{ isEdit ? t('common.save') : t('common.submit') }}
             </el-button>
           </div>
         </div>
@@ -291,6 +291,9 @@ import { getProtocolById } from '@/api/modules/protocol'
 import ProtocolSelector from '@/components/ProtocolSelector.vue'
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
 import { useExcelImport } from '@/composables/useExcelImport'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 // ---------- 路由 ----------
 const router = useRouter()
@@ -310,9 +313,9 @@ function handleViewAddresses(row) {
 async function copyId(id) {
   try {
     await navigator.clipboard.writeText(String(id))
-    ElMessage.success('ID 已复制')
+    ElMessage.success(t('deviceObject.idCopied'))
   } catch {
-    ElMessage.error('复制失败')
+    ElMessage.error(t('deviceObject.copyFailed'))
   }
 }
 
@@ -376,7 +379,7 @@ const {
 } = useExcelImport({
   importFn: (file) => importDeviceObjects(file),
   downloadFn: downloadDeviceTemplate,
-  templateName: '设备导入模板.xlsx',
+  templateName: () => t('deviceObject.importTemplateName'),
   refresh: fetchList,
 })
 
@@ -409,10 +412,10 @@ const formData = reactive({
 // ---------- 表单校验规则 ----------
 const formRules = {
   name: [
-    { required: true, message: '请输入设备对象名称', trigger: 'blur' },
-    { min: 1, max: 100, message: '名称长度在 1 到 100 个字符', trigger: 'blur' },
+    { required: true, message: () => t('deviceObject.searchNameRequired'), trigger: 'blur' },
+    { min: 1, max: 100, message: () => t('deviceObject.nameLength'), trigger: 'blur' },
   ],
-  description: [{ max: 200, message: '描述不能超过 200 个字符', trigger: 'blur' }],
+  description: [{ max: 200, message: () => t('protocol.descMaxLength'), trigger: 'blur' }],
 }
 
 // ---------- form-create 动态表单 ----------
@@ -448,7 +451,7 @@ async function handleProtocolChange(protocolId) {
   try {
     const res = await getProtocolById(protocolId)
     if (!res) {
-      ElMessage.warning('未找到协议详情')
+      ElMessage.warning(t('deviceObject.protocolDetailNotFound'))
       return
     }
     // 回填协议名称（编辑模式时覆盖列表回传的 ID）
@@ -459,7 +462,7 @@ async function handleProtocolChange(protocolId) {
       try {
         parsed = typeof res.formJson === 'string' ? JSON.parse(res.formJson) : res.formJson
       } catch {
-        ElMessage.warning('协议表单配置解析失败')
+        ElMessage.warning(t('deviceObject.protocolFormParseFailed'))
         return
       }
 
@@ -468,7 +471,7 @@ async function handleProtocolChange(protocolId) {
         try {
           parsed.rule = JSON.parse(parsed.rule)
         } catch {
-          ElMessage.warning('协议表单规则解析失败')
+          ElMessage.warning(t('deviceObject.protocolRuleParseFailed'))
           return
         }
       }
@@ -487,7 +490,7 @@ async function handleProtocolChange(protocolId) {
         // 兼容纯数组格式
         fcRule.value = parsed
       } else {
-        ElMessage.warning('协议表单配置格式不正确')
+        ElMessage.warning(t('deviceObject.protocolFormInvalid'))
         return
       }
 
@@ -534,7 +537,7 @@ async function handleProtocolChange(protocolId) {
     }
   } catch (err) {
     console.error('获取协议详情失败', err)
-    ElMessage.error('获取协议配置失败')
+    ElMessage.error(t('deviceObject.fetchProtocolConfigFailed'))
   }
 }
 
@@ -616,13 +619,13 @@ async function handleEdit(row) {
 // ---------- 删除 ----------
 async function handleDelete(row) {
   try {
-    await ElMessageBox.confirm(`确定要删除设备对象「${row.name}」吗？`, '删除确认', {
+    await ElMessageBox.confirm(t('deviceObject.deleteConfirm', { name: row.name }), t('deviceObject.deleteTitle'), {
       type: 'warning',
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
     })
     await deleteDeviceObject(row.id)
-    ElMessage.success('删除成功')
+    ElMessage.success(t('protocol.deleteSuccess'))
     fetchList()
   } catch {
     // 用户取消或删除失败，不做处理
@@ -653,7 +656,7 @@ function collectProtocolConfig() {
 // ---------- 测试连接 ----------
 async function handleTestConnection() {
   if (!formData.protocol) {
-    ElMessage.warning('请选择协议')
+    ElMessage.warning(t('deviceObject.selectProtocolFirst'))
     return
   }
   // 校验 form-create 动态表单
@@ -661,7 +664,7 @@ async function handleTestConnection() {
     try {
       await fcApi.value.validate()
     } catch {
-      ElMessage.warning('请完善协议参数配置')
+      ElMessage.warning(t('deviceObject.completeProtocolConfig'))
       return
     }
   }
@@ -672,7 +675,7 @@ async function handleTestConnection() {
       protocolName: formData.protocol,
       protocolJson: collectProtocolConfig() ?? {},
     })
-    ElMessage.success('连接成功')
+    ElMessage.success(t('deviceObject.connectionSuccess'))
   } catch (err) {
     
   } finally {
@@ -688,13 +691,13 @@ async function handleSubmit() {
     await formRef.value.validate()
   } catch {
     currentStep.value = 1
-    ElMessage.warning('请先完成基本信息填写')
+    ElMessage.warning(t('deviceObject.basicInfoIncomplete'))
     return
   }
 
   // 校验协议是否已选
   if (!formData.protocol) {
-    ElMessage.warning('请选择协议')
+    ElMessage.warning(t('deviceObject.selectProtocolFirst'))
     return
   }
 
@@ -703,7 +706,7 @@ async function handleSubmit() {
     try {
       await fcApi.value.validate()
     } catch {
-      ElMessage.warning('请完善协议参数配置')
+      ElMessage.warning(t('deviceObject.completeProtocolConfig'))
       return
     }
   }
@@ -723,16 +726,16 @@ async function handleSubmit() {
     if (isEdit.value) {
       payload.id = formData.id
       await updateDeviceObject(payload)
-      ElMessage.success('编辑成功')
+      ElMessage.success(t('protocol.editSuccess'))
     } else {
       console.log(payload);
       await addDeviceObject(payload)
-      ElMessage.success('新增成功')
+      ElMessage.success(t('protocol.addSuccess'))
     }
     dialogVisible.value = false
     fetchList()
   } catch (err) {
-    const msg = isEdit.value ? '编辑失败' : '新增失败'
+    const msg = isEdit.value ? t('protocol.editFailed') : t('protocol.addFailed')
     console.error(msg, err)
     ElMessage.error(err?.response?.data?.msg || err?.message || msg)
   } finally {

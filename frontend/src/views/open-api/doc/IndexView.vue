@@ -4,11 +4,11 @@
     <header class="flex items-center justify-between px-6 border-b bg-white" style="height: 60px">
       <div class="flex items-center gap-3">
         <el-icon class="text-lg text-[#409eff]"><Document /></el-icon>
-        <span class="font-bold text-base">开放接口文档</span>
-        <span class="text-xs text-gray-400">供第三方系统接入时查阅</span>
+        <span class="font-bold text-base">{{ t('openApiDoc.title') }}</span>
+        <span class="text-xs text-gray-400">{{ t('openApiDoc.subtitle') }}</span>
       </div>
       <el-button text type="primary" @click="router.push('/dashboard')">
-        <el-icon class="mr-1"><Back /></el-icon>返回控制台
+        <el-icon class="mr-1"><Back /></el-icon>{{ t('openApiDoc.backToConsole') }}
       </el-button>
     </header>
 
@@ -18,7 +18,7 @@
         <aside v-if="tocTree.length" class="w-56 shrink-0 sticky top-6">
           <div class="toc-panel">
             <button type="button" class="toc-title" @click="panelCollapsed = !panelCollapsed">
-              <span>目录</span>
+              <span>{{ t('openApiDoc.toc') }}</span>
               <el-icon class="toc-caret" :class="{ 'is-folded': panelCollapsed }"><ArrowDown /></el-icon>
             </button>
             <nav v-show="!panelCollapsed" class="toc-list">
@@ -58,7 +58,7 @@
           <!-- 文档由后端 go:embed 内置 markdown 渲染为 HTML，此处仅展示 -->
           <div v-if="loading" v-loading="loading" class="h-48" />
           <div v-show="!loading && docHtml" ref="contentRef" class="api-doc-content" v-html="docHtml" />
-          <el-empty v-if="!loading && !docHtml" description="文档加载失败，请刷新重试" />
+          <el-empty v-if="!loading && !docHtml" :description="t('openApiDoc.loadFailed')" />
         </el-card>
       </div>
     </main>
@@ -68,7 +68,10 @@
 <script setup>
 import { ref, nextTick, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { getOpenApiDoc } from '@/api/modules/openApiSecret'
+
+const { t } = useI18n()
 
 const router = useRouter()
 const docHtml = ref('')

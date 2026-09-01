@@ -1,27 +1,27 @@
 <template>
   <div class="p-6">
-    <h1 class="text-2xl font-bold text-gray-800 mb-6">日志文件查看</h1>
+    <h1 class="text-2xl font-bold text-gray-800 mb-6">{{ t('menu.logFile') }}</h1>
 
     <!-- 日志文件列表 -->
     <el-card shadow="never">
       <div class="flex items-center justify-between mb-4">
-        <span class="text-gray-600">日志目录下的 .log 文件（按修改时间倒序）</span>
+        <span class="text-gray-600">{{ t('log.filesHint') }}</span>
         <el-button type="primary" :loading="loading" @click="fetchList">
-          <el-icon class="mr-1"><Refresh /></el-icon>刷新
+          <el-icon class="mr-1"><Refresh /></el-icon>{{ t('common.refresh') }}
         </el-button>
       </div>
 
       <el-table :data="tableData" v-loading="loading" stripe border style="width: 100%">
-        <el-table-column type="index" label="序号" width="70" align="center" />
-        <el-table-column prop="fileName" label="文件名" min-width="220" show-overflow-tooltip />
-        <el-table-column label="大小" width="120" align="center">
+        <el-table-column type="index" :label="t('common.index')" width="70" align="center" />
+        <el-table-column prop="fileName" :label="t('log.fileName')" min-width="220" show-overflow-tooltip />
+        <el-table-column :label="t('log.size')" width="120" align="center">
           <template #default="{ row }">{{ formatSize(row.size) }}</template>
         </el-table-column>
-        <el-table-column prop="modifyTime" label="修改时间" width="180" align="center" />
-        <el-table-column label="操作" width="120" align="center" fixed="right">
+        <el-table-column prop="modifyTime" :label="t('log.modifyTime')" width="180" align="center" />
+        <el-table-column :label="t('common.action')" width="120" align="center" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="handleView(row)">
-              查看日志
+              {{ t('log.viewLog') }}
             </el-button>
           </template>
         </el-table-column>
@@ -51,19 +51,19 @@
       class="log-drawer"
     >
       <div class="flex items-center gap-3 mb-3">
-        <span class="text-sm text-gray-300">显示末尾</span>
+        <span class="text-sm text-gray-300">{{ t('log.showTail') }}</span>
         <el-select v-model="tailLines" style="width: 130px" @change="fetchLogContent">
-          <el-option label="200 行" :value="200" />
-          <el-option label="500 行" :value="500" />
-          <el-option label="1000 行" :value="1000" />
-          <el-option label="2000 行" :value="2000" />
+          <el-option :label="t('log.lines', { n: 200 })" :value="200" />
+          <el-option :label="t('log.lines', { n: 500 })" :value="500" />
+          <el-option :label="t('log.lines', { n: 1000 })" :value="1000" />
+          <el-option :label="t('log.lines', { n: 2000 })" :value="2000" />
         </el-select>
-        <span class="text-sm text-gray-400">共 {{ totalLines }} 行</span>
+        <span class="text-sm text-gray-400">{{ t('log.totalLines', { total: totalLines }) }}</span>
         <el-button :loading="contentLoading" @click="scrollToBottom">
-          <el-icon class="mr-1"><Bottom /></el-icon>回到底部
+          <el-icon class="mr-1"><Bottom /></el-icon>{{ t('log.scrollToBottom') }}
         </el-button>
         <el-button type="primary" :loading="contentLoading" @click="fetchLogContent">
-          <el-icon class="mr-1"><Refresh /></el-icon>刷新
+          <el-icon class="mr-1"><Refresh /></el-icon>{{ t('common.refresh') }}
         </el-button>
       </div>
 
@@ -74,7 +74,7 @@
         style="height: calc(100vh - 180px)"
       >
         <template v-if="logLines.length">{{ joinedLines }}</template>
-        <div v-else class="text-gray-400">暂无日志内容</div>
+        <div v-else class="text-gray-400">{{ t('log.noContent') }}</div>
       </div>
     </el-drawer>
   </div>
@@ -82,7 +82,10 @@
 
 <script setup>
 import { ref, computed, nextTick, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getLogFilePage, readLogFile } from '@/api/modules/logFile'
+
+const { t } = useI18n()
 
 // ---------- 文件列表（分页） ----------
 const loading = ref(false)

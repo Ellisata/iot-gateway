@@ -16,21 +16,24 @@
             <Expand v-else />
           </el-icon>
           <el-breadcrumb separator="/">
-            <el-breadcrumb-item v-if="route.meta.title">{{ route.meta.title }}</el-breadcrumb-item>
+            <el-breadcrumb-item v-if="pageTitle">{{ pageTitle }}</el-breadcrumb-item>
           </el-breadcrumb>
         </div>
 
         <div class="flex items-center gap-4">
+          <!-- 语言切换 -->
+          <LocaleSwitcher />
+
           <el-dropdown trigger="click" @command="handleCommand">
             <span class="flex items-center gap-2 cursor-pointer hover:text-[#409eff]">
               <el-avatar :size="32" icon="UserFilled" />
-              <span class="text-sm">{{ userStore.userName || '管理员' }}</span>
+              <span class="text-sm">{{ userStore.userName || t('layout.admin') }}</span>
               <el-icon><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="profile">个人中心</el-dropdown-item>
-                <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
+                <el-dropdown-item command="profile">{{ t('layout.profile') }}</el-dropdown-item>
+                <el-dropdown-item divided command="logout">{{ t('layout.logout') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -46,16 +49,24 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store'
 import SideMenu from '@/components/SideMenu.vue'
+import LocaleSwitcher from '@/components/LocaleSwitcher.vue'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const { t } = useI18n()
 
 const isCollapsed = ref(false)
+
+// 面包屑标题：取路由 titleKey 实时翻译，切换语言时跟随更新
+const pageTitle = computed(() =>
+  route.meta.titleKey ? t(route.meta.titleKey) : ''
+)
 
 function toggleSidebar() {
   isCollapsed.value = !isCollapsed.value

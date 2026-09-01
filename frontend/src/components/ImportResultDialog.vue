@@ -1,9 +1,9 @@
 <template>
-  <el-dialog v-model="visible" title="导入结果" width="640px" :close-on-click-modal="false">
+  <el-dialog v-model="visible" :title="t('excelImport.resultTitle')" width="640px" :close-on-click-modal="false">
     <div class="flex items-center gap-6 mb-4 text-sm">
-      <span>共 <span class="font-semibold">{{ result.total }}</span> 条</span>
-      <span class="text-green-600">成功 {{ result.success }} 条</span>
-      <span class="text-red-600">失败 {{ result.failed }} 条</span>
+      <span>{{ t('excelImport.total', { total: result.total }) }}</span>
+      <span class="text-green-600">{{ t('excelImport.success', { n: result.success }) }}</span>
+      <span class="text-red-600">{{ t('excelImport.failed', { n: result.failed }) }}</span>
     </div>
     <el-table
       v-if="result.failed > 0"
@@ -12,18 +12,22 @@
       border
       stripe
     >
-      <el-table-column prop="row" label="Excel行号" width="90" align="center" />
-      <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
-      <el-table-column prop="reason" label="失败原因" min-width="220" show-overflow-tooltip />
+      <el-table-column prop="row" :label="t('excelImport.row')" width="90" align="center" />
+      <el-table-column prop="name" :label="t('excelImport.name')" min-width="140" show-overflow-tooltip />
+      <el-table-column prop="reason" :label="t('excelImport.reason')" min-width="220" show-overflow-tooltip />
     </el-table>
-    <el-empty v-else description="全部导入成功" />
+    <el-empty v-else :description="t('excelImport.allSuccess')" />
     <template #footer>
-      <el-button type="primary" @click="visible = false">确定</el-button>
+      <el-button type="primary" @click="visible = false">{{ t('common.confirm') }}</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup>
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
+
 const visible = defineModel('visible', { type: Boolean })
 defineProps({
   result: { type: Object, required: true },

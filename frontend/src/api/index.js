@@ -2,6 +2,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
 import { useUserStore } from '@/store'
+import { translate as t } from '@/i18n'
 
 // 统一处理登录失效：清空本地登录态后跳转登录页。
 // 注意必须调用 store.logout() 而不是只删 localStorage —— 路由守卫依据
@@ -52,8 +53,8 @@ request.interceptors.response.use(
     // 登录失效优先处理：即使请求配置了 silent 也要登出跳转，
     // silent 只用于屏蔽普通业务错误提示
     if (res.code === "20004" || res.code === "20005" || res.code === "20006") {
-      handleAuthError(res.msg || '登录已过期，请重新登录')
-      return Promise.reject(new Error(res.msg || '登录已过期，请重新登录'))
+      handleAuthError(res.msg || t('request.authExpired'))
+      return Promise.reject(new Error(res.msg || t('request.authExpired')))
     }
 
     // 如果请求配置了 silent，跳过错误提示
@@ -61,15 +62,15 @@ request.interceptors.response.use(
 
     // 如果后端返回的业务状态码不是 0，按错误处理
     if (res.code && res.code !== "0") {
-      ElMessage.error(res.msg || '请求失败')
-      return Promise.reject(new Error(res.msg || '请求失败'))
+      ElMessage.error(res.msg || t('request.requestFailed'))
+      return Promise.reject(new Error(res.msg || t('request.requestFailed')))
     }
     return res.data
   },
   (error) => {
     // 401 无论是否 silent 都要登出跳转；silent 只屏蔽其余错误提示
     if (error.response?.status === 401) {
-      handleAuthError('登录已过期，请重新登录')
+      handleAuthError(t('request.authExpired'))
       return Promise.reject(error)
     }
 
@@ -81,19 +82,19 @@ request.interceptors.response.use(
     if (error.response) {
       switch (error.response.status) {
         case 403:
-          ElMessage.error('没有权限访问')
+          ElMessage.error(t('request.forbidden'))
           break
         case 404:
-          ElMessage.error('请求的资源不存在')
+          ElMessage.error(t('request.notFound'))
           break
         case 500:
-          ElMessage.error('服务器错误')
+          ElMessage.error(t('request.serverError'))
           break
         default:
-          ElMessage.error(error.message || '网络错误')
+          ElMessage.error(error.message || t('request.networkError'))
       }
     } else {
-      ElMessage.error('网络连接异常')
+      ElMessage.error(t('request.connectionAbnormal'))
     }
     return Promise.reject(error)
   }

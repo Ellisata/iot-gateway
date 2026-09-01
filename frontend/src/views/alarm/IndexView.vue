@@ -7,31 +7,31 @@
       <div class="flex flex-wrap items-center gap-3">
         <el-input
           v-model="queryForm.targetName"
-          placeholder="请输入目标名称搜索"
+          :placeholder="t('alarm.targetNamePlaceholder')"
           clearable
           style="width: 240px"
           @keyup.enter="handleSearch"
         />
         <el-select
           v-model="queryForm.alarmType"
-          placeholder="报警类型"
+          :placeholder="t('alarm.alarmType')"
           clearable
           style="width: 150px"
         >
-          <el-option label="断联报警" value="offline" />
-          <el-option label="恢复记录" value="recover" />
+          <el-option :label="t('alarm.typeOffline')" value="offline" />
+          <el-option :label="t('alarm.typeRecover')" value="recover" />
         </el-select>
         <el-select
           v-model="queryForm.status"
-          placeholder="报警状态"
+          :placeholder="t('alarm.alarmStatus')"
           clearable
           style="width: 150px"
         >
-          <el-option label="未恢复" value="active" />
-          <el-option label="已恢复" value="cleared" />
+          <el-option :label="t('alarm.statusActive')" value="active" />
+          <el-option :label="t('alarm.statusCleared')" value="cleared" />
         </el-select>
-        <el-button type="primary" @click="handleSearch">查询</el-button>
-        <el-button @click="handleReset">重置</el-button>
+        <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
+        <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
       </div>
     </el-card>
 
@@ -44,36 +44,36 @@
         border
         style="width: 100%"
       >
-        <el-table-column type="index" label="序号" width="70" align="center" />
-        <el-table-column prop="targetName" label="目标名称" min-width="140" show-overflow-tooltip />
-        <el-table-column prop="targetType" label="目标类型" width="100" align="center">
+        <el-table-column type="index" :label="t('common.index')" width="70" align="center" />
+        <el-table-column prop="targetName" :label="t('alarm.targetName')" min-width="140" show-overflow-tooltip />
+        <el-table-column prop="targetType" :label="t('alarm.targetType')" width="100" align="center">
           <template #default="{ row }">
-            {{ row.targetType === 'device' ? '设备' : '通道' }}
+            {{ row.targetType === 'device' ? t('alarm.typeDevice') : t('alarm.typeChannel') }}
           </template>
         </el-table-column>
-        <el-table-column prop="alarmTypeName" label="报警类型" width="110" align="center">
+        <el-table-column prop="alarmTypeName" :label="t('alarm.alarmTypeCol')" width="110" align="center">
           <template #default="{ row }">
             <el-tag :type="row.alarmType === 'offline' ? 'danger' : 'success'" size="small">
               {{ row.alarmTypeName }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="level" label="级别" width="90" align="center">
+        <el-table-column prop="level" :label="t('alarm.level')" width="90" align="center">
           <template #default="{ row }">
             <el-tag :type="levelTagType(row.level)" size="small">{{ levelName(row.level) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="content" label="报警内容" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="statusName" label="状态" width="100" align="center">
+        <el-table-column prop="content" :label="t('alarm.content')" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="statusName" :label="t('alarm.statusCol')" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.status === 'active' ? 'danger' : 'success'" size="small">
               {{ row.statusName }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="firstOccurTime" label="首次发生时间" width="170" align="center" />
-        <el-table-column prop="lastOccurTime" label="最近发生时间" width="170" align="center" />
-        <el-table-column prop="clearTime" label="恢复时间" width="170" align="center" />
+        <el-table-column prop="firstOccurTime" :label="t('alarm.firstOccurTime')" width="170" align="center" />
+        <el-table-column prop="lastOccurTime" :label="t('alarm.lastOccurTime')" width="170" align="center" />
+        <el-table-column prop="clearTime" :label="t('alarm.clearTime')" width="170" align="center" />
       </el-table>
 
       <!-- 分页 -->
@@ -95,7 +95,10 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getAlarmPage } from '@/api/modules/alarm'
+
+const { t } = useI18n()
 
 // 通过路由 props 注入目标类型：device | channel
 const props = defineProps({
@@ -106,7 +109,7 @@ const props = defineProps({
 })
 
 const pageTitle = computed(() =>
-  props.targetType === 'device' ? '设备报警' : '通道报警'
+  props.targetType === 'device' ? t('alarm.deviceTitle') : t('alarm.channelTitle')
 )
 
 // ---------- 查询表单 ----------
@@ -176,12 +179,12 @@ function handleCurrentChange(val) {
 // ---------- 级别展示 ----------
 function levelName(level) {
   const map = {
-    critical: '严重',
-    error: '错误',
-    warning: '警告',
-    info: '信息',
+    critical: 'alarm.levelCritical',
+    error: 'alarm.levelError',
+    warning: 'alarm.levelWarning',
+    info: 'alarm.levelInfo',
   }
-  return map[level] || level || '—'
+  return map[level] ? t(map[level]) : level || '—'
 }
 
 function levelTagType(level) {

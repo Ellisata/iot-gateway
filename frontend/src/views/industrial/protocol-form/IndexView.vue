@@ -3,17 +3,17 @@
     <!-- 顶部工具栏 -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <span class="toolbar-label">选择协议：</span>
+        <span class="toolbar-label">{{ t('protocolForm.selectProtocol') }}</span>
         <ProtocolSelector
           v-model="selectedProtocol"
-          button-text="选择协议"
+          :button-text="t('protocolForm.selectProtocolBtn')"
           @select="handleProtocolSelect"
         />
       </div>
       <div class="toolbar-right">
         <el-button type="primary" :loading="saving" @click="handleSave">
           <el-icon><Check /></el-icon>
-          保存
+          {{ t('common.save') }}
         </el-button>
       </div>
     </div>
@@ -28,7 +28,7 @@
       <!-- 加载遮罩 -->
       <div v-if="formLoading" class="loading-mask">
         <el-icon class="loading-icon" :size="32"><Loading /></el-icon>
-        <span>加载中...</span>
+        <span>{{ t('common.loading') }}</span>
       </div>
     </div>
 
@@ -41,6 +41,9 @@ import { Check, Loading } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { getProtocolById, updateProtocolFormJsonById } from '@/api/modules/protocol'
 import ProtocolSelector from '@/components/ProtocolSelector.vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 defineOptions({ name: 'SettingsProtocolForm' })
 
@@ -107,7 +110,7 @@ async function handleProtocolChange(id) {
       designerRef.value?.setOptions({})
     }
   } catch {
-    ElMessage.error('加载协议表单配置失败')
+    ElMessage.error(t('protocolForm.loadFailed'))
     designerRef.value?.setRule([])
     designerRef.value?.setOptions({})
   } finally {
@@ -121,14 +124,14 @@ async function handleSave() {
 
   const id = selectedProtocolId.value
   if (!id) {
-    ElMessage.warning('请先选择一个协议')
+    ElMessage.warning(t('protocolForm.selectFirst'))
     return
   }
 
   const rule = JSON.parse(designerRef.value.getJson() || '[]')
   const options = JSON.parse(designerRef.value.getOptionsJson() || '{}')
   if (!rule || !rule.length) {
-    ElMessage.warning('表单内容为空，请先拖拽组件')
+    ElMessage.warning(t('protocolForm.emptyForm'))
     return
   }
 
@@ -138,9 +141,9 @@ async function handleSave() {
       id,
       formJson: { rule, options }
     })
-    ElMessage.success('保存成功')
+    ElMessage.success(t('protocolForm.saveSuccess'))
   } catch (e) {
-    ElMessage.error(e?.msg || '保存失败')
+    ElMessage.error(e?.msg || t('protocolForm.saveFailed'))
   } finally {
     saving.value = false
   }

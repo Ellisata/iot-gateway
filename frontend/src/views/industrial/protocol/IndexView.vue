@@ -1,6 +1,6 @@
 <template>
   <div class="p-6">
-    <h1 class="text-2xl font-bold text-gray-800 mb-6">协议管理</h1>
+    <h1 class="text-2xl font-bold text-gray-800 mb-6">{{ t('menu.protocol') }}</h1>
 
     <!-- 工具栏 -->
     <el-card shadow="never" class="mb-4">
@@ -8,15 +8,15 @@
         <div class="flex items-center gap-3">
           <el-input
             v-model="queryForm.name"
-            placeholder="请输入协议名称搜索"
+            :placeholder="t('protocol.searchPlaceholder')"
             clearable
             style="width: 240px"
             @keyup.enter="handleSearch"
           />
-          <el-button type="primary" @click="handleSearch">查询</el-button>
-          <el-button @click="handleReset">重置</el-button>
+          <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
+          <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
         </div>
-        <el-button v-if="userStore.isAdmin" type="primary" @click="handleAdd">新增协议</el-button>
+        <el-button v-if="userStore.isAdmin" type="primary" @click="handleAdd">{{ t('protocol.add') }}</el-button>
       </div>
     </el-card>
 
@@ -29,28 +29,28 @@
         style="width: 100%"
         border
       >
-        <el-table-column type="index" label="序号" width="70" align="center" />
-        <el-table-column prop="name" label="名称" min-width="140" />
-        <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="sort" label="排序" width="80" align="center" />
-        <el-table-column prop="status" label="状态" width="100" align="center">
+        <el-table-column type="index" :label="t('common.index')" width="70" align="center" />
+        <el-table-column prop="name" :label="t('common.name')" min-width="140" />
+        <el-table-column prop="description" :label="t('common.description')" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="sort" :label="t('protocol.sort')" width="80" align="center" />
+        <el-table-column prop="status" :label="t('common.status')" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
-              {{ row.status === 1 ? '启用' : '停用' }}
+              {{ row.status === 1 ? t('common.enabled') : t('common.disabled') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" label="创建时间" width="180" align="center" />
-        <el-table-column label="操作" width="130" align="center" fixed="right">
+        <el-table-column prop="createdAt" :label="t('common.createdAt')" width="180" align="center" />
+        <el-table-column :label="t('common.action')" width="130" align="center" fixed="right">
           <template #default="{ row }">
             <div class="flex items-center justify-center gap-2">
-              <el-tooltip content="查看表单" placement="top">
+              <el-tooltip :content="t('protocol.viewForm')" placement="top">
                 <el-button type="primary" link size="small" :icon="View" @click="handleViewForm(row)" />
               </el-tooltip>
-              <el-tooltip v-if="userStore.isAdmin" content="编辑" placement="top">
+              <el-tooltip v-if="userStore.isAdmin" :content="t('common.edit')" placement="top">
                 <el-button type="primary" link size="small" :icon="EditPen" @click="handleEdit(row)" />
               </el-tooltip>
-              <el-tooltip v-if="userStore.isAdmin" content="删除" placement="top">
+              <el-tooltip v-if="userStore.isAdmin" :content="t('common.delete')" placement="top">
                 <el-button type="danger" link size="small" :icon="Delete" @click="handleDelete(row)" />
               </el-tooltip>
             </div>
@@ -76,7 +76,7 @@
     <!-- 新增 / 编辑 对话框 -->
     <el-dialog
       v-model="dialogVisible"
-      :title="isEdit ? '编辑协议' : '新增协议'"
+      :title="isEdit ? t('protocol.editTitle') : t('protocol.addTitle')"
       width="580px"
       :close-on-click-modal="false"
       @close="handleDialogClose"
@@ -89,46 +89,46 @@
         label-position="right"
         status-icon
       >
-        <el-form-item label="名称" prop="name">
+        <el-form-item :label="t('common.name')" prop="name">
           <el-input
             v-model="formData.name"
-            placeholder="请输入协议名称（1-50 个字符）"
+            :placeholder="t('protocol.namePlaceholder')"
             maxlength="50"
             show-word-limit
           />
         </el-form-item>
-        <el-form-item label="描述" prop="description">
+        <el-form-item :label="t('common.description')" prop="description">
           <el-input
             v-model="formData.description"
-            placeholder="请输入协议描述"
+            :placeholder="t('protocol.descPlaceholder')"
             type="textarea"
             :rows="3"
             maxlength="200"
             show-word-limit
           />
         </el-form-item>
-        <el-form-item label="排序" prop="sort">
+        <el-form-item :label="t('protocol.sort')" prop="sort">
           <el-input-number
             v-model="formData.sort"
             :min="0"
             :max="9999"
-            placeholder="排序值"
+            :placeholder="t('protocol.sortPlaceholder')"
           />
         </el-form-item>
-        <el-form-item label="状态" prop="status">
+        <el-form-item :label="t('common.status')" prop="status">
           <el-switch
             v-model="formData.status"
             :active-value="1"
             :inactive-value="0"
-            active-text="启用"
-            inactive-text="停用"
+            :active-text="t('common.enabled')"
+            :inactive-text="t('common.disabled')"
           />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="submitting" @click="handleSubmit">
-          确定
+          {{ t('common.confirm') }}
         </el-button>
       </template>
     </el-dialog>
@@ -136,7 +136,7 @@
     <!-- 查看表单对话框 -->
     <el-dialog
       v-model="viewDialogVisible"
-      :title="`查看表单 —— ${viewFormName}`"
+      :title="t('protocol.viewFormTitle', { name: viewFormName })"
       width="min(800px, 92vw)"
       :close-on-click-modal="false"
       @close="handleViewDialogClose"
@@ -156,9 +156,9 @@
       </div>
       <template #footer>
         <el-button @click="handleCopyJson" :disabled="!viewFormRawJson" v-if="viewFormRawJson">
-          复制 JSON
+          {{ t('protocol.copyJson') }}
         </el-button>
-        <el-button @click="viewDialogVisible = false">关闭</el-button>
+        <el-button @click="viewDialogVisible = false">{{ t('common.close') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -169,6 +169,9 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, EditPen, View } from '@element-plus/icons-vue'
 import { useUserStore } from '@/store'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 import {
   getProtocolList,
   addProtocol,
@@ -214,7 +217,7 @@ async function fetchList() {
     }
   } catch (err) {
     console.error('获取协议列表失败', err)
-    ElMessage.error('获取列表失败')
+    ElMessage.error(t('protocol.fetchListFailed'))
   } finally {
     loading.value = false
   }
@@ -262,11 +265,11 @@ const formData = reactive({
 // ---------- 表单校验规则 ----------
 const formRules = {
   name: [
-    { required: true, message: '请输入协议名称', trigger: 'blur' },
-    { min: 1, max: 50, message: '名称长度在 1 到 50 个字符', trigger: 'blur' },
+    { required: true, message: () => t('protocol.nameRequired'), trigger: 'blur' },
+    { min: 1, max: 50, message: () => t('protocol.nameLength'), trigger: 'blur' },
   ],
   description: [
-    { max: 200, message: '描述不能超过 200 个字符', trigger: 'blur' },
+    { max: 200, message: () => t('protocol.descMaxLength'), trigger: 'blur' },
   ],
 }
 
@@ -289,13 +292,13 @@ function handleEdit(row) {
 
 async function handleDelete(row) {
   try {
-    await ElMessageBox.confirm(`确定要删除协议「${row.name}」吗？`, '删除确认', {
+    await ElMessageBox.confirm(t('protocol.deleteConfirm', { name: row.name }), t('protocol.deleteTitle'), {
       type: 'warning',
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
     })
     await deleteProtocol(row.id)
-    ElMessage.success('删除成功')
+    ElMessage.success(t('protocol.deleteSuccess'))
     fetchList()
   } catch {
     // 用户取消或删除失败，不做处理
@@ -324,15 +327,15 @@ async function handleSubmit() {
     if (isEdit.value) {
       payload.id = formData.id
       await updateProtocol(payload)
-      ElMessage.success('编辑成功')
+      ElMessage.success(t('protocol.editSuccess'))
     } else {
       await addProtocol(payload)
-      ElMessage.success('新增成功')
+      ElMessage.success(t('protocol.addSuccess'))
     }
     dialogVisible.value = false
     fetchList()
   } catch (err) {
-    const msg = isEdit.value ? '编辑失败' : '新增失败'
+    const msg = isEdit.value ? t('protocol.editFailed') : t('protocol.addFailed')
     console.error(msg, err)
     ElMessage.error(err?.response?.data?.msg || err?.message || msg)
   } finally {
@@ -380,7 +383,7 @@ function handleViewForm(row) {
   try {
     const formJson = row.formJson
     if (!formJson) {
-      viewFormError.value = '暂无表单配置'
+      viewFormError.value = t('protocol.noFormConfig')
       return
     }
 
@@ -390,7 +393,7 @@ function handleViewForm(row) {
     const deep = tryDeepParse(obj)
     viewFormRawJson.value = JSON.stringify(deep, null, 2)
   } catch (e) {
-    viewFormError.value = '表单配置解析失败，原始内容：' + String(row.formJson)
+    viewFormError.value = t('protocol.formParseFailed', { raw: String(row.formJson) })
     console.error('解析 formJson 失败', e)
   } finally {
     viewFormLoading.value = false
@@ -406,7 +409,7 @@ function handleCopyJson() {
   if (!viewFormRawJson.value) return
   try {
     navigator.clipboard.writeText(viewFormRawJson.value)
-    ElMessage.success('JSON 已复制到剪贴板')
+    ElMessage.success(t('protocol.jsonCopied'))
   } catch {
     // 降级方案：创建临时 textarea 复制
     const textarea = document.createElement('textarea')
@@ -417,7 +420,7 @@ function handleCopyJson() {
     textarea.select()
     document.execCommand('copy')
     document.body.removeChild(textarea)
-    ElMessage.success('JSON 已复制到剪贴板')
+    ElMessage.success(t('protocol.jsonCopied'))
   }
 }
 

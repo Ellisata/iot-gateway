@@ -23,26 +23,26 @@
     >
       <el-menu-item index="/dashboard">
         <el-icon><Odometer /></el-icon>
-        <template #title>首页</template>
+        <template #title>{{ t('menu.dashboard') }}</template>
       </el-menu-item>
 
       <!-- 工业物联网 -->
       <el-sub-menu index="/industrial">
         <template #title>
           <el-icon><Monitor /></el-icon>
-          <span>工业物联网</span>
+          <span>{{ t('menu.industrial') }}</span>
         </template>
         <el-menu-item index="/industrial/device-object">
           <el-icon><Cpu /></el-icon>
-          <template #title>设备对象管理</template>
+          <template #title>{{ t('menu.deviceObject') }}</template>
         </el-menu-item>
         <el-menu-item index="/industrial/protocol">
           <el-icon><List /></el-icon>
-          <template #title>协议管理</template>
+          <template #title>{{ t('menu.protocol') }}</template>
         </el-menu-item>
         <el-menu-item v-if="userStore.isAdmin" index="/industrial/protocol-form">
           <el-icon><Document /></el-icon>
-          <template #title>协议表单配置</template>
+          <template #title>{{ t('menu.protocolForm') }}</template>
         </el-menu-item>
       </el-sub-menu>
 
@@ -50,15 +50,15 @@
       <el-sub-menu index="/data-push">
         <template #title>
           <el-icon><Promotion /></el-icon>
-          <span>数据推送</span>
+          <span>{{ t('menu.dataPush') }}</span>
         </template>
         <el-menu-item index="/data-push/channel">
           <el-icon><Connection /></el-icon>
-          <template #title>通道管理</template>
+          <template #title>{{ t('menu.channel') }}</template>
         </el-menu-item>
         <el-menu-item v-if="userStore.isAdmin" index="/data-push/channel-form">
           <el-icon><Document /></el-icon>
-          <template #title>通道表单管理</template>
+          <template #title>{{ t('menu.channelForm') }}</template>
         </el-menu-item>
       </el-sub-menu>
 
@@ -66,15 +66,15 @@
       <el-sub-menu index="/alarm">
         <template #title>
           <el-icon><Bell /></el-icon>
-          <span>报警管理</span>
+          <span>{{ t('menu.alarm') }}</span>
         </template>
         <el-menu-item index="/alarm/device">
           <el-icon><Monitor /></el-icon>
-          <template #title>设备报警</template>
+          <template #title>{{ t('menu.alarmDevice') }}</template>
         </el-menu-item>
         <el-menu-item index="/alarm/channel">
           <el-icon><Connection /></el-icon>
-          <template #title>通道报警</template>
+          <template #title>{{ t('menu.alarmChannel') }}</template>
         </el-menu-item>
       </el-sub-menu>
 
@@ -82,11 +82,11 @@
       <el-sub-menu v-if="userStore.isAdmin" index="/log">
         <template #title>
           <el-icon><Memo /></el-icon>
-          <span>日志管理</span>
+          <span>{{ t('menu.log') }}</span>
         </template>
         <el-menu-item index="/log/file">
           <el-icon><Tickets /></el-icon>
-          <template #title>日志文件查看</template>
+          <template #title>{{ t('menu.logFile') }}</template>
         </el-menu-item>
       </el-sub-menu>
 
@@ -94,7 +94,7 @@
       <el-sub-menu v-if="userStore.isAdmin" index="/secret">
         <template #title>
           <el-icon><Key /></el-icon>
-          <span>密钥管理</span>
+          <span>{{ t('menu.secret') }}</span>
         </template>
         <el-menu-item index="/secret/api-key">
           <el-icon><Key /></el-icon>
@@ -105,7 +105,7 @@
       <!-- 开放接口文档（独立顶级入口，全员可见，新窗口打开） -->
       <el-menu-item index="/open-api/doc">
         <el-icon><Document /></el-icon>
-        <template #title>开放接口文档</template>
+        <template #title>{{ t('menu.openApiDoc') }}</template>
       </el-menu-item>
 
     </el-menu>
@@ -114,6 +114,7 @@
 
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store'
 
 // 新窗口打开的页面（全页阅读型内容，不在管理端布局内展示）
@@ -129,6 +130,7 @@ defineProps({
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const { t } = useI18n()
 
 /**
  * 菜单点击处理：常规项当前窗口跳转，阅读型文档项新开窗口。

@@ -1,6 +1,6 @@
 <template>
   <div class="p-6">
-    <h1 class="text-2xl font-bold text-gray-800 mb-6">通道管理</h1>
+    <h1 class="text-2xl font-bold text-gray-800 mb-6">{{ t('menu.channel') }}</h1>
 
     <!-- 工具栏 -->
     <el-card shadow="never" class="mb-4">
@@ -8,15 +8,15 @@
         <div class="flex items-center gap-3">
           <el-input
             v-model="queryForm.name"
-            placeholder="请输入通道名称搜索"
+            :placeholder="t('channel.searchPlaceholder')"
             clearable
             style="width: 240px"
             @keyup.enter="handleSearch"
           />
-          <el-button type="primary" @click="handleSearch">查询</el-button>
-          <el-button @click="handleReset">重置</el-button>
+          <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
+          <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
         </div>
-        <el-button type="primary" @click="handleAdd">新增通道</el-button>
+        <el-button type="primary" @click="handleAdd">{{ t('channel.add') }}</el-button>
       </div>
     </el-card>
 
@@ -29,24 +29,24 @@
         style="width: 100%"
         border
       >
-        <el-table-column type="index" label="序号" width="70" align="center" />
-        <el-table-column prop="name" label="名称" min-width="140" />
-        <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="status" label="状态" width="100" align="center">
+        <el-table-column type="index" :label="t('common.index')" width="70" align="center" />
+        <el-table-column prop="name" :label="t('common.name')" min-width="140" />
+        <el-table-column prop="description" :label="t('common.description')" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="status" :label="t('common.status')" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
-              {{ row.status === 1 ? '启用' : '停用' }}
+              {{ row.status === 1 ? t('common.enabled') : t('common.disabled') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" label="创建时间" width="180" align="center" />
-        <el-table-column label="操作" width="130" align="center" fixed="right">
+        <el-table-column prop="createdAt" :label="t('common.createdAt')" width="180" align="center" />
+        <el-table-column :label="t('common.action')" width="130" align="center" fixed="right">
           <template #default="{ row }">
             <div class="flex items-center justify-center gap-2">
-              <el-tooltip content="编辑" placement="top">
+              <el-tooltip :content="t('common.edit')" placement="top">
                 <el-button type="primary" link size="small" :icon="EditPen" @click="handleEdit(row)" />
               </el-tooltip>
-              <el-tooltip content="删除" placement="top">
+              <el-tooltip :content="t('common.delete')" placement="top">
                 <el-button type="danger" link size="small" :icon="Delete" @click="handleDelete(row)" />
               </el-tooltip>
             </div>
@@ -72,7 +72,7 @@
     <!-- 新增 / 编辑 对话框 -->
     <el-dialog
       v-model="dialogVisible"
-      :title="isEdit ? '编辑通道' : '新增通道'"
+      :title="isEdit ? t('channel.editTitle') : t('channel.addTitle')"
       width="580px"
       :close-on-click-modal="false"
       @close="handleDialogClose"
@@ -85,46 +85,46 @@
         label-position="right"
         status-icon
       >
-        <el-form-item label="名称" prop="name">
+        <el-form-item :label="t('common.name')" prop="name">
           <ChannelSelector
             v-model="formData.name"
             :disabled="isEdit"
             @select="handleChannelSelect"
           />
         </el-form-item>
-        <el-form-item label="描述" prop="description">
+        <el-form-item :label="t('common.description')" prop="description">
           <el-input
             v-model="formData.description"
-            placeholder="请输入通道描述"
+            :placeholder="t('channel.descPlaceholder')"
             type="textarea"
             :rows="3"
             maxlength="200"
             show-word-limit
           />
         </el-form-item>
-        <el-form-item label="状态" prop="status">
+        <el-form-item :label="t('common.status')" prop="status">
           <el-switch
             v-model="formData.status"
             :active-value="1"
             :inactive-value="0"
-            active-text="启用"
-            inactive-text="停用"
+            :active-text="t('common.enabled')"
+            :inactive-text="t('common.disabled')"
           />
         </el-form-item>
       </el-form>
 
       <!-- 动态连接配置表单：根据所选通道名称加载 -->
       <template v-if="formData.name">
-        <el-divider content-position="left">连接配置</el-divider>
+        <el-divider content-position="left">{{ t('channel.connectConfig') }}</el-divider>
         <div class="flex items-center justify-between mb-2">
-          <span class="text-sm font-medium text-gray-600">连接参数</span>
+          <span class="text-sm font-medium text-gray-600">{{ t('channel.connectParams') }}</span>
           <el-button
             type="primary"
             link
             :loading="testingConnection"
             @click="handleTestConnectivity"
           >
-            <el-icon class="mr-1"><Connection /></el-icon> 测试连接
+            <el-icon class="mr-1"><Connection /></el-icon> {{ t('channel.testConnection') }}
           </el-button>
         </div>
         <div v-loading="dynamicFormLoading" class="min-h-[60px] pb-2">
@@ -132,7 +132,7 @@
             v-if="!dynamicFormLoading && !dynamicFormRule.length"
             class="text-sm text-gray-400 py-2"
           >
-            该通道暂无连接配置
+            {{ t('channel.noConnectConfig') }}
           </div>
           <form-create
             v-else
@@ -145,9 +145,9 @@
       </template>
 
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="submitting" @click="handleSubmit">
-          确定
+          {{ t('common.confirm') }}
         </el-button>
       </template>
     </el-dialog>
@@ -169,6 +169,9 @@ import {
 } from '@/api/modules/pushChannel'
 import { getPushChannelFormByName } from '@/api/modules/pushChannelForm'
 import ChannelSelector from '@/components/ChannelSelector.vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 // ---------- 查询表单 ----------
 const queryForm = reactive({
@@ -206,7 +209,7 @@ async function fetchList() {
     }
   } catch (err) {
     console.error('获取通道列表失败', err)
-    ElMessage.error('获取列表失败')
+    ElMessage.error(t('channel.fetchListFailed'))
   } finally {
     loading.value = false
   }
@@ -253,11 +256,11 @@ const formData = reactive({
 // ---------- 表单校验规则 ----------
 const formRules = {
   name: [
-    { required: true, message: '请输入通道名称', trigger: 'blur' },
-    { min: 1, max: 50, message: '名称长度在 1 到 50 个字符', trigger: 'blur' },
+    { required: true, message: () => t('channel.nameRequired'), trigger: 'blur' },
+    { min: 1, max: 50, message: () => t('channel.nameLength'), trigger: 'blur' },
   ],
   description: [
-    { max: 200, message: '描述不能超过 200 个字符', trigger: 'blur' },
+    { max: 200, message: () => t('channel.descMaxLength'), trigger: 'blur' },
   ],
 }
 
@@ -383,7 +386,7 @@ function handleChannelSelect({ name }) {
 // ---------- 测试连接 ----------
 async function handleTestConnectivity() {
   if (!formData.name) {
-    ElMessage.warning('请选择通道')
+    ElMessage.warning(t('channel.selectChannelFirst'))
     return
   }
   // 校验动态连接配置表单
@@ -391,7 +394,7 @@ async function handleTestConnectivity() {
     try {
       await dynamicFormApi.value.validate()
     } catch {
-      ElMessage.warning('请完善连接配置')
+      ElMessage.warning(t('channel.completeConnectConfig'))
       return
     }
   }
@@ -407,9 +410,9 @@ async function handleTestConnectivity() {
     const connected =
       typeof res === 'boolean' ? res : res?.connected ?? res?.success ?? true
     if (connected === false || connected === 'false') {
-      ElMessage.error('连接失败，请检查配置')
+      ElMessage.error(t('channel.connectionFailed'))
     } else {
-      ElMessage.success('连接成功')
+      ElMessage.success(t('channel.connectionSuccess'))
     }
   } catch (err) {
     // 失败时全局拦截器已弹出后端错误信息，此处静默
@@ -459,13 +462,13 @@ async function handleEdit(row) {
 
 async function handleDelete(row) {
   try {
-    await ElMessageBox.confirm(`确定要删除通道「${row.name}」吗？`, '删除确认', {
+    await ElMessageBox.confirm(t('channel.deleteConfirm', { name: row.name }), t('channel.deleteTitle'), {
       type: 'warning',
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
     })
     await deleteChannel(row.id)
-    ElMessage.success('删除成功')
+    ElMessage.success(t('channel.deleteSuccess'))
     fetchList()
   } catch {
     // 用户取消或删除失败，不做处理
@@ -489,7 +492,7 @@ async function handleSubmit() {
     try {
       await dynamicFormApi.value.validate()
     } catch {
-      ElMessage.warning('请完善连接配置')
+      ElMessage.warning(t('channel.completeConnectConfig'))
       return
     }
   }
@@ -506,10 +509,10 @@ async function handleSubmit() {
     if (isEdit.value) {
       payload.id = formData.id
       await updateChannel(payload)
-      ElMessage.success('编辑成功')
+      ElMessage.success(t('channel.editSuccess'))
     } else {
       await addChannel(payload)
-      ElMessage.success('新增成功')
+      ElMessage.success(t('channel.addSuccess'))
     }
     dialogVisible.value = false
     fetchList()

@@ -7,6 +7,7 @@ import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
 
 import App from './App.vue'
 import router from './router'
+import i18n from './i18n'
 import './styles/tailwind.css'
 import './styles/index.scss'
 
@@ -25,7 +26,8 @@ window.axios = axios
 
 app.use(createPinia())
 app.use(router)
-app.use(ElementPlus, { locale: zhCn })
+app.use(i18n)
+app.use(ElementPlus)
 app.use(FcDesigner)
 app.use(FcDesigner.formCreate) // 注册表单渲染器
 

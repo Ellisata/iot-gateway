@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 
 /**
  * Excel 批量导入组合式函数：封装文件选择、.xlsx 校验、上传、结果弹窗状态与模板下载。
@@ -10,6 +11,7 @@ import { ElMessage } from 'element-plus'
  * @param {() => void} [opts.refresh] - 导入成功（至少 1 条）后刷新列表
  */
 export function useExcelImport({ importFn, downloadFn, templateName, refresh }) {
+  const { t } = useI18n()
   const fileInputRef = ref(null)
   const importing = ref(false)
   const importResultVisible = ref(false)
@@ -24,7 +26,7 @@ export function useExcelImport({ importFn, downloadFn, templateName, refresh }) 
     e.target.value = '' // 允许重复选择同一文件
     if (!file) return
     if (!file.name.toLowerCase().endsWith('.xlsx')) {
-      ElMessage.warning('仅支持 .xlsx 格式的 Excel 文件')
+      ElMessage.warning(t('excelImport.onlyXlsx'))
       return
     }
     importing.value = true
@@ -46,14 +48,14 @@ export function useExcelImport({ importFn, downloadFn, templateName, refresh }) 
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = templateName
+      a.download = typeof templateName === 'function' ? templateName() : templateName
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-      ElMessage.success('模板已下载')
+      ElMessage.success(t('excelImport.templateDownloaded'))
     } catch {
-      ElMessage.error('模板下载失败')
+      ElMessage.error(t('excelImport.templateDownloadFailed'))
     }
   }
 

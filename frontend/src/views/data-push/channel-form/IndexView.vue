@@ -3,17 +3,17 @@
     <!-- 顶部工具栏 -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <span class="toolbar-label">选择通道：</span>
+        <span class="toolbar-label">{{ t('channelForm.selectChannel') }}</span>
         <ChannelSelector
           v-model="selectedChannel"
-          button-text="选择通道"
+          :button-text="t('channelForm.selectChannelBtn')"
           @select="handleChannelSelect"
         />
       </div>
       <div class="toolbar-right">
         <el-button type="primary" :loading="saving" @click="handleSave">
           <el-icon><Check /></el-icon>
-          保存
+          {{ t('common.save') }}
         </el-button>
       </div>
     </div>
@@ -28,7 +28,7 @@
       <!-- 加载遮罩 -->
       <div v-if="formLoading" class="loading-mask">
         <el-icon class="loading-icon" :size="32"><Loading /></el-icon>
-        <span>加载中...</span>
+        <span>{{ t('common.loading') }}</span>
       </div>
     </div>
 
@@ -44,6 +44,9 @@ import {
   createPushChannelForm,
 } from '@/api/modules/pushChannelForm'
 import ChannelSelector from '@/components/ChannelSelector.vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 defineOptions({ name: 'DataPushChannelForm' })
 
@@ -132,14 +135,14 @@ async function handleSave() {
 
   const name = selectedChannel.value
   if (!name) {
-    ElMessage.warning('请先选择一个通道')
+    ElMessage.warning(t('channelForm.selectFirst'))
     return
   }
 
   const rule = JSON.parse(designerRef.value.getJson() || '[]')
   const options = JSON.parse(designerRef.value.getOptionsJson() || '{}')
   if (!rule || !rule.length) {
-    ElMessage.warning('表单内容为空，请先拖拽组件')
+    ElMessage.warning(t('channelForm.emptyForm'))
     return
   }
 
@@ -149,9 +152,9 @@ async function handleSave() {
       name,
       formJson: { rule, options }
     })
-    ElMessage.success('保存成功')
+    ElMessage.success(t('channelForm.saveSuccess'))
   } catch (e) {
-    ElMessage.error(e?.msg || '保存失败')
+    ElMessage.error(e?.msg || t('channelForm.saveFailed'))
   } finally {
     saving.value = false
   }
