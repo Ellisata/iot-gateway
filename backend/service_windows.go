@@ -12,7 +12,7 @@ import (
 )
 
 // 服务名：必须与 install.bat / uninstall.bat 中的 SERVICE_NAME 保持一致
-const serviceName = "iot-hand-gateway"
+const serviceName = "iot-gateway"
 
 // runAsWindowsService 检测当前是否由服务控制管理器（SCM）启动：
 //   - 是：切换工作目录到可执行文件所在目录（sc 服务默认工作目录是 System32，

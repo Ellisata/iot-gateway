@@ -1,0 +1,36 @@
+# 统一行尾规范，防止跨平台编辑器/检出把批处理改成 LF 导致 cmd 解析错乱
+# 默认：所有文本文件入库规范为 LF
+* text=auto
+
+# Windows 批处理必须 CRLF（cmd.exe 无法解析 LF-only 的脚本）
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Shell 脚本 / Docker / Go 必须 LF
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.go text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
+
+# 前端资源统一 LF
+*.js text eol=lf
+*.ts text eol=lf
+*.vue text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.scss text eol=lf
+*.json text eol=lf
+
+# 二进制文件不做任何转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.exe binary
+*.zip binary
+*.gz binary

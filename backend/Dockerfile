@@ -36,9 +36,9 @@ WORKDIR /app
 # 从构建阶段复制二进制文件
 #COPY --from=builder /app/ibs .
 
-COPY ./iot-hand-gateway .
+COPY ./iot-gateway .
 
-RUN chmod +x iot-hand-gateway
+RUN chmod +x iot-gateway
 
 # default.yaml 已通过 go:embed 嵌入二进制，单二进制部署无需额外文件。
 # 如需在部署时覆盖嵌入的默认配置（如端口、JWT 密钥），取消下方 COPY 并放置自定义 default.yaml。
@@ -55,4 +55,4 @@ EXPOSE 9081
   #CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
 
 # 运行应用
-ENTRYPOINT ["/app/iot-hand-gateway"]
+ENTRYPOINT ["/app/iot-gateway"]

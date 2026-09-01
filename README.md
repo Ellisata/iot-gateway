@@ -1,4 +1,4 @@
-# iot-hand-gateway
+# iot-gateway
 
 工业物联网数据网关。前端 `frontend`（Vue3 + Vite），后端 `backend`（Go + Gin）。
 
@@ -27,14 +27,14 @@
 
 ### 服务化部署（系统后台服务）
 
-将可执行文件安装为开机自启的后台服务（服务名 `iot-hand-gateway`，管理地址 `http://<主机IP>:9081/admin`）。
+将可执行文件安装为开机自启的后台服务（服务名 `iot-gateway`，管理地址 `http://<主机IP>:9081/admin`）。
 
 | 平台 | 安装 | 卸载 |
 |---|---|---|
 | Windows | 管理员运行 `install.bat` | 管理员运行 `uninstall.bat`（`--purge` 连数据一并删除） |
 | Linux | `sudo ./install.sh` | `sudo ./uninstall.sh`（`--purge` 连数据一并删除） |
 
-- 安装目录：Windows 默认 `%ProgramFiles%\iot-hand-gateway`（可 `set IOT_GATEWAY_HOME=...` 覆盖）；Linux 默认 `/opt/iot-hand-gateway`（可 `INSTALL_DIR=...` 覆盖）。
+- 安装目录：Windows 默认 `%ProgramFiles%\iot-gateway`（可 `set IOT_GATEWAY_HOME=...` 覆盖）；Linux 默认 `/opt/iot-gateway`（可 `INSTALL_DIR=...` 覆盖）。
 - 服务以安装目录为工作目录运行，`data/`（SQLite）与 `log/`（日志）写入该目录；程序崩溃自动重启。
 - Windows 后端已内置原生服务支持（`golang.org/x/sys/windows/svc`，见 `backend/service_windows.go`），`install.bat` 直接用 `sc` 命令注册，无需 NSSM 等第三方工具；崩溃自动重启由 `sc failure` 配置。
 - 如需覆盖嵌入的默认配置，将自定义 `default.yaml` 放到脚本同目录，安装时会一并复制到安装目录。

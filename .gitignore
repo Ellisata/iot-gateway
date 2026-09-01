@@ -1,6 +1,6 @@
 # 编译输出
-iot-hand-gateway
-iot-hand-gateway.exe
+iot-gateway
+iot-gateway.exe
 *.exe
 
 # IDE

@@ -1,6 +1,6 @@
 @echo off
 :: ============================================
-::  iot-hand-gateway 生产模式一键构建
+::  iot-gateway 生产模式一键构建
 ::  前端构建 -> 同步到 backend/web/dist -> Go 编译
 ::  用法: build.bat          编译 Linux + Windows（部署用，默认）
 ::        build.bat windows  仅编译 Windows（本地运行快）

@@ -1,15 +1,15 @@
 @echo off
 :: ============================================================
-::  iot-hand-gateway Windows 服务卸载脚本
+::  iot-gateway Windows 服务卸载脚本
 ::
 ::  用法:
 ::    uninstall.bat           停止并删除服务（保留安装目录及数据）
 ::    uninstall.bat --purge   停止并删除服务，同时删除安装目录（慎用）
 :: ============================================================
 setlocal
-set "SERVICE_NAME=iot-hand-gateway"
+set "SERVICE_NAME=iot-gateway"
 set "SRC_DIR=%~dp0"
-set "INSTALL_DIR=%ProgramFiles%\iot-hand-gateway"
+set "INSTALL_DIR=%ProgramFiles%\iot-gateway"
 if not "%IOT_GATEWAY_HOME%"=="" set "INSTALL_DIR=%IOT_GATEWAY_HOME%"
 
 :: 检查管理员权限

@@ -1,22 +1,22 @@
 @echo off
 :: ============================================================
-::  iot-hand-gateway Windows 服务安装脚本（原生 sc，无需 NSSM）
-::  将脚本同目录下的 iot-hand-gateway.exe 注册为系统后台服务
+::  iot-gateway Windows 服务安装脚本（原生 sc，无需 NSSM）
+::  将脚本同目录下的 iot-gateway.exe 注册为系统后台服务
 ::  （exe 内置 Windows 服务支持，见 backend/service_windows.go）
 ::
 ::  用法:
-::    install.bat                          安装并启动服务（默认 %ProgramFiles%\iot-hand-gateway）
+::    install.bat                          安装并启动服务（默认 %ProgramFiles%\iot-gateway）
 ::    set IOT_GATEWAY_HOME=C:\iot-gateway  自定义安装目录
 ::
-::  服务名: iot-hand-gateway
+::  服务名: iot-gateway
 ::  管理地址: http://localhost:9081/admin
 :: ============================================================
 setlocal
-set "SERVICE_NAME=iot-hand-gateway"
-set "DISPLAY_NAME=IoT Hand Gateway"
-set "BINARY_NAME=iot-hand-gateway.exe"
+set "SERVICE_NAME=iot-gateway"
+set "DISPLAY_NAME=IoT Gateway"
+set "BINARY_NAME=iot-gateway.exe"
 set "SRC_DIR=%~dp0"
-set "INSTALL_DIR=%ProgramFiles%\iot-hand-gateway"
+set "INSTALL_DIR=%ProgramFiles%\iot-gateway"
 if not "%IOT_GATEWAY_HOME%"=="" set "INSTALL_DIR=%IOT_GATEWAY_HOME%"
 
 :: 检查管理员权限

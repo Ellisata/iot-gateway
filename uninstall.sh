@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-#  iot-hand-gateway Linux systemd 服务卸载脚本
+#  iot-gateway Linux systemd 服务卸载脚本
 #
 #  用法:
 #    sudo ./uninstall.sh            停止并卸载服务(保留安装目录与数据)
@@ -8,8 +8,8 @@
 # ============================================================
 set -euo pipefail
 
-SERVICE_NAME="iot-hand-gateway"
-INSTALL_DIR="${INSTALL_DIR:-/opt/iot-hand-gateway}"
+SERVICE_NAME="iot-gateway"
+INSTALL_DIR="${INSTALL_DIR:-/opt/iot-gateway}"
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
 # 检查 root 权限

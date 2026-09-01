@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # ============================================================
-#  iot-hand-gateway Linux systemd 服务安装脚本
-#  将脚本同目录下的 iot-hand-gateway 二进制安装为系统后台服务
+#  iot-gateway Linux systemd 服务安装脚本
+#  将脚本同目录下的 iot-gateway 二进制安装为系统后台服务
 #
 #  用法:
-#    sudo ./install.sh                       安装并启动服务(默认 /opt/iot-hand-gateway)
+#    sudo ./install.sh                       安装并启动服务(默认 /opt/iot-gateway)
 #    INSTALL_DIR=/opt/xxx sudo ./install.sh  自定义安装目录
 #
-#  服务名: iot-hand-gateway
+#  服务名: iot-gateway
 #  管理地址: http://<本机IP>:9081/admin
 # ============================================================
 set -euo pipefail
 
-SERVICE_NAME="iot-hand-gateway"
-BINARY_NAME="iot-hand-gateway"
-INSTALL_DIR="${INSTALL_DIR:-/opt/iot-hand-gateway}"
+SERVICE_NAME="iot-gateway"
+BINARY_NAME="iot-gateway"
+INSTALL_DIR="${INSTALL_DIR:-/opt/iot-gateway}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BINARY_PATH="${SCRIPT_DIR}/${BINARY_NAME}"
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
@@ -50,7 +50,7 @@ fi
 echo "[2/3] 写入 systemd 服务单元 ..."
 cat > "${UNIT_FILE}" <<EOF
 [Unit]
-Description=IoT Hand Gateway
+Description=IoT Gateway
 After=network-online.target
 Wants=network-online.target
 
