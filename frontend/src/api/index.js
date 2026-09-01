@@ -1,6 +1,18 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
+import { useUserStore } from '@/store'
+
+// 统一处理登录失效：清空本地登录态后跳转登录页。
+// 注意必须调用 store.logout() 而不是只删 localStorage —— 路由守卫依据
+// userStore.isLoggedIn 判断登录态，只删 token 会被守卫重定向回首页。
+function handleAuthError(msg) {
+  useUserStore().logout()
+  if (router.currentRoute.value.name !== 'Login') {
+    ElMessage.error(msg)
+    router.push('/login')
+  }
+}
 
 // 创建 axios 实例
 // 注意：不在此处设置全局 Content-Type，axios 会自动为对象请求设置
@@ -37,14 +49,15 @@ request.interceptors.response.use(
 
     const res = response.data
 
-    // 如果请求配置了 silent，跳过错误提示
-    if (config?.silent) return res
-
+    // 登录失效优先处理：即使请求配置了 silent 也要登出跳转，
+    // silent 只用于屏蔽普通业务错误提示
     if (res.code === "20004" || res.code === "20005" || res.code === "20006") {
-      localStorage.removeItem('token')
-      router.push('/login')
+      handleAuthError(res.msg || '登录已过期，请重新登录')
       return Promise.reject(new Error(res.msg || '登录已过期，请重新登录'))
     }
+
+    // 如果请求配置了 silent，跳过错误提示
+    if (config?.silent) return res
 
     // 如果后端返回的业务状态码不是 0，按错误处理
     if (res.code && res.code !== "0") {
@@ -54,6 +67,12 @@ request.interceptors.response.use(
     return res.data
   },
   (error) => {
+    // 401 无论是否 silent 都要登出跳转；silent 只屏蔽其余错误提示
+    if (error.response?.status === 401) {
+      handleAuthError('登录已过期，请重新登录')
+      return Promise.reject(error)
+    }
+
     // 静默模式跳过错误提示
     if (error.config?.silent) {
       return Promise.reject(error)
@@ -61,11 +80,6 @@ request.interceptors.response.use(
 
     if (error.response) {
       switch (error.response.status) {
-        case 401:
-          ElMessage.error('登录已过期，请重新登录')
-          localStorage.removeItem('token')
-          router.push('/login')
-          break
         case 403:
           ElMessage.error('没有权限访问')
           break
