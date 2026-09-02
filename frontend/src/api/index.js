@@ -2,7 +2,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
 import { useUserStore } from '@/store'
-import { translate as t } from '@/i18n'
+import i18n, { translate as t } from '@/i18n'
 
 // 统一处理登录失效：清空本地登录态后跳转登录页。
 // 注意必须调用 store.logout() 而不是只删 localStorage —— 路由守卫依据
@@ -31,6 +31,8 @@ request.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    // 注入语言头，后端按此返回对应语言的错误文案
+    config.headers.area = i18n.global.locale.value
     return config
   },
   (error) => {

@@ -335,9 +335,9 @@ async function handleSubmit() {
     dialogVisible.value = false
     fetchList()
   } catch (err) {
-    const msg = isEdit.value ? t('protocol.editFailed') : t('protocol.addFailed')
-    console.error(msg, err)
-    ElMessage.error(err?.response?.data?.msg || err?.message || msg)
+    //const msg = isEdit.value ? t('protocol.editFailed') : t('protocol.addFailed')
+    //console.error(msg, err)
+    //ElMessage.error(err?.response?.data?.msg || err?.message || msg)
   } finally {
     submitting.value = false
   }

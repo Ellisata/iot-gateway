@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"iot-gateway/logger"
+	"iot-gateway/utils"
 )
 
 //go:embed *.json
@@ -49,12 +50,24 @@ func initTranslations() {
 	}
 }
 
-// areaToLang 区域到语言代码映射
+// areaToLang 区域/语言代码到语言文件映射
+// 兼容 BCP47（zh-CN / en-US）与自定义区域码（zh_hk / hk / tw 等）
 func areaToLang(area string) string {
-	switch strings.ToLower(area) {
-	case "zh_hk", "tw", "mo", "hk":
+	normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(area), "_", "-"))
+	if normalized == "" {
+		return "zh"
+	}
+
+	primary := normalized
+	if idx := strings.Index(normalized, "-"); idx > 0 {
+		primary = normalized[:idx]
+	}
+
+	switch {
+	case primary == "hk" || primary == "tw" || primary == "mo",
+		normalized == "zh-hk" || normalized == "zh-tw" || normalized == "zh-mo":
 		return "zh-hk"
-	case "en", "us", "uk", "au", "ca":
+	case primary == "en":
 		return "en"
 	default:
 		return "zh"
@@ -106,12 +119,9 @@ func TCtxf(ctx context.Context, key string, args ...interface{}) string {
 }
 
 // LangFromCtx 从 context 中提取语言代码
+// 区域值由 areaMiddleware 经 utils.SetAreaToCtx 注入（类型化 key）
 func LangFromCtx(ctx context.Context) string {
-	area, ok := ctx.Value("area").(string)
-	if !ok || area == "" {
-		return "zh"
-	}
-	return areaToLang(area)
+	return areaToLang(utils.GetAreaFromCtx(ctx))
 }
 
 func formatMessage(msg string, args ...interface{}) string {

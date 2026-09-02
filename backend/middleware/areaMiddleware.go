@@ -9,7 +9,7 @@ import (
 // AreaMiddleware 区域设置中间件
 func AreaMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		area := c.GetHeader("Area")
+		area := c.GetHeader("area")
 		if area == "" {
 			area = "zh"
 		}
