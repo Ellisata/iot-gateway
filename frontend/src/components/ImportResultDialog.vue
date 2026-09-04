@@ -1,3 +1,8 @@
+<!--
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+-->
+
 <template>
   <el-dialog v-model="visible" :title="t('excelImport.resultTitle')" width="640px" :close-on-click-modal="false">
     <div class="flex items-center gap-6 mb-4 text-sm">

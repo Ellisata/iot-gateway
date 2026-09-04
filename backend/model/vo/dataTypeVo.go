@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 package vo
 
 // DataTypeOptionVO 协议可配置数据类型选项（配置界面类型下拉）。

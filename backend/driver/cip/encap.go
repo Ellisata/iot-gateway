@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 // Package cip 提供 EtherNet/IP（CIP）协议的厂商无关通用实现：
 // 封装层（会话管理、Common Packet Format）与 CIP 通用状态码。
 //

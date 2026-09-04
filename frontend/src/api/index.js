@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 package po
 
 // User 用户持久化对象（映射 sqlite sys_user 表）

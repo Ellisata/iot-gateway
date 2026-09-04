@@ -1,3 +1,8 @@
+<!--
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+-->
+
 <template>
   <div class="h-screen flex">
     <!-- 侧边栏导航 -->
@@ -32,7 +37,7 @@
             </span>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="profile">{{ t('layout.profile') }}</el-dropdown-item>
+                <el-dropdown-item command="changePassword">{{ t('layout.changePassword') }}</el-dropdown-item>
                 <el-dropdown-item divided command="logout">{{ t('layout.logout') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -45,6 +50,9 @@
         <router-view />
       </el-main>
     </el-container>
+
+    <!-- 修改密码对话框 -->
+    <ChangePasswordDialog v-model="changePasswordVisible" @success="handleChangePasswordSuccess" />
   </div>
 </template>
 
@@ -55,6 +63,7 @@ import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store'
 import SideMenu from '@/components/SideMenu.vue'
 import LocaleSwitcher from '@/components/LocaleSwitcher.vue'
+import ChangePasswordDialog from '@/components/ChangePasswordDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -73,9 +82,22 @@ function toggleSidebar() {
 }
 
 function handleCommand(command) {
+  if (command === 'changePassword') {
+    changePasswordVisible.value = true
+  }
   if (command === 'logout') {
     userStore.logout()
     router.push('/login')
   }
+}
+
+// 修改密码对话框
+const changePasswordVisible = ref(false)
+
+/** 密码修改成功后清空登录态，跳转登录页重新认证 */
+function handleChangePasswordSuccess() {
+  changePasswordVisible.value = false
+  userStore.logout()
+  router.push('/login')
 }
 </script>

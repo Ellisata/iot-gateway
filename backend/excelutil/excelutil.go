@@ -1,6 +1,9 @@
 // Package excelutil 提供 Excel(.xlsx) 批量导入的通用框架与模板生成工具。
 // 各业务（设备、设备地址等）只需提供行解析回调，解析/表头校验/空行跳过/
 // 去重/事务/逐行续入/汇总等样板逻辑统一在此处理。
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 package excelutil
 
 import (

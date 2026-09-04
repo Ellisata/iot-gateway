@@ -1,5 +1,7 @@
 # 协议容量测试结论
 
+[简体中文](capacity-testing.md) | [English](capacity-testing.en.md)
+
 > 测试工具：`cmd/loadtest`（方法学与完整矩阵数据见 [cmd/loadtest/README.md](../cmd/loadtest/README.md)）。
 > 环境：8 核 / Windows / loopback / 进程内假 PLC 服务器，scan=1000ms。
 > **数值为网关侧上限**，随机器核数、设备真实往返时延变化；现场容量评估按本文的

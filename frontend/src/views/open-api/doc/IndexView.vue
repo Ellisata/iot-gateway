@@ -1,3 +1,8 @@
+<!--
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+-->
+
 <template>
   <div class="h-screen flex flex-col bg-[#f5f7fa]">
     <!-- 独立阅读页顶栏（不在管理端主布局内，供新窗口打开） -->

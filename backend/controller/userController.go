@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 package controller
 
 import (
@@ -105,4 +108,20 @@ func (ctr *UserController) GetProfile(c *gin.Context) {
 		return
 	}
 	c.JSON(200, response.Success(data))
+}
+
+// ChangePassword 修改当前用户密码（校验旧密码）
+func (ctr *UserController) ChangePassword(c *gin.Context) {
+	ctx := c.Request.Context()
+	userId, _ := c.Get("userId")
+	var req dto.ChangePasswordDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	if err := ctr.userService.ChangePassword(ctx, userId.(string), &req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(nil))
 }

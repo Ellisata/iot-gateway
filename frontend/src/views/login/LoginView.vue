@@ -1,3 +1,8 @@
+<!--
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+-->
+
 <template>
   <div class="w-full max-w-[420px] px-4 animate-card-enter">
     <div class="login-card-wrapper">

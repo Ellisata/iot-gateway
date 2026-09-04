@@ -1,5 +1,7 @@
 # loadtest 端到端采集容量压测
 
+[简体中文](README.md) | [English](README.en.md)
+
 进程内跑完整采集链路（采集引擎 + worker 池 + 协议驱动 + **假 PLC 服务器**），
 扫描（设备数 × 单设备点位）矩阵，量化每种协议在网关侧可支撑的**设备容量**与**点位容量**。
 
@@ -179,7 +181,7 @@ RTT 1ms 时单设备 1000 点即开始掉点（周期 ≈ 1.2s）。
 驱动把地址解析为 NodeID（本地无 I/O）后按 `maxBatch` 分批 ReadRequest，
 帧数 = ceil(N/maxBatch)，与点位布局无关（数值 NodeID 无区间合并概念）。
 假服务器复用 gopcua 进程内 server 包（与 driver/opcua 集成测试同方案），
-Read 覆盖处理器按 NodeID 公式返值（详细结论见 specs/capacity-testing.md）。
+Read 覆盖处理器按 NodeID 公式返值（详细结论见 [specs/capacity-testing.md](../../specs/capacity-testing.md)）。
 
 **连续布局（`ns=1;i=<n>`，scan=1000ms）**：全矩阵 **0% 掉点**（最高 100×5000
 = 50 万点，实际 56 万记录/秒），与 Modbus 基线同级。

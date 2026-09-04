@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 import { defineStore } from 'pinia'
 
 const USER_INFO_KEY = 'userInfo'

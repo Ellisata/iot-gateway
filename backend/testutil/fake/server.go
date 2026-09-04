@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 // Package fake 提供协议假 PLC 服务器（真实 TCP 监听），供端到端容量压测使用。
 //
 // 每个协议一个构造函数（NewModbusTCP / NewMC3E ...），返回监听 127.0.0.1 随机端口的

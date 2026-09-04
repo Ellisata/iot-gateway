@@ -1,5 +1,7 @@
 # 推送载荷契约（push payload）
 
+[简体中文](push-payload.md) | [English](push-payload.en.md)
+
 > 本规范定义采集数据推送到外部通道（当前为 MQTT）时，每条点位 JSON 的字段语义与
 > `value` 值的**自描述解析约定**。外部消费端应据此解析，不依赖网关内部实现。
 

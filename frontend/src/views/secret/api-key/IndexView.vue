@@ -1,3 +1,8 @@
+<!--
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+-->
+
 <template>
   <div class="p-6">
     <h1 class="text-2xl font-bold text-gray-800 mb-6">API Key</h1>

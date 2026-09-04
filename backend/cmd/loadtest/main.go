@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 // loadtest 端到端采集容量压测工具。
 //
 // 进程内跑完整采集链路（采集引擎 + worker 池 + 协议驱动 + 假 PLC 服务器），

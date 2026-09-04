@@ -1,0 +1,33 @@
+name: 功能建议 / Feature Request
+description: 提议新协议驱动、推送通道或功能改进 / Propose a new protocol driver, push channel or improvement
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        支持的协议驱动与推送通道均为插件式注册表设计，欢迎提出新协议（如永宏、基恩士、施耐德等）或新通道（如 Kafka、PostgreSQL）建议。
+        Protocol drivers and push channels are registry-based plugins — proposals for new ones (e.g. Keyence, Schneider, Kafka, PostgreSQL) are welcome.
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题 / Problem to solve
+      description: 使用场景是什么？目前为什么做不到？/ What scenario? Why can't current features do it?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案 / Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 备选方案 / Alternatives considered
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: 是否愿意贡献 / Willing to contribute?
+      description: 提交 PR 前请阅读 [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md)（含 CLA 约定）
+      options:
+        - label: 我愿意提交 PR 实现 / I'm willing to submit a PR

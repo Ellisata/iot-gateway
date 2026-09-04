@@ -1,0 +1,72 @@
+name: Bug 报告 / Bug Report
+description: 报告 iot-gateway 的缺陷 / Report a defect in iot-gateway
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请先搜索已有 Issue 避免重复。**请勿粘贴密钥、密码、真实设备 IP 等敏感信息。**
+        Thanks for the report! Please search existing issues first. **Do not paste secrets, passwords or real device IPs.**
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 问题描述 / What happened?
+      description: 期望行为 vs 实际行为 / Expected vs actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      placeholder: |
+        1. 配置设备 X 协议 Y
+        2. 启动采集
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: 涉及协议 / Protocol involved
+      options:
+        - 不涉及 / Not protocol-related
+        - ModBus.RTU
+        - ModBus.TCP
+        - Siemens.S7
+        - Mitsubishi.MC
+        - Omron.FINS
+        - Omron.CIP
+        - Rockwell.CIP
+        - OPC.UA
+    validations:
+      required: true
+  - type: dropdown
+    id: deploy
+    attributes:
+      label: 部署方式 / Deployment
+      options:
+        - 单二进制 / Binary
+        - Windows 服务 / Windows service
+        - Linux systemd
+        - Docker Compose
+        - 开发模式 / Dev mode
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / Version
+      description: 运行 `./iot-gateway` 后启动日志中的版本，或 commit hash
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志片段 / Relevant logs
+      description: `log/app-*.log` 中与问题相关的片段（已脱敏）
+      render: shell
+  - type: textarea
+    id: config
+    attributes:
+      label: 相关配置（脱敏）/ Related config (sanitized)
+      render: yaml

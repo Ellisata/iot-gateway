@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用咨询 / Usage questions
+    url: https://github.com/wang4856304/iot-gateway/discussions
+    about: 使用问题请到 Discussions 讨论，便于检索 / Ask usage questions in Discussions for searchability
+  - name: 安全漏洞 / Security vulnerabilities
+    url: mailto:15289288565@163.com
+    about: 请勿公开披露，请邮件私下报告 / Please report privately via email, do not open a public issue

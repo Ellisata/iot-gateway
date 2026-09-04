@@ -1,0 +1,28 @@
+# iot-gateway 构建部署(多阶段全流程构建: 前端构建 -> Go 编译 -> 运行镜像)
+#
+# 无需本地预构建,直接:
+#   docker compose up -d --build    # 构建镜像并后台启动
+#   docker compose logs -f          # 跟踪日志
+#   docker compose ps               # 查看状态(含健康检查)
+#   docker compose down             # 停止并移除容器
+services:
+  iot-gateway:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: iot-gateway:1.0
+    container_name: iot-gateway
+    restart: unless-stopped
+    ports:
+      - "9081:9081"
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/app/data   # SQLite 数据库(data/iot-gateway.db)
+      - ./log:/app/log     # 运行日志
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9081/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

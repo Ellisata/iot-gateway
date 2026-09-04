@@ -1,0 +1,33 @@
+# 构建上下文为仓库根目录(多阶段全流程构建)
+# 只保留 frontend/ 与 backend/ 源码,其余一律排除
+
+# 版本管理与文档(注意: backend/docs/openApi.md 被 go:embed 嵌入,不能排除)
+.git
+.gitignore
+CLA.md
+README.md
+README.en.md
+LICENSE
+docker-compose.yml
+.dockerignore
+
+# 本地构建产物(容器内会重新构建,务必排除旧二进制与旧前端产物)
+iot-gateway
+iot-gateway.exe
+backend/iot-gateway
+backend/iot-gateway.exe
+backend/web/dist
+frontend/dist
+frontend/node_modules
+
+# 运行时数据与日志
+backend/data
+backend/log
+*.db
+
+# 安装脚本
+install.bat
+install.sh
+uninstall.bat
+uninstall.sh
+build.bat

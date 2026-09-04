@@ -1,3 +1,8 @@
+<!--
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+-->
+
 <template>
   <el-dropdown trigger="click" @command="handleCommand">
     <span class="flex items-center gap-1 cursor-pointer hover:text-[#409eff] text-sm">

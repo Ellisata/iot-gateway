@@ -2,7 +2,10 @@ server:
   port: 9081
 
 jwt:
-  secret: 573ce5969e9884d49d4fab77b09a306a
+  # 登录令牌签名密钥。留空时每次启动自动随机生成（重启后所有登录态失效）。
+  # 生产环境建议固定密钥以保证重启后登录态不丢：优先读环境变量 IOT_GATEWAY_JWT_SECRET，
+  # 否则使用此处配置值。切勿使用公开仓库中的示例值。
+  secret: ""
   expireHour: 24
   issuer: iot-gateway
 

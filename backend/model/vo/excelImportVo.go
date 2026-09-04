@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 package vo
 
 // ExcelImportErrorVO 单行导入失败明细（Excel 批量导入共用）

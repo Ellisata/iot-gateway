@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 package service
 
 import (
@@ -149,6 +152,59 @@ func (s *UserService) Login(ctx context.Context, req *dto.LoginDTO) (*vo.LoginVO
 	return &vo.LoginVO{
 		AccessToken: token,
 	}, nil
+}
+
+// ChangePassword 修改密码（校验旧密码）
+func (s *UserService) ChangePassword(ctx context.Context, userId string, req *dto.ChangePasswordDTO) error {
+	// 解密旧密码
+	oldPassword, err := utils.RSADecrypt(req.OldPassword, utils.PrivateKey)
+	if err != nil {
+		return err
+	}
+	// 解密新密码
+	newPassword, err := utils.RSADecrypt(req.NewPassword, utils.PrivateKey)
+	if err != nil {
+		return err
+	}
+	// 解密确认密码并校验两次输入一致（RSA 加密文本不同，只能在解密后比对）
+	confirmPassword, err := utils.RSADecrypt(req.ConfirmPassword, utils.PrivateKey)
+	if err != nil {
+		return err
+	}
+	if newPassword != confirmPassword {
+		return appError.NewAppErrorCtx(
+			enums.ParamValidEnum.GetCode(),
+			enums.ParamValidEnum.GetMessage(),
+			enums.ParamValidEnum.GetMsgKey(),
+		)
+	}
+
+	var user po.User
+	if err := s.sqliteDB.WithContext(ctx).Where("id = ?", userId).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return appError.NewAppErrorCtx(
+				enums.UserNotExistsEnum.GetCode(),
+				enums.UserNotExistsEnum.GetMessage(),
+				enums.UserNotExistsEnum.GetMsgKey(),
+			)
+		}
+		return err
+	}
+
+	if !utils.CheckPassword(oldPassword, user.Password) {
+		return appError.NewAppErrorCtx(
+			enums.PasswordErrEnum.GetCode(),
+			enums.PasswordErrEnum.GetMessage(),
+			enums.PasswordErrEnum.GetMsgKey(),
+		)
+	}
+
+	hashedPassword, err := utils.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+
+	return s.sqliteDB.WithContext(ctx).Model(&po.User{}).Where("id = ?", userId).Update("password", hashedPassword).Error
 }
 
 // PageUser 用户分页查询

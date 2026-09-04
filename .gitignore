@@ -21,6 +21,8 @@ temp/
 data/
 *.db
 
+log/
+*.log
 # Claude Code 设置
 .claude/settings.json
 .claude/settings.local.json

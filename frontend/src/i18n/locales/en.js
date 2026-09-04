@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 /**
  * English locale
  */
@@ -82,7 +85,26 @@ export default {
   layout: {
     admin: 'Admin',
     profile: 'Profile',
+    changePassword: 'Change Password',
     logout: 'Sign Out',
+  },
+
+  // ---------- Change password ----------
+  changePassword: {
+    title: 'Change Password',
+    oldPassword: 'Old Password',
+    oldPasswordPlaceholder: 'Enter old password',
+    newPassword: 'New Password',
+    newPasswordPlaceholder: 'Enter new password',
+    confirmPassword: 'Confirm Password',
+    confirmPasswordPlaceholder: 'Enter new password again',
+    oldRequired: 'Please enter the old password',
+    newRequired: 'Enter new password',
+    newMinLength: 'Password must be at least 6 characters',
+    confirmRequired: 'Please enter the new password again',
+    confirmMismatch: 'The two passwords do not match',
+    submit: 'OK',
+    success: 'Password changed, please sign in again',
   },
 
   // ---------- Dashboard ----------

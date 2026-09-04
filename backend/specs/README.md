@@ -14,7 +14,7 @@
 | [目录结构规范](directory-structure.md) | 标准目录树、分包原则、文件命名约定 | 初始化项目仓库时的目录搭建 |
 | [开发技术规范](development-standards.md) | 命名规范、错误处理、日志规范、安全规范、代码风格 | 日常编码中的规范约束与 Code Review |
 | [通用技术组件](technical-components.md) | 配置管理、日志系统、响应封装、数据库操作等核心组件 | 技术选型参考与组件复用 |
-| [推送载荷契约](push-payload.md) | 采集数据外发 payload 的字段语义、value 按 kind 自描述解析约定 | 外部消费端对接与数据解析 |
+| [推送载荷契约](push-payload.md) | 采集数据外发 payload 的字段语义、value 按 kind 自描述解析约定 | 外部消费端对接与数据解析（[EN](push-payload.en.md)） |
 | [断联报警](alarm.md) | 设备/推送通道离线与恢复报警的检测、判定与统一落库方案 | 断联报警功能设计与实现参考 |
 
 ## 使用方式

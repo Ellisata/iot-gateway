@@ -1,12 +1,21 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 package configFile
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"sync"
 
 	"github.com/spf13/viper"
 )
+
+// EnvJwtSecret 环境变量名：JWT 签名密钥，优先级高于所有配置文件
+const EnvJwtSecret = "IOT_GATEWAY_JWT_SECRET"
 
 // Config 全局配置结构体
 type Config struct {
@@ -107,8 +116,34 @@ func InitConfig() *Config {
 		if err := v.Unmarshal(cfg); err != nil {
 			panic("failed to unmarshal config: " + err.Error())
 		}
+
+		// 5. JWT 密钥安全化：环境变量 > 配置文件值 > 随机生成
+		cfg.Jwt.Secret = resolveJwtSecret(cfg.Jwt.Secret)
 	})
 	return cfg
+}
+
+// resolveJwtSecret 解析 JWT 签名密钥（优先级由高到低）：
+//  1. 环境变量 IOT_GATEWAY_JWT_SECRET：容器 / 服务化部署注入密钥的首选方式
+//  2. 配置文件中的非空 secret：部署方显式固定的密钥（重启后登录态保持）
+//  3. 随机生成 32 字节十六进制密钥：未配置时的安全默认值，
+//     每次启动重新生成（重启后所有登录态失效，但绝不会使用公开的固定密钥）
+func resolveJwtSecret(configured string) string {
+	if s := os.Getenv(EnvJwtSecret); s != "" {
+		return s
+	}
+	if configured != "" {
+		return configured
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		panic(fmt.Sprintf("failed to generate random jwt secret: %v", err))
+	}
+	secret := hex.EncodeToString(buf)
+	// 配置加载先于日志器初始化，且 logger 反向依赖本包（会循环导入），故直接输出到 stderr
+	fmt.Fprintf(os.Stderr,
+		"[WARN] jwt.secret not configured, generated an ephemeral secret: all sessions will be invalidated on restart. Set jwt.secret in config or the %s env var to persist sessions.\n", EnvJwtSecret)
+	return secret
 }
 
 // GetConfig 线程安全读取配置

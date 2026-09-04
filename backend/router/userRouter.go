@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 package router
 
 import (
@@ -18,4 +21,5 @@ func UserRoutes(r *gin.Engine, uc *controller.UserController) {
 	r.PUT("/users/:id", uc.UpdateUser)
 	r.GET("/users", uc.PageUser)
 	r.GET("/profile", uc.GetProfile)
+	r.PUT("/user/password", uc.ChangePassword)
 }

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
 /**
  * 中文语言包（默认语言）
  */
@@ -82,7 +85,26 @@ export default {
   layout: {
     admin: '管理员',
     profile: '个人中心',
+    changePassword: '修改密码',
     logout: '退出登录',
+  },
+
+  // ---------- 修改密码 ----------
+  changePassword: {
+    title: '修改密码',
+    oldPassword: '旧密码',
+    oldPasswordPlaceholder: '请输入旧密码',
+    newPassword: '新密码',
+    newPasswordPlaceholder: '请输入新密码',
+    confirmPassword: '确认新密码',
+    confirmPasswordPlaceholder: '请再次输入新密码',
+    oldRequired: '请输入旧密码',
+    newRequired: '请输入新密码',
+    newMinLength: '密码长度不少于 6 位',
+    confirmRequired: '请再次输入新密码',
+    confirmMismatch: '两次输入的密码不一致',
+    submit: '确定',
+    success: '密码修改成功，请重新登录',
   },
 
   // ---------- 首页 ----------
