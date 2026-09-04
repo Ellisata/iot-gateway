@@ -210,7 +210,7 @@ Bug reports, documentation, new protocol drivers and push channels are all welco
 
 ## Community
 
-- **Issues / Discussions**: file bugs and feature requests on [GitHub Issues](https://github.com/wang4856304/iot-gateway/issues) (the Gitee repo is primary for Chinese users; both are monitored).
+- **Issues / Discussions**: file bugs and feature requests on [GitHub Issues](https://github.com/Ellisata/iot-gateway) (the Gitee repo is primary for Chinese users; both are monitored).
 - **Email**: open-source inquiries and commercial licensing at `15289288565@163.com`.
 
 ## License & FAQ
