@@ -2,6 +2,7 @@
 iot-gateway
 iot-gateway.exe
 *.exe
+release/
 
 # IDE
 .idea/
