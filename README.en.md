@@ -213,12 +213,41 @@ Bug reports, documentation, new protocol drivers and push channels are all welco
 - **Issues / Discussions**: file bugs and feature requests on [GitHub Issues](https://github.com/wang4856304/iot-gateway/issues) (the Gitee repo is primary for Chinese users; both are monitored).
 - **Email**: open-source inquiries and commercial licensing at `15289288565@163.com`.
 
-## License
+## License & FAQ
 
-This project is open-sourced under the [GNU AGPL-3.0](LICENSE).
+This project is open-sourced under the [GNU AGPL-3.0](LICENSE). The FAQ below helps you quickly assess your use case (a friendly explanation only, not legal advice):
 
-- If you modify this project and offer it as a network service (including deploying it for third parties), you must release the corresponding source code under AGPL-3.0.
-- For **closed-source commercial use, OEM embedding, or commercial deployments where you prefer not to disclose source**, contact us to purchase a commercial license (exempting you from AGPL obligations).
+**Q1: I deploy it inside my own company (collecting data from our own production lines). Do I have to open-source my code?**
+
+No. AGPL's source-disclosure obligations are triggered only when you **convey** the software or **offer it as a network service to others**. Internal use of an unmodified version, without serving external users, requires no source disclosure at all.
+
+**Q2: I integrate my own systems (MES, ERP, dashboards) via the Open API / MQTT. Do those have to be AGPL-licensed?**
+
+No. Your systems talk to this gateway over network interfaces — that's data exchange between independent programs. Your business code is not a derivative work of this project and is not bound by AGPL.
+
+**Q3: When must I release source code?**
+
+If you modify this project and then either ① **convey** the modified version to others (including bundling it for sale or shipping it with hardware), or ② **offer the modified version as a network service to users** (including deploying it for third parties). In either case you must provide the complete corresponding source code under AGPL-3.0 to the relevant recipients.
+
+**Q4: Can I develop a closed-source protocol driver / push channel for this project?**
+
+- A driver or channel compiled into the gateway binary is a derivative work and must be released under AGPL-3.0.
+- A **separate process** interacting with the gateway over the network (a standalone collector, a standalone push agent, etc.) is not bound by it.
+- Contributions of self-built drivers / channels under AGPL-3.0 are very welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). The project's registry + interface plugin design keeps integration cheap.
+
+**Q5: Does AGPL cover the data the gateway collects and pushes?**
+
+No. The data belongs to its owner. AGPL governs the software and its derivative works only — it never "infects" the data collected, transported or stored.
+
+**Q6: I'm a hardware / gateway vendor and want to embed this project in a product I sell. Is that allowed?**
+
+Yes, via either path: ① comply with AGPL-3.0 by providing the complete corresponding source code to buyers; or ② contact us to purchase a **commercial license** exempting you from AGPL obligations, supporting closed-source OEM embedding.
+
+**Q7: How do I get a closed-source / OEM / dual license?**
+
+Contact `<15289288565@163.com>` with your use case (OEM embedding, SaaS, derivative delivery, etc.) and we'll provide a commercial license.
+
+---
+
 - External contributions are licensed to the maintainer under [CLA.md](CLA.md) and released with the project under AGPL-3.0; the commercial-edition repository stays separate from this one.
-
-For open-source inquiries and commercial licensing, contact: `<15289288565@163.com>`
+- For open-source inquiries and commercial licensing, contact: `<15289288565@163.com>`
