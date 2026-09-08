@@ -18,6 +18,21 @@ type OpenApiDeviceVO struct {
 	UpdatedAt       string `json:"updatedAt"`
 }
 
+// OpenApiDeviceNameVO 开放接口设备名称响应（按ID批量查询）。
+// 采用对象而非 map 结构，便于后续按兼容性承诺增量扩展字段。
+type OpenApiDeviceNameVO struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// OpenApiAddressLabelVO 开放接口点位标签响应（按设备ID+点位ID批量查询）
+type OpenApiAddressLabelVO struct {
+	ID         string `json:"id"`
+	DeviceID   string `json:"deviceId"`
+	DeviceName string `json:"deviceName"` // 所属设备名称（设备已删除时为空串）
+	Label      string `json:"label"`      // 地址 name 的中文说明（如温度、电流）
+}
+
 // OpenApiDeviceAddressVO 开放接口设备地址响应（只读点位定义）
 type OpenApiDeviceAddressVO struct {
 	ID             string `json:"id"`

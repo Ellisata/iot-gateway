@@ -8,6 +8,7 @@
 | 版本 | 日期 | 变更内容 | 破坏性变更 |
 | ---- | ---- | -------- | ---------- |
 | v1.0 | 2026-08-27 | 首次发布：设备分页查询、设备地址分页查询 | - |
+| v1.1 | 2026-09-07 | 新增：批量查询设备名称（4.2）、批量查询点位标签（4.3）；后续接口章节编号顺延 | - |
 
 ## 兼容性承诺
 
@@ -173,7 +174,111 @@ curl -H "X-Api-Key: your-app-key" \
 }
 ```
 
-### 4.2 分页查询设备地址（点位定义）
+### 4.2 批量查询设备名称
+
+根据设备 ID 列表批量查询设备名称。适用于外部系统已持有设备 ID、需要展示名称的场景（如报表、大屏），
+一次请求即可完成 ID → 名称 的批量映射，无需逐个调用 4.1 翻页查找。
+
+```
+POST /openApi/device/names
+Content-Type: application/json
+```
+
+**请求参数（JSON Body）**
+
+| 参数 | 类型 | 必填 | 说明 |
+| ---- | ---- | ---- | ---- |
+| ids | string[] | 是 | 设备 ID 列表，至少 1 个（如 `["id1","id2"]`） |
+
+**响应字段（data 为数组）**
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| id | string | 设备 ID |
+| name | string | 设备名称 |
+
+> 说明：
+> - 返回顺序与传入 `ids` 顺序一致；
+> - **库中不存在的 ID 不会出现在返回结果里**（不报错、不占位），调用方需自行判断缺失；
+> - 单次请求建议不超过 100 个 ID，超长列表请分批请求。
+
+**示例**
+
+```bash
+curl -X POST -H "X-Api-Key: your-app-key" -H "Content-Type: application/json" \
+     -d '{"ids":["a1b2c3d4e5f6","f6e5d4c3b2a1","not-exist-id"]}' \
+     "http://192.168.1.100:9081/openApi/device/names"
+```
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": [
+    { "id": "a1b2c3d4e5f6", "name": "1号PLC" },
+    { "id": "f6e5d4c3b2a1", "name": "2号PLC" }
+  ],
+  "serverTime": "2026-09-07 10:30:00"
+}
+```
+
+### 4.3 批量查询点位标签
+
+根据设备 ID 数组 + 点位 ID 数组批量查询点位标签（label）。适用于外部系统已持有设备 ID 与点位 ID、
+需要展示点位中文说明的场景（如报表、大屏），一次请求即可完成 点位ID → 标签 的批量映射，
+无需按设备逐个调用 4.1 / 4.4 翻页查找。
+
+```
+POST /openApi/deviceAddress/labels
+Content-Type: application/json
+```
+
+**请求参数（JSON Body）**
+
+| 参数 | 类型 | 必填 | 说明 |
+| ---- | ---- | ---- | ---- |
+| deviceIds | string[] | 是 | 设备 ID 列表，至少 1 个 |
+| addressIds | string[] | 是 | 点位 ID 列表，至少 1 个 |
+
+> `deviceIds` 作归属校验：不属于这些设备的点位视为不存在。
+
+**响应字段（data 为数组）**
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| id | string | 点位 ID |
+| deviceId | string | 所属设备 ID |
+| deviceName | string | 所属设备名称；设备已被删除时为空串 `""` |
+| label | string | 点位标签（地址名称的中文说明，如"温度"、"电流"） |
+
+> 说明：
+> - 返回顺序与传入 `addressIds` 顺序一致；
+> - **库中不存在的点位 ID（或不属于传入设备的点位）不会出现在返回结果里**（不报错、不占位），调用方需自行判断缺失；
+> - 单次请求建议 `deviceIds`、`addressIds` 各不超过 100 个，超长列表请分批请求。
+
+**示例**
+
+```bash
+curl -X POST -H "X-Api-Key: your-app-key" -H "Content-Type: application/json" \
+     -d '{"deviceIds":["a1b2c3d4e5f6"],"addressIds":["f6e5d4c3b2a1","0e9d8c7b6a5f","not-exist-id"]}' \
+     "http://192.168.1.100:9081/openApi/deviceAddress/labels"
+```
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": [
+    { "id": "f6e5d4c3b2a1", "deviceId": "a1b2c3d4e5f6", "deviceName": "1号PLC", "label": "炉膛温度" },
+    { "id": "0e9d8c7b6a5f", "deviceId": "a1b2c3d4e5f6", "deviceName": "1号PLC", "label": "主轴电流" }
+  ],
+  "serverTime": "2026-09-07 10:35:00"
+}
+```
+
+### 4.4 分页查询设备地址（点位定义）
 
 按设备查询其点位（地址）定义列表。依赖 4.1 返回的 `id` 作为 `deviceId`。
 

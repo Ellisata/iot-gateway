@@ -270,6 +270,23 @@ func (s *DeviceService) PageDevice(ctx context.Context, req *dto.PageDeviceDTO) 
 	}, nil
 }
 
+// GetDeviceNamesByIDs 根据设备ID列表批量查询设备名称，返回 id → name 映射。
+// 库中不存在的ID不出现在结果里；ids 为空直接返回空映射，不访问数据库。
+func (s *DeviceService) GetDeviceNamesByIDs(ctx context.Context, ids []string) (map[string]string, error) {
+	nameMap := make(map[string]string, len(ids))
+	if len(ids) == 0 {
+		return nameMap, nil
+	}
+	var devices []po.Device
+	if err := s.sqliteDB.WithContext(ctx).Select("id", "name").Where("id IN ?", ids).Find(&devices).Error; err != nil {
+		return nil, err
+	}
+	for _, d := range devices {
+		nameMap[d.ID] = d.Name
+	}
+	return nameMap, nil
+}
+
 // getProtocolName 根据 protocol_id 查询协议名称
 func (s *DeviceService) getProtocolName(ctx context.Context, protocolID string) string {
 	if protocolID == "" {

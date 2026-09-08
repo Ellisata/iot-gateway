@@ -38,6 +38,38 @@ func (ctr *OpenApiController) PageDevices(c *gin.Context) {
 	c.JSON(200, response.Success(data))
 }
 
+// ListDeviceNames 批量查询设备名称（JSON Body 传设备ID数组）
+func (ctr *OpenApiController) ListDeviceNames(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiDeviceNamesDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.openApiService.ListOpenApiDeviceNames(ctx, req.IDs)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// ListAddressLabels 批量查询点位标签（JSON Body 传设备ID数组 + 点位ID数组）
+func (ctr *OpenApiController) ListAddressLabels(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiAddressLabelsDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.openApiService.ListOpenApiAddressLabels(ctx, req.DeviceIDs, req.AddressIDs)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
 // PageDeviceAddresses 对外设备地址分页查询（按设备ID）
 func (ctr *OpenApiController) PageDeviceAddresses(c *gin.Context) {
 	ctx := c.Request.Context()

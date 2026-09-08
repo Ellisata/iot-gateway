@@ -19,6 +19,8 @@ func OpenApiRoutes(r *gin.Engine, oass *service.OpenApiSecretService, oac *contr
 	{
 		// 对外只读查询
 		openApi.GET("/device/page", oac.PageDevices)
+		openApi.POST("/device/names", oac.ListDeviceNames)
+		openApi.POST("/deviceAddress/labels", oac.ListAddressLabels)
 		openApi.GET("/deviceAddress/page", oac.PageDeviceAddresses)
 	}
 }

@@ -260,6 +260,21 @@ func (s *DeviceAddressService) PageDeviceAddress(ctx context.Context, req *dto.P
 	}, nil
 }
 
+// GetAddressesByIDs 根据设备ID数组 + 点位ID数组批量查询点位（仅取 id/device_id/label 三列）。
+// deviceIDs 作归属过滤：不属于这些设备的点位视为不存在。库中不存在的ID不出现在结果里；
+// 任一列表为空直接返回空切片，不访问数据库。
+func (s *DeviceAddressService) GetAddressesByIDs(ctx context.Context, deviceIDs, addressIDs []string) ([]po.DeviceAddress, error) {
+	if len(deviceIDs) == 0 || len(addressIDs) == 0 {
+		return nil, nil
+	}
+	var addrs []po.DeviceAddress
+	if err := s.sqliteDB.WithContext(ctx).Select("id", "device_id", "label").
+		Where("device_id IN ? AND id IN ?", deviceIDs, addressIDs).Find(&addrs).Error; err != nil {
+		return nil, err
+	}
+	return addrs, nil
+}
+
 // getProtocolName 根据协议 ID 查询协议名称（iot_protocol.name），
 // 协议不存在或查询失败时返回空串。
 func (s *DeviceAddressService) getProtocolName(ctx context.Context, protocolID string) string {
