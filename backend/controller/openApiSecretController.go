@@ -8,6 +8,7 @@ import (
 
 	"iot-gateway/appError"
 	"iot-gateway/docs"
+	"iot-gateway/i18n"
 	"iot-gateway/model/dto"
 	"iot-gateway/response"
 	"iot-gateway/service"
@@ -64,9 +65,10 @@ func (ctr *OpenApiSecretController) ListOpenApiSecret(c *gin.Context) {
 	c.JSON(200, response.Success(data))
 }
 
-// GetOpenApiDoc 获取开放接口说明文档（服务端渲染 markdown 为 HTML）
+// GetOpenApiDoc 获取开放接口说明文档（服务端渲染 markdown 为 HTML，按用户语言返回中/英文版本）
 func (ctr *OpenApiSecretController) GetOpenApiDoc(c *gin.Context) {
-	c.JSON(200, response.Success(docs.RenderOpenApiDocHTML()))
+	ctx := c.Request.Context()
+	c.JSON(200, response.Success(docs.RenderOpenApiDocHTML(i18n.LangFromCtx(ctx))))
 }
 
 // DeleteOpenApiSecret 删除密钥

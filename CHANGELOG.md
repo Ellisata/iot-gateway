@@ -13,6 +13,8 @@ All notable changes to this project are documented in this file (Keep a Changelo
 
 ### Added
 
+- 开放接口文档按管理端用户语言展示：新增英文版文档，`/openApiSecret/doc` 接口根据用户语言（`area` 头）返回中文或英文版本。
+  Open API documentation now follows the admin user's language: an English version was added, and `/openApiSecret/doc` returns the Chinese or English version based on the user's language (`area` header).
 - 开源发布配套文件：CONTRIBUTING、SECURITY、CHANGELOG、CLA、GitHub/Gitee Issue 与 PR 模板。
   Open-source release scaffolding: CONTRIBUTING, SECURITY, CHANGELOG, CLA, GitHub/Gitee issue and PR templates.
 - `build.sh`：Linux/macOS 一键构建脚本（与 build.bat 等价，支持 all/windows/linux/native 目标）。

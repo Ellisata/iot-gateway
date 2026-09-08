@@ -1,7 +1,7 @@
 # 构建上下文为仓库根目录(多阶段全流程构建)
 # 只保留 frontend/ 与 backend/ 源码,其余一律排除
 
-# 版本管理与文档(注意: backend/docs/openApi.md 被 go:embed 嵌入,不能排除)
+# 版本管理与文档(注意: backend/docs/openApi*.md 被 go:embed 嵌入,不能排除)
 .git
 .gitignore
 CLA.md
