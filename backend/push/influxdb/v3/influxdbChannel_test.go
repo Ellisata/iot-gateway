@@ -100,21 +100,36 @@ func (s *fakeSpool) Count() (int64, error) {
 }
 
 // testChannel 构造一个可直接驱动 tryConnect/write 的通道(不启动 goroutine,无需 SQLite)。
+// 关闭断网缓存:缓存相关的用例直接驱动 push.GroupedDrainer,不经过通道。
 func testChannel(cfg *influxdbConfig) *influxdbChannel {
-	return &influxdbChannel{
+	ch := &influxdbChannel{
 		id:     "test-id",
 		name:   "influxdb",
 		cfg:    cfg,
 		sig:    "test-id|influxdb|sig",
 		client: newHTTPClient(cfg),
 	}
+	ch.ob = push.NewOutbox(push.OutboxConfig{
+		Tag:  "influxdb",
+		ID:   ch.id,
+		Name: ch.name,
+		Conn: ch,
+	})
+	return ch
 }
 
-// lastErrNow 加锁读取 lastErr(测试辅助)
-func (ch *influxdbChannel) lastErrNow() string {
-	ch.mu.RLock()
-	defer ch.mu.RUnlock()
-	return ch.lastErr
+// lastErrNow 读取最近一次错误(经状态快照,测试辅助)
+func (ch *influxdbChannel) lastErrNow() string { return ch.Snapshot().LastErr }
+
+// testDrainer 构造本通道的补发策略(与 run 中装配的一致),用于直接驱动补发算法。
+func testDrainer(cfg *influxdbConfig, sp push.Spool, write func(string) bool) *push.GroupedDrainer {
+	return &push.GroupedDrainer{
+		Tag:     "influxdb",
+		Spool:   sp,
+		New:     func() push.Aggregator { return newLineBuilder(cfg.Measurement) },
+		Write:   write,
+		MaxRows: cfg.batchRows(),
+	}
 }
 
 func TestTryConnectSuccess(t *testing.T) {
@@ -237,8 +252,8 @@ func TestWriteSuccess(t *testing.T) {
 	if gotBody != "collected_data,device_id=d value_int=1i,value_kind=\"int\",quality=0i 123" {
 		t.Errorf("body = %q", gotBody)
 	}
-	if ch.publishCount.Load() != 1 {
-		t.Errorf("publishCount = %d, want 1", ch.publishCount.Load())
+	if got := ch.Snapshot().PublishCount; got != 1 {
+		t.Errorf("publishCount = %d, want 1", got)
 	}
 	if errMsg := ch.lastErrNow(); errMsg != "" {
 		t.Errorf("lastErr = %q, want empty", errMsg)
@@ -267,8 +282,8 @@ func TestWriteNon2xx(t *testing.T) {
 	if !strings.Contains(ch.lastErrNow(), "400") || !strings.Contains(ch.lastErrNow(), "invalid line protocol") {
 		t.Errorf("lastErr should carry status and body, got %q", ch.lastErrNow())
 	}
-	if ch.publishCount.Load() != 0 {
-		t.Errorf("publishCount = %d, want 0", ch.publishCount.Load())
+	if got := ch.Snapshot().PublishCount; got != 0 {
+		t.Errorf("publishCount = %d, want 0", got)
 	}
 }
 
@@ -377,8 +392,8 @@ func TestDrainWindowNarrowIsolatesBadBatch(t *testing.T) {
 	cfg := testCfg(srv.URL, "t", "m")
 	ch := testChannel(cfg)
 	sp := newFakeSpool()
-	ch.spool = sp
 	ch.connected.Store(true)
+	d := testDrainer(cfg, sp, ch.write)
 
 	for _, sb := range []push.SpoolBatch{
 		spoolBatch(1, "a1"),
@@ -393,16 +408,14 @@ func TestDrainWindowNarrowIsolatesBadBatch(t *testing.T) {
 
 	// 1) 普通聚合:整组(含坏批次)一次写入失败,failID 是组头 b1(不能据此删 b1)
 	pend, _ := sp.FetchOldest(16)
-	if ok, failID := ch.drainWindow(pend, false); ok || failID != 1 {
+	if ok, failID := d.Drain(pend, false); ok || failID != 1 {
 		t.Fatalf("normal drain should fail at group head b1, ok=%v failID=%d", ok, failID)
 	}
-	// 失败后补发协程会置 poisonBatchID=b1、narrowDrain=true;模拟之
-	ch.poisonBatchID = 1
-	ch.narrowDrain = true
+	// 至此补发协程会进入窄化,重连后才再次进入补发循环
 
 	// 2) 窄化:逐批试写 —— b1、b2 写成功删除,到 b3 失败,failID 应定位到 b3 而非 b1
 	pend, _ = sp.FetchOldest(16)
-	if ok, failID := ch.drainWindow(pend, true); ok || failID != 3 {
+	if ok, failID := d.Drain(pend, true); ok || failID != 3 {
 		t.Fatalf("narrow drain should isolate bad batch b3, ok=%v failID=%d", ok, failID)
 	}
 	if n, _ := sp.Count(); n != 2 {
@@ -416,16 +429,16 @@ func TestDrainWindowNarrowIsolatesBadBatch(t *testing.T) {
 		t.Fatal("b4 (good) must not be deleted by collateral poison")
 	}
 
-	// 3) 再次窄化重试 b3:仍失败 → failID 仍是 b3,与 poisonBatchID 一致可判毒
+	// 3) 再次窄化重试 b3:仍失败 → failID 仍是 b3,与上层记录的毒批次一致可判毒
 	pend, _ = sp.FetchOldest(16)
-	if ok, failID := ch.drainWindow(pend, true); ok || failID != 3 {
+	if ok, failID := d.Drain(pend, true); ok || failID != 3 {
 		t.Fatalf("b3 should fail again with failID=3, ok=%v failID=%d", ok, failID)
 	}
 
 	// 4) 移除坏批次 b3 后,窄化续取 b4 可全部写成功
 	sp.Delete(3)
 	pend, _ = sp.FetchOldest(16)
-	if ok, _ := ch.drainWindow(pend, true); !ok {
+	if ok, _ := d.Drain(pend, true); !ok {
 		t.Fatal("after removing bad batch, narrow drain should fully succeed")
 	}
 	if n, _ := sp.Count(); n != 0 {
@@ -443,8 +456,8 @@ func TestDrainWindowNarrowAllGood(t *testing.T) {
 	cfg := testCfg(srv.URL, "t", "m")
 	ch := testChannel(cfg)
 	sp := newFakeSpool()
-	ch.spool = sp
 	ch.connected.Store(true)
+	d := testDrainer(cfg, sp, ch.write)
 
 	for _, sb := range []push.SpoolBatch{
 		spoolBatch(1, "a1"),
@@ -456,7 +469,7 @@ func TestDrainWindowNarrowAllGood(t *testing.T) {
 	}
 
 	pend, _ := sp.FetchOldest(16)
-	if ok, _ := ch.drainWindow(pend, true); !ok {
+	if ok, _ := d.Drain(pend, true); !ok {
 		t.Fatal("narrow drain should succeed for all-good batches")
 	}
 	if n, _ := sp.Count(); n != 0 {

@@ -5,9 +5,12 @@ package mqtt
 
 import (
 	"encoding/json"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
@@ -200,27 +203,6 @@ func TestMarshalBatch(t *testing.T) {
 	}
 }
 
-// ==================== mqttChannel.go ====================
-
-func TestEnqueueDropOldest(t *testing.T) {
-	ch := &mqttChannel{id: "c", name: "c", cfg: &mqttConfig{}, outbox: make(chan push.PushBatch, 2)}
-	ch.Enqueue(push.PushBatch{DeviceID: "a"})
-	ch.Enqueue(push.PushBatch{DeviceID: "b"})
-
-	// outbox 已满，再入队应丢弃最旧 "a"，保留最新
-	ch.Enqueue(push.PushBatch{DeviceID: "c"})
-
-	if got := <-ch.outbox; got.DeviceID != "b" {
-		t.Errorf("after drop-oldest, first = %s, want b", got.DeviceID)
-	}
-	if got := <-ch.outbox; got.DeviceID != "c" {
-		t.Errorf("after drop-oldest, second = %s, want c", got.DeviceID)
-	}
-	if ch.droppedCount.Load() != 1 {
-		t.Errorf("droppedCount = %d, want 1", ch.droppedCount.Load())
-	}
-}
-
 // ==================== 注册接入（push.ChannelFactories） ====================
 
 func TestEngineBuildsMqttChannel(t *testing.T) {
@@ -256,64 +238,9 @@ func TestEngineBuildsMqttChannel(t *testing.T) {
 	}
 }
 
-// ==================== 断网本地缓存（push_outbox） ====================
-
-// newTestChannelWithSpool 构造带 SQLite 本地缓存的通道（未调用 run，仅启动写协程）
-func newTestChannelWithSpool(t *testing.T, cfg *mqttConfig, outboxCap int) (*mqttChannel, *push.SqliteSpool) {
-	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite failed: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("get sql.DB failed: %v", err)
-	}
-	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&po.PushOutbox{}); err != nil {
-		t.Fatalf("migrate failed: %v", err)
-	}
-
-	spool := push.NewSqliteSpool(db, "c1")
-	ch := &mqttChannel{
-		id:          "c1",
-		name:        "mqtt",
-		cfg:         cfg,
-		spool:       spool,
-		outbox:      make(chan push.PushBatch, outboxCap),
-		spoolCh:     make(chan push.PushBatch, spoolChSize),
-		drainNotify: make(chan struct{}, 1),
-	}
-	ch.quit = make(chan struct{})
-	ch.spoolDone = make(chan struct{})
-	go ch.spoolWriteLoop()
-	return ch, spool
-}
-
-// stopWriteLoop 停止测试通道的写协程（等价于 Stop 的后半段）
-func (ch *mqttChannel) stopWriteLoop() {
-	if ch.quit == nil {
-		return
-	}
-	close(ch.quit)
-	if ch.spoolDone != nil {
-		<-ch.spoolDone
-	}
-}
-
-// waitSpoolCount 轮询等待本地缓存批次数量达到期望值（写协程异步落盘）
-func waitSpoolCount(t *testing.T, spool *push.SqliteSpool, want int64) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if n, err := spool.Count(); err == nil && n == want {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	n, _ := spool.Count()
-	t.Fatalf("spool count = %d, want %d", n, want)
-}
+// ==================== 断网本地缓存配置 ====================
+// 队列/缓存/补发本身的语义由 push 包统一实现与覆盖（见 push/outbox_test.go），
+// 此处只覆盖 mqtt 侧的配置解析。
 
 func TestParseConfigSpool(t *testing.T) {
 	// 缺省启用缓存，上限回落默认值
@@ -347,91 +274,148 @@ func TestParseConfigSpool(t *testing.T) {
 	}
 }
 
-func TestEnqueueSpoolWhenDisconnected(t *testing.T) {
-	ch, spool := newTestChannelWithSpool(t, &mqttConfig{}, 4)
-	defer ch.stopWriteLoop()
+// ==================== 断网缓存补发（drainWindow） ====================
+// 队列/落盘/唤醒的语义由 push.Outbox 统一覆盖（见 push/outbox_test.go），
+// 此处只覆盖 mqtt 特有的「逐批发布 + 成功批次合并删除 + failID 定位」。
 
-	// 未连接（connected=false）时入队应直接落盘，不进内存队列
-	ch.Enqueue(push.PushBatch{DeviceID: "d1", CollectedAt: "t1"})
-	ch.Enqueue(push.PushBatch{DeviceID: "d1", CollectedAt: "t2"})
+// newTestChannelWithSpool 构造带 SQLite 断网缓存的通道（不 Start，仅备好缓存）。
+func newTestChannelWithSpool(t *testing.T, cfg *mqttConfig) (*mqttChannel, *push.SqliteSpool) {
+	t.Helper()
 
-	waitSpoolCount(t, spool, 2)
-	if got := len(ch.outbox); got != 0 {
-		t.Errorf("outbox depth = %d, want 0 (disconnected → spool)", got)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite failed: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql.DB failed: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	if err := db.AutoMigrate(&po.PushOutbox{}); err != nil {
+		t.Fatalf("migrate failed: %v", err)
+	}
+
+	ch := &mqttChannel{id: "c1", name: "mqtt", cfg: cfg}
+	ch.ob = push.NewOutbox(push.OutboxConfig{
+		Tag:          "mqtt",
+		ID:           "c1",
+		Name:         "mqtt",
+		DB:           db,
+		SpoolEnabled: true,
+		SpoolCap:     100,
+		Conn:         ch,
+	})
+	spool, ok := ch.ob.Spool().(*push.SqliteSpool)
+	if !ok {
+		t.Fatalf("spool type = %T, want *push.SqliteSpool", ch.ob.Spool())
+	}
+	return ch, spool
+}
+
+// stubToken 立即完成、带预设错误的 paho Token。
+type stubToken struct{ err error }
+
+func (t stubToken) Wait() bool                     { return true }
+func (t stubToken) WaitTimeout(time.Duration) bool { return true }
+func (t stubToken) Done() <-chan struct{}          { return closedCh }
+func (t stubToken) Error() error                   { return t.err }
+
+var closedCh = func() <-chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}()
+
+// stubClient 只实现发布路径用到的 paho Client 子集：命中 failOn 主题即失败，
+// 其余主题记录为成功发布。
+type stubClient struct {
+	connected bool
+	failOn    string // 命中该主题即返回错误；空串表示全部成功
+	mu        sync.Mutex
+	published []string
+}
+
+func (c *stubClient) IsConnected() bool                    { return c.connected }
+func (c *stubClient) IsConnectionOpen() bool               { return c.connected }
+func (c *stubClient) Connect() mqtt.Token                  { return stubToken{} }
+func (c *stubClient) Disconnect(quiesce uint)              {}
+func (c *stubClient) AddRoute(string, mqtt.MessageHandler) {}
+func (c *stubClient) OptionsReader() mqtt.ClientOptionsReader {
+	return mqtt.NewOptionsReader(mqtt.NewClientOptions())
+}
+
+func (c *stubClient) Publish(topic string, _ byte, _ bool, _ interface{}) mqtt.Token {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if topic == c.failOn {
+		return stubToken{err: errors.New("rejected")}
+	}
+	c.published = append(c.published, topic)
+	return stubToken{}
+}
+
+func (c *stubClient) Subscribe(string, byte, mqtt.MessageHandler) mqtt.Token { return stubToken{} }
+func (c *stubClient) SubscribeMultiple(map[string]byte, mqtt.MessageHandler) mqtt.Token {
+	return stubToken{}
+}
+func (c *stubClient) Unsubscribe(...string) mqtt.Token { return stubToken{} }
+
+func TestDrainWindowDeletesOnlyPublishedBatches(t *testing.T) {
+	// 逐批发布：成功的批次必须删除，首个失败的批次及其后保留待重连重试，
+	// 且 failID 必须精确定位到失败批次（而非组头），否则上层会误判毒批次。
+	ch, spool := newTestChannelWithSpool(t, &mqttConfig{Topic: "/t/+/read"})
+
+	for _, dev := range []string{"d1", "d2", "d3"} {
+		if err := spool.Insert(push.PushBatch{DeviceID: dev, CollectedAt: "t"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pend, err := spool.FetchOldest(16)
+	if err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+
+	client := &stubClient{connected: true, failOn: "/t/d2/read"}
+	ok, failID := ch.drainWindow(client, pend)
+	if ok {
+		t.Fatal("drainWindow should report failure when one batch is rejected")
+	}
+	if failID != 2 {
+		t.Fatalf("failID = %d, want 2 (首个失败批次)", failID)
+	}
+
+	n, err := spool.Count()
+	if err != nil {
+		t.Fatalf("count failed: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("spool count = %d, want 2 (d1 已删，d2/d3 保留)", n)
 	}
 }
 
-func TestEnqueueSpillsToSpoolWhenOutboxFull(t *testing.T) {
-	ch, spool := newTestChannelWithSpool(t, &mqttConfig{}, 2)
-	defer ch.stopWriteLoop()
+func TestDrainWindowAllSuccess(t *testing.T) {
+	ch, spool := newTestChannelWithSpool(t, &mqttConfig{Topic: "/t/+/read"})
 
-	ch.connected = true
-	ch.Enqueue(push.PushBatch{DeviceID: "a"})
-	ch.Enqueue(push.PushBatch{DeviceID: "b"}) // 内存队列已满
-	ch.Enqueue(push.PushBatch{DeviceID: "c"}) // 溢写本地缓存而非丢最旧
-
-	waitSpoolCount(t, spool, 1)
-	if got := len(ch.outbox); got != 2 {
-		t.Errorf("outbox depth = %d, want 2", got)
+	for _, dev := range []string{"d1", "d2"} {
+		if err := spool.Insert(push.PushBatch{DeviceID: dev, CollectedAt: "t"}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if got := ch.droppedCount.Load(); got != 0 {
-		t.Errorf("droppedCount = %d, want 0 (spill to spool)", got)
-	}
-}
-
-func TestEnqueueLegacyDropOldestWhenSpoolDisabled(t *testing.T) {
-	// spool 为 nil（未启用）时回退为纯内存丢最旧行为
-	ch := &mqttChannel{id: "c", name: "c", cfg: &mqttConfig{SpoolDisabled: true}, outbox: make(chan push.PushBatch, 2)}
-	ch.Enqueue(push.PushBatch{DeviceID: "a"})
-	ch.Enqueue(push.PushBatch{DeviceID: "b"})
-	ch.Enqueue(push.PushBatch{DeviceID: "c"})
-
-	if got := <-ch.outbox; got.DeviceID != "b" {
-		t.Errorf("after drop-oldest, first = %s, want b", got.DeviceID)
-	}
-	if got := <-ch.outbox; got.DeviceID != "c" {
-		t.Errorf("after drop-oldest, second = %s, want c", got.DeviceID)
-	}
-	if ch.droppedCount.Load() != 1 {
-		t.Errorf("droppedCount = %d, want 1", ch.droppedCount.Load())
-	}
-}
-
-func TestSpoolWriteSignalsDrain(t *testing.T) {
-	// 落盘（含断连直落）应 ping 补发唤醒，事件驱动补发无需轮询
-	ch, _ := newTestChannelWithSpool(t, &mqttConfig{}, 4)
-	defer ch.stopWriteLoop()
-
-	ch.Enqueue(push.PushBatch{DeviceID: "d1", CollectedAt: "t1"})
-
-	select {
-	case <-ch.drainNotify:
-		// 写协程已 ping
-	case <-time.After(2 * time.Second):
-		t.Fatal("spool write did not signal drain")
-	}
-}
-
-func TestDrainSignalWakeSemantics(t *testing.T) {
-	ch := &mqttChannel{drainNotify: make(chan struct{}, 1)}
-	ch.quit = make(chan struct{})
-
-	// ping 立即唤醒等待
-	ch.signalDrain()
-	if !ch.waitSpoolDrain() {
-		t.Fatal("waitSpoolDrain returned false after signal")
+	pend, err := spool.FetchOldest(16)
+	if err != nil {
+		t.Fatalf("fetch failed: %v", err)
 	}
 
-	// quit 关闭后立即返回 false（停止信号）
-	close(ch.quit)
-	if ch.waitSpoolDrain() {
-		t.Fatal("waitSpoolDrain returned true after quit")
+	client := &stubClient{connected: true}
+	if ok, failID := ch.drainWindow(client, pend); !ok || failID != 0 {
+		t.Fatalf("drainWindow = (%v, %d), want (true, 0)", ok, failID)
 	}
-}
 
-func TestDrainSignalNilChannelNoop(t *testing.T) {
-	// spool 未启用（drainNotify 为 nil）时 signalDrain 必须 no-op，不得阻塞
-	ch := &mqttChannel{cfg: &mqttConfig{SpoolDisabled: true}}
-	ch.signalDrain() // 若阻塞则测试超时
-	ch.signalDrain()
+	n, err := spool.Count()
+	if err != nil {
+		t.Fatalf("count failed: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("spool count = %d, want 0", n)
+	}
 }

@@ -13,6 +13,7 @@ import (
 
 	"iot-gateway/collector"
 	"iot-gateway/driver"
+	"iot-gateway/push"
 )
 
 func rec(deviceID, addressID, kind, value string, quality int) collector.CollectedRecord {
@@ -315,4 +316,32 @@ func fnvHash(s string) string {
 	h := fnv.New64a()
 	h.Write([]byte(s))
 	return strconv.FormatUint(h.Sum64(), 16)
+}
+
+func TestInsertBuilderAggregatorContract(t *testing.T) {
+	// push.Aggregator 契约：**新构造的空聚合器必须接受任意批次**。
+	// AggregateWriter 在 Append 返回 false 时「刷出当前负载 → 用同一批次重试」，
+	// 若空负载也拒绝就会刷出空负载并陷入死循环。
+	ib := newInsertBuilder("iot", "collected_data")
+	if !ib.Append(push.PushBatch{
+		CollectedAt: "2026-01-01 00:00:00.000",
+		Records:     []collector.CollectedRecord{rec("d1", "a1", "int", "1", 192)},
+	}) {
+		t.Fatal("fresh insertBuilder must accept any batch")
+	}
+	if ib.Rows() != 1 || ib.Empty() || ib.Payload() == "" {
+		t.Fatalf("rows=%d empty=%v payload=%q", ib.Rows(), ib.Empty(), ib.Payload())
+	}
+
+	// 同一设备+点位再次追加必然冲突（调用方据此先刷出再重试），且状态不变
+	before := ib.Payload()
+	if ib.Append(push.PushBatch{
+		CollectedAt: "2026-01-01 00:00:01.000",
+		Records:     []collector.CollectedRecord{rec("d1", "a1", "int", "2", 192)},
+	}) {
+		t.Fatal("duplicate subtable must be rejected")
+	}
+	if ib.Payload() != before || ib.Rows() != 1 {
+		t.Fatal("rejected append must not mutate the statement")
+	}
 }
