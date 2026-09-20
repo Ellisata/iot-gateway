@@ -60,6 +60,7 @@ For unknown/empty `kind`, fall back to numeric inference: integer → float → 
 - `protocol` is the protocol name (`iot_protocol.name`, e.g. `ModBus.TCP`, `Siemens.Net.S7`) — the **namespace** of the type; `dataType` is the **internal type name** within that protocol scope (`word`, `int16`, `uint8`...), taken from the address config's `data_type` field and already normalized (`Word`/`WORD`/`word` all land as `word`).
 - Together they pin down the exact PLC type: the same internal name means different things under different protocols (e.g. `byte` → Modbus `uint8` vs. S7 `byte`); `protocol` resolves cross-protocol name collisions.
 - **External consumers parse `value` by `kind`** (see §3); `protocol`+`dataType` are for exact type recovery and aggregation/analytics.
+- **DL/T 645 is the exception**: byte count, decimal places and signedness come from the **data identifier (DI)**, not from `dataType`. `float` therefore yields an engineering value already scaled by the DI's decimals, whereas `bcd`/`lbcd`/`uint`/`int` yield the **unscaled** raw integer; the same `dataType` (e.g. `uint`) means different units under different DIs, so consumers must interpret it per point.
 
 ## 5. Float representation (lossless round-trip)
 
@@ -78,9 +79,12 @@ For unknown/empty `kind`, fall back to numeric inference: integer → float → 
 | S7 | `date` | `YYYY-MM-DD` | `2026-08-19` |
 | S7 | `tod` | `HH:MM:SS` | `16:39:47` |
 | S7 | `dt` | `YYYY-MM-DD HH:MM:SS` | `2026-08-19 16:39:47` |
+| DL/T 645 | `datetime` (date DI) | `YYYY-MM-DD` | `2026-08-19` |
+| DL/T 645 | `datetime` (time DI) | `HH:MM:SS` | `16:39:47` |
 
 - Modbus/FINS `date` has raw semantics of **Unix seconds** (driver decoding convention), normalized to UTC RFC3339 on output, so consumers don't need to agree on units; convert from ISO when an epoch is needed.
 - S7 date/tod/dt are output in human-readable form **without a time zone** (S7 decodes to local time); consume as text.
+- DL/T 645 date/time are BCD encoded and likewise **carry no time zone**; the year is transmitted as two digits and the driver interprets it as 2000-and-later. When the field layout does not match the spec the driver sets `quality=0` with an empty value rather than guessing a wrong date.
 
 ## 7. Known contract gaps (deliberately not addressed by this spec)
 

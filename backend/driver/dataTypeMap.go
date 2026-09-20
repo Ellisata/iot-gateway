@@ -166,6 +166,35 @@ var opcuaTypes = map[string]string{
 	TypeDouble:  "float64",
 }
 
+// dlt645Types DL/T 645 通用数据类型 → 内部类型名。
+//
+// 与其他协议不同：645 的数据长度、小数位、符号、编码方式由**数据标识 DI** 决定，
+// 通用类型只决定输出形态与 Kind（见 driver/dlt645/decode.go）：
+//   - Float/Double → 工程值，应用 DI 的小数位（BCD 定标值，始终以 float64 承载，
+//     避免 4 字节电量 999999.99 在 float32 下丢最后一位）；
+//   - BCD/LBCD/Word/DWord/Byte/Short/Long/Char → 原始整数，不应用小数位；
+//   - String → BCD 数字串（表号/通信地址）；
+//   - Date → 日期时间；
+//   - Boolean → 数值非零判定。
+//
+// 所有 13 个通用类型均有映射，使 AvailableTypes("dlt645") 返回完整列表，
+// 且 NormalizeAddressType 无需回退。
+var dlt645Types = map[string]string{
+	TypeBoolean: "bool",
+	TypeDate:    "datetime",
+	TypeString:  "string",
+	TypeByte:    "uint",
+	TypeChar:    "int",
+	TypeShort:   "int",
+	TypeWord:    "uint",
+	TypeDWord:   "uint",
+	TypeLong:    "int",
+	TypeFloat:   "float",
+	TypeDouble:  "float",
+	TypeBCD:     "bcd",
+	TypeLBCD:    "lbcd",
+}
+
 // ==================== 协议作用域（scope）组织 ====================
 
 // scopeTypeMap 可配置类型的唯一真源：TypeRegistry scope 前缀 → 通用/扩展类型映射。
@@ -181,6 +210,7 @@ var scopeTypeMap = map[string]map[string]string{
 	"mitsubishi": mcTypes,
 	"rockwell":   rockwellTypes,
 	"opcua":      opcuaTypes,
+	"dlt645":     dlt645Types,
 }
 
 // scopeProtocols scope 前缀 → 该 scope 下的 config 协议名（driver.Register / iot_protocol.name）。
@@ -193,6 +223,7 @@ var scopeProtocols = map[string][]string{
 	"mitsubishi": {"Mitsubishi.MC.TCP", "Mitsubishi.MC.Serial"},
 	"rockwell":   {"Rockwell.CIP"},
 	"opcua":      {"OPC.UA"},
+	"dlt645":     {"DLT645.Serial", "DLT645.TCP"},
 }
 
 // protocolScope config 协议名 → scope 前缀（由 scopeProtocols 派生）。

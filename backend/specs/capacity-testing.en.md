@@ -19,6 +19,7 @@ The essence of point capacity: **frames × per-frame round-trip latency < scan i
 | Omron.CIP | 1 tag/round-trip (0x0A batch via maxTagsPerRequest) | N → ceil(N/batch) | N |
 | Rockwell.CIP | 125 elements/frame (array tags) | ceil(N/125) per same-cardinality array, summed across cardinalities | N (standalone tags) |
 | OPC.UA | maxBatch nodes/ReadRequest (default 100, up to 1000) | ceil(N/maxBatch) (direct NodeID) | Same (browse-path adds 1 Translate round-trip on first use, then caches) |
+| DL/T 645 | 12 data identifiers/frame (`maxDIsPerRead`, spec limit; default 1) | **No range-merge concept, layout-independent**: ceil(N/maxDIsPerRead) | Same |
 
 Per-device capacity ceiling ≈ scan interval / per-frame round-trip latency × points per frame; the whole machine is jointly constrained by CPU (decode/format/GC) and the worker pool (NumCPU×2). The measured common throughput ceiling on this machine is about **2M records/s**.
 
@@ -100,6 +101,139 @@ The driver resolves points to NodeIDs, then issues ReadRequests in batches of `m
    a 1000-point device goes 100 frames → 10 frames. Note some servers impose per-request operation limits
    (BadTooManyOperations); on failure dial it back down (the driver retries in sub-batches).
 3. Per-device cycle estimate: `ceil(points/maxBatch) × 2×RTT`, which must stay below the scan interval.
+
+## DL/T 645 specifics (2026-09)
+
+**This is the one protocol where gateway-side compute is not a bottleneck at all** — the limits are the
+2400bps physical link and the `interFrameDelayMs` setting, both 5–6 orders of magnitude above gateway overhead.
+
+### Per-frame cost model
+
+```
+per-device cycle = ceil(points / maxDIsPerRead) × (inter-frame delay + round-trip)
+round-trip       = (request bytes + response bytes) × 11 / baud + meter processing time
+```
+
+- **Inter-frame delay** (`interFrameDelayMs`, default **30ms**): RS-485 transceiver turnaround + meter
+  processing. **It is charged per frame and is the hard per-device throughput ceiling: 1000/delay frames
+  per second, independent of link speed and of how many devices run concurrently** (measured at 1/2/5/10
+  concurrent devices: a constant 32 frames/s per device). The 30ms default gives 33 frames/s.
+- **No range merging**: 645 read commands address one data identifier at a time; adjacent identifiers are
+  never coalesced. **Batched reads (`maxDIsPerRead`) are therefore the only frame-count lever**, capped at 12 by the spec.
+- Frame size grows with the batch: `maxDIsPerRead=1` is 16B request + 20B response; `=12` is 72B + 108B
+  (each identifier carries 8 bytes of data field).
+
+### Measured: point capacity gain from batching = batch size (exactly linear)
+
+Single device, scan=1000ms, default 30ms inter-frame delay (loopback, to remove link latency from the picture):
+
+| maxDIsPerRead | Points | Frames | Frames/s | Cycle | drop% |
+|---|---|---|---|---|---|
+| 1 (default) | 20 | 20 | 20 | 1s | 0.0 |
+| 1 | 50 | 50 | 25 | 2s | **50.0** |
+| 1 | 100 | 100 | 25 | 4s | **75.0** |
+| 12 | 240 | 20 | 20 | 1s | 0.0 |
+| 12 | 600 | 50 | 25 | 2s | **50.0** |
+| 12 | 1200 | 100 | 25 | 4s | **75.0** |
+
+**At the same frame count, batching carries 12× the points**: 240 batched points and 20 unbundled points
+show identical cycle, frame rate and drop. The default `maxDIsPerRead=1` means frames = points, which is
+the root cause of "one meter yields only a handful of points" in the field.
+
+### Measured: real-link simulation (2400bps / 8E1)
+
+`-latency` injects the round-trip from the formula above (165ms for 1 identifier, 825ms for 12):
+
+| maxDIsPerRead | Round-trip | Points | Points/s | drop% |
+|---|---|---|---|---|
+| 1 | 165ms | 5 | 5 | 0.0 |
+| 1 | 165ms | 10 | 5 | **50.0** |
+| 12 | 825ms | 12 | 12 | 0.0 |
+| 12 | 825ms | 24 | 12 | **50.0** |
+
+**At 2400bps a single meter tops out at 12 points/s** (1s scan), even with batching maxed out. At 9600bps
+it scales proportionally to roughly 48 points/s.
+
+### Measured: gateway-side ceiling (inter-frame delay disabled)
+
+`-dlt645-interframe 0`, maxDIsPerRead=12, ~1.2ms per frame:
+
+| Devices | Points/device | Frames/s | Records/s | drop% |
+|---|---|---|---|---|
+| 10 | 2000 | 1670 | 20000 | 0.0 |
+| 10 | 5000 | 4179 | 50000 | 0.0 |
+| 50 | 2000 | 8347 | 100000 | 0.0 |
+| 50 | 5000 | 17270 | 205000 | **18.0** |
+| 100 | 2000 | 16699 | 200000 | 0.0 |
+| 100 | 5000 | 24637 | 298000 | **40.4** |
+
+The gateway side tops out around **25k frames/s / 300k records/s** (CPU ceiling, on par with the other protocols).
+
+### Micro-benchmarks (driver/dlt645, 16 threads)
+
+| Stage | Cost | Allocations |
+|---|---|---|
+| Request framing | 45ns (1 id) / 149ns (12 ids) | 2 / 3 allocs |
+| Response parse (incl. checksum) | 79ns | 3 allocs |
+| Read response (whole frame / 1-byte chunks) | 239ns / 508ns | 7 / 8 allocs |
+| Decode BCD / binary / date | 19ns / 4.3ns / 173ns | 1 / 0 / 3 allocs |
+| Plan cache hit | 11.7ns | 0 allocs |
+| Full `Read`, 1000 points | 807µs (maxDIs=1) / 419µs (maxDIs=12) | 17845 / 7101 allocs |
+
+**A complete exchange (drain → encode → send → parse → dispatch) is 280ns, while one frame at 2400bps
+takes 165ms — six orders of magnitude apart.** There is no gateway-side optimization pressure on 645.
+
+### Production configuration advice
+
+1. **Raise `maxDIsPerRead` to 8–12** (spec limit 12). It is the only point-capacity lever, and the gain
+   equals the batch size exactly. The trade-off: when a batch is rejected the driver degrades to reading
+   identifier by identifier (`plan.go`), so abnormal responses cost extra frames.
+2. **Lower `interFrameDelayMs` to match the actual meter.** The 30ms default is conservative; fast meters
+   tolerate 10–20ms, improving per-device throughput linearly. At 5600/9600bps or above — or on Ethernet
+   (DTU transparent mode) — 30ms becomes the bottleneck before the link does. After lowering it, watch for
+   bit errors: insufficient transceiver turnaround drops the first byte.
+3. **Size per-device point count from "baud rate + scan interval", not from gateway capability**:
+   `points ≤ baud/11 / (request + response bytes) × scan interval × batch`. At 2400bps / 1s / batch 12 that is 12 points.
+4. **Serial (`DLT645.Serial`) and Ethernet (`DLT645.TCP`) share the same application layer**, so frame
+   counts and batching gains are identical. This benchmark covers TCP only — the extra serial constraint is
+   RS-485 bus exclusivity (`SerialExclusive`): while one meter is polled, every other meter on the same bus
+   waits, so divide capacity by the number of meters sharing one 485 bus.
+
+### Fake meter vs real hardware
+
+The fake meter in `testutil/fake/dlt645.go` implements read-data commands only (2007=0x11 / 1997=0x01),
+echoing each requested data identifier with fixed-length data. The data length is a **convention**, not
+derived from the request (645 read commands carry only identifiers; lengths come from the meter manual),
+so the load-test seeder declares 4 bytes explicitly via `%08X:4:2`. The following real-hardware paths are
+**not covered** — do not infer them from benchmark numbers:
+
+- **Half-duplex echo**: some DTUs / serial servers echo the request frame back verbatim, which the driver
+  must parse and skip (`isRequestCtrl` in `codec.go`). The fake meter does not echo, so an echoing link
+  doubles the byte volume and raises per-frame time.
+- **Follow-up frames (0xB1/0xB2)**: the driver does not reassemble them yet; receiving one marks the whole
+  group as abnormal. The fake meter never sends them.
+- **Abnormal responses**: the fake meter answers error code 02 for rejected identifiers. The external
+  simulator on port 8899 **replies with error code 01 to every read request, with a byte-swapped address
+  field** — it cannot be used for capacity measurement.
+
+### Data identifier dictionary verification status
+
+Of the built-in dictionary (44 entries for 2007, 18 for 1997) **only 6 / 2** — total energy, phase-A
+voltage/current, grid frequency and a few more — have been cross-verified against multiple sources. The
+byte counts and decimal places of the remaining entries come from the spec text alone and have **not been
+compared against a real meter one by one**. At startup the driver logs these "pending verification" entries
+in one INFO line; check that log first when a reading does not match the meter.
+
+Do not patch the code to adapt — override through the **address suffix** instead:
+
+```
+02010100          # from the dictionary: 2 bytes, 1 decimal (phase-A voltage)
+02020100:3:3      # explicitly 3 bytes, 3 decimals
+12345678:2:0:s    # vendor-private identifier: 2-byte signed BCD
+```
+
+An identifier that is neither in the dictionary nor given an explicit byte count **fails loudly** rather
+than guessing a length — a guessed length silently yields wrong values.
 
 ## Scaling bottleneck notes
 

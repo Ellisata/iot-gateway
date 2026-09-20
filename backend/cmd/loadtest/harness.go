@@ -36,6 +36,10 @@ type protocolAdapter struct {
 	sparseStride         int                                 // 稀疏步长（地址间隙，用于地址空间上限估算）
 	maxSparse            int                                 // 稀疏布局点数上限（地址空间限制，0=不限制）
 	dataType             string                              // 点位数据类型（驱动内部类型名）
+	// framesFn 返回假服务器累计应答的事务帧数（可选，nil = 该协议不上报）。
+	// 对问答式、逐点寻址的协议（DL/T 645），帧数才是容量的自变量，
+	// 从「记录/秒」反推帧率要经过引擎批次与调度，容易得出错误结论。
+	framesFn func() int64
 }
 
 var adapters = map[string]protocolAdapter{
@@ -118,6 +122,40 @@ var adapters = map[string]protocolAdapter{
 		maxSparse:  0,
 		dataType:   "int16",
 	},
+	"dlt645": {
+		name:                 "DLT645.TCP",
+		newServer:            fake.NewDLT645,
+		newServerWithLatency: fake.NewDLT645WithLatency,
+		deviceJSON: func(port int, opts Options) string {
+			// -dlt645-batch N>1 时注入 maxDIsPerRead（单请求打包的数据标识个数，
+			// 驱动默认 1 = 一个数据标识一次往返，规范上限 12）
+			batch := ""
+			if opts.DLT645Batch > 1 {
+				batch = fmt.Sprintf(`,"maxDIsPerRead":%d`, opts.DLT645Batch)
+			}
+			// -dlt645-interframe N>=0 时覆盖帧间延时（驱动默认 30ms）。
+			// 这是单设备吞吐的硬上限：帧间延时 T 下单设备最多 1000/T 帧/秒，
+			// 与链路速率无关，因此测「网关侧上限」必须能把它关掉。
+			inter := ""
+			if opts.DLT645InterFrame >= 0 {
+				inter = fmt.Sprintf(`,"interFrameDelayMs":%d`, opts.DLT645InterFrame)
+			}
+			return fmt.Sprintf(`{"host":"127.0.0.1","port":%d%s%s}`, port, batch, inter)
+		},
+		// 厂商私有数据标识段 0x06000000+（内置字典只收录到 0x0400xxxx，不冲突）
+		// + 显式 4 字节/2 位小数（与假表 dltDefaultDataSize 约定一致）。
+		// 注意不能借用 0x04000000 段：其中的 04000101/04000102/04000401/04000402
+		// 是日期、时间、通信地址、表号，规范固定了布局与字节数，给它们显式字节数会被拒。
+		//
+		// 645 的读命令**逐数据标识寻址**，规范里没有「区间/连续块」概念：
+		// 相邻数据标识不会合并成一次更强的请求，故连续与稀疏布局对该协议完全相同，
+		// 帧数恒为 ceil(N / maxDIsPerRead)，与点位在地址空间上是否相邻无关。
+		addrName:   func(i int) string { return fmt.Sprintf("%08X:4:2", 0x06000000+i) },
+		sparseName: func(i int) string { return fmt.Sprintf("%08X:4:2", 0x06000000+i) },
+		maxSparse:  0, // 私有数据标识空间 2^32，现实点数远达不到上限
+		dataType:   "float",
+		framesFn:   fake.DLT645ReadFrames,
+	},
 	"opcua": {
 		name:                 "OPC.UA",
 		newServer:            fake.NewOpcUa,
@@ -172,16 +210,20 @@ func (s *countingSink) counts() (total, good int64) {
 
 // Options 压测参数。
 type Options struct {
-	Protocol   string // 驱动注册名（仅用于展示）
-	Devices    []int  // 设备数矩阵
-	Points     []int  // 单设备点位矩阵
-	ScanMs     int    // 采集频率（毫秒）
-	RunSec     time.Duration
-	Warmup     time.Duration
-	Sparse     bool
-	CIPBatch   int // CIP 0x0A 多服务批量读：每个报文携带标签数（>1 启用，0/1=单读）
-	OpcUaBatch int // OPC UA 单 ReadRequest 节点数（0=驱动默认 100）
-	Workers    int // worker 池并发数（0=默认 NumCPU*2）
+	Protocol    string // 驱动注册名（仅用于展示）
+	Devices     []int  // 设备数矩阵
+	Points      []int  // 单设备点位矩阵
+	ScanMs      int    // 采集频率（毫秒）
+	RunSec      time.Duration
+	Warmup      time.Duration
+	Sparse      bool
+	CIPBatch    int // CIP 0x0A 多服务批量读：每个报文携带标签数（>1 启用，0/1=单读）
+	OpcUaBatch  int // OPC UA 单 ReadRequest 节点数（0=驱动默认 100）
+	DLT645Batch int // DL/T 645 单请求打包的数据标识个数（0/1=驱动默认单点单读，规范上限 12）
+	// DLT645InterFrame DL/T 645 收发间延时毫秒（<0=驱动默认 30ms，0=关闭）。
+	// 它是单设备吞吐的硬上限（1000/delay 帧每秒），与链路速率无关。
+	DLT645InterFrame int
+	Workers          int // worker 池并发数（0=默认 NumCPU*2）
 }
 
 // seedDB 用真实迁移建库并造数：1 个协议 + devices 台设备 + devices×points 个点位。
@@ -270,6 +312,7 @@ type caseResult struct {
 	errCount      int
 	cycleMs       float64 // dev-0 观测到的轮询周期均值（毫秒）
 	fps           float64 // 每秒实际记录数
+	framesPerSec  float64 // 假服务器每秒应答的事务帧数（0 = 该协议不上报）
 }
 
 // runCase 跑一组 (devices, points)：建库造数 → 起采集引擎 → 预热 → 测量窗口采样 → 停止。
@@ -304,6 +347,10 @@ func runCase(pa protocolAdapter, opts Options, servers []*fake.Server, devices, 
 
 	// 测量窗口：清空预热计数，采样器记录堆/协程/错误/设备轮询周期
 	sink.reset()
+	var framesBefore int64
+	if pa.framesFn != nil {
+		framesBefore = pa.framesFn()
+	}
 	var (
 		mu            sync.Mutex
 		peakHeap      uint64
@@ -361,8 +408,17 @@ func runCase(pa protocolAdapter, opts Options, servers []*fake.Server, devices, 
 	window := time.Since(start).Seconds()
 	close(stop)
 
-	engine.Stop()
+	// 计数快照**必须在 Stop 之前取**。Engine.Stop 会排空在途轮询（task.go 的 wg.Wait），
+	// 尚未跑完的设备轮询会在排空期间继续产出记录与帧，若在那之后再计数，
+	// 这些 Drain 期产出会被摊到只有 RunSec 的 window 上——
+	// 掉点越重（轮询周期越长）吞吐被高估得越多，恰好污染本工具要检测的那个区间。
 	total, good := sink.counts()
+	framesInWindow := int64(0)
+	if pa.framesFn != nil {
+		framesInWindow = pa.framesFn() - framesBefore
+	}
+
+	engine.Stop()
 
 	// 预期记录数 = 设备数 × 点数 × (窗口内轮询轮数)
 	expected := float64(devices*points) * (window * 1000 / float64(opts.ScanMs))
@@ -374,6 +430,10 @@ func runCase(pa protocolAdapter, opts Options, servers []*fake.Server, devices, 
 	var cycleMs float64
 	if cycN > 0 {
 		cycleMs = cycSum / cycN
+	}
+	var framesPerSec float64
+	if pa.framesFn != nil {
+		framesPerSec = float64(framesInWindow) / window
 	}
 	return &caseResult{
 		devices:       devices,
@@ -387,13 +447,14 @@ func runCase(pa protocolAdapter, opts Options, servers []*fake.Server, devices, 
 		errCount:      errCount,
 		cycleMs:       cycleMs,
 		fps:           float64(total) / window,
+		framesPerSec:  framesPerSec,
 	}, nil
 }
 
 // sweep 按 (设备数 × 点数) 矩阵逐组压测并打印结果表。
 func sweep(pa protocolAdapter, opts Options, servers []*fake.Server) error {
-	fmt.Printf("%-7s %-9s %-9s %-12s %-12s %-7s %-8s %-9s %-7s %-7s %-6s\n",
-		"devices", "points", "total", "expected/s", "actual/s", "drop%", "heapMB", "goroutines", "errors", "cycleMs", "good%")
+	fmt.Printf("%-7s %-9s %-9s %-12s %-12s %-7s %-8s %-9s %-7s %-7s %-6s %-10s\n",
+		"devices", "points", "total", "expected/s", "actual/s", "drop%", "heapMB", "goroutines", "errors", "cycleMs", "good%", "frames/s")
 	for _, devs := range opts.Devices {
 		for _, pts := range opts.Points {
 			res, err := runCase(pa, opts, servers, devs, pts)
@@ -406,10 +467,14 @@ func sweep(pa protocolAdapter, opts Options, servers []*fake.Server) error {
 			if res.actual > 0 {
 				goodPct = float64(res.good) * 100 / float64(res.actual)
 			}
-			fmt.Printf("%-7d %-9d %-9d %-12.0f %-12.0f %-7.1f %-8d %-9d %-7d %-7.1f %-6.1f\n",
+			framesCell := "-"
+			if pa.framesFn != nil {
+				framesCell = fmt.Sprintf("%.0f", res.framesPerSec)
+			}
+			fmt.Printf("%-7d %-9d %-9d %-12.0f %-12.0f %-7.1f %-8d %-9d %-7d %-7.1f %-6.1f %-10s\n",
 				res.devices, res.points, res.devices*res.points,
 				expectedPerSec, res.fps, res.dropPct,
-				res.peakHeapMB, res.peakGoroutine, res.errCount, res.cycleMs, goodPct)
+				res.peakHeapMB, res.peakGoroutine, res.errCount, res.cycleMs, goodPct, framesCell)
 		}
 	}
 	return nil

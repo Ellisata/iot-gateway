@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"iot-gateway/driver"
+	_ "iot-gateway/driver/dlt645"       // 注册 DL/T 645 驱动
 	_ "iot-gateway/driver/mitsubishi"   // 注册 MC 驱动
 	_ "iot-gateway/driver/modbus"       // 注册 Modbus 驱动
 	_ "iot-gateway/driver/omron/cip"    // 注册 CIP 驱动
@@ -285,6 +286,105 @@ func TestMC3EDriverAgainstFake(t *testing.T) {
 	for _, r := range results {
 		if r.Quality != 192 {
 			t.Errorf("address %s quality=%d, want 192", r.DeviceAddressID, r.Quality)
+		}
+	}
+}
+
+// TestDLT645DriverAgainstFake 用真实 DL/T 645 驱动连假表读取。
+//
+// 除了「能读通」，还必须断言**逐点取值正确**：645 的应答数据域是
+// 「数据标识 + 数据」重复结构，一旦切分错位就会静默地把上一个点位的数据当成
+// 当前点位的值（驱动为此专门校验应答回显的数据标识）。假表按数据标识合成数值，
+// 这里据反推每个点位的期望值，映射错位会直接失败。
+func TestDLT645DriverAgainstFake(t *testing.T) {
+	srv, err := NewDLT645()
+	if err != nil {
+		t.Fatalf("new fake dlt645: %v", err)
+	}
+	defer srv.Close()
+
+	d, err := driver.Create("DLT645.TCP")
+	if err != nil {
+		t.Fatalf("create dlt645 driver: %v", err)
+	}
+	if err := d.Connect(fmt.Sprintf(`{"host":"127.0.0.1","port":%d}`, srv.Port())); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer d.Close()
+
+	// 厂商私有数据标识 + 显式 4 字节/2 位小数（与假表的 dltDefaultDataSize 约定一致）
+	addrs := []po.DeviceAddress{
+		{ID: "p0", Name: "04000000:4:2", DataType: "float"},
+		{ID: "p1", Name: "04000005:4:2", DataType: "float"},
+		{ID: "p2", Name: "04000018:4:2", DataType: "float"},
+		{ID: "p3", Name: "04000063:4:2", DataType: "float"},
+	}
+	results, err := d.Read(addrs)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(results) != len(addrs) {
+		t.Fatalf("got %d results, want %d", len(results), len(addrs))
+	}
+	// 期望值 = 数据标识最低字节 % 100，按 2 位小数格式化
+	// （0x00/0x05/0x18/0x63 → 0/5/24/99）
+	want := []string{"0.00", "0.05", "0.24", "0.99"}
+	for i, r := range results {
+		if r.Quality != 192 {
+			t.Errorf("address %s quality=%d, want 192", r.DeviceAddressID, r.Quality)
+		}
+		if r.Value != want[i] {
+			t.Errorf("address %s value=%q, want %q", r.DeviceAddressID, r.Value, want[i])
+		}
+	}
+}
+
+// TestDLT645DriverBatchAgainstFake 用 maxDIsPerRead>1 的批量读连假表，
+// 验证单请求多数据标识的组装与应答切分端到端可用（帧数从 N 降到 ceil(N/batch)）。
+func TestDLT645DriverBatchAgainstFake(t *testing.T) {
+	srv, err := NewDLT645()
+	if err != nil {
+		t.Fatalf("new fake dlt645: %v", err)
+	}
+	defer srv.Close()
+
+	d, err := driver.Create("DLT645.TCP")
+	if err != nil {
+		t.Fatalf("create dlt645 driver: %v", err)
+	}
+	// 4 个数据标识打包进一个请求；9 个点位 → 3 帧
+	if err := d.Connect(fmt.Sprintf(
+		`{"host":"127.0.0.1","port":%d,"maxDIsPerRead":4}`, srv.Port())); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer d.Close()
+
+	addrs := make([]po.DeviceAddress, 0, 9)
+	want := make([]string, 0, 9)
+	for i := 0; i < 9; i++ {
+		di := 0x04000000 + i*7
+		addrs = append(addrs, po.DeviceAddress{
+			ID:       fmt.Sprintf("p%d", i),
+			Name:     fmt.Sprintf("%08X:4:2", di),
+			DataType: "float",
+		})
+		// 假表按数据标识最低字节 % 100 返值（见 fake/dlt645.go 的 dltDataFor）
+		want = append(want, fmt.Sprintf("0.%02d", (di&0xFF)%100))
+	}
+
+	results, err := d.Read(addrs)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(results) != len(addrs) {
+		t.Fatalf("got %d results, want %d", len(results), len(addrs))
+	}
+	for i, r := range results {
+		if r.Quality != 192 {
+			t.Errorf("address %s quality=%d, want 192", r.DeviceAddressID, r.Quality)
+		}
+		if r.Value != want[i] {
+			t.Errorf("address %s value=%q, want %q", r.DeviceAddressID, r.Value, want[i])
 		}
 	}
 }

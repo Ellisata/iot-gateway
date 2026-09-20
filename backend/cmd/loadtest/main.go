@@ -11,13 +11,18 @@
 //
 //	go run ./cmd/loadtest -protocol modbus -devices 10,50,100 -points 500,2000,5000
 //
-// 支持协议：modbus / mc / fins / s7 / cip / opcua（各协议假服务器见 testutil/fake）。
+// 支持协议：modbus / mc / fins / s7 / cip / rockwell / opcua / dlt645
+// （各协议假服务器见 testutil/fake）。
 // 常用选项：
 //
 //	-sparse    稀疏地址布局（地址间隙超过合并窗口，每个点位一个请求帧，探测帧数最坏情况）
 //	-scan 500  把采集频率从默认 1000ms 收紧到 500ms
 //	-run 10    延长测量窗口到 10s（减小首尾边界误差）
+//	-latency   每事务注入固定延迟（模拟真实线路往返，CIP 系 / OPC UA / DL/T 645）
 //	-cpuprofile cpu.pprof  -memprofile mem.pprof  在最大组合下输出 pprof 画像
+//
+// 注：-sparse 对 DL/T 645 与 OPC UA 无意义——两者都没有区间合并概念，
+// 帧数只由「点数 / 单请求打包数」决定，与地址是否相邻无关。
 package main
 
 import (
@@ -44,7 +49,7 @@ log:
 `
 
 func main() {
-	protocol := flag.String("protocol", "modbus", "protocol: modbus | mc | fins | s7 | cip | rockwell | opcua")
+	protocol := flag.String("protocol", "modbus", "protocol: modbus | mc | fins | s7 | cip | rockwell | opcua | dlt645")
 	devices := flag.String("devices", "10,50,100", "comma-separated device counts")
 	points := flag.String("points", "500,2000,5000", "comma-separated points per device")
 	scan := flag.Int("scan", 1000, "scan frequency in ms")
@@ -54,7 +59,9 @@ func main() {
 	sparse := flag.Bool("sparse", false, "sparse address layout (breaks range merging)")
 	cipBatch := flag.Int("cip-batch", 0, "CIP 0x0A multi-service read: tags per request (>1 enables batching)")
 	opcuaBatch := flag.Int("opcua-batch", 0, "OPC UA maxBatch: nodes per ReadRequest (0 = driver default 100)")
-	latency := flag.Int("latency", 0, "artificial per-transaction latency in ms (CIP / OPC UA fake servers only)")
+	dlt645Batch := flag.Int("dlt645-batch", 0, "DL/T 645 maxDIsPerRead: data identifiers per request (0/1 = one round trip per point, max 12)")
+	dlt645Inter := flag.Int("dlt645-interframe", -1, "DL/T 645 inter-frame delay ms (-1 = driver default 30, 0 = disabled)")
+	latency := flag.Int("latency", 0, "artificial per-transaction latency in ms (CIP / OPC UA / DL/T 645 fake servers only)")
 	workers := flag.Int("workers", 0, "worker pool concurrency (0 = NumCPU*2)")
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file for the largest case")
 	memprofile := flag.String("memprofile", "", "write heap profile to file for the largest case")
@@ -121,16 +128,18 @@ func main() {
 	}()
 
 	opts := Options{
-		Protocol:   pa.name,
-		Devices:    devList,
-		Points:     ptList,
-		ScanMs:     *scan,
-		RunSec:     time.Duration(*run * float64(time.Second)),
-		Warmup:     time.Duration(*warmup * float64(time.Second)),
-		Sparse:     *sparse,
-		CIPBatch:   *cipBatch,
-		OpcUaBatch: *opcuaBatch,
-		Workers:    *workers,
+		Protocol:         pa.name,
+		Devices:          devList,
+		Points:           ptList,
+		ScanMs:           *scan,
+		RunSec:           time.Duration(*run * float64(time.Second)),
+		Warmup:           time.Duration(*warmup * float64(time.Second)),
+		Sparse:           *sparse,
+		CIPBatch:         *cipBatch,
+		OpcUaBatch:       *opcuaBatch,
+		DLT645Batch:      *dlt645Batch,
+		DLT645InterFrame: *dlt645Inter,
+		Workers:          *workers,
 	}
 
 	layout := "contiguous"
@@ -142,6 +151,12 @@ func main() {
 	}
 	if *opcuaBatch > 0 && *opcuaBatch != 100 {
 		layout = fmt.Sprintf("%s+maxBatch-%d", layout, *opcuaBatch)
+	}
+	if *dlt645Batch > 1 {
+		layout = fmt.Sprintf("%s+maxDIs-%d", layout, *dlt645Batch)
+	}
+	if *dlt645Inter >= 0 {
+		layout = fmt.Sprintf("%s+interFrame-%dms", layout, *dlt645Inter)
 	}
 	if *workers > 0 {
 		layout = fmt.Sprintf("%s+workers-%d", layout, *workers)

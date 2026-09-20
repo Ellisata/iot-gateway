@@ -10,7 +10,7 @@
 
 ## 功能特性
 
-- **多协议采集**：内置 Modbus、西门子 S7、三菱 MC、欧姆龙 FINS/CIP、罗克韦尔 CIP、OPC UA 等 12 种协议/传输驱动，支持寄存器批量读取、字节序/字序配置。
+- **多协议采集**：内置 Modbus、西门子 S7、三菱 MC、欧姆龙 FINS/CIP、罗克韦尔 CIP、OPC UA、DL/T 645 电能表等 14 种协议/传输驱动，支持寄存器批量读取、字节序/字序配置。
 - **动态表单驱动**：协议参数以 JSON Schema 动态表单存储于数据库，新增协议无需改前端代码。
 - **采集引擎**：Worker 并发池调度轮询任务；后台 watcher 检测配置变更，**零中断热加载**。
 - **推送引擎**：设备级分组批量分发；通道配置热加载；断网时数据写入 **本地 outbox 持久缓存**，恢复后自动补发，不丢数据。
@@ -25,7 +25,7 @@
                  ┌────────────────────── 单二进制 iot-gateway ──────────────────────┐
                  │                                                                  │
   PLC / 设备 ───▶│  collector 采集引擎 ──▶ driver 协议驱动层                          │
-                 │   (Worker池/热加载)      (Modbus/S7/MC/FINS/CIP/OPC UA ...)       │
+                 │   (Worker池/热加载)      (Modbus/S7/MC/FINS/CIP/645/OPC UA ...)   │
                  │        │                                                         │
                  │        ▼ RecordSink                                              │
                  │  push 推送引擎 ────┬──▶ MQTT Broker                              │
@@ -50,8 +50,12 @@
 | Omron.CIP | EtherNet/IP | 欧姆龙 CIP 设备 |
 | Rockwell.CIP | EtherNet/IP | 罗克韦尔（AB）ControlLogix / CompactLogix |
 | OPC.UA | 以太网 | 支持 OPC UA 的设备与网关 |
+| DLT645.Serial / DLT645.TCP | 串口 / 以太网 | DL/T 645 多功能电能表（2007 / 1997 两版数据标识） |
 
-> 各协议可承载的设备/点位容量与调优建议，见[采集容量压测报告](backend/cmd/loadtest/README.md)。
+> 各协议可承载的设备/点位容量与调优建议（含 DL/T 645 专项），见[采集容量压测报告](backend/cmd/loadtest/README.md)。
+
+> DL/T 645 逐数据标识寻址、**无区间合并**：帧数 = 点数 ÷ `maxDIsPerRead`（默认逐个读，规范上限 12），
+> 真机瓶颈在串口波特率与帧间延时。该协议参数的调优建议与其他协议不同，**上线前请先读压测报告**。
 
 ## 支持推送通道
 
@@ -176,7 +180,7 @@ sqlite:
 ```
 ├── backend/            # Go 后端
 │   ├── collector/      # 采集引擎（轮询调度 / 配置热加载）
-│   ├── driver/         # 协议驱动注册表（modbus/s7/mitsubishi/omron/rockwell/opcua）
+│   ├── driver/         # 协议驱动注册表（modbus/s7/mitsubishi/omron/rockwell/opcua/dlt645）
 │   ├── push/           # 推送引擎（mqtt/tdengine-v3/influxdb-v3 + outbox）
 │   ├── controller/ service/ model/  # HTTP 分层（Controller → Service → Database）
 │   ├── database/sqlite/migrations/  # SQLite 迁移脚本

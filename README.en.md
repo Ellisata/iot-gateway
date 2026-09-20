@@ -10,7 +10,7 @@ English | [简体中文](README.md)
 
 ## Features
 
-- **Multi-protocol acquisition**: 12 built-in protocol/transport drivers covering Modbus, Siemens S7, Mitsubishi MC, Omron FINS/CIP, Rockwell CIP and OPC UA — with batch register reads and configurable byte/word order.
+- **Multi-protocol acquisition**: 14 built-in protocol/transport drivers covering Modbus, Siemens S7, Mitsubishi MC, Omron FINS/CIP, Rockwell CIP, OPC UA and DL/T 645 electricity meters — with batch register reads and configurable byte/word order.
 - **Dynamic form driven**: protocol parameters are stored in the database as dynamic form schemas (JSON), so new protocols require no frontend changes.
 - **Acquisition engine**: worker-pool scheduled polling tasks; a background watcher detects configuration changes and applies **zero-downtime hot reload**.
 - **Push engine**: device-grouped batch dispatch; channel configs hot-reload; on network outage data lands in a **persistent local outbox** and is automatically re-sent once the connection recovers — no data loss.
@@ -25,7 +25,7 @@ English | [简体中文](README.md)
               ┌─────────────────── single iot-gateway binary ───────────────────┐
               │                                                                 │
   PLC / device ──▶ collector engine ──▶ driver layer                            │
-              │   (worker pool /      (Modbus/S7/MC/FINS/CIP/OPC UA ...)        │
+              │   (worker pool /      (Modbus/S7/MC/FINS/CIP/645/OPC UA ...)    │
               │    hot reload)                                                  │
               │      │                                                          │
               │      ▼ RecordSink                                               │
@@ -51,8 +51,13 @@ English | [简体中文](README.md)
 | Omron.CIP | EtherNet/IP | Omron CIP devices |
 | Rockwell.CIP | EtherNet/IP | Rockwell (Allen-Bradley) ControlLogix / CompactLogix |
 | OPC.UA | Ethernet | OPC UA capable devices and gateways |
+| DLT645.Serial / DLT645.TCP | Serial / Ethernet | DL/T 645 electricity meters (2007 / 1997 identifier sets) |
 
-> For measured per-protocol capacity (devices × points) and tuning advice, see the [capacity load-test report](backend/cmd/loadtest/README.en.md).
+> For measured per-protocol capacity (devices × points) and tuning advice — including a dedicated DL/T 645 section — see the [capacity load-test report](backend/cmd/loadtest/README.en.md).
+
+> DL/T 645 addresses points one data identifier at a time with **no range merging**: frames = points ÷ `maxDIsPerRead`
+> (one point per frame by default, spec cap 12), and on real hardware the bottleneck is baud rate and inter-frame delay.
+> This protocol tunes differently from the rest — **read the load-test report before going live**.
 
 ## Supported Push Channels
 
@@ -180,7 +185,7 @@ sqlite:
 ```
 ├── backend/            # Go backend
 │   ├── collector/      # Acquisition engine (poll scheduling / config hot reload)
-│   ├── driver/         # Protocol driver registry (modbus/s7/mitsubishi/omron/rockwell/opcua)
+│   ├── driver/         # Protocol driver registry (modbus/s7/mitsubishi/omron/rockwell/opcua/dlt645)
 │   ├── push/           # Push engine (mqtt/tdengine-v3/influxdb-v3 + outbox)
 │   ├── controller/ service/ model/  # HTTP layers (Controller → Service → Database)
 │   ├── database/sqlite/migrations/  # SQLite migration scripts

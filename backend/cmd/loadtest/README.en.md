@@ -14,16 +14,21 @@ go run ./cmd/loadtest -protocol modbus -devices 10,50,100 -points 500,2000,5000
 
 | Flag | Default | Description |
 |---|---|---|
-| `-protocol` | `modbus` | `modbus` / `mc` / `fins` / `s7` / `cip` / `rockwell` / `opcua` |
+| `-protocol` | `modbus` | `modbus` / `mc` / `fins` / `s7` / `cip` / `rockwell` / `opcua` / `dlt645` |
 | `-devices` | `10,50,100` | Device count matrix (comma-separated) |
 | `-points` | `500,2000,5000` | Points-per-device matrix |
 | `-scan` | `1000` | Scan frequency (ms); tighten to 200/100 to probe saturation |
 | `-run` / `-warmup` | `5` / `2` | Measurement window / warm-up seconds |
 | `-servers` | `4` | Fake PLC server pool size (devices round-robin across it) |
 | `-sparse` | `false` | Sparse address layout (gaps > merge window, **1 frame/point**, worst-case frame count) |
-| `-latency` | `0` | Fixed per-transaction latency in ms (simulates real RTT; CIP family and `opcua` only) |
+| `-latency` | `0` | Fixed per-transaction latency in ms (simulates real RTT; CIP family / `opcua` / `dlt645` only) |
 | `-opcua-batch` | `0` | OPC UA maxBatch (nodes per ReadRequest; 0 = driver default 100) |
+| `-dlt645-batch` | `0` | DL/T 645 maxDIsPerRead (data identifiers per request; spec limit 12; 0/1 = default one point per round-trip) |
+| `-dlt645-interframe` | `-1` | DL/T 645 inter-frame delay in ms (`-1` = driver default 30, `0` = disabled) |
 | `-cpuprofile` / `-memprofile` | - | pprof profiles of the largest combination |
+
+> `-sparse` is meaningless for `dlt645` and `opcua`: neither has a range-merge concept, so the frame
+> count depends only on points / per-request batch size, not on whether addresses are adjacent.
 
 ## Metrics
 
@@ -31,8 +36,19 @@ go run ./cmd/loadtest -protocol modbus -devices 10,50,100 -points 500,2000,5000
 - **actual/s**: records/sec actually received by the sink (counting only; replaces the real push engine to isolate push interference).
 - **cycleMs**: poll cycle derived from diffs of dev-0 successful reads (meaningful only when `scan>=1000ms`; below 1s it is washed out by second-level timestamp precision).
 - **heapMB / goroutines / errors**: peaks within the measurement window; errors come from engine error counters.
+- **frames/s**: transaction frames answered per second by the fake servers (reported by `dlt645` only; `-` elsewhere).
+  For request/response, per-point-addressed protocols the frame count is the true independent variable — deriving a
+  frame rate from "records/sec" goes through the engine's batching and scheduling, and a mistake anywhere in that
+  chain yields a wrong conclusion. Note that at small point counts this value is capped by the scan interval
+  (frames per cycle ÷ scan interval), not by frame cost.
 
 "Supported" verdict: drop%=0 **and** errors=0 **and** good%=100.
+
+> **Counting window**: both record and frame snapshots are taken **before** `engine.Stop()`. `Stop()` drains
+> in-flight polls (`wg.Wait()` in `task.go`), and unfinished device cycles keep producing records during the
+> drain; counting after that spreads those records over a window of only `-run` seconds — overstating
+> throughput more the heavier the drop (i.e. the longer the cycle), which corrupts exactly the regime this
+> tool exists to detect (fixed 2026-09).
 
 ## How it works
 
@@ -45,6 +61,8 @@ testutil/fake/           fake PLC servers (real TCP listeners, frame-by-frame pa
   s7.go                  S7 (ISO CR/CC + PDU negotiation + read vars, byte-aligned with gos7)
   cip.go                 EtherNet/IP (Register Session + SendRRData + 0x4C reads;
                          Omron dialect NewCIP / AB dialect NewCIPAB / RTT-enabled *WithLatency)
+  dlt645.go              DL/T 645 (read-data command 0x11; echoes identifiers + fixed-length data;
+                         Dlt645ReadFrames provides the frame counter)
   opcua.go               OPC UA (reuses the gopcua in-process server package + Read handler overrides;
                          address space ns=1;i=≥1001 fully formulaic; RTT-enabled NewOpcUaWithLatency)
   integration_test.go    real-driver-to-fake-server interop tests (guards against frame-format drift)
@@ -193,6 +211,55 @@ the Read override handler returns values by NodeID formula (detailed findings in
 - Raising `maxBatch` (≤1000) is this protocol's only frame-count lever: 50×5000@200ms went from 24.5% to 1.0%.
 - Browse-path addresses (`Device/Tag` form) need a Translate round-trip on first use and invalidate on reconnect — not covered by this benchmark;
   direct NodeID addressing is recommended in production.
+
+### DL/T 645 (per-identifier addressing, no range merging; batching is the only frame-count lever, spec limit 12)
+
+**Gateway-side compute is not a bottleneck at all here**: one complete exchange costs 280ns (see the micro-benchmarks
+in `driver/dlt645`), while a single frame at 2400bps takes 165ms — six orders of magnitude apart. Capacity is set by
+the **baud rate** and the **inter-frame delay**.
+
+What makes the inter-frame delay special: it is **charged per frame** and is the hard per-device throughput ceiling
+(1000/delay frames per second), independent of link speed and device concurrency (measured at 1/2/5/10 concurrent
+devices: a constant 32 frames/s per device).
+
+**Point capacity gain from batching equals the batch size exactly** (single device, scan=1000ms, default 30ms delay):
+
+| maxDIsPerRead | Points | Frames | Frames/s | Cycle | drop% |
+|---|---|---|---|---|---|
+| 1 (default) | 20 | 20 | 20 | 1s | 0.0 |
+| 1 | 50 | 50 | 25 | 2s | **50.0** |
+| 1 | 100 | 100 | 25 | 4s | **75.0** |
+| 12 | 240 | 20 | 20 | 1s | 0.0 |
+| 12 | 600 | 50 | 25 | 2s | **50.0** |
+| 12 | 1200 | 100 | 25 | 4s | **75.0** |
+
+At the same frame count, batching carries 12× the points. With the default `maxDIsPerRead=1` frames = points, which is
+the root cause of "one meter yields only a handful of points" in the field.
+
+**Real-link simulation (`-latency`, 2400bps / 8E1)**: 165ms round-trip for 1 identifier, 825ms for 12.
+
+| maxDIsPerRead | Round-trip | Points | Points/s | drop% |
+|---|---|---|---|---|
+| 1 | 165ms | 10 | 5 | **50.0** |
+| 12 | 825ms | 12 | 12 | 0.0 |
+| 12 | 825ms | 24 | 12 | **50.0** |
+
+**At 2400bps a single meter tops out at 12 points/s** (1s scan), even with batching maxed out.
+
+**Gateway-side ceiling (`-dlt645-interframe 0`, maxDIs=12, ~1.2ms per frame)**:
+
+| Devices | Points/device | Frames/s | Records/s | drop% |
+|---|---|---|---|---|
+| 10 | 2000 | 1670 | 20000 | 0.0 |
+| 50 | 5000 | 17270 | 205000 | **18.0** |
+| 100 | 5000 | 24637 | 298000 | **40.4** |
+
+Tops out around **25k frames/s / 300k records/s** (CPU ceiling). Worth noting: with the inter-frame delay disabled a
+frame costs 1.2ms, of which about 1ms is the fixed read deadline in `tcpClient.Drain()` — **an optimization
+opportunity**, since at high throughput (delay already disabled) it accounts for 80% of per-frame cost. Draining only
+when the buffer actually holds residue (probing with `SetReadDeadline(time.Now())`) would remove it.
+
+Full findings, micro-benchmarks and uncovered real-hardware paths: [specs/capacity-testing.en.md](../../specs/capacity-testing.en.md).
 
 ### Optimization directions
 1. **Frame count decides point capacity**: Modbus 125 registers/frame, MC 960 words/frame, FINS 100 words/frame,

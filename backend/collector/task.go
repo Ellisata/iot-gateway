@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"iot-gateway/driver"
+	_ "iot-gateway/driver/dlt645"       // 注册 DL/T 645 电能表驱动
 	_ "iot-gateway/driver/mitsubishi"   // 注册三菱 MC 驱动
 	_ "iot-gateway/driver/modbus"       // 注册 Modbus 驱动
 	_ "iot-gateway/driver/omron/cip"    // 注册欧姆龙 CIP 驱动
