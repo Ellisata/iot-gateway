@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file (Keep a Changelo
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-20
+
 ### Changed
 
 - JWT 签名密钥不再使用内置固定值：未配置时每次启动随机生成临时密钥；生产环境建议通过 `IOT_GATEWAY_JWT_SECRET` 环境变量或 `jwt.secret` 配置固定密钥。
@@ -17,3 +19,6 @@ All notable changes to this project are documented in this file (Keep a Changelo
   Added the DL/T 645 electricity-meter driver (`DLT645.Serial` / `DLT645.TCP`): reads voltage, current, power and energy from multifunction meters over RS-485 or a serial server (DTU), supporting both the DL/T 645-2007 and 1997 identifier sets, per-identifier addressing with batch packing (`maxDIsPerRead`), a built-in data-identifier dictionary and checksum verification, and disconnection alarms.
 - 开放接口文档按管理端用户语言展示：新增英文版文档，`/openApiSecret/doc` 接口根据用户语言（`area` 头）返回中文或英文版本。
   Open API documentation now follows the admin user's language: an English version was added, and `/openApiSecret/doc` returns the Chinese or English version based on the user's language (`area` header).
+
+[Unreleased]: https://gitee.com/wang4856304/iot-gateway/compare/v0.2.1...HEAD
+[0.2.1]: https://gitee.com/wang4856304/iot-gateway/compare/v0.1.0...v0.2.1
