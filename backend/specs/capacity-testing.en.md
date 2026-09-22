@@ -19,7 +19,7 @@ The essence of point capacity: **frames × per-frame round-trip latency < scan i
 | Omron.CIP | 1 tag/round-trip (0x0A batch via maxTagsPerRequest) | N → ceil(N/batch) | N |
 | Rockwell.CIP | 125 elements/frame (array tags) | ceil(N/125) per same-cardinality array, summed across cardinalities | N (standalone tags) |
 | OPC.UA | maxBatch nodes/ReadRequest (default 100, up to 1000) | ceil(N/maxBatch) (direct NodeID) | Same (browse-path adds 1 Translate round-trip on first use, then caches) |
-| DL/T 645 | 12 data identifiers/frame (`maxDIsPerRead`, spec limit; default 1) | **No range-merge concept, layout-independent**: ceil(N/maxDIsPerRead) | Same |
+| DL/T 645 | 12 data identifiers/frame (`maxDIsPerRead`, spec limit — and the factory default) | **No range-merge concept, layout-independent**: ceil(N/maxDIsPerRead) | Same |
 
 Per-device capacity ceiling ≈ scan interval / per-frame round-trip latency × points per frame; the whole machine is jointly constrained by CPU (decode/format/GC) and the worker pool (NumCPU×2). The measured common throughput ceiling on this machine is about **2M records/s**.
 
@@ -114,10 +114,12 @@ per-device cycle = ceil(points / maxDIsPerRead) × (inter-frame delay + round-tr
 round-trip       = (request bytes + response bytes) × 11 / baud + meter processing time
 ```
 
-- **Inter-frame delay** (`interFrameDelayMs`, default **30ms**): RS-485 transceiver turnaround + meter
-  processing. **It is charged per frame and is the hard per-device throughput ceiling: 1000/delay frames
-  per second, independent of link speed and of how many devices run concurrently** (measured at 1/2/5/10
-  concurrent devices: a constant 32 frames/s per device). The 30ms default gives 33 frames/s.
+- **Inter-frame delay** (`interFrameDelayMs`, default **30ms serial / 0 TCP**): the 30ms reserves RS-485
+  transceiver turnaround + meter processing, which **is meaningless on a TCP transparent link** (the
+  serial server / DTU handles turnaround itself), so TCP ships with 0. On serial it **is charged per frame
+  and is the hard per-device throughput ceiling: 1000/delay frames per second, independent of link speed
+  and of how many devices run concurrently** (measured at 1/2/5/10 concurrent devices: a constant
+  32 frames/s per device). The 30ms serial default gives 33 frames/s — do not carry that number over to TCP.
 - **No range merging**: 645 read commands address one data identifier at a time; adjacent identifiers are
   never coalesced. **Batched reads (`maxDIsPerRead`) are therefore the only frame-count lever**, capped at 12 by the spec.
 - Frame size grows with the batch: `maxDIsPerRead=1` is 16B request + 20B response; `=12` is 72B + 108B
@@ -125,20 +127,21 @@ round-trip       = (request bytes + response bytes) × 11 / baud + meter process
 
 ### Measured: point capacity gain from batching = batch size (exactly linear)
 
-Single device, scan=1000ms, default 30ms inter-frame delay (loopback, to remove link latency from the picture):
+Single device, scan=1000ms, 30ms inter-frame delay (loopback, to remove link latency from the picture):
 
 | maxDIsPerRead | Points | Frames | Frames/s | Cycle | drop% |
 |---|---|---|---|---|---|
-| 1 (default) | 20 | 20 | 20 | 1s | 0.0 |
+| 1 | 20 | 20 | 20 | 1s | 0.0 |
 | 1 | 50 | 50 | 25 | 2s | **50.0** |
 | 1 | 100 | 100 | 25 | 4s | **75.0** |
-| 12 | 240 | 20 | 20 | 1s | 0.0 |
+| 12 (default) | 240 | 20 | 20 | 1s | 0.0 |
 | 12 | 600 | 50 | 25 | 2s | **50.0** |
 | 12 | 1200 | 100 | 25 | 4s | **75.0** |
 
 **At the same frame count, batching carries 12× the points**: 240 batched points and 20 unbundled points
-show identical cycle, frame rate and drop. The default `maxDIsPerRead=1` means frames = points, which is
-the root cause of "one meter yields only a handful of points" in the field.
+show identical cycle, frame rate and drop. `maxDIsPerRead=1` means frames = points, which is the root
+cause of "one meter yields only a handful of points" in the field; the factory default is now 12 (see the
+transport optimization record below), and the `1` rows are kept for contrast.
 
 ### Measured: real-link simulation (2400bps / 8E1)
 
@@ -183,15 +186,48 @@ The gateway side tops out around **25k frames/s / 300k records/s** (CPU ceiling,
 **A complete exchange (drain → encode → send → parse → dispatch) is 280ns, while one frame at 2400bps
 takes 165ms — six orders of magnitude apart.** There is no gateway-side optimization pressure on 645.
 
+### Frame count and batching: transport optimization record (2026-09)
+
+The micro-benchmarks above only cover an **in-process stand-in**; they cannot see the transport. An
+end-to-end benchmark over real TCP against the fake meter (`BenchmarkReadTCP`) closes that gap:
+5000 points / 12 identifiers per frame = 417 frames per round.
+
+| Revision | ns/frame | frames/s | allocs/op |
+|---|---|---|---|
+| Before | 1502634 – 1548372 | 646 – 666 | 32093 |
+| After | 20999 – 21530 | 46447 – 47622 | 30842 |
+
+**Per-frame cost drops ~71×.** Two independent waits were removed, both charged per frame and therefore
+growing linearly with point count:
+
+1. **The pre-send Drain wait** (`tcp.go`): the old implementation entered the read loop even on an empty
+   buffer, burning the full `tcpDrainDeadline` (1ms) before timing out — 417ms wasted per round at 5000
+   points. It now queries the receive buffer once via `sockPendingBytes` (`sockbuf*.go`) and returns
+   immediately when it reads 0. Semantics are unchanged: **already-arrived** residue is still cleared,
+   we just no longer pay for an empty buffer.
+2. **The TCP-default 30ms inter-frame delay**: that wait means nothing on a transparent link, so
+   `DefaultDLT645Config` now sets it per transport (TCP 0 / serial 30). Its cost is likewise linear in
+   frame count (12.5s wasted per round at 5000 points).
+
+On the serial side there is a matching `MarkDirty` optimization: the serial port exposes no raw fd and
+cannot be probed, so "did the previous round end cleanly" decides whether Drain actually reads, saving the
+`serialReadTimeout` (20ms) idle read on clean rounds. **That path's gain is projected, not measured on
+real hardware** — when validating in the field, watch whether per-device cycle time drops accordingly.
+
+By the capacity formula above, the gateway-side per-frame cost is now ~21µs against 165ms at 2400bps —
+still four orders of magnitude apart. **The conclusion is unchanged: 645's bottleneck is always the link
+and the turnaround reserve, never gateway compute.**
+
 ### Production configuration advice
 
-1. **Raise `maxDIsPerRead` to 8–12** (spec limit 12). It is the only point-capacity lever, and the gain
-   equals the batch size exactly. The trade-off: when a batch is rejected the driver degrades to reading
-   identifier by identifier (`plan.go`), so abnormal responses cost extra frames.
-2. **Lower `interFrameDelayMs` to match the actual meter.** The 30ms default is conservative; fast meters
-   tolerate 10–20ms, improving per-device throughput linearly. At 5600/9600bps or above — or on Ethernet
-   (DTU transparent mode) — 30ms becomes the bottleneck before the link does. After lowering it, watch for
-   bit errors: insufficient transceiver turnaround drops the first byte.
+1. **Keep `maxDIsPerRead` at its default of 12** (the spec limit). It is the only point-capacity lever,
+   and the gain equals the batch size exactly. The trade-off: when a batch is rejected the driver degrades
+   to reading identifier by identifier (`plan.go`), so abnormal responses cost extra frames. Only lower it
+   if a specific meter provably rejects batched reads and the degrade path is too costly.
+2. **On serial, lower `interFrameDelayMs` to match the actual meter** (TCP already defaults to 0). The
+   30ms serial default is conservative; fast meters tolerate 10–20ms, improving per-device throughput
+   linearly. At 5600/9600bps or above, 30ms becomes the bottleneck before the link does. After lowering
+   it, watch for bit errors: insufficient transceiver turnaround drops the first byte.
 3. **Size per-device point count from "baud rate + scan interval", not from gateway capability**:
    `points ≤ baud/11 / (request + response bytes) × scan interval × batch`. At 2400bps / 1s / batch 12 that is 12 points.
 4. **Serial (`DLT645.Serial`) and Ethernet (`DLT645.TCP`) share the same application layer**, so frame

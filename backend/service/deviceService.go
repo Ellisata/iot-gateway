@@ -209,7 +209,11 @@ func (s *DeviceService) TestDeviceConnection(ctx context.Context, req *dto.TestD
 	}
 	if err := driver.PingDevice(req.ProtocolName, string(req.ProtocolJSON)); err != nil {
 		logger.Error("%s", err.Error())
-		return appError.NewAppError(enums.DevicePingFailEnum.GetCode(), enums.DevicePingFailEnum.GetMessage())
+		// 把驱动原文透给前端，而不是固定文案。这是个运维诊断入口，
+		// 「COM1 已被设备「xxx」的采集任务占用，请先停用该设备」这类信息必须能直接看到——
+		// 只进日志等于没有。代价是这里不再有 i18n 译文，但驱动错误本身只有中文，
+		// en 环境下译出来的「设备连接测试失败」也提供不了任何可照做的动作。
+		return appError.NewAppError(enums.DevicePingFailEnum.GetCode(), err.Error())
 	}
 	return nil
 }

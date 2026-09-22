@@ -53,6 +53,10 @@ func (d *mcDriver) SerialExclusive() bool {
 	return d.transport == TransportSerial
 }
 
+// 编译期断言：SerialOwner 的方法签名一旦漂移，类型断言会静默失败——
+// 复用退回临时实例，「测试连接」又变回 Access is denied，且没有任何编译错误提示。
+var _ driver.SerialOwner = (*mcDriver)(nil)
+
 func (d *mcDriver) Connect(protocolJSON string) error {
 	cfg, err := ParseMCConfig(protocolJSON)
 	if err != nil {
@@ -67,15 +71,27 @@ func (d *mcDriver) Connect(protocolJSON string) error {
 	d.rangeCache = nil
 	d.rangeCacheMu.Unlock()
 
+	// 先关闭旧连接释放串口，再建立新连接。
+	//
+	// Windows 下串口是独占的：不先释放旧句柄，newTransport 里的 CreateFile 会直接
+	// Access is denied。而读失败只把 connected 置 false、**并不释放句柄**，
+	// 所以这里必须显式 Close —— 否则一次读超时就会让此后每次重连永久失败，
+	// 退避一路顶到上限，句柄一直挂在那里。
+	d.mu.Lock()
+	old := d.client
+	d.client = nil
+	d.config = nil
+	d.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+
 	client, err := newTransport(cfg)
 	if err != nil {
 		return fmt.Errorf("mc: connect failed: %w", err)
 	}
 
 	d.mu.Lock()
-	if d.client != nil {
-		d.client.Close()
-	}
 	d.config = cfg
 	d.client = client
 	d.mu.Unlock()
@@ -93,16 +109,22 @@ func (d *mcDriver) Ping(protocolJSON string) error {
 	// 若当前驱动实例已持有同参数的连接（如采集引擎运行中已 Connect），
 	// 直接复用现有连接做轻量读，避免对同一串口再开一个句柄——
 	// Windows 下串口被独占时二次打开会报 Access is denied。
+	//
+	// 复用分支全程持读锁：把「取出连接」与「用完连接」合成一个临界段。
+	// 否则 Connect/Close 可能在取出 client 之后把它关掉（重连时 Connect 是先摘下
+	// 旧 client 再关），这次 ping 要么误报设备不可达、要么对着已关闭的句柄收发。
 	d.mu.RLock()
-	live := d.client
-	d.mu.RUnlock()
-	if live != nil && live.IsConnected() && sameConfig(d.config, cfg) {
-		if err := pingRead(live, cfg); err != nil {
+	live, cur := d.client, d.config
+	if live != nil && live.IsConnected() && sameConfig(cur, cfg) {
+		err := pingRead(live, cfg)
+		d.mu.RUnlock()
+		if err != nil {
 			return fmt.Errorf("mc: ping failed (reused connection): %w", err)
 		}
 		logger.Info("mc ping success: transport=%s (reused connection)", cfg.Transport)
 		return nil
 	}
+	d.mu.RUnlock()
 
 	// 无状态握手：建立临时连接做轻量读后立即关闭，不修改驱动内部状态
 	client, err := newTransport(cfg)
@@ -315,6 +337,47 @@ func (d *mcDriver) Close() error {
 	}
 	d.config = nil
 	return nil
+}
+
+// MatchConnection 实现 driver.SerialOwner：本实例当前持有的连接能否服务这次测试。
+//
+// 只有串口参与连接复用。TCP 复用是有害的：采集引擎那条连接可能早已失效
+// （对端重启）而 connected 仍为 true，复用会把一次本可成功的拨号测试报成失败，
+// 而新开一条 TCP 连接的代价为零。串口则相反——端口被独占，不复用就只能失败。
+func (d *mcDriver) MatchConnection(protocolJSON string) bool {
+	if d.transport != TransportSerial {
+		return false
+	}
+	probe, err := ParseMCConfig(protocolJSON)
+	if err != nil {
+		return false // JSON 非法：交给 Ping 去报解析错误，不走复用
+	}
+	// 与 Connect/Ping 保持一致：传输层由协议注册名固定，JSON 里的 transport 不参与比较，
+	// 否则协议表单里残留 transport=tcp 的串口设备永远匹配不上。
+	probe.Transport = d.transport
+
+	d.mu.RLock()
+	cur := d.config
+	d.mu.RUnlock()
+	return sameConfig(cur, probe)
+}
+
+// SerialResource 实现 driver.SerialOwner：返回本实例当前独占的串口名。
+//
+// 刻意不看 IsConnected()：「持有句柄」与「链路可用」是两回事——串口读失败只把连接
+// 标记为断开、并不释放句柄，那个端口在重连之前仍然被本实例占着，
+// 而这正是需要提示「被谁占用」的时刻。
+func (d *mcDriver) SerialResource() string {
+	if d.transport != TransportSerial {
+		return ""
+	}
+	d.mu.RLock()
+	cfg, client := d.config, d.client
+	d.mu.RUnlock()
+	if cfg == nil || client == nil {
+		return ""
+	}
+	return cfg.ComPort
 }
 
 // sameConfig 判断两份配置的关键连接参数是否一致，用于 Ping 复用已有连接。

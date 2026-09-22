@@ -63,6 +63,10 @@ func (d *finsDriver) SerialExclusive() bool {
 	return d.transport == TransportSerial
 }
 
+// 编译期断言：SerialOwner 的方法签名一旦漂移，类型断言会静默失败——
+// 复用退回临时实例，「测试连接」又变回 Access is denied，且没有任何编译错误提示。
+var _ driver.SerialOwner = (*finsDriver)(nil)
+
 func (d *finsDriver) Connect(protocolJSON string) error {
 	cfg, err := ParseFINSConfig(protocolJSON)
 	if err != nil {
@@ -76,15 +80,27 @@ func (d *finsDriver) Connect(protocolJSON string) error {
 	d.rangeCache = nil
 	d.rangeCacheMu.Unlock()
 
+	// 先关闭旧连接释放串口，再建立新连接。
+	//
+	// Windows 下串口是独占的：不先释放旧句柄，newTransport 里的 CreateFile 会直接
+	// Access is denied。而读失败只把 connected 置 false、**并不释放句柄**，
+	// 所以这里必须显式 Close —— 否则一次读超时就会让此后每次重连永久失败，
+	// 退避一路顶到上限，句柄一直挂在那里。
+	d.mu.Lock()
+	old := d.client
+	d.client = nil
+	d.config = nil
+	d.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+
 	client, err := newTransport(cfg)
 	if err != nil {
 		return fmt.Errorf("fins: connect failed: %w", err)
 	}
 
 	d.mu.Lock()
-	if d.client != nil {
-		d.client.Close()
-	}
 	d.config = cfg
 	d.client = client
 	d.mu.Unlock()
@@ -103,16 +119,22 @@ func (d *finsDriver) Ping(protocolJSON string) error {
 	// 若当前驱动实例已持有同参数的连接（如采集引擎运行中已 Connect），
 	// 直接复用现有连接做轻量读，避免对同一串口再开一个句柄——
 	// Windows 下串口被独占时二次打开会报 Access is denied。
+	//
+	// 复用分支全程持读锁：把「取出连接」与「用完连接」合成一个临界段。
+	// 否则 Connect/Close 可能在取出 client 之后把它关掉（重连时 Connect 是先摘下
+	// 旧 client 再关），这次 ping 要么误报设备不可达、要么对着已关闭的句柄收发。
 	d.mu.RLock()
-	live := d.client
-	d.mu.RUnlock()
-	if live != nil && live.IsConnected() && sameConfig(d.config, cfg) {
-		if err := pingRead(live, cfg); err != nil {
+	live, cur := d.client, d.config
+	if live != nil && live.IsConnected() && sameConfig(cur, cfg) {
+		err := pingRead(live, cfg)
+		d.mu.RUnlock()
+		if err != nil {
 			return fmt.Errorf("fins: ping failed (reused connection): %w", err)
 		}
 		logger.Info("fins ping success: transport=%s (reused connection)", cfg.Transport)
 		return nil
 	}
+	d.mu.RUnlock()
 
 	// 无状态握手：建立临时连接做轻量读后立即关闭，不修改驱动内部状态
 	client, err := newTransport(cfg)

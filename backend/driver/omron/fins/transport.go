@@ -54,6 +54,10 @@ func newTransport(cfg *FINSConfig) (finsTransport, error) {
 }
 
 // sameConfig 判断两份配置的关键连接参数是否一致，用于 Ping 复用已有连接。
+//
+// 串口链路参数（波特率/数据位/停止位/校验位）必须参与比较：finsSerialClient 的
+// 这些参数在打开串口时就固定死了，复用一条 9600/N 的连接去测 19200/E 的配置，
+// 会给出一个与被测配置无关的成功结论。
 func sameConfig(a, b *FINSConfig) bool {
 	if a == nil || b == nil {
 		return false
@@ -61,8 +65,49 @@ func sameConfig(a, b *FINSConfig) bool {
 	return strings.EqualFold(a.Transport, b.Transport) &&
 		a.Host == b.Host && a.Port == b.Port &&
 		a.ComPort == b.ComPort &&
+		a.BaudRate == b.BaudRate && a.DataBits == b.DataBits &&
+		a.StopBits == b.StopBits && strings.EqualFold(a.Parity, b.Parity) &&
 		a.DstNode == b.DstNode && a.SrcNode == b.SrcNode &&
 		a.DstUnit == b.DstUnit && a.SrcUnit == b.SrcUnit &&
 		a.UnitNo == b.UnitNo &&
 		strings.EqualFold(a.FCSMode, b.FCSMode)
+}
+
+// MatchConnection 实现 driver.SerialOwner：本实例当前持有的连接能否服务这次测试。
+//
+// 只有 Serial（Host Link 本地串口）参与连接复用。UDP/TCP/HostLinkTCP 都不独占端口，
+// 复用一条可能早已失效的长连接只会误报失败，而新开一条连接的代价为零。
+func (d *finsDriver) MatchConnection(protocolJSON string) bool {
+	if d.transport != TransportSerial {
+		return false
+	}
+	probe, err := ParseFINSConfig(protocolJSON)
+	if err != nil {
+		return false // JSON 非法：交给 Ping 去报解析错误，不走复用
+	}
+	// 与 Connect/Ping 保持一致：传输层由协议注册名固定，JSON 里的 transport 不参与比较
+	probe.Transport = d.transport
+
+	d.mu.RLock()
+	cur := d.config
+	d.mu.RUnlock()
+	return sameConfig(cur, probe)
+}
+
+// SerialResource 实现 driver.SerialOwner：返回本实例当前独占的串口名。
+//
+// 刻意不看 IsConnected()：「持有句柄」与「链路可用」是两回事——串口读失败只把连接
+// 标记为断开、并不释放句柄，那个端口在重连之前仍然被本实例占着，
+// 而这正是需要提示「被谁占用」的时刻。
+func (d *finsDriver) SerialResource() string {
+	if d.transport != TransportSerial {
+		return ""
+	}
+	d.mu.RLock()
+	cfg, client := d.config, d.client
+	d.mu.RUnlock()
+	if cfg == nil || client == nil {
+		return ""
+	}
+	return cfg.ComPort
 }

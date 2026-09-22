@@ -52,6 +52,10 @@ func (d *dlt645Driver) SerialExclusive() bool {
 	return d.transport == TransportSerial
 }
 
+// 编译期断言：SerialOwner 的方法签名一旦漂移，类型断言会静默失败——
+// 复用退回临时实例，「测试连接」又变回 Access is denied，且没有任何编译错误提示。
+var _ driver.SerialOwner = (*dlt645Driver)(nil)
+
 func (d *dlt645Driver) Connect(protocolJSON string) error {
 	cfg, err := ParseDLT645Config(protocolJSON, d.transport)
 	if err != nil {
@@ -107,17 +111,23 @@ func (d *dlt645Driver) Ping(protocolJSON string) error {
 	// 若当前驱动实例已持有同参数的连接（采集引擎运行中已 Connect），
 	// 直接复用现有连接做轻量读，避免对同一串口再开一个句柄——
 	// Windows 下串口被独占时二次打开会报 Access is denied。
+	//
+	// 复用分支全程持读锁：把「取出连接」与「用完连接」合成一个临界段。
+	// 否则 Connect/Close 可能在取出 client 之后把它关掉（重连时 Connect 是先把旧连接
+	// 摘下来再关），这次 ping 要么误报设备不可达、要么对着已关闭的句柄收发。
+	// 读锁与采集侧 Read 的取锁不冲突（同为读锁），只是让 Connect/Close 等到本次交互收尾。
 	d.mu.RLock()
-	live := d.client
-	cur := d.config
-	d.mu.RUnlock()
+	live, cur := d.client, d.config
 	if live != nil && live.IsConnected() && sameConfig(cur, cfg) {
-		if err := pingRead(live, cfg, addr); err != nil {
+		err := pingRead(live, cfg, addr)
+		d.mu.RUnlock()
+		if err != nil {
 			return fmt.Errorf("dlt645: ping 失败（复用已有连接）: %w", err)
 		}
 		logger.Info("dlt645 ping 成功：transport=%s（复用已有连接）", cfg.Transport)
 		return nil
 	}
+	d.mu.RUnlock()
 
 	// 无状态握手：建立临时连接做轻量读后立即关闭，不修改驱动内部状态
 	client, err := newTransport(cfg)
@@ -356,6 +366,43 @@ func (d *dlt645Driver) Close() error {
 	d.plans.clear()
 	d.problems.clear()
 	return nil
+}
+
+// MatchConnection 实现 driver.SerialOwner：本实例当前持有的连接能否服务这次测试。
+//
+// 只有串口参与连接复用。TCP 复用是有害的：采集引擎那条连接可能早已半死
+// （对端串口服务器重启）而 connected 仍为 true，复用会把一次本可成功的拨号测试
+// 报成失败，而新开一条 TCP 连接的代价为零。串口则相反——端口被独占，不复用就只能失败。
+func (d *dlt645Driver) MatchConnection(protocolJSON string) bool {
+	if d.transport != TransportSerial {
+		return false
+	}
+	probe, err := ParseDLT645Config(protocolJSON, d.transport)
+	if err != nil {
+		return false // JSON 非法：交给 Ping 去报解析错误，不走复用
+	}
+	d.mu.RLock()
+	cur := d.config
+	d.mu.RUnlock()
+	return sameConfig(cur, probe)
+}
+
+// SerialResource 实现 driver.SerialOwner：返回本实例当前独占的串口名。
+//
+// 刻意不看 IsConnected()：「持有句柄」与「链路可用」是两回事——串口读失败只把连接
+// 标记为断开、并不释放句柄，那个端口在重连之前仍然被本实例占着，
+// 而这正是需要提示「被谁占用」的时刻。
+func (d *dlt645Driver) SerialResource() string {
+	if d.transport != TransportSerial {
+		return ""
+	}
+	d.mu.RLock()
+	cfg, client := d.config, d.client
+	d.mu.RUnlock()
+	if cfg == nil || client == nil {
+		return ""
+	}
+	return cfg.ComPort
 }
 
 // sameConfig 判断两份配置的关键连接参数是否一致，用于 Ping 复用已有连接。

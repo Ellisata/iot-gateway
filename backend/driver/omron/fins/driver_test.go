@@ -199,3 +199,129 @@ func TestDriverReadNetworkError(t *testing.T) {
 		t.Fatalf("expected network error to propagate")
 	}
 }
+
+// newLiveSerialDriver 造一个「已连上串口」的驱动实例，配置来自同一份 JSON，
+// 因此 MatchConnection/Ping 的复用分支应当命中。
+func newLiveSerialDriver(t *testing.T, json string) (*finsDriver, *mockTransport) {
+	t.Helper()
+	cfg, err := ParseFINSConfig(json)
+	if err != nil {
+		t.Fatalf("解析配置失败: %v", err)
+	}
+	// 与 Connect 一致：传输层由协议注册名固定，覆盖 JSON 里的 transport
+	cfg.Transport = TransportSerial
+	mt := &mockTransport{fn: func(finsArea, uint16, uint16) ([]byte, error) {
+		return []byte{0x00, 0x00}, nil
+	}}
+	d := newFINSDriver(TransportSerial)
+	d.mu.Lock()
+	d.config = cfg
+	d.client = mt
+	d.mu.Unlock()
+	return d, mt
+}
+
+// MatchConnection 只在 Serial 上成立：UDP/TCP/HostLinkTCP 都不独占端口，
+// 复用一条可能早已失效的长连接只会误报失败，而新开一条连接的代价为零。
+func TestMatchConnectionSerialOnly(t *testing.T) {
+	const cfgJSON = `{"comPort":"COM1"}`
+
+	for _, transport := range []string{TransportUDP, TransportTCP, TransportHostLinkTCP} {
+		d := newFINSDriver(transport)
+		cfg, _ := ParseFINSConfig(cfgJSON)
+		cfg.Transport = transport
+		d.mu.Lock()
+		d.config = cfg
+		d.client = &mockTransport{}
+		d.mu.Unlock()
+		if d.MatchConnection(cfgJSON) {
+			t.Errorf("%s 传输不应参与串口连接复用", transport)
+		}
+	}
+
+	d, _ := newLiveSerialDriver(t, cfgJSON)
+	if !d.MatchConnection(cfgJSON) {
+		t.Error("Serial 传输参数一致时应判定可复用")
+	}
+	// 表单里残留的 transport 字段不参与比较——传输层由协议注册名固定
+	if !d.MatchConnection(`{"comPort":"COM1","transport":"tcp"}`) {
+		t.Error("JSON 里的 transport 字段应被注册名覆盖，不该影响匹配")
+	}
+}
+
+func TestMatchConnectionRejectsMismatch(t *testing.T) {
+	d, _ := newLiveSerialDriver(t, `{"comPort":"COM1"}`)
+
+	cases := map[string]string{
+		"串口不同":     `{"comPort":"COM2"}`,
+		"单元号不同":    `{"comPort":"COM1","unitNo":7}`,
+		"FCS 模式不同": `{"comPort":"COM1","fcsMode":"FULL"}`,
+		"JSON 非法":  "not json",
+	}
+	for name, in := range cases {
+		if d.MatchConnection(in) {
+			t.Errorf("%s：不应判定为可复用", name)
+		}
+	}
+
+	if newFINSDriver(TransportSerial).MatchConnection(`{"comPort":"COM1"}`) {
+		t.Error("未连接过的实例不应判定为可复用")
+	}
+	if got := newFINSDriver(TransportTCP).SerialResource(); got != "" {
+		t.Errorf("TCP 传输不持有串口，SerialResource = %q, want 空", got)
+	}
+}
+
+// H3 回归：串口链路参数（波特率/数据位/停止位/校验位）必须参与比较。
+//
+// finsSerialClient 的这些参数在打开串口时就固定死了，复用一条 9600/N 的连接
+// 去测 19200/E 的配置，会给出一个与被测配置无关的成功结论。
+func TestSameConfigSerialLinkParams(t *testing.T) {
+	base, err := ParseFINSConfig(`{"comPort":"COM1","baudRate":"9600","dataBits":"8","stopBits":"1","parity":"N"}`)
+	if err != nil {
+		t.Fatalf("解析配置失败: %v", err)
+	}
+	probe := func(mutate func(*FINSConfig)) *FINSConfig {
+		c, _ := ParseFINSConfig(`{"comPort":"COM1","baudRate":"9600","dataBits":"8","stopBits":"1","parity":"N"}`)
+		mutate(c)
+		return c
+	}
+
+	if !sameConfig(base, probe(func(*FINSConfig) {})) {
+		t.Error("完全一致的配置应判定为一致")
+	}
+	cases := map[string]func(*FINSConfig){
+		"波特率不同": func(c *FINSConfig) { c.BaudRate = 19200 },
+		"数据位不同": func(c *FINSConfig) { c.DataBits = 7 },
+		"停止位不同": func(c *FINSConfig) { c.StopBits = 2 },
+		"校验位不同": func(c *FINSConfig) { c.Parity = "E" },
+	}
+	for name, mutate := range cases {
+		if sameConfig(base, probe(mutate)) {
+			t.Errorf("%s：串口链路参数不同不应判定为一致", name)
+		}
+	}
+	if sameConfig(nil, base) || sameConfig(base, nil) {
+		t.Error("nil 配置不应判定为一致")
+	}
+}
+
+// Ping 复用已有连接：把 ComPort 设成必然打不开的假串口，
+// 一旦走了「开临时连接」那条路就必定失败。
+func TestPingReusesLiveSerialConnection(t *testing.T) {
+	const cfgJSON = `{"comPort":"COM_NOT_EXIST_1"}`
+	d, mt := newLiveSerialDriver(t, cfgJSON)
+
+	called := 0
+	mt.fn = func(finsArea, uint16, uint16) ([]byte, error) {
+		called++
+		return []byte{0x00, 0x00}, nil
+	}
+
+	if err := d.Ping(cfgJSON); err != nil {
+		t.Fatalf("Ping 应复用已有连接并成功，实际报错: %v", err)
+	}
+	if called == 0 {
+		t.Error("复用路径没有向已有连接发出任何请求")
+	}
+}

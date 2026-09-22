@@ -42,6 +42,10 @@ type modbusRTUDriver struct {
 // 防止不同频率分组的轮询在串口上交错。
 func (d *modbusRTUDriver) SerialExclusive() bool { return true }
 
+// 编译期断言：SerialOwner 的方法签名一旦漂移，类型断言会静默失败——
+// 复用退回临时实例，「测试连接」又变回 Access is denied，且没有任何编译错误提示。
+var _ driver.SerialOwner = (*modbusRTUDriver)(nil)
+
 func (d *modbusRTUDriver) Connect(protocolJSON string) error {
 	cfg, err := ParseModbusRTUConfig(protocolJSON)
 	if err != nil {
@@ -101,11 +105,20 @@ func (d *modbusRTUDriver) Ping(protocolJSON string) error {
 	// 若当前驱动实例已持有该串口的连接（如采集引擎运行中已 Connect），
 	// 直接复用现有连接做 Modbus 握手，避免对同一串口再开一个句柄——
 	// Windows 下串口被独占时二次打开会报 Access is denied。
+	//
+	// 复用分支全程持读锁：把「取出连接」与「用完连接」合成一个临界段。
+	// 否则 Connect/Close 可能在取出 client 之后把它关掉（Connect 是先摘下旧 client 再关），
+	// 这次 ping 要么误报设备不可达、要么对着已关闭的句柄收发。
+	// 读锁与采集侧读的取锁不冲突（同为读锁），只是让 Connect/Close 等到本次交互收尾。
+	//
+	// 判定用 matchConfig 而不是只比 comPort：只比串口号时，从站号不同的设备会被
+	// 总线上的**相邻从站**正常应答，测试连接返回成功而用户想验的那台根本没被问到。
 	d.mu.RLock()
 	liveClient := d.client
-	d.mu.RUnlock()
-	if liveClient != nil && liveClient.IsConnected() && liveClient.comPort == cfg.ComPort {
-		if err := liveClient.Ping(); err != nil {
+	if liveClient != nil && liveClient.matchConfig(cfg) {
+		err := liveClient.Ping()
+		d.mu.RUnlock()
+		if err != nil {
 			return fmt.Errorf("modbus rtu: ping %s failed (device no response): %w",
 				cfg.ComPort, err)
 		}
@@ -113,6 +126,7 @@ func (d *modbusRTUDriver) Ping(protocolJSON string) error {
 			cfg.ComPort, cfg.BaudRate, cfg.UnitID)
 		return nil
 	}
+	d.mu.RUnlock()
 
 	// Step 1: 串口连通性检查（打开串口）
 	handler := goburrowModbus.NewRTUClientHandler(cfg.ComPort)
@@ -125,7 +139,9 @@ func (d *modbusRTUDriver) Ping(protocolJSON string) error {
 	handler.IdleTimeout = timeout * 2
 
 	if err := handler.Connect(); err != nil {
-		return fmt.Errorf("modbus rtu: ping %s failed (serial): %w", cfg.ComPort, err)
+		// Ping 有自己的打开路径（不走 NewModbusRTUClient），提示要在这里再补一次
+		return fmt.Errorf("modbus rtu: ping %s failed (serial): %w%s",
+			cfg.ComPort, err, driver.SerialBusyHint(cfg.ComPort))
 	}
 	defer handler.Close()
 
@@ -221,6 +237,34 @@ func (d *modbusRTUDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, e
 		results = append(results, byID[a.ID])
 	}
 	return results, nil
+}
+
+// MatchConnection 实现 driver.SerialOwner：本实例当前持有的连接能否服务这次测试。
+// Modbus RTU 只有串口一种传输，天然独占串口。
+func (d *modbusRTUDriver) MatchConnection(protocolJSON string) bool {
+	cfg, err := ParseModbusRTUConfig(protocolJSON)
+	if err != nil || cfg.ComPort == "" {
+		return false // JSON 非法：交给 Ping 去报解析错误，不走复用
+	}
+	d.mu.RLock()
+	live := d.client
+	d.mu.RUnlock()
+	return live != nil && live.matchConfig(cfg)
+}
+
+// SerialResource 实现 driver.SerialOwner：返回本实例当前独占的串口名。
+//
+// 刻意不看 IsConnected()：「持有句柄」与「链路可用」是两回事——串口读失败只把连接
+// 标记为断开、并不释放句柄，那个端口在重连之前仍然被本实例占着，
+// 而这正是需要提示「被谁占用」的时刻。
+func (d *modbusRTUDriver) SerialResource() string {
+	d.mu.RLock()
+	cfg, client := d.config, d.client
+	d.mu.RUnlock()
+	if cfg == nil || client == nil {
+		return ""
+	}
+	return cfg.ComPort
 }
 
 func (d *modbusRTUDriver) IsConnected() bool {

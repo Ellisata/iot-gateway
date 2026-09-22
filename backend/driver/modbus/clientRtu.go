@@ -5,11 +5,13 @@ package modbus
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	goburrowModbus "github.com/goburrow/modbus"
 
+	"iot-gateway/driver"
 	"iot-gateway/logger"
 )
 
@@ -59,7 +61,10 @@ func NewModbusRTUClient(comPort string, baudRate, dataBits, stopBits int,
 	handler.IdleTimeout = timeout * 2
 
 	if err := handler.Connect(); err != nil {
-		return nil, fmt.Errorf("modbus rtu: connect to %s failed: %w", comPort, err)
+		// 打开失败最常见的原因是端口已被本进程内另一个采集任务占着（Windows 下串口独占），
+		// 而系统原文「Access is denied」对用户毫无指向性——补一句「被谁占用」。
+		return nil, fmt.Errorf("modbus rtu: connect to %s failed: %w%s",
+			comPort, err, driver.SerialBusyHint(comPort))
 	}
 
 	client := goburrowModbus.NewClient(handler)
@@ -173,6 +178,24 @@ func (c *ModbusRTUClient) Ping() error {
 		return fmt.Errorf("modbus rtu: ping read failed: %w", err)
 	}
 	return nil
+}
+
+// matchConfig 判断当前连接是否与 cfg 描述的链路完全一致（Ping 复用连接的前置条件）。
+//
+// 从站号必须比，不能只比串口号：Ping 用的是 handler 里既有的 SlaveId，
+// 复用一条从站地址不同的连接，会把「测试 2 号站」的请求发到总线上的 1 号站，
+// 1 号站正常应答 → 测试连接报成功，而用户想验的 2 号站根本没被问到。
+// 波特率 / 数据位 / 停止位 / 校验位同理：帧参数不同的连接不该被当成同一条链路。
+func (c *ModbusRTUClient) matchConfig(cfg *ModbusRTUConfig) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.connected &&
+		c.comPort == cfg.ComPort &&
+		c.baudRate == cfg.BaudRate &&
+		c.dataBits == cfg.DataBits &&
+		c.stopBits == cfg.StopBits &&
+		strings.EqualFold(c.parity, cfg.Parity) &&
+		c.slaveID == cfg.UnitID
 }
 
 // IsConnected 返回当前连接状态

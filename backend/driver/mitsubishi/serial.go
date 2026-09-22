@@ -6,10 +6,12 @@ package mitsubishi
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/goburrow/serial"
 
+	"iot-gateway/driver"
 	"iot-gateway/logger"
 )
 
@@ -19,10 +21,13 @@ import (
 // 连接测试同时触发）在串口上交错、破坏帧结构。读超时/写失败标记断连，
 // 由采集引擎按指数退避重连。
 type mcSerialClient struct {
-	mu        sync.Mutex
-	port      serial.Port
-	timeout   time.Duration
-	connected bool
+	mu      sync.Mutex
+	port    serial.Port
+	timeout time.Duration
+	// connected 用原子量而非普通字段：IsConnected 会被驱动之外的调用方读到
+	// （driver.PingDevice 复用采集引擎的连接时要先问一句连没连上），
+	// 而写它的是采集协程里的 Read。用 c.mu 保护不行——Close 也不持 c.mu。
+	connected atomic.Bool
 }
 
 // newMCSerialClient 创建并打开 4C Format5 串口连接。
@@ -60,16 +65,17 @@ func newMCSerialClient(cfg *MCConfig) (mcTransport, error) {
 		Timeout:  timeout,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("mc serial: open %s failed: %w", cfg.ComPort, err)
+		// 打开失败最常见的原因是端口已被本进程内另一个采集任务占着（Windows 下串口独占），
+		// 而系统原文「Access is denied」对用户毫无指向性——补一句「被谁占用」。
+		return nil, fmt.Errorf("mc serial: open %s failed: %w%s",
+			cfg.ComPort, err, driver.SerialBusyHint(cfg.ComPort))
 	}
 
 	logger.Info("mc serial client connected to %s (baud=%d, data=%d, stop=%d, parity=%s)",
 		cfg.ComPort, baud, dataBits, stopBits, parity)
-	return &mcSerialClient{
-		port:      port,
-		timeout:   timeout,
-		connected: true,
-	}, nil
+	client := &mcSerialClient{port: port, timeout: timeout}
+	client.connected.Store(true)
+	return client, nil
 }
 
 // Read 通过 4C Format5 帧读取设备数据。
@@ -77,20 +83,20 @@ func (c *mcSerialClient) Read(device mcDevice, head uint32, points uint16, bitMo
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.port == nil || !c.connected {
+	if c.port == nil || !c.connected.Load() {
 		return nil, fmt.Errorf("mc serial: not connected")
 	}
 
 	frame := buildSerialFrame(device, head, points, bitMode)
 	logger.Debug("mc serial send raw=% X", frame)
 	if _, err := c.port.Write(frame); err != nil {
-		c.connected = false
+		c.connected.Store(false)
 		return nil, fmt.Errorf("mc serial: write failed: %w", err)
 	}
 
 	resp, err := c.readFrame()
 	if err != nil {
-		c.connected = false
+		c.connected.Store(false)
 		return nil, fmt.Errorf("mc serial: read failed: %w", err)
 	}
 
@@ -157,7 +163,7 @@ func (c *mcSerialClient) readFrame() ([]byte, error) {
 
 // IsConnected 返回连接状态
 func (c *mcSerialClient) IsConnected() bool {
-	return c != nil && c.connected
+	return c != nil && c.connected.Load()
 }
 
 // Close 关闭串口连接
@@ -166,7 +172,7 @@ func (c *mcSerialClient) Close() error {
 		return nil
 	}
 	err := c.port.Close()
-	c.connected = false
+	c.connected.Store(false)
 	logger.Info("mc serial client closed")
 	return err
 }

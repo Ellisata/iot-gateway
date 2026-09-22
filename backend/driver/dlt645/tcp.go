@@ -88,11 +88,25 @@ func (c *tcpClient) SetReadDeadline(t time.Time) error {
 	return c.conn.SetReadDeadline(t)
 }
 
-// Drain 以极短截止时间读取并丢弃接收缓冲中的残留字节。
+// Drain 丢弃接收缓冲中的残留字节（上一轮迟到的应答）。
+//
+// 先问一次「缓冲里有没有待读字节」再决定要不要进入下面的读循环：
+// 干净链路的常态是缓冲为空，此时那次读只能空等到截止时间才返回超时——
+// 每帧白等 1ms，而 645 的帧数随点位数线性增长（帧数 = ⌈点数/maxDIsPerRead⌉），
+// 这一毫秒会直接变成单设备轮询周期的下限。探测是纯查询、不下读，
+// 语义与原来完全一致：**已到达的**残留字节照样被清掉，只是不再为「空缓冲」付等待。
+//
+// 探测失败（拿不到裸 fd）时退化为原来的定时读，正确性不受影响。
 func (c *tcpClient) Drain() {
 	if c.conn == nil || !c.connected {
 		return
 	}
+	if tcp, ok := c.conn.(*net.TCPConn); ok {
+		if n, ok := sockPendingBytes(tcp); ok && n == 0 {
+			return
+		}
+	}
+
 	_ = c.conn.SetReadDeadline(time.Now().Add(tcpDrainDeadline))
 	buf := make([]byte, 256)
 	for i := 0; i < tcpDrainRounds; i++ {
@@ -104,6 +118,12 @@ func (c *tcpClient) Drain() {
 	}
 	_ = c.conn.SetReadDeadline(time.Time{})
 }
+
+// MarkDirty TCP 侧为空操作。
+//
+// 串口要靠这个标记才敢跳过 Drain（它查不了缓冲），而 TCP 有 sockPendingBytes
+// 可**直接**查出残留，不依赖「上一轮是否干净收尾」的推断，故无需记账。
+func (c *tcpClient) MarkDirty() {}
 
 func (c *tcpClient) IsConnected() bool {
 	return c != nil && c.connected

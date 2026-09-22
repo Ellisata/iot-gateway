@@ -321,6 +321,9 @@ func readResponse(t dlt645Transport, cfg *DLT645Config, addr [6]byte, deadline t
 				// 该位置像帧头但还不完整，保留在此等待更多数据
 				break
 			}
+			// 该处是回显 / 总线上他人的应答 / 线路噪声——本次交互之外的东西也在这条
+			// 链路上，记一笔，让下一轮开始前真正去清一次缓冲（见 MarkDirty 的说明）。
+			t.MarkDirty()
 			if state == parseSkipFrame {
 				scanned += n
 			} else {
@@ -329,6 +332,9 @@ func readResponse(t dlt645Transport, cfg *DLT645Config, addr [6]byte, deadline t
 		}
 
 		if !time.Now().Before(deadline) {
+			// 超时是「迟到的应答」最主要的来源：这一轮没等到，对方之后答过来的
+			// 字节会留在缓冲里，必须在下一轮发请求前清掉，否则会被当成下一轮的应答。
+			t.MarkDirty()
 			return nil, fmt.Errorf("dlt645: 等待应答超时（%s 内未收到完整合法帧，已收 %d 字节）",
 				cfg.Timeout, len(buf))
 		}
@@ -343,6 +349,7 @@ func readResponse(t dlt645Transport, cfg *DLT645Config, addr [6]byte, deadline t
 		}
 
 		if err := t.SetReadDeadline(deadline); err != nil {
+			t.MarkDirty()
 			return nil, fmt.Errorf("dlt645: 设置读超时失败: %w", err)
 		}
 		n, err := t.Read(tmp)
@@ -355,6 +362,7 @@ func readResponse(t dlt645Transport, cfg *DLT645Config, addr [6]byte, deadline t
 			if n > 0 || isTimeoutErr(err) {
 				continue
 			}
+			t.MarkDirty()
 			return nil, fmt.Errorf("dlt645: 读应答失败: %w", err)
 		}
 	}
@@ -384,6 +392,8 @@ func exchange(t dlt645Transport, cfg *DLT645Config, addr [6]byte, req []byte) (*
 
 	logger.Debug("dlt645: 发送 raw=% X", frame)
 	if _, err := t.Write(frame); err != nil {
+		// 写失败时请求可能已部分发出，对方仍可能作答——链路状态未知。
+		t.MarkDirty()
 		return nil, fmt.Errorf("dlt645: 发送请求失败: %w", err)
 	}
 

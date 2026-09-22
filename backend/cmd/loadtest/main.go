@@ -59,8 +59,8 @@ func main() {
 	sparse := flag.Bool("sparse", false, "sparse address layout (breaks range merging)")
 	cipBatch := flag.Int("cip-batch", 0, "CIP 0x0A multi-service read: tags per request (>1 enables batching)")
 	opcuaBatch := flag.Int("opcua-batch", 0, "OPC UA maxBatch: nodes per ReadRequest (0 = driver default 100)")
-	dlt645Batch := flag.Int("dlt645-batch", 0, "DL/T 645 maxDIsPerRead: data identifiers per request (0/1 = one round trip per point, max 12)")
-	dlt645Inter := flag.Int("dlt645-interframe", -1, "DL/T 645 inter-frame delay ms (-1 = driver default 30, 0 = disabled)")
+	dlt645Batch := flag.Int("dlt645-batch", 0, "DL/T 645 maxDIsPerRead: data identifiers per request (0 = driver default 12, 1 = one round trip per point, max 12)")
+	dlt645Inter := flag.Int("dlt645-interframe", -1, "DL/T 645 inter-frame delay ms (-1 = driver default: 0 for TCP, 30 for serial)")
 	latency := flag.Int("latency", 0, "artificial per-transaction latency in ms (CIP / OPC UA / DL/T 645 fake servers only)")
 	workers := flag.Int("workers", 0, "worker pool concurrency (0 = NumCPU*2)")
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file for the largest case")
@@ -152,7 +152,7 @@ func main() {
 	if *opcuaBatch > 0 && *opcuaBatch != 100 {
 		layout = fmt.Sprintf("%s+maxBatch-%d", layout, *opcuaBatch)
 	}
-	if *dlt645Batch > 1 {
+	if *dlt645Batch >= 1 {
 		layout = fmt.Sprintf("%s+maxDIs-%d", layout, *dlt645Batch)
 	}
 	if *dlt645Inter >= 0 {

@@ -30,7 +30,7 @@ func startFakeMC(t *testing.T, resp []byte) (int, chan []byte, chan error) {
 			return
 		}
 		defer conn.Close()
-		req := make([]byte, 22)
+		req := make([]byte, 21)
 		if _, err := io.ReadFull(conn, req); err != nil {
 			errCh <- err
 			return
@@ -61,7 +61,7 @@ func newTCPTestClient(t *testing.T, port int) mcTransport {
 	return client
 }
 
-// TestTCPClientRoundTrip 本地假 PLC 回环验证：请求帧为 22 字节标准 3E 帧，
+// TestTCPClientRoundTrip 本地假 PLC 回环验证：请求帧为 21 字节标准 3E 帧，
 // 响应按「数据长度 + 结束码 + 数据」正确解析。
 func TestTCPClientRoundTrip(t *testing.T) {
 	resp := []byte{

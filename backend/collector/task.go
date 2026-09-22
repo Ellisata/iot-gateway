@@ -313,6 +313,20 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 		task.groups = append(task.groups, group)
 	}
 
+	// 登记独占串口的驱动实例：HTTP「测试连接」只拿得到协议名 + protocol_json，
+	// 只能靠这里按协议名反查引擎正在使用的实例，复用其串口连接
+	//（Windows 下串口独占，引擎持句柄时 Ping 再开一个必然 Access is denied，见 driver.PingDevice）。
+	//
+	// 放在函数最后一步是刻意的：上面还有若干提前 return 的失败路径，
+	// 早登记会在那些路径上留下没人注销的条目。
+	devNames := make(map[string]string, len(devices))
+	for i := range devices {
+		devNames[devices[i].ID] = devices[i].Name
+	}
+	for id, drv := range task.drivers {
+		driver.RegisterSerialOwner(task.protocols[id], devNames[id], drv)
+	}
+
 	return task, nil
 }
 
@@ -359,13 +373,27 @@ func (t *gatewayTask) Stop() {
 	// 排空 workerPool 中在途的轮询任务，避免其访问已关闭的驱动连接
 	t.wg.Wait()
 
-	// 关闭所有协议驱动（所有轮询已退出，可安全关闭）
+	// 关闭所有协议驱动（所有轮询已退出，可安全关闭），随后注销独占串口登记。
+	//
+	// 注销必须放在 Close 之后、且不持有 t.mu：注销要拿 driver 的登记表锁，
+	// 而那把锁的铁律是「不得与驱动自身的锁嵌套」——在持 d.mu 期间注销，
+	// 会与本包 PingDevice 的复用路径构成 AB-BA 而死锁（见 driver/serialOwner.go）。
 	t.mu.Lock()
+	type retiredDriver struct {
+		protocol string
+		drv      driver.Driver
+	}
+	retired := make([]retiredDriver, 0, len(t.drivers))
 	for id, drv := range t.drivers {
 		drv.Close()
+		retired = append(retired, retiredDriver{protocol: t.protocols[id], drv: drv})
 		delete(t.drivers, id)
 	}
 	t.mu.Unlock()
+
+	for _, r := range retired {
+		driver.UnregisterSerialOwner(r.drv)
+	}
 
 	logger.Info("collector: stopped task")
 }

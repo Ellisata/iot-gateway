@@ -69,17 +69,17 @@ func cipTypeCode(dataType string) (uint16, bool) {
 // cipTypeSizeByCode Omron 数据表类型码 → 固定字节数（0x0A 多服务响应按此切分各标签数据）。
 // 与 cipTypeCodeByTypeName 互逆；string 等动态长度类型不在其中（批量读不收纳）。
 var cipTypeSizeByCode = map[uint16]int{
-	cipTypeBool:   1,
-	cipTypeSINT:   1,
-	cipTypeINT:    2,
-	cipTypeDINT:   4,
-	cipTypeUSINT:  1,
-	cipTypeUINT:   2,
-	cipTypeUDINT:  4,
-	cipTypeWORD:   2,
-	cipTypeDWORD:  4,
-	cipTypeREAL:   4,
-	cipTypeLREAL:  8,
+	cipTypeBool:  1,
+	cipTypeSINT:  1,
+	cipTypeINT:   2,
+	cipTypeDINT:  4,
+	cipTypeUSINT: 1,
+	cipTypeUINT:  2,
+	cipTypeUDINT: 4,
+	cipTypeWORD:  2,
+	cipTypeDWORD: 4,
+	cipTypeREAL:  4,
+	cipTypeLREAL: 8,
 }
 
 // cipTypeSize 查询类型码对应的固定数据字节数。

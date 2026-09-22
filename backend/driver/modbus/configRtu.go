@@ -6,14 +6,48 @@ package modbus
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
 
+// rawInt 容错整数：兼容 JSON 数字（9600）与字符串（"9600"）。
+//
+// form-create 各控件产出的 JSON 形态并不一致：inputNumber 给数字，select 给字符串，
+// 而两者在这里语义完全相同。set 区分「字段缺席」与「显式配了 0」——
+// 例如 timeoutMs 配 0 是「不超时」还是「没填」，只有 set 分得出来。
+// 与 driver/dlt645 的同名类型同一套路，各驱动包自持一份。
+type rawInt struct {
+	set bool
+	val int
+}
+
+func (r *rawInt) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(strings.TrimSpace(string(b)), `"`)
+	if s == "" || s == "null" {
+		return nil
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return nil // 认不出来就当作没配，走默认值；表单项是用户手填的，不该因此让整个设备配置解析失败
+	}
+	r.set = true
+	r.val = v
+	return nil
+}
+
 // modbusRTUConfigRaw 匹配 protocol_json 原始数据格式
 // （数值字段为原生 JSON 类型：unitId/mergeWindow/stringLen，与 TCP 一致，不再是全字符串）
+//
+// 串口链路参数（波特率/数据位/停止位）例外，用 rawInt：它们由 select 控件产出，
+// 提交的是字符串。
 type modbusRTUConfigRaw struct {
 	ComPort     string `json:"comPort"`
+	BaudRate    rawInt `json:"baudRate"`
+	DataBits    rawInt `json:"dataBits"`
+	StopBits    rawInt `json:"stopBits"`
+	Parity      string `json:"parity"`
+	TimeoutMS   rawInt `json:"timeoutMs"`
 	UnitID      uint8  `json:"unitId"`
 	ByteOrder   string `json:"byteOrder"`
 	WordOrder   string `json:"wordOrder"`
@@ -83,6 +117,23 @@ func ParseModbusRTUConfig(protocolJSON string) (*ModbusRTUConfig, error) {
 	// 串口配置
 	cfg.ComPort = raw.ComPort
 
+	// 串口链路参数：非法值一律回退默认值，而不是让整条配置解析失败——
+	// 这几个值错了的表现是「不通」，本来就够难排查了，不该再多一层报错。
+	// 它们同时参与 Ping 的连接复用判定（见 ModbusRTUClient.matchConfig），
+	// 所以必须如实反映到 cfg 上，否则复用判定拿到的永远是默认值。
+	if raw.BaudRate.val > 0 {
+		cfg.BaudRate = raw.BaudRate.val
+	}
+	if v := raw.DataBits.val; v == 5 || v == 6 || v == 7 || v == 8 {
+		cfg.DataBits = v
+	}
+	if v := raw.StopBits.val; v == 1 || v == 2 {
+		cfg.StopBits = v
+	}
+	if p := strings.ToUpper(strings.TrimSpace(raw.Parity)); p == "N" || p == "E" || p == "O" {
+		cfg.Parity = p
+	}
+
 	// 从站地址（原生 byte；未配置时保持默认 1）
 	if raw.UnitID != 0 {
 		cfg.UnitID = raw.UnitID
@@ -112,6 +163,12 @@ func ParseModbusRTUConfig(protocolJSON string) (*ModbusRTUConfig, error) {
 	// string 读取长度：未配置时保持默认 16
 	if raw.StringLen > 0 {
 		cfg.StringLen = raw.StringLen
+	}
+
+	// 单帧超时：显式配置才覆盖，未配置保持默认 5000。
+	// 过小会把应答帧截断，现象是「偶发 CRC 校验错」而不是明确的超时，极难排查。
+	if raw.TimeoutMS.set && raw.TimeoutMS.val > 0 {
+		cfg.TimeoutMS = raw.TimeoutMS.val
 	}
 
 	// 设置 Timeout

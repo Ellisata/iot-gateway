@@ -14,6 +14,7 @@ import (
 	"iot-gateway/driver"
 	"iot-gateway/logger"
 	"iot-gateway/model/po"
+	"iot-gateway/testutil/fake"
 )
 
 // TestMain 把日志静音到 ERROR 并重定向到临时目录。
@@ -76,6 +77,7 @@ type benchTransport struct {
 func (t *benchTransport) Lock()                           {}
 func (t *benchTransport) Unlock()                         {}
 func (t *benchTransport) Drain()                          {}
+func (t *benchTransport) MarkDirty()                      {}
 func (t *benchTransport) SetReadDeadline(time.Time) error { return nil }
 func (t *benchTransport) IsConnected() bool               { return true }
 func (t *benchTransport) Close() error                    { return nil }
@@ -124,6 +126,7 @@ func (t *benchMeterTransport) dataLenOf(di uint32) int {
 func (t *benchMeterTransport) Lock()                           {}
 func (t *benchMeterTransport) Unlock()                         {}
 func (t *benchMeterTransport) Drain()                          {}
+func (t *benchMeterTransport) MarkDirty()                      {}
 func (t *benchMeterTransport) SetReadDeadline(time.Time) error { return nil }
 func (t *benchMeterTransport) IsConnected() bool               { return true }
 func (t *benchMeterTransport) Close() error                    { return nil }
@@ -413,4 +416,114 @@ func BenchmarkDriverReadParallel(b *testing.B) {
 			}
 		}
 	})
+}
+
+// benchEndToEndAddrs 造 n 个「数据标识 + 字节数 + 小数位」形式的点位地址，
+// 与压测造数（testutil/fake 的 %08X:4:2 约定）一致。
+//
+// 不复用 benchAddrs：那份是给进程内替身用的固定点表，地址不带字节数规格，
+// 而这里的假表按地址里声明的字节数回数据，两者必须对上。
+func benchEndToEndAddrs(n int) []po.DeviceAddress {
+	addrs := make([]po.DeviceAddress, n)
+	for i := range addrs {
+		addrs[i] = po.DeviceAddress{
+			ID:       "id-" + strconv.Itoa(i),
+			Name:     fmt.Sprintf("%08X:4:2", 0x10000000+i),
+			DataType: "float",
+		}
+	}
+	return addrs
+}
+
+// BenchmarkReadTCP 测「一整批点位读一遍」的耗时：对 5000 点 / maxDIsPerRead=12
+// 即 417 帧，用 ns/op ÷ 417 得到**单帧往返成本**——这是 645 容量的唯一自变量
+// （帧数 = ⌈点数/maxDIsPerRead⌉）。
+//
+// 与上面的 BenchmarkDriverRead* 不同，这里走真实 TCP 与真实假表，
+// 因此覆盖到传输层：Drain 的空等、收发间延时、TCP 往返，这些恰恰是
+// 单帧成本的大头（进程内替身测不到）。
+func BenchmarkReadTCP(b *testing.B) {
+	srv, err := fake.NewDLT645()
+	if err != nil {
+		b.Fatalf("启动假表失败: %v", err)
+	}
+	defer srv.Close()
+
+	cfgJSON := fmt.Sprintf(
+		`{"host":"127.0.0.1","port":%d,"maxDIsPerRead":12,"interFrameDelayMs":0}`, srv.Port())
+	d := newDLT645Driver(TransportTCP)
+	if err := d.Connect(cfgJSON); err != nil {
+		b.Fatalf("连接失败: %v", err)
+	}
+	defer d.Close()
+
+	addrs := benchEndToEndAddrs(5000)
+	if _, err := d.Read(addrs); err != nil { // 预热：建规划缓存
+		b.Fatalf("预热失败: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		res, err := d.Read(addrs)
+		if err != nil {
+			b.Fatalf("读取失败: %v", err)
+		}
+		if res[0].Quality != 192 {
+			b.Fatalf("首点质量为 %d，期望 192", res[0].Quality)
+		}
+	}
+	b.StopTimer()
+
+	frames := float64(b.N) * float64(benchFrameCount(5000, 12))
+	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/frames, "ns/frame")
+	b.ReportMetric(frames/b.Elapsed().Seconds(), "frames/s")
+}
+
+// benchFrameCount 一轮采集的帧数：⌈点数/每帧标识数⌉。
+func benchFrameCount(points, perRead int) int {
+	return (points + perRead - 1) / perRead
+}
+
+// BenchmarkReadTCPDefaults 同上，但**只给连接参数、其余走默认值**。
+//
+// 与 BenchmarkReadTCP 的差别正是要测的东西：那份显式写了 interFrameDelayMs=0，
+// 把「TCP 默认该不该等 30ms 换向时间」这个决策绕开了；这里交给 DefaultDLT645Config
+// 决定——旧默认会让每帧白等 30ms，417 帧即每轮 12.5s。
+func BenchmarkReadTCPDefaults(b *testing.B) {
+	srv, err := fake.NewDLT645()
+	if err != nil {
+		b.Fatalf("启动假表失败: %v", err)
+	}
+	defer srv.Close()
+
+	cfgJSON := fmt.Sprintf(`{"host":"127.0.0.1","port":%d}`, srv.Port())
+	d := newDLT645Driver(TransportTCP)
+	if err := d.Connect(cfgJSON); err != nil {
+		b.Fatalf("连接失败: %v", err)
+	}
+	defer d.Close()
+
+	perRead := d.config.MaxDIsPerRead
+	addrs := benchEndToEndAddrs(5000)
+	if _, err := d.Read(addrs); err != nil { // 预热：建规划缓存
+		b.Fatalf("预热失败: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		res, err := d.Read(addrs)
+		if err != nil {
+			b.Fatalf("读取失败: %v", err)
+		}
+		if res[0].Quality != 192 {
+			b.Fatalf("首点质量为 %d，期望 192", res[0].Quality)
+		}
+	}
+	b.StopTimer()
+
+	frames := float64(b.N) * float64(benchFrameCount(5000, perRead))
+	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/frames, "ns/frame")
+	b.ReportMetric(frames/b.Elapsed().Seconds(), "frames/s")
 }

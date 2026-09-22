@@ -70,13 +70,24 @@ func Create(protocol string) (Driver, error) {
 }
 
 // PingDevice 测试指定协议设备的连通性
-// 根据协议名从注册表创建临时驱动实例，调用 Ping 后立即销毁
-// 可用于设备列表中的"测试连接"功能
+// 用于设备列表中的"测试连接"功能。
+//
+// 优先复用采集引擎当前持有的同协议实例（见 SerialOwner）：Windows 下串口是独占资源
+// （goburrow/serial 以共享模式 0 打开），引擎已持有 COM 句柄时，临时实例再打开一次
+// 必然报 Access is denied —— 那会把「设备其实可达」误报成失败。
+//
+// 找不到可复用实例时（绝大多数情况：采集未运行、或传输层是 TCP），
+// 退回原路径：创建临时实例执行 Ping，不保存任何状态。
 func PingDevice(protocol, protocolJSON string) error {
+	// findLiveSerialOwner 只是候选筛子：返回之后、驱动拿到自己的锁之前，实例可能已被
+	// 重连到另一台设备上。复用与否最终以驱动 Ping 分支内的校验为准，这里不做二次补救。
+	if live := findLiveSerialOwner(protocol, protocolJSON); live != nil {
+		return live.Ping(protocolJSON)
+	}
+
 	fn, ok := registry[protocol]
 	if !ok {
 		return fmt.Errorf("driver: unsupported protocol %q", protocol)
 	}
-	// 创建临时实例执行 Ping，不保存任何状态
 	return fn().Ping(protocolJSON)
 }

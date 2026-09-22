@@ -29,7 +29,16 @@ type dlt645Transport interface {
 	// 由底层短超时 + codec 的截止时间循环共同兜底）。
 	SetReadDeadline(t time.Time) error
 	// Drain 丢弃接收缓冲中的残留字节（上一轮迟到的应答）。
+	// 实现可以确认无残留时零成本返回：TCP 直接查 socket 缓冲；
+	// 串口查不了，靠 MarkDirty 的标记跳过干净轮次。
 	Drain()
+	// MarkDirty 标记「本轮交互没有干净收尾，链路上可能还有在途字节」，
+	// 使下一次 Drain 真正去清缓冲。调用点在 codec.go 的失败与噪声路径。
+	//
+	// 迟到的应答只可能在某轮**没按时收到应答**时才在途：干净收尾的轮次，
+	// 对方已经答完了，不会有东西再飘过来。所以只在这些路径记账是充分的，
+	// 而它换来的收益是串口每帧省下 serialReadTimeout 的空读。
+	MarkDirty()
 
 	IsConnected() bool
 	Close() error

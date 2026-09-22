@@ -42,16 +42,22 @@ const (
 	defaultStopBits      = 1
 	defaultParity        = "E"  // 645 电表几乎全为偶校验，与仓库内其它驱动的 "N" 默认不同
 	defaultTimeoutMS     = 3000 // 单帧应答超时
-	defaultInterFrameMS  = 30   // 收发间延时：RS-485 收发器换向 + 表处理时间
+	defaultInterFrameMS  = 30   // 串口收发间延时：RS-485 收发器换向 + 表处理时间
 	defaultPreambleBytes = 4    // 串口前导 0xFE 唤醒字节数
-	defaultMaxDIsPerRead = 1    // 默认一个 DI 一个请求（见 plan.go 说明）
-	defaultMaxFollowUp   = 2    // 2007 后续帧上限
-	maxPreambleBytes     = 4    // 标准规定前导 0xFE 为 1~4 字节
-	maxMeterDigits       = 12   // 表号 6 字节 BCD = 12 位十进制
-	maxDIsPerReadLimit   = 12   // 单请求最多打包的数据标识个数
-	maxFollowUpLimit     = 8    // 后续帧上限的合法取值上界
-	maxDataLen2007       = 200  // 标准规定读数据 L ≤ 200
-	maxDataLen1997       = 52   // 1997 帧总长 ≤ 64 字节，扣除 12 字节固定开销
+	// defaultMaxDIsPerRead 单请求打包的数据标识个数。
+	//
+	// 出厂 12（协议上限）：帧数 = ⌈点数/maxDIsPerRead⌉，设 1 意味着一帧一个点，
+	// 2000 点档起单轮周期就远超任何采集频率。之所以敢打包，是因为「异常应答
+	// 不回显失败项」这个顾虑已有兜底：readGroup 遇异常应答会自动降级为逐个重读
+	// （readGroupPerDI），代价只是失败时多发一轮，而不是永远丢掉可定位性。
+	defaultMaxDIsPerRead = 12
+	defaultMaxFollowUp   = 2   // 2007 后续帧上限
+	maxPreambleBytes     = 4   // 标准规定前导 0xFE 为 1~4 字节
+	maxMeterDigits       = 12  // 表号 6 字节 BCD = 12 位十进制
+	maxDIsPerReadLimit   = 12  // 单请求最多打包的数据标识个数
+	maxFollowUpLimit     = 8   // 后续帧上限的合法取值上界
+	maxDataLen2007       = 200 // 标准规定读数据 L ≤ 200
+	maxDataLen1997       = 52  // 1997 帧总长 ≤ 64 字节，扣除 12 字节固定开销
 )
 
 // DLT645Config DL/T 645 协议配置（对应 device.protocol_json 反序列化）。
@@ -79,17 +85,20 @@ type DLT645Config struct {
 	Timeout   time.Duration `json:"-"`         // 超时时间（由 TimeoutMS 转换）
 	// InterFrameDelayMS 发送请求后、开始读应答前的等待毫秒数。
 	// RS-485 需要收发器换向时间，且 645 表处理慢（尤其 2400bps），过短会丢首字节。
-	InterFrameDelayMS int           `json:"interFrameDelayMs"` // 默认 30
-	InterFrameDelay   time.Duration `json:"-"`                 // 由 InterFrameDelayMS 转换
+	// 串口默认 30；TCP 默认 0（透传链路由串口服务器 / DTU 自己换向，
+	// 网关这侧的等待是纯空转，且代价随帧数线性放大）。
+	InterFrameDelayMS int           `json:"interFrameDelayMs"`
+	InterFrameDelay   time.Duration `json:"-"` // 由 InterFrameDelayMS 转换
 
 	// PreambleBytes 帧前导 0xFE 唤醒字节个数（0~4）。串口默认 4，TCP 默认 0。
 	// 前导字节不计入校验和。
 	PreambleBytes int `json:"preambleBytes"`
 
 	// ---- 读优化与容错 ----
-	// MaxDIsPerRead 单请求打包的数据标识个数，默认 1。
-	// 2007 的读命令理论支持一次读多个 DI，但异常应答不回显 DI、无法定位失败项，
-	// 故默认逐个读；设为 >1 时批量请求遇异常应答会自动降级为逐个重读（见 plan.go）。
+	// MaxDIsPerRead 单请求打包的数据标识个数，默认 12（协议上限）。
+	// 2007 的读命令支持一次读多个 DI；帧数 = ⌈点数/maxDIsPerRead⌉，
+	// 设为 1 会让帧数等于点数，大点位设备单轮周期直接超出采集频率。
+	// 批量请求遇异常应答会自动降级为逐个重读（见 plan.go / readGroupPerDI）。
 	MaxDIsPerRead int `json:"maxDIsPerRead"`
 	// MaxFollowUpFrames 收到「有后续帧」标志（0xB1 / 0xB2）时的续读次数上限，默认 2。
 	//
@@ -104,11 +113,18 @@ type DLT645Config struct {
 }
 
 // DefaultDLT645Config 返回默认 DL/T 645 配置。
-// transport 决定与传输相关的默认值（前导唤醒字节数）。
+//
+// transport 决定两项与链路相关的默认值，两者都是「串口需要、TCP 不需要」的等待：
+//   - PreambleBytes：串口要 0xFE 前导唤醒表，透传链路不需要；
+//   - InterFrameDelayMS：30ms 是 RS-485 收发器换向 + 老表的处理时间预留，
+//     而 TCP 透传链路上这些由串口服务器 / DTU 自己处理，网关这侧的等待是纯空转。
+//     它的代价随帧数线性放大（5000 点 / 每帧 12 个标识 = 417 帧 → 每轮白等 12.5s）。
 func DefaultDLT645Config(transport string) *DLT645Config {
 	preamble := 0
+	interFrameMS := 0
 	if transport == TransportSerial {
 		preamble = defaultPreambleBytes
+		interFrameMS = defaultInterFrameMS
 	}
 	return &DLT645Config{
 		Transport:         transport,
@@ -123,8 +139,8 @@ func DefaultDLT645Config(transport string) *DLT645Config {
 		Parity:            defaultParity,
 		TimeoutMS:         defaultTimeoutMS,
 		Timeout:           time.Duration(defaultTimeoutMS) * time.Millisecond,
-		InterFrameDelayMS: defaultInterFrameMS,
-		InterFrameDelay:   time.Duration(defaultInterFrameMS) * time.Millisecond,
+		InterFrameDelayMS: interFrameMS,
+		InterFrameDelay:   time.Duration(interFrameMS) * time.Millisecond,
 		PreambleBytes:     preamble,
 		MaxDIsPerRead:     defaultMaxDIsPerRead,
 		MaxFollowUpFrames: defaultMaxFollowUp,

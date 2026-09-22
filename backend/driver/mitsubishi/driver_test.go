@@ -254,3 +254,97 @@ func TestDriverReadRangeCacheClearedOnConnect(t *testing.T) {
 		t.Errorf("range cache entries after Connect = %d, want 0", n)
 	}
 }
+
+// newLiveSerialDriver 造一个「已连上串口」的驱动实例，配置来自同一份 JSON，
+// 因此 MatchConnection/Ping 的复用分支应当命中。
+func newLiveSerialDriver(t *testing.T, json string) (*mcDriver, *mockTransport) {
+	t.Helper()
+	cfg, err := ParseMCConfig(json)
+	if err != nil {
+		t.Fatalf("解析配置失败: %v", err)
+	}
+	// 与 Connect 一致：传输层由协议注册名固定，覆盖 JSON 里的 transport
+	cfg.Transport = TransportSerial
+	mt := &mockTransport{fn: func(mcDevice, uint32, uint16, bool) ([]byte, error) {
+		return []byte{0x00, 0x00}, nil
+	}}
+	d := newMCDriver(TransportSerial)
+	d.mu.Lock()
+	d.config = cfg
+	d.client = mt
+	d.mu.Unlock()
+	return d, mt
+}
+
+// MatchConnection 只在串口上成立：TCP 复用会把「对端早已失效但 connected 仍为真」的
+// 长连接的失败，算到一次本可成功的新建连接头上，而新开一条 TCP 连接的代价为零。
+func TestMatchConnectionSerialOnly(t *testing.T) {
+	const cfgJSON = `{"comPort":"COM1"}`
+
+	tcp := newMCDriver(TransportTCP)
+	tcp.mu.Lock()
+	cfg, _ := ParseMCConfig(cfgJSON)
+	cfg.Transport = TransportTCP
+	tcp.config = cfg
+	tcp.client = &mockTransport{}
+	tcp.mu.Unlock()
+	if tcp.MatchConnection(cfgJSON) {
+		t.Error("TCP 驱动不应参与串口连接复用")
+	}
+
+	d, _ := newLiveSerialDriver(t, cfgJSON)
+	if !d.MatchConnection(cfgJSON) {
+		t.Error("串口驱动参数一致时应判定可复用")
+	}
+}
+
+// 表单里残留的 transport 字段不参与比较——传输层由协议注册名固定，
+// 否则一台串口设备只要 JSON 里带着 transport=tcp 就永远匹配不上。
+func TestMatchConnectionIgnoresStaleTransportField(t *testing.T) {
+	d, _ := newLiveSerialDriver(t, `{"comPort":"COM1"}`)
+	if !d.MatchConnection(`{"comPort":"COM1","transport":"tcp"}`) {
+		t.Error("JSON 里的 transport 字段应被注册名覆盖，不该影响匹配")
+	}
+}
+
+func TestMatchConnectionRejectsMismatch(t *testing.T) {
+	d, _ := newLiveSerialDriver(t, `{"comPort":"COM1"}`)
+
+	cases := map[string]string{
+		"串口不同":    `{"comPort":"COM2"}`,
+		"波特率不同":   `{"comPort":"COM1","baudRate":19200}`,
+		"JSON 非法": "not json",
+	}
+	for name, in := range cases {
+		if d.MatchConnection(in) {
+			t.Errorf("%s：不应判定为可复用", name)
+		}
+	}
+
+	if newMCDriver(TransportSerial).MatchConnection(`{"comPort":"COM1"}`) {
+		t.Error("未连接过的实例不应判定为可复用")
+	}
+	if got := newMCDriver(TransportTCP).SerialResource(); got != "" {
+		t.Errorf("TCP 驱动不持有串口，SerialResource = %q, want 空", got)
+	}
+}
+
+// Ping 复用已有连接：把 ComPort 设成必然打不开的假串口，
+// 一旦走了「开临时连接」那条路就必定失败。
+func TestPingReusesLiveSerialConnection(t *testing.T) {
+	const cfgJSON = `{"comPort":"COM_NOT_EXIST_1"}`
+	d, mt := newLiveSerialDriver(t, cfgJSON)
+
+	called := 0
+	mt.fn = func(mcDevice, uint32, uint16, bool) ([]byte, error) {
+		called++
+		return []byte{0x00, 0x00}, nil
+	}
+
+	if err := d.Ping(cfgJSON); err != nil {
+		t.Fatalf("Ping 应复用已有连接并成功，实际报错: %v", err)
+	}
+	if called == 0 {
+		t.Error("复用路径没有向已有连接发出任何请求")
+	}
+}

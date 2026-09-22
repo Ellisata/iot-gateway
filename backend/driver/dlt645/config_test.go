@@ -23,8 +23,27 @@ func TestDefaultConfig(t *testing.T) {
 		t.Error("默认应开启校验码校验")
 	}
 	// TCP 透传链路无需唤醒字节
-	if tp := DefaultDLT645Config(TransportTCP); tp.PreambleBytes != 0 {
+	tp := DefaultDLT645Config(TransportTCP)
+	if tp.PreambleBytes != 0 {
 		t.Errorf("TCP 默认前导字节数 = %d, want 0", tp.PreambleBytes)
+	}
+	// 收发间延时同样只对串口有意义：透传链路上换向由串口服务器 / DTU 自己处理，
+	// 网关这侧的等待是纯空转，而它的代价随帧数线性放大。
+	if tp.InterFrameDelayMS != 0 || tp.InterFrameDelay != 0 {
+		t.Errorf("TCP 默认收发间延时 = %dms/%v, want 0（透传链路无需等待）",
+			tp.InterFrameDelayMS, tp.InterFrameDelay)
+	}
+	if s.InterFrameDelayMS != defaultInterFrameMS {
+		t.Errorf("串口默认收发间延时 = %dms, want %d（RS-485 换向 + 表处理时间）",
+			s.InterFrameDelayMS, defaultInterFrameMS)
+	}
+	// 打包上限默认取协议上限：帧数 = ⌈点数/maxDIsPerRead⌉，逐个读会让大点位设备
+	// 的单轮周期直接超出采集频率。
+	if s.MaxDIsPerRead != maxDIsPerReadLimit {
+		t.Errorf("默认单请求标识数 = %d, want %d（协议上限）", s.MaxDIsPerRead, maxDIsPerReadLimit)
+	}
+	if tp.MaxDIsPerRead != maxDIsPerReadLimit {
+		t.Errorf("TCP 默认单请求标识数 = %d, want %d", tp.MaxDIsPerRead, maxDIsPerReadLimit)
 	}
 }
 

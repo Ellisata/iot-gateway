@@ -24,6 +24,7 @@ type fakeTransport struct {
 func (f *fakeTransport) Lock()                           {}
 func (f *fakeTransport) Unlock()                         {}
 func (f *fakeTransport) Drain()                          {}
+func (f *fakeTransport) MarkDirty()                      {}
 func (f *fakeTransport) SetReadDeadline(time.Time) error { return nil }
 func (f *fakeTransport) IsConnected() bool               { return true }
 func (f *fakeTransport) Close() error                    { return nil }

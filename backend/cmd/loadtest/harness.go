@@ -127,14 +127,17 @@ var adapters = map[string]protocolAdapter{
 		newServer:            fake.NewDLT645,
 		newServerWithLatency: fake.NewDLT645WithLatency,
 		deviceJSON: func(port int, opts Options) string {
-			// -dlt645-batch N>1 时注入 maxDIsPerRead（单请求打包的数据标识个数，
-			// 驱动默认 1 = 一个数据标识一次往返，规范上限 12）
+			// -dlt645-batch N>=1 时注入 maxDIsPerRead（单请求打包的数据标识个数，
+			// 规范上限 12）；0 = 不注入，用驱动默认。
+			//
+			// 注意 1 也必须走注入：驱动默认已是 12，再按「>1 才注入」处理会让
+			// `-dlt645-batch 1` 静默落回默认 12，复现不出「一个标识一次往返」的口径。
 			batch := ""
-			if opts.DLT645Batch > 1 {
+			if opts.DLT645Batch >= 1 {
 				batch = fmt.Sprintf(`,"maxDIsPerRead":%d`, opts.DLT645Batch)
 			}
-			// -dlt645-interframe N>=0 时覆盖帧间延时（驱动默认 30ms）。
-			// 这是单设备吞吐的硬上限：帧间延时 T 下单设备最多 1000/T 帧/秒，
+			// -dlt645-interframe N>=0 时覆盖帧间延时（TCP 驱动默认 0，串口默认 30ms）。
+			// 这是串口单设备吞吐的硬上限：帧间延时 T 下单设备最多 1000/T 帧/秒，
 			// 与链路速率无关，因此测「网关侧上限」必须能把它关掉。
 			inter := ""
 			if opts.DLT645InterFrame >= 0 {
@@ -219,9 +222,10 @@ type Options struct {
 	Sparse      bool
 	CIPBatch    int // CIP 0x0A 多服务批量读：每个报文携带标签数（>1 启用，0/1=单读）
 	OpcUaBatch  int // OPC UA 单 ReadRequest 节点数（0=驱动默认 100）
-	DLT645Batch int // DL/T 645 单请求打包的数据标识个数（0/1=驱动默认单点单读，规范上限 12）
-	// DLT645InterFrame DL/T 645 收发间延时毫秒（<0=驱动默认 30ms，0=关闭）。
-	// 它是单设备吞吐的硬上限（1000/delay 帧每秒），与链路速率无关。
+	DLT645Batch int // DL/T 645 单请求打包的数据标识个数（0=驱动默认 12，1=单点单读，规范上限 12）
+	// DLT645InterFrame DL/T 645 收发间延时毫秒（<0=驱动默认：TCP 0、串口 30ms；0=关闭）。
+	// 它对串口是单设备吞吐的硬上限（1000/delay 帧每秒），与链路速率无关；
+	// TCP 透传链路的换向由串口服务器 / DTU 自己处理，故驱动默认已是 0。
 	DLT645InterFrame int
 	Workers          int // worker 池并发数（0=默认 NumCPU*2）
 }

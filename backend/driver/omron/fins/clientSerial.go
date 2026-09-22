@@ -6,10 +6,12 @@ package fins
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/goburrow/serial"
 
+	"iot-gateway/driver"
 	"iot-gateway/logger"
 )
 
@@ -19,15 +21,18 @@ import (
 // 连接测试同时触发）在串口上交错、破坏帧结构。读超时/写失败标记断连，
 // 由采集引擎按指数退避重连。
 type finsSerialClient struct {
-	mu        sync.Mutex
-	port      serial.Port
-	timeout   time.Duration
-	unitNo    byte
-	dstUnit   byte
-	srcUnit   byte
-	sid       byte
-	fcsMode   string
-	connected bool
+	mu      sync.Mutex
+	port    serial.Port
+	timeout time.Duration
+	unitNo  byte
+	dstUnit byte
+	srcUnit byte
+	sid     byte
+	fcsMode string
+	// connected 用原子量而非普通字段：IsConnected 会被驱动之外的调用方读到
+	// （driver.PingDevice 复用采集引擎的连接时要先问一句连没连上），
+	// 而写它的是采集协程里的 Read。用 c.mu 保护不行——Close 也不持 c.mu。
+	connected atomic.Bool
 }
 
 // newFINSSerialClient 创建并打开 Host Link 串口连接。
@@ -65,20 +70,24 @@ func newFINSSerialClient(cfg *FINSConfig) (finsTransport, error) {
 		Timeout:  timeout,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("fins serial: open %s failed: %w", cfg.ComPort, err)
+		// 打开失败最常见的原因是端口已被本进程内另一个采集任务占着（Windows 下串口独占），
+		// 而系统原文「Access is denied」对用户毫无指向性——补一句「被谁占用」。
+		return nil, fmt.Errorf("fins serial: open %s failed: %w%s",
+			cfg.ComPort, err, driver.SerialBusyHint(cfg.ComPort))
 	}
 
 	logger.Info("fins serial client connected to %s (baud=%d, data=%d, stop=%d, parity=%s, unit=%d)",
 		cfg.ComPort, baud, dataBits, stopBits, parity, cfg.UnitNo)
-	return &finsSerialClient{
-		port:      port,
-		timeout:   timeout,
-		unitNo:    cfg.UnitNo,
-		dstUnit:   cfg.DstUnit,
-		srcUnit:   cfg.SrcUnit,
-		fcsMode:   cfg.FCSMode,
-		connected: true,
-	}, nil
+	client := &finsSerialClient{
+		port:    port,
+		timeout: timeout,
+		unitNo:  cfg.UnitNo,
+		dstUnit: cfg.DstUnit,
+		srcUnit: cfg.SrcUnit,
+		fcsMode: cfg.FCSMode,
+	}
+	client.connected.Store(true)
+	return client, nil
 }
 
 // Read 通过 Host Link 帧读取内存区。
@@ -86,7 +95,7 @@ func (c *finsSerialClient) Read(area finsArea, word, count uint16) ([]byte, erro
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.port == nil || !c.connected {
+	if c.port == nil || !c.connected.Load() {
 		return nil, fmt.Errorf("fins serial: not connected")
 	}
 
@@ -103,13 +112,13 @@ func (c *finsSerialClient) Read(area finsArea, word, count uint16) ([]byte, erro
 
 	logger.Debug("fins serial send raw=%q", string(frame))
 	if _, err := c.port.Write(frame); err != nil {
-		c.connected = false
+		c.connected.Store(false)
 		return nil, fmt.Errorf("fins serial: write failed: %w", err)
 	}
 
 	resp, err := c.readFrame()
 	if err != nil {
-		c.connected = false
+		c.connected.Store(false)
 		return nil, fmt.Errorf("fins serial: read failed: %w", err)
 	}
 
@@ -149,7 +158,7 @@ func (c *finsSerialClient) readFrame() ([]byte, error) {
 
 // IsConnected 返回连接状态
 func (c *finsSerialClient) IsConnected() bool {
-	return c != nil && c.connected
+	return c != nil && c.connected.Load()
 }
 
 // Close 关闭串口连接
@@ -158,7 +167,7 @@ func (c *finsSerialClient) Close() error {
 		return nil
 	}
 	err := c.port.Close()
-	c.connected = false
+	c.connected.Store(false)
 	logger.Info("fins serial client closed")
 	return err
 }

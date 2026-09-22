@@ -23,8 +23,8 @@ go run ./cmd/loadtest -protocol modbus -devices 10,50,100 -points 500,2000,5000
 | `-sparse` | `false` | Sparse address layout (gaps > merge window, **1 frame/point**, worst-case frame count) |
 | `-latency` | `0` | Fixed per-transaction latency in ms (simulates real RTT; CIP family / `opcua` / `dlt645` only) |
 | `-opcua-batch` | `0` | OPC UA maxBatch (nodes per ReadRequest; 0 = driver default 100) |
-| `-dlt645-batch` | `0` | DL/T 645 maxDIsPerRead (data identifiers per request; spec limit 12; 0/1 = default one point per round-trip) |
-| `-dlt645-interframe` | `-1` | DL/T 645 inter-frame delay in ms (`-1` = driver default 30, `0` = disabled) |
+| `-dlt645-batch` | `0` | DL/T 645 maxDIsPerRead (data identifiers per request; spec limit 12; `0` = driver default **12**, `1` = one point per round-trip) |
+| `-dlt645-interframe` | `-1` | DL/T 645 inter-frame delay in ms (`-1` = driver default: `0` for TCP, `30` for serial) |
 | `-cpuprofile` / `-memprofile` | - | pprof profiles of the largest combination |
 
 > `-sparse` is meaningless for `dlt645` and `opcua`: neither has a range-merge concept, so the frame
@@ -218,23 +218,28 @@ the Read override handler returns values by NodeID formula (detailed findings in
 in `driver/dlt645`), while a single frame at 2400bps takes 165ms — six orders of magnitude apart. Capacity is set by
 the **baud rate** and the **inter-frame delay**.
 
-What makes the inter-frame delay special: it is **charged per frame** and is the hard per-device throughput ceiling
-(1000/delay frames per second), independent of link speed and device concurrency (measured at 1/2/5/10 concurrent
-devices: a constant 32 frames/s per device).
+What makes the inter-frame delay special: it is **charged per frame** and is the hard per-device throughput ceiling on
+serial (1000/delay frames per second), independent of link speed and device concurrency (measured at 1/2/5/10
+concurrent devices: a constant 32 frames/s per device). **30ms is only meaningful on serial** — on a TCP transparent
+link the serial server / DTU handles turnaround itself, so the driver now defaults it to 0 there.
 
-**Point capacity gain from batching equals the batch size exactly** (single device, scan=1000ms, default 30ms delay):
+**Point capacity gain from batching equals the batch size exactly** (single device, scan=1000ms, 30ms delay):
 
 | maxDIsPerRead | Points | Frames | Frames/s | Cycle | drop% |
 |---|---|---|---|---|---|
-| 1 (default) | 20 | 20 | 20 | 1s | 0.0 |
+| 1 | 20 | 20 | 20 | 1s | 0.0 |
 | 1 | 50 | 50 | 25 | 2s | **50.0** |
 | 1 | 100 | 100 | 25 | 4s | **75.0** |
-| 12 | 240 | 20 | 20 | 1s | 0.0 |
+| 12 (default) | 240 | 20 | 20 | 1s | 0.0 |
 | 12 | 600 | 50 | 25 | 2s | **50.0** |
 | 12 | 1200 | 100 | 25 | 4s | **75.0** |
 
-At the same frame count, batching carries 12× the points. With the default `maxDIsPerRead=1` frames = points, which is
-the root cause of "one meter yields only a handful of points" in the field.
+At the same frame count, batching carries 12× the points. With `maxDIsPerRead=1` frames = points, which is the root
+cause of "one meter yields only a handful of points" in the field; the driver default is now 12, and the `1` rows are
+kept for contrast (`-dlt645-batch 1` reproduces them).
+
+Note also that the inter-frame delay now defaults to **0 on TCP** (30ms is only meaningful on serial); pass
+`-dlt645-interframe` explicitly to reproduce the old behaviour.
 
 **Real-link simulation (`-latency`, 2400bps / 8E1)**: 165ms round-trip for 1 identifier, 825ms for 12.
 

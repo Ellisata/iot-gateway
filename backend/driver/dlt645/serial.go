@@ -6,10 +6,12 @@ package dlt645
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/goburrow/serial"
 
+	"iot-gateway/driver"
 	"iot-gateway/logger"
 )
 
@@ -26,9 +28,17 @@ const serialDrainRounds = 8
 
 // serialClient RS-485 / RS-232 串口传输。
 type serialClient struct {
-	mu        sync.Mutex
-	port      serial.Port
-	connected bool
+	mu   sync.Mutex
+	port serial.Port
+	// connected 用原子量而非普通字段：IsConnected 会被驱动之外的调用方读到
+	// （driver.PingDevice 复用采集引擎的连接时要先问一句连没连上），
+	// 而写它的是采集协程里的 Read。用 c.mu 保护不行——Close 也不持 c.mu，
+	// 且 IsConnected 不该排在一次在途读后面空等一个读超时。
+	connected atomic.Bool
+	// dirty 上一轮交互没有干净收尾（写失败 / 读超时 / 读到噪声帧）。
+	// 串口拿不到裸 fd、查不了接收缓冲，只能靠这个标记决定 Drain 要不要真去读。
+	// 仅在持有 mu 的交互期间读写（exchange 全程持锁）。
+	dirty bool
 }
 
 // newSerialClient 创建并打开串口连接。
@@ -62,36 +72,41 @@ func newSerialClient(cfg *DLT645Config) (dlt645Transport, error) {
 		Timeout:  serialReadTimeout,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("dlt645 serial: 打开 %s 失败: %w", cfg.ComPort, err)
+		// 打开失败最常见的原因是端口已被本进程内另一个采集任务占着（Windows 下串口独占），
+		// 而系统原文「Access is denied」对用户毫无指向性——补一句「被谁占用」。
+		return nil, fmt.Errorf("dlt645 serial: 打开 %s 失败: %w%s",
+			cfg.ComPort, err, driver.SerialBusyHint(cfg.ComPort))
 	}
 
 	logger.Info("dlt645 serial 已连接 %s（baud=%d, data=%d, stop=%d, parity=%s）",
 		cfg.ComPort, baud, dataBits, stopBits, parity)
-	return &serialClient{port: port, connected: true}, nil
+	client := &serialClient{port: port}
+	client.connected.Store(true)
+	return client, nil
 }
 
 func (c *serialClient) Lock()   { c.mu.Lock() }
 func (c *serialClient) Unlock() { c.mu.Unlock() }
 
 func (c *serialClient) Write(p []byte) (int, error) {
-	if c.port == nil || !c.connected {
+	if c.port == nil || !c.connected.Load() {
 		return 0, fmt.Errorf("dlt645 serial: 连接已关闭")
 	}
 	n, err := c.port.Write(p)
 	if err != nil {
-		c.connected = false
+		c.connected.Store(false)
 		return n, fmt.Errorf("dlt645 serial: 写入失败: %w", err)
 	}
 	return n, nil
 }
 
 func (c *serialClient) Read(p []byte) (int, error) {
-	if c.port == nil || !c.connected {
+	if c.port == nil || !c.connected.Load() {
 		return 0, fmt.Errorf("dlt645 serial: 连接已关闭")
 	}
 	n, err := c.port.Read(p)
 	if err != nil && !isTimeoutErr(err) {
-		c.connected = false
+		c.connected.Store(false)
 	}
 	return n, err
 }
@@ -101,10 +116,24 @@ func (c *serialClient) Read(p []byte) (int, error) {
 func (c *serialClient) SetReadDeadline(time.Time) error { return nil }
 
 // Drain 丢弃接收缓冲中的残留字节，最多读取 serialDrainRounds 轮。
+//
+// 串口读用的是 goburrow/serial 的 select + 打开时固定的超时，
+// 缓冲为空时**每次读都要空等到 serialReadTimeout（20ms）**才返回 ErrTimeout。
+// 而 serial.Port 只有 io.ReadWriteCloser、拿不到裸 fd，做不了 TCP 那样的
+// 待读字节探测，因此改用 dirty 标记：上一轮干净收尾就整段跳过。
+//
+// 这不削弱「值慢一拍」的防护——迟到的应答只可能在某轮没按时收到应答时才在途，
+// 而那种轮次恰恰会把 dirty 置上。参考：同仓库的 ModBus.RTU（goburrow/modbus）
+// 从不 pre-drain，只按预期长度读 + 校验 CRC，本策略比它更保守。
 func (c *serialClient) Drain() {
-	if c.port == nil || !c.connected {
+	if c.port == nil || !c.connected.Load() {
 		return
 	}
+	if !c.dirty {
+		return
+	}
+	c.dirty = false
+
 	buf := make([]byte, 256)
 	for i := 0; i < serialDrainRounds; i++ {
 		n, err := c.port.Read(buf)
@@ -115,8 +144,11 @@ func (c *serialClient) Drain() {
 	}
 }
 
+// MarkDirty 见 transport.go 的接口说明。
+func (c *serialClient) MarkDirty() { c.dirty = true }
+
 func (c *serialClient) IsConnected() bool {
-	return c != nil && c.connected
+	return c != nil && c.connected.Load()
 }
 
 func (c *serialClient) Close() error {
@@ -124,7 +156,7 @@ func (c *serialClient) Close() error {
 		return nil
 	}
 	err := c.port.Close()
-	c.connected = false
+	c.connected.Store(false)
 	c.port = nil
 	logger.Info("dlt645 serial 连接已关闭")
 	return err

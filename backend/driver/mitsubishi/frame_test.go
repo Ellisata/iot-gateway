@@ -8,20 +8,23 @@ import (
 	"testing"
 )
 
-// TestBuildReadFrameWord D100 字单位读帧（22 字节，含请求数据长度与监视定时器）。
-// 3E/SLMP 二进制帧多字节字段均小端：命令 01 04、I/O FF 03、长度 0D 00、定时器 10 00。
+// TestBuildReadFrameWord D100 字单位读帧（21 字节，含请求数据长度与监视定时器）。
+// 3E/SLMP 二进制帧多字节字段均小端：命令 01 04、I/O FF 03、长度 0C 00、定时器 10 00。
+//
+// 期望字节取自真机实测：这个请求打在真 PLC 上回 0x0000 + 数据；
+// 换成「设备码 2 字节在前、首地址号在后」的旧布局，同一地址回 0xC056/C05A。
 func TestBuildReadFrameWord(t *testing.T) {
 	dev, _ := lookupDevice("D")
 	frame := buildReadFrame(dev, 100, 1, false)
 	want := []byte{
 		0x50, 0x00, // 子头：读
 		0x00, 0xFF, 0xFF, 0x03, 0x00, // 网络/PC/IO/站（I/O 0x03FF 小端）
-		0x0D, 0x00, // 请求数据长度：监视定时器(2) + 请求体(11)（小端）
+		0x0C, 0x00, // 请求数据长度：监视定时器(2) + 请求体(10)（小端）
 		0x10, 0x00, // 监视定时器：4s（小端）
 		0x01, 0x04, // 命令：批量读（小端 0x0401）
 		0x00, 0x00, // 子命令：字单位
-		0xA8, 0x00, // 设备码 D（LE）
 		0x64, 0x00, 0x00, // 首地址 100（LE 3 字节）
+		0xA8,       // 设备码 D（1 字节）
 		0x01, 0x00, // 点数 1（LE）
 	}
 	if !bytes.Equal(frame, want) {
@@ -36,12 +39,12 @@ func TestBuildReadFrameBit(t *testing.T) {
 	want := []byte{
 		0x50, 0x00,
 		0x00, 0xFF, 0xFF, 0x03, 0x00,
-		0x0D, 0x00,
+		0x0C, 0x00,
 		0x10, 0x00,
 		0x01, 0x04,
 		0x01, 0x00, // 子命令：位单位（小端 0x0001）
-		0x90, 0x00, // 设备码 M（LE）
-		0x0A, 0x00, 0x00, // 首地址 10
+		0x0A, 0x00, 0x00, // 首地址 10（3 字节 LE）
+		0x90,       // 设备码 M（1 字节）
 		0x01, 0x00,
 	}
 	if !bytes.Equal(frame, want) {
@@ -77,19 +80,22 @@ func TestParseTCPEndCode(t *testing.T) {
 }
 
 // TestBuildSerialFrame D100 字单位串口帧（4C Format5，含和校验）。
-// 4C Format5 二进制与 3E 同为小端：I/O FF 03、数据长度 0B 00、命令 01 04。
+// 4C Format5 二进制与 3E 同为小端：I/O FF 03、数据长度 0A 00、命令 01 04。
+//
+// 请求体与 3E 共用 buildMCBody（软元件顺序已按真机修正）；4C 的外部封帧
+// 本身（DLE 填充、和校验、是否带监视定时器）尚未经真机核实，见 frameserial.go。
 func TestBuildSerialFrame(t *testing.T) {
 	dev, _ := lookupDevice("D")
 	frame := buildSerialFrame(dev, 100, 1, false)
 	want := []byte{
 		0x10, 0x02, // DLE STX
 		0x00, 0xFF, 0xFF, 0x03, 0x00, // 网络/PC/IO/站（I/O 小端）
-		0x0B, 0x00, // 数据长度 = 请求体 11 字节（小端）
+		0x0A, 0x00, // 数据长度 = 请求体 10 字节（小端）
 		0x01, 0x04, 0x00, 0x00, // 命令/子命令（字单位，小端）
-		0xA8, 0x00, // 设备码 D
-		0x64, 0x00, 0x00, // 首地址 100
+		0x64, 0x00, 0x00, // 首地址 100（3 字节 LE）
+		0xA8,       // 设备码 D（1 字节）
 		0x01, 0x00, // 点数 1
-		0x1E,       // 和校验（inner 累加低 8 位）
+		0x1D,       // 和校验（inner 累加低 8 位）
 		0x10, 0x03, // DLE ETX
 	}
 	if !bytes.Equal(frame, want) {
