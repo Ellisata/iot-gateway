@@ -4,8 +4,10 @@ English | [简体中文](README.md)
 
 **iot-gateway** is a ready-to-run industrial IoT data acquisition gateway: it polls PLCs and industrial devices on a schedule, pushes collected data to downstream channels such as MQTT, TDEngine and InfluxDB, and ships with an embedded web admin console. The whole system is deployed to gateways or industrial PCs as a **single binary** — no external database required.
 
-<!-- Admin console screenshot (dashboard / device management): place EN-locale screenshots under docs/images/ -->
-<img src="docs/images/dashboard.en.png" width="900" alt="Admin console" />
+<!-- Demo video (admin console tour): place the EN-locale demo video under docs/video/ -->
+<video src="docs/video/demo%20video.mp4" width="900" controls muted></video>
+
+[▶ If the video above does not play, download it here](docs/video/demo%20video.mp4)
 
 
 ## Features

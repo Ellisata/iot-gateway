@@ -87,7 +87,7 @@ const routes = [
       {
         path: 'log/file',
         name: 'LogFile',
-        component: () => import('@/views/log/IndexView.vue'),
+        component: () => import('@/views/logs/IndexView.vue'),
         meta: { titleKey: 'menu.logFile', icon: 'Tickets', roles: ['admin'] },
       },
       // ---- 密钥管理路由 ----

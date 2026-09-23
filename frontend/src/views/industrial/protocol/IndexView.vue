@@ -9,19 +9,16 @@
 
     <!-- 工具栏 -->
     <el-card shadow="never" class="mb-4">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <el-input
-            v-model="queryForm.name"
-            :placeholder="t('protocol.searchPlaceholder')"
-            clearable
-            style="width: 240px"
-            @keyup.enter="handleSearch"
-          />
-          <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
-          <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
-        </div>
-        <el-button v-if="userStore.isAdmin" type="primary" @click="handleAdd">{{ t('protocol.add') }}</el-button>
+      <div class="flex items-center gap-3">
+        <el-input
+          v-model="queryForm.name"
+          :placeholder="t('protocol.searchPlaceholder')"
+          clearable
+          style="width: 240px"
+          @keyup.enter="handleSearch"
+        />
+        <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
+        <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
       </div>
     </el-card>
 
@@ -46,7 +43,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="createdAt" :label="t('common.createdAt')" width="180" align="center" />
-        <el-table-column :label="t('common.action')" width="130" align="center" fixed="right">
+        <el-table-column :label="t('common.action')" width="100" align="center" fixed="right">
           <template #default="{ row }">
             <div class="flex items-center justify-center gap-2">
               <el-tooltip :content="t('protocol.viewForm')" placement="top">
@@ -54,9 +51,6 @@
               </el-tooltip>
               <el-tooltip v-if="userStore.isAdmin" :content="t('common.edit')" placement="top">
                 <el-button type="primary" link size="small" :icon="EditPen" @click="handleEdit(row)" />
-              </el-tooltip>
-              <el-tooltip v-if="userStore.isAdmin" :content="t('common.delete')" placement="top">
-                <el-button type="danger" link size="small" :icon="Delete" @click="handleDelete(row)" />
               </el-tooltip>
             </div>
           </template>
@@ -78,10 +72,10 @@
       </div>
     </el-card>
 
-    <!-- 新增 / 编辑 对话框 -->
+    <!-- 编辑对话框 -->
     <el-dialog
       v-model="dialogVisible"
-      :title="isEdit ? t('protocol.editTitle') : t('protocol.addTitle')"
+      :title="t('protocol.editTitle')"
       width="580px"
       :close-on-click-modal="false"
       @close="handleDialogClose"
@@ -171,17 +165,15 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, EditPen, View } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { EditPen, View } from '@element-plus/icons-vue'
 import { useUserStore } from '@/store'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 import {
   getProtocolList,
-  addProtocol,
   updateProtocol,
-  deleteProtocol,
 } from '@/api/modules/protocol'
 
 const userStore = useUserStore()
@@ -254,7 +246,6 @@ function handleCurrentChange(val) {
 
 // ---------- 对话框状态 ----------
 const dialogVisible = ref(false)
-const isEdit = ref(false)
 const submitting = ref(false)
 const formRef = ref(null)
 
@@ -279,35 +270,13 @@ const formRules = {
 }
 
 // ---------- 操作 ----------
-function handleAdd() {
-  isEdit.value = false
-  formData.status = 1
-  dialogVisible.value = true
-}
-
 function handleEdit(row) {
-  isEdit.value = true
   formData.id = row.id
   formData.name = row.name
   formData.description = row.description ?? ''
   formData.sort = row.sort ?? undefined
   formData.status = row.status ?? 1
   dialogVisible.value = true
-}
-
-async function handleDelete(row) {
-  try {
-    await ElMessageBox.confirm(t('protocol.deleteConfirm', { name: row.name }), t('protocol.deleteTitle'), {
-      type: 'warning',
-      confirmButtonText: t('common.confirm'),
-      cancelButtonText: t('common.cancel'),
-    })
-    await deleteProtocol(row.id)
-    ElMessage.success(t('protocol.deleteSuccess'))
-    fetchList()
-  } catch {
-    // 用户取消或删除失败，不做处理
-  }
 }
 
 function handleDialogClose() {
@@ -324,25 +293,19 @@ async function handleSubmit() {
   submitting.value = true
   try {
     const payload = {
+      id: formData.id,
       name: formData.name.trim(),
       description: formData.description.trim(),
       sort: formData.sort,
       status: formData.status,
     }
-    if (isEdit.value) {
-      payload.id = formData.id
-      await updateProtocol(payload)
-      ElMessage.success(t('protocol.editSuccess'))
-    } else {
-      await addProtocol(payload)
-      ElMessage.success(t('protocol.addSuccess'))
-    }
+    await updateProtocol(payload)
+    ElMessage.success(t('protocol.editSuccess'))
     dialogVisible.value = false
     fetchList()
   } catch (err) {
-    //const msg = isEdit.value ? t('protocol.editFailed') : t('protocol.addFailed')
-    //console.error(msg, err)
-    //ElMessage.error(err?.response?.data?.msg || err?.message || msg)
+    //console.error(t('protocol.editFailed'), err)
+    //ElMessage.error(err?.response?.data?.msg || err?.message || t('protocol.editFailed'))
   } finally {
     submitting.value = false
   }

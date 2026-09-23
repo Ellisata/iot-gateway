@@ -4,7 +4,7 @@
 -->
 
 <template>
-  <div class="p-6">
+  <div class="p-6 log-page">
     <h1 class="text-2xl font-bold text-gray-800 mb-6">{{ t('menu.logFile') }}</h1>
 
     <!-- 日志文件列表 -->
@@ -53,17 +53,16 @@
       :title="drawerTitle"
       size="70%"
       destroy-on-close
-      class="log-drawer"
     >
-      <div class="flex items-center gap-3 mb-3">
-        <span class="text-sm text-gray-300">{{ t('log.showTail') }}</span>
+      <div class="flex shrink-0 items-center gap-3 bg-white px-5 py-4">
+        <span class="text-sm text-gray-600">{{ t('log.showTail') }}</span>
         <el-select v-model="tailLines" style="width: 130px" @change="fetchLogContent">
           <el-option :label="t('log.lines', { n: 200 })" :value="200" />
           <el-option :label="t('log.lines', { n: 500 })" :value="500" />
           <el-option :label="t('log.lines', { n: 1000 })" :value="1000" />
           <el-option :label="t('log.lines', { n: 2000 })" :value="2000" />
         </el-select>
-        <span class="text-sm text-gray-400">{{ t('log.totalLines', { total: totalLines }) }}</span>
+        <span class="text-sm text-gray-500">{{ t('log.totalLines', { total: totalLines }) }}</span>
         <el-button :loading="contentLoading" @click="scrollToBottom">
           <el-icon class="mr-1"><Bottom /></el-icon>{{ t('log.scrollToBottom') }}
         </el-button>
@@ -75,8 +74,7 @@
       <div
         ref="contentRef"
         v-loading="contentLoading"
-        class="bg-black text-gray-100 rounded p-4 font-mono text-sm leading-6 whitespace-pre overflow-auto"
-        style="height: calc(100vh - 180px)"
+        class="flex-1 min-h-0 bg-black text-gray-100 p-5 font-mono text-sm leading-6 whitespace-pre overflow-auto"
       >
         <template v-if="logLines.length">{{ joinedLines }}</template>
         <div v-else class="text-gray-400">{{ t('log.noContent') }}</div>
@@ -193,20 +191,15 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 日志抽屉整体黑色背景（标题栏 + 内容区） */
-.log-drawer {
-  --el-drawer-bg-color: #000;
-}
-
-.log-drawer :deep(.el-drawer__header) {
-  color: #e5e7eb;
-}
-
-.log-drawer :deep(.el-drawer__close-btn) {
-  color: #9ca3af;
-}
-
-.log-drawer :deep(.el-drawer__close-btn):hover i {
-  color: var(--el-color-primary);
+/* el-drawer 的根元素由组件内部渲染，拿不到本组件的 scope id，
+   直接写 .el-drawer__body 这样的类选择器不会生效，
+   必须挂在页面根节点上用 :deep() 才能命中。
+   去掉内容区自带的 20px 内边距并改成纵向弹性布局，
+   让工具条（白底）和日志区（黑底）各自撑满，日志区不留白边。 */
+.log-page :deep(.el-drawer__body) {
+  padding: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 </style>
