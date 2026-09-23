@@ -8,11 +8,14 @@ English | [简体中文](README.md)
      on Gitee/GitHub. The video tag is sanitized away, and the raw URL sends
      Content-Disposition: attachment, which downloads instead of playing.
      The GIF is a highlight reel of the demo -- login, dashboard, protocols,
-     device objects, dynamic form, channels, logs, open API docs -- and
-     clicking it downloads the full video under docs/video/. -->
-[![Admin console](docs/images/demo.en.gif)](docs/video/demo%20video.mp4)
+     device objects, dynamic form, channels, logs, open API docs.
+     Clicking plays the video from image.edwining.com: the repo's own raw URL
+     sends Content-Disposition: attachment, which only downloads, whereas
+     this host omits the header and supports Range, so the browser plays it.
+     The originals stay in docs/video/ as a fallback if that host goes away. -->
+[![Admin console](docs/images/demo.en.gif)](https://image.edwining.com/public/redpandacompress_demo%20video.mp4)
 
-*Click the GIF to download the full demo (62 s)*
+*Click the GIF to watch the full demo (62 s)*
 
 
 ## Features

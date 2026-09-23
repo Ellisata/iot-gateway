@@ -5,13 +5,15 @@
 **iot-gateway** 是一个开箱即用的工业物联网数据采集网关：定时轮询 PLC / 工业设备，将采集数据推送至 MQTT、TDEngine、InfluxDB 等下游通道，并提供内嵌的 Web 管理控制台。整体以 **单二进制** 形式部署到网关设备或工控机，无需外部数据库。
 
 <!-- 管理控制台概览：动图是唯一能在 Gitee/GitHub 上直接动起来的形式 ——
-     <video> 标签会被 Markdown 清洗器丢弃，而 raw 链接又带
-     Content-Disposition: attachment，点了只会下载、不会播放。
+     <video> 标签会被 Markdown 清洗器丢弃。
      动图是视频的精华剪辑，依次走过登录、大盘、协议、设备对象、动态表单、
-     通道、日志、开放接口文档；点击可下载完整视频。 -->
-[![管理控制台概览](docs/images/demo.zh.gif)](docs/video/演示视频.mp4)
+     通道、日志、开放接口文档。
+     点击进外链播放：仓库自己的 raw 链接带 Content-Disposition: attachment，
+     只会触发下载；image.edwining.com 不带该头且支持 Range，浏览器直接播。
+     仓库内的 docs/video/ 仍保留原片，作为外链失效时的备份。 -->
+[![管理控制台概览](docs/images/demo.zh.gif)](https://image.edwining.com/public/redpandacompress_%E6%BC%94%E7%A4%BA%E8%A7%86%E9%A2%91.mp4)
 
-*点击动图下载完整演示视频（90 秒）*
+*点击动图观看完整演示视频（90 秒）*
 
 
 ## 功能特性
