@@ -4,13 +4,14 @@ English | [简体中文](README.md)
 
 **iot-gateway** is a ready-to-run industrial IoT data acquisition gateway: it polls PLCs and industrial devices on a schedule, pushes collected data to downstream channels such as MQTT, TDEngine and InfluxDB, and ships with an embedded web admin console. The whole system is deployed to gateways or industrial PCs as a **single binary** — no external database required.
 
-<!-- Admin console tour: a clickable cover in place of <video> -- Gitee/GitHub
-     sanitize the video tag away and leave nothing rendered, while an image
-     renders everywhere. Cover is the redesigned dashboard; it links to the
-     EN-locale demo video under docs/video/ -->
-[![Admin console](docs/images/dashboard.en.png)](docs/video/demo%20video.mp4)
+<!-- Admin console tour: an animated GIF -- the only form that actually moves
+     on Gitee/GitHub. The video tag is sanitized away, and the raw URL sends
+     Content-Disposition: attachment, which downloads instead of playing.
+     The GIF is the opening of the demo (login -> dashboard); clicking it
+     downloads the full video under docs/video/. -->
+[![Admin console](docs/images/demo.en.gif)](docs/video/demo%20video.mp4)
 
-*Click the cover to play the demo video*
+*Click the GIF to download the full demo (62 s)*
 
 
 ## Features
