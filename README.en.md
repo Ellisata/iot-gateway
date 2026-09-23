@@ -7,8 +7,9 @@ English | [简体中文](README.md)
 <!-- Admin console tour: an animated GIF -- the only form that actually moves
      on Gitee/GitHub. The video tag is sanitized away, and the raw URL sends
      Content-Disposition: attachment, which downloads instead of playing.
-     The GIF is the opening of the demo (login -> dashboard); clicking it
-     downloads the full video under docs/video/. -->
+     The GIF is a highlight reel of the demo -- login, dashboard, protocols,
+     device objects, dynamic form, channels, logs, open API docs -- and
+     clicking it downloads the full video under docs/video/. -->
 [![Admin console](docs/images/demo.en.gif)](docs/video/demo%20video.mp4)
 
 *Click the GIF to download the full demo (62 s)*
