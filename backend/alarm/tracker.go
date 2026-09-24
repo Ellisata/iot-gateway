@@ -58,6 +58,8 @@ type Tracker struct {
 	targetType string // TypeDevice / TypeChannel
 	label      string // 文案前缀：设备 / 推送通道
 
+	sink NotifySink // 报警通知出口，可为 nil（不通知）
+
 	mu     sync.Mutex
 	states map[string]*devState // targetID -> 状态机
 }
@@ -71,12 +73,14 @@ type devState struct {
 
 // NewTracker 创建断联报警状态机（默认连续失败 3 次判离线）。
 // targetType 为 TypeDevice/TypeChannel，label 用于报警文案（"设备"/"推送通道"）。
-func NewTracker(db *gorm.DB, targetType, label string) *Tracker {
+// sink 为报警通知出口，传 nil 表示只落库不通知（单测/裁剪部署）。
+func NewTracker(db *gorm.DB, targetType, label string, sink NotifySink) *Tracker {
 	return &Tracker{
 		db:         db,
 		cfg:        Config{ConsecutiveFailures: DefaultConsecutiveFailures, Level: defaultLevel},
 		targetType: targetType,
 		label:      label,
+		sink:       sink,
 		states:     make(map[string]*devState),
 	}
 }
@@ -136,6 +140,9 @@ func (t *Tracker) Reset(targetID string) {
 
 // ClearActive 重置状态机并清除目标的 active 离线报警（历史保留）。
 // 用于目标被运营停用/删除时，或巡检发现目标由运行转停止时。
+//
+// 这里刻意不投递通知：目标被停用/删除是运营操作，属于行政取消，不是「恢复通信」，
+// 往群里发恢复通知会误导值班人员。
 func (t *Tracker) ClearActive(targetID string) {
 	t.Reset(targetID)
 	now := time.Now().Format("2006-01-02 15:04:05")
@@ -185,7 +192,9 @@ func (t *Tracker) raiseOfflineLocked(targetID, targetName string) {
 	}
 	if err := t.db.Create(a).Error; err != nil {
 		logger.Error("alarm: create offline alarm for %s %s failed: %v", t.targetType, targetName, err)
+		return // 落库失败不通知：保持「通知 ⇔ 报警行已写入」这一不变式
 	}
+	t.notifyLocked(a)
 }
 
 // recoverLocked 目标恢复：清 active 离线报警并写一条恢复历史（调用方持 t.mu）。
@@ -218,11 +227,16 @@ func (t *Tracker) recoverLocked(targetID, targetName string) {
 	}
 	if err := t.db.Create(rec).Error; err != nil {
 		logger.Error("alarm: create recover record for %s %s failed: %v", t.targetType, targetName, err)
+		return // 同上：没写进库就不通知
 	}
+	t.notifyLocked(rec)
 }
 
 // touchLastOccurLocked 已离线目标持续失败时刷新 active 行的 last_occur_time（节流）。
 // 调用方持 t.mu。
+//
+// 这里刻意不投递通知：它只是时间戳刷新，不是状态边沿，通知会按节流周期刷屏。
+// 通知只在 ONLINE↔OFFLINE 边沿（raiseOfflineLocked / recoverLocked）发出。
 func (t *Tracker) touchLastOccurLocked(targetID string, st *devState) {
 	now := time.Now()
 	if !st.lastTouch.IsZero() && now.Sub(st.lastTouch) < touchMinInterval {

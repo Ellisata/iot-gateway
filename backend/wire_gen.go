@@ -13,6 +13,7 @@ import (
 	"iot-gateway/configFile"
 	"iot-gateway/controller"
 	"iot-gateway/database/sqlite"
+	"iot-gateway/notify"
 	"iot-gateway/push"
 	"iot-gateway/router"
 	"iot-gateway/service"
@@ -37,7 +38,8 @@ func InitializeApp() (*AppDependencies, func()) {
 	userController := controller.NewUserController(userService)
 	workerPool := NewWorkerPool(config)
 	engine := push.NewEngine(db)
-	alarmEngine := alarm.NewEngine(db)
+	dispatcher := notify.NewDispatcher(db)
+	alarmEngine := alarm.NewEngine(db, dispatcher)
 	collectorEngine := collector.NewEngine(db, workerPool, engine, alarmEngine)
 	alarmService := service.NewAlarmService(db)
 	deviceService := service.NewDeviceService(db, collectorEngine, alarmService)
@@ -54,20 +56,25 @@ func InitializeApp() (*AppDependencies, func()) {
 	pushChannelFormController := controller.NewPushChannelFormController(pushChannelFormService)
 	pushController := controller.NewPushController(engine)
 	alarmController := controller.NewAlarmController(alarmService)
+	alarmWebhookService := service.NewAlarmWebhookService(db, dispatcher)
+	alarmWebhookController := controller.NewAlarmWebhookController(alarmWebhookService)
+	alarmWebhookFormService := service.NewAlarmWebhookFormService(db)
+	alarmWebhookFormController := controller.NewAlarmWebhookFormController(alarmWebhookFormService)
 	logFileService := service.NewLogFileService(config)
 	logFileController := controller.NewLogFileController(logFileService)
 	openApiSecretService := service.NewOpenApiSecretService(db)
 	openApiSecretController := controller.NewOpenApiSecretController(openApiSecretService)
 	openApiService := service.NewOpenApiService(deviceService, deviceAddressService)
 	openApiController := controller.NewOpenApiController(openApiService)
-	v := ProvideRouteOptions(userController, deviceController, deviceAddressController, collectionController, protocolController, pushChannelController, pushChannelFormController, pushController, alarmController, logFileController, openApiSecretController, openApiSecretService, openApiController)
+	v := ProvideRouteOptions(userController, deviceController, deviceAddressController, collectionController, protocolController, pushChannelController, pushChannelFormController, pushController, alarmController, alarmWebhookController, alarmWebhookFormController, logFileController, openApiSecretController, openApiSecretService, openApiController)
 	ginEngine := router.SetupRouter(v)
-	channelMonitor := alarm.NewChannelMonitor(db, engine)
+	channelMonitor := alarm.NewChannelMonitor(db, engine, dispatcher)
 	appDependencies := &AppDependencies{
 		Engine:          ginEngine,
 		CollectorEngine: collectorEngine,
 		PushEngine:      engine,
 		AlarmMonitor:    channelMonitor,
+		AlarmNotifier:   dispatcher,
 	}
 	return appDependencies, func() {
 	}
@@ -81,6 +88,7 @@ type AppDependencies struct {
 	CollectorEngine *collector.Engine
 	PushEngine      *push.Engine
 	AlarmMonitor    *alarm.ChannelMonitor
+	AlarmNotifier   *notify.Dispatcher
 }
 
 // NewWorkerPool 从配置创建 Worker 池
@@ -101,10 +109,12 @@ func ProvideRouteOptions(
 	pcf *controller.PushChannelFormController,
 	pus *controller.PushController,
 	ac2 *controller.AlarmController,
+	awc *controller.AlarmWebhookController,
+	awfc *controller.AlarmWebhookFormController,
 	lc *controller.LogFileController,
 	oasc *controller.OpenApiSecretController,
 	oass *service.OpenApiSecretService,
 	oac *controller.OpenApiController,
 ) []router.RouteOption {
-	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectionRoutes(cc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac)}
+	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectionRoutes(cc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithAlarmWebhookRoutes(awc), router.WithAlarmWebhookFormRoutes(awfc), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac)}
 }

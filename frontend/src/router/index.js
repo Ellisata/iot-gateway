@@ -83,6 +83,13 @@ const routes = [
         props: { targetType: 'channel' },
         meta: { titleKey: 'menu.alarmChannel', icon: 'Warning' },
       },
+      {
+        // 通知配置含群机器人地址与加签密钥（地址本身即凭证），限管理员
+        path: 'alarm/webhook',
+        name: 'AlarmWebhook',
+        component: () => import('@/views/alarm/webhook/IndexView.vue'),
+        meta: { titleKey: 'menu.alarmWebhook', icon: 'Bell', roles: ['admin'] },
+      },
       // ---- 日志管理路由 ----
       {
         path: 'log/file',

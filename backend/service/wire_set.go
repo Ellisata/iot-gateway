@@ -15,6 +15,8 @@ var ServiceProviderSet = wire.NewSet(
 	NewPushChannelService,
 	NewPushChannelFormService,
 	NewAlarmService,
+	NewAlarmWebhookService,
+	NewAlarmWebhookFormService,
 	NewLogFileService,
 	NewOpenApiSecretService,
 	NewOpenApiService,

@@ -17,8 +17,9 @@ type Engine struct {
 }
 
 // NewEngine 创建设备断联报警引擎（默认连续失败 3 次判离线）。
-func NewEngine(db *gorm.DB) *Engine {
-	return &Engine{tr: NewTracker(db, TypeDevice, "设备")}
+// sink 为报警通知出口（推送钉钉/企微/飞书等），传 nil 表示只落库不通知。
+func NewEngine(db *gorm.DB, sink NotifySink) *Engine {
+	return &Engine{tr: NewTracker(db, TypeDevice, "设备", sink)}
 }
 
 // ReportDevicePoll 实现 collector.DeviceStateSink。

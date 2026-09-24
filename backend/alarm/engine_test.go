@@ -51,7 +51,7 @@ func countAlarms(t *testing.T, db *gorm.DB, deviceID, alarmType, status string) 
 
 func TestAlarmEngineOfflineAfterThreshold(t *testing.T) {
 	db := newTestDB(t)
-	e := NewEngine(db)
+	e := NewEngine(db, nil)
 	e.tr.cfg.ConsecutiveFailures = 3
 
 	// 连续失败未达阈值：不产生报警
@@ -79,7 +79,7 @@ func TestAlarmEngineOfflineAfterThreshold(t *testing.T) {
 
 func TestAlarmEngineTransientFailureNoAlarm(t *testing.T) {
 	db := newTestDB(t)
-	e := NewEngine(db)
+	e := NewEngine(db, nil)
 	e.tr.cfg.ConsecutiveFailures = 3
 
 	// 2 次失败后恢复：去抖生效，全程不产生报警
@@ -94,7 +94,7 @@ func TestAlarmEngineTransientFailureNoAlarm(t *testing.T) {
 
 func TestAlarmEngineRecoverClearsAndWritesHistory(t *testing.T) {
 	db := newTestDB(t)
-	e := NewEngine(db)
+	e := NewEngine(db, nil)
 	e.tr.cfg.ConsecutiveFailures = 3
 
 	e.ReportDevicePoll("dev-1", "dev1", false)
@@ -119,7 +119,7 @@ func TestAlarmEngineRecoverClearsAndWritesHistory(t *testing.T) {
 
 func TestAlarmEngineNoDuplicateWhileOffline(t *testing.T) {
 	db := newTestDB(t)
-	e := NewEngine(db)
+	e := NewEngine(db, nil)
 	e.tr.cfg.ConsecutiveFailures = 3
 
 	for i := 0; i < 3; i++ {
@@ -146,7 +146,7 @@ func TestAlarmEngineNoDuplicateWhileOffline(t *testing.T) {
 
 func TestAlarmEngineIsolatesDevices(t *testing.T) {
 	db := newTestDB(t)
-	e := NewEngine(db)
+	e := NewEngine(db, nil)
 	e.tr.cfg.ConsecutiveFailures = 3
 
 	e.ReportDevicePoll("dev-1", "dev1", false)

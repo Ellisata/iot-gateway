@@ -92,4 +92,14 @@ var (
 	OpenApiSecretNotExistsEnum = NewBusinessEnum("70002", "开放接口密钥不存在", "err.open_api_secret_not_found")
 	OpenApiSecretKeyEmptyEnum  = NewBusinessEnum("70003", "开放接口密钥为空", "err.open_api_secret_key_empty")
 	OpenApiSecretInvalidEnum   = NewBusinessEnum("70004", "开放接口密钥无效", "err.open_api_secret_invalid")
+
+	// 报警 Webhook 通知相关错误码
+	AlarmWebhookExistsEnum        = NewBusinessEnum("80001", "报警Webhook名称已存在", "err.alarm_webhook_exists")
+	AlarmWebhookNotExistsEnum     = NewBusinessEnum("80002", "报警Webhook不存在", "err.alarm_webhook_not_found")
+	AlarmWebhookConfigInvalidEnum = NewBusinessEnum("80003", "报警Webhook配置非法", "err.alarm_webhook_config_invalid")
+	AlarmWebhookTestSendFailEnum  = NewBusinessEnum("80004", "报警Webhook测试发送失败", "err.alarm_webhook_test_send_fail")
+
+	// 报警 Webhook 表单相关错误码
+	AlarmWebhookFormExistsEnum    = NewBusinessEnum("80011", "报警Webhook表单名称已存在", "err.alarm_webhook_form_exists")
+	AlarmWebhookFormNotExistsEnum = NewBusinessEnum("80012", "报警Webhook表单不存在", "err.alarm_webhook_form_not_found")
 )

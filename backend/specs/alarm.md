@@ -1,8 +1,12 @@
 # 断联报警设计（alarm）
 
 > 本规范定义**设备**与**推送通道**断联（离线/恢复）报警的检测、判定与落库方案。
-> 范围：**仅落库**（SQLite `alarm` 表 + 查询 API），不做实时通知通道；
+> 范围：检测、判定与**落库**（SQLite `alarm` 表 + 查询 API）；
 > 信号源**复用已有信号**（设备=采集轮询成败；推送通道=连接状态巡检），不引入独立心跳 Ping。
+>
+> 报警的**外发通知**（钉钉 / 企业微信 / 飞书 / 自定义 Webhook）见
+> [报警 Webhook 通知](alarm-webhook.md)。本包只负责在状态边沿投递一个事件，
+> 投递与重试由 `notify` 包负责，两者通过 `alarm.NotifySink` 解耦。
 
 ---
 
@@ -81,14 +85,31 @@ collector/task.go         设备采集成败上报 ReportDevicePoll
 alarm/tracker.go          Tracker：共享状态机 + 落库（按 targetType 参数化）
 alarm/engine.go           Engine：设备信号薄封装（实现 DeviceStateSink）
 alarm/channel.go          ChannelMonitor：通道连接状态巡检
+alarm/event.go            Event / NotifySink：报警外发通知出口（sink 为 nil 时只落库）
 service/alarmService.go   查询/清理（活跃报警、历史分页、目标停用清理）
 controller/alarmController.go / router/alarmRouter.go    /alarm/pageAlarm、/alarm/listActive
 ```
 
+**通知出口的触发点**（`alarm/event.go` 的 `notifyLocked`）：只在**状态边沿**、
+且**落库成功之后**投递，以维持「通知 ⇔ 报警行已写入」这一不变式：
+
+| 时机 | 是否通知 | 原因 |
+|------|----------|------|
+| `raiseOfflineLocked` 新建 active 离线行 | ✅ | 状态边沿 |
+| `recoverLocked` 写 recover 行 | ✅ | 状态边沿 |
+| `touchLastOccurLocked` 刷新时间戳 | ❌ | 非边沿，按节流周期发会刷屏 |
+| `ClearActive` 清除（目标停用/删除） | ❌ | 行政取消，不是「恢复通信」 |
+| `db.Create` 失败 | ❌ | 没写进库，无可通知的事实 |
+
 Wire 接线：
-- `alarm.NewEngine` 绑定为 `collector.DeviceStateSink`；
-- `alarm.NewChannelMonitor(db, push.Engine)` 绑定 `alarm.StatusSource`（`push.Engine.GetStatus` 结构满足），
-  实例挂到 `AppDependencies.AlarmMonitor`，由 `main.go` 随推送引擎启停。
+- `alarm.NewEngine(db, sink)` 绑定为 `collector.DeviceStateSink`；
+- `alarm.NewChannelMonitor(db, push.Engine, sink)` 绑定 `alarm.StatusSource`
+  （`push.Engine.GetStatus` 结构满足），实例挂到 `AppDependencies.AlarmMonitor`；
+- `notify.NewDispatcher(db)` 经 `wire.Bind` 绑定为 `alarm.NotifySink`，
+  同时挂到 `AppDependencies.AlarmNotifier`。**`alarm` 不 import `notify`**，
+  接口由消费方（`alarm`）定义（与 `collector.DeviceStateSink` 同一手法）。
+- 启停顺序：通知器在推送引擎之后、报警巡检与采集之前启动；`defer` 最先注册故**最后停止**，
+  让停机前产生的报警仍有机会在途排空。
 
 ## 5. 查询 API
 

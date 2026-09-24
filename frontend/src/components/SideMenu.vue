@@ -81,6 +81,10 @@
           <el-icon><Connection /></el-icon>
           <template #title>{{ t('menu.alarmChannel') }}</template>
         </el-menu-item>
+        <el-menu-item v-if="userStore.isAdmin" index="/alarm/webhook">
+          <el-icon><BellFilled /></el-icon>
+          <template #title>{{ t('menu.alarmWebhook') }}</template>
+        </el-menu-item>
       </el-sub-menu>
 
       <!-- 日志管理 -->

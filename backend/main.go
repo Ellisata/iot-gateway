@@ -83,23 +83,31 @@ func runGateway(stop <-chan struct{}) error {
 		logger.Error("push engine start failed: %v", err)
 	}
 
-	// 6. 启动推送通道断联报警巡检器（依赖通道已加载）
+	// 6. 启动报警 Webhook 通知器（钉钉/企微/飞书等）。
+	// 必须早于报警巡检与采集：否则启动窗口内产生的报警会因通知器未就绪而被丢弃。
+	if err := deps.AlarmNotifier.Start(); err != nil {
+		logger.Error("alarm notifier start failed: %v", err)
+	}
+
+	// 7. 启动推送通道断联报警巡检器（依赖通道已加载）
 	deps.AlarmMonitor.Start()
 
-	// 7. 启动采集引擎
+	// 8. 启动采集引擎
 	go func() {
 		if err := deps.CollectorEngine.Start(); err != nil {
 			logger.Error("collection engine start failed: %v", err)
 		}
 	}()
 
-	// 停止顺序：先停报警巡检（避免扫描关闭中的通道），再停推送、最后停采集。
-	// defer 后进先出，先注册 Collector，使 AlarmMonitor/PushEngine 的 Stop 先执行。
+	// 停止顺序：先停报警巡检（避免扫描关闭中的通道），再停推送、采集，
+	// 最后停通知器。defer 后进先出，故通知器最先注册 → 最后停止，
+	// 让停机前产生的报警仍有机会在途排空（有界 5s）。
+	defer deps.AlarmNotifier.Stop()
 	defer deps.CollectorEngine.Stop()
 	defer deps.PushEngine.Stop()
 	defer deps.AlarmMonitor.Stop()
 
-	// 8. 启动 HTTP 服务器。使用 http.Server 而非 gin 的 Run，以便服务模式下优雅停机。
+	// 9. 启动 HTTP 服务器。使用 http.Server 而非 gin 的 Run，以便服务模式下优雅停机。
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	srv := &http.Server{
 		Addr:    addr,

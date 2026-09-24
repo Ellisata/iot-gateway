@@ -17,6 +17,7 @@ import (
 	"iot-gateway/configFile"
 	"iot-gateway/controller"
 	"iot-gateway/database"
+	"iot-gateway/notify"
 	"iot-gateway/push"
 	"iot-gateway/router"
 	"iot-gateway/service"
@@ -29,6 +30,7 @@ type AppDependencies struct {
 	CollectorEngine *collector.Engine
 	PushEngine      *push.Engine
 	AlarmMonitor    *alarm.ChannelMonitor
+	AlarmNotifier   *notify.Dispatcher
 }
 
 // InitializeApp 构建完整的应用依赖图
@@ -52,6 +54,9 @@ func InitializeApp() (*AppDependencies, func()) {
 		// 推送通道断联报警巡检器（复用 push.Engine.GetStatus 作为连接状态源）
 		alarm.NewChannelMonitor,
 		wire.Bind(new(alarm.StatusSource), new(*push.Engine)),
+		// 报警通知器（实现 alarm.NotifySink，把报警推送到钉钉/企微/飞书等 Webhook）
+		notify.NewDispatcher,
+		wire.Bind(new(alarm.NotifySink), new(*notify.Dispatcher)),
 
 		// 领域路由集中注册，新增模块仅改 ProvideRouteOptions
 		ProvideRouteOptions,
@@ -80,6 +85,8 @@ func ProvideRouteOptions(
 	pcf *controller.PushChannelFormController,
 	pus *controller.PushController,
 	ac2 *controller.AlarmController,
+	awc *controller.AlarmWebhookController,
+	awfc *controller.AlarmWebhookFormController,
 	lc *controller.LogFileController,
 	oasc *controller.OpenApiSecretController,
 	oass *service.OpenApiSecretService,
@@ -95,6 +102,8 @@ func ProvideRouteOptions(
 		router.WithPushChannelFormRoutes(pcf),
 		router.WithPushRoutes(pus),
 		router.WithAlarmRoutes(ac2),
+		router.WithAlarmWebhookRoutes(awc),
+		router.WithAlarmWebhookFormRoutes(awfc),
 		router.WithLogFileRoutes(lc),
 		router.WithOpenApiSecretRoutes(oasc),
 		router.WithOpenApiRoutes(oass, oac),

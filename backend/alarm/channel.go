@@ -49,9 +49,10 @@ type ChannelMonitor struct {
 }
 
 // NewChannelMonitor 创建推送通道断联报警巡检器（未启动）。
-func NewChannelMonitor(db *gorm.DB, src StatusSource) *ChannelMonitor {
+// sink 为报警通知出口，传 nil 表示只落库不通知。
+func NewChannelMonitor(db *gorm.DB, src StatusSource, sink NotifySink) *ChannelMonitor {
 	return &ChannelMonitor{
-		tr:   NewTracker(db, TypeChannel, "推送通道"),
+		tr:   NewTracker(db, TypeChannel, "推送通道", sink),
 		src:  src,
 		wait: channelScanInterval,
 		was:  make(map[string]bool),

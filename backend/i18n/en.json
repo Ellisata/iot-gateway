@@ -35,5 +35,11 @@
     "err.open_api_secret_not_found": "Open API secret not found",
     "err.open_api_secret_key_empty": "Open API secret key is empty",
     "err.open_api_secret_invalid": "Invalid Open API secret key",
+    "err.alarm_webhook_exists": "Alarm webhook name already exists",
+    "err.alarm_webhook_not_found": "Alarm webhook not found",
+    "err.alarm_webhook_config_invalid": "Invalid alarm webhook configuration",
+    "err.alarm_webhook_test_send_fail": "Alarm webhook test send failed",
+    "err.alarm_webhook_form_exists": "Alarm webhook form name already exists",
+    "err.alarm_webhook_form_not_found": "Alarm webhook form not found",
     "success": "Operation successful"
 }

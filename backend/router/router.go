@@ -103,6 +103,20 @@ func WithPushRoutes(pc *controller.PushController) RouteOption {
 	}
 }
 
+// WithAlarmWebhookRoutes 报警 Webhook 通知模块路由选项
+func WithAlarmWebhookRoutes(awc *controller.AlarmWebhookController) RouteOption {
+	return func(r *gin.Engine) {
+		AlarmWebhookRoutes(r, awc)
+	}
+}
+
+// WithAlarmWebhookFormRoutes 报警 Webhook 表单模块路由选项
+func WithAlarmWebhookFormRoutes(awfc *controller.AlarmWebhookFormController) RouteOption {
+	return func(r *gin.Engine) {
+		AlarmWebhookFormRoutes(r, awfc)
+	}
+}
+
 // WithAlarmRoutes 设备断联报警模块路由选项
 func WithAlarmRoutes(ac *controller.AlarmController) RouteOption {
 	return func(r *gin.Engine) {

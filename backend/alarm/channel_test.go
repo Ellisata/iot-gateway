@@ -35,7 +35,12 @@ func channelStatus(id, name string, running, connected bool) push.ChannelStatusV
 }
 
 func newChannelMonitor(db *gorm.DB, src *fakeStatusSource) *ChannelMonitor {
-	m := NewChannelMonitor(db, src)
+	return newChannelMonitorWithSink(db, src, nil)
+}
+
+// newChannelMonitorWithSink 注入通知出口的巡检器，供通知 hook 测试使用。
+func newChannelMonitorWithSink(db *gorm.DB, src *fakeStatusSource, sink NotifySink) *ChannelMonitor {
+	m := NewChannelMonitor(db, src, sink)
 	m.tr.cfg.ConsecutiveFailures = channelFailThreshold
 	return m
 }
