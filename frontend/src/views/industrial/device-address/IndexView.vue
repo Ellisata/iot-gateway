@@ -68,7 +68,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="name" :label="t('common.name')" min-width="140" />
+        <el-table-column prop="name" :label="t('deviceAddress.addressName')" min-width="140" />
         <el-table-column prop="label" :label="t('deviceAddress.tag')" min-width="140" show-overflow-tooltip />
         <el-table-column prop="dataType" :label="t('deviceAddress.dataType')" width="130" align="center" />
         <el-table-column prop="commonDataType" :label="t('deviceAddress.commonDataType')" width="140" align="center" />
@@ -141,13 +141,45 @@
         label-position="right"
         status-icon
       >
-        <el-form-item :label="t('common.name')" prop="name">
-          <el-input
-            v-model="formData.name"
-            :placeholder="t('deviceAddress.namePlaceholder')"
-            maxlength="100"
-            show-word-limit
-          />
+        <el-form-item :label="t('deviceAddress.addressName')" prop="name">
+          <div class="flex items-center gap-2 w-full">
+            <el-input
+              v-model="formData.name"
+              :placeholder="addressPlaceholder"
+              maxlength="100"
+              show-word-limit
+              class="flex-1 min-w-0"
+            />
+            <!-- 用气泡而不是抽屉：表单本身已经开在对话框里，气泡能让说明和输入框同时可见、
+                 边看边改，抽屉会盖住半个表单 -->
+            <el-popover v-if="addressSpec" placement="bottom" :width="380" trigger="click">
+              <template #reference>
+                <el-button :icon="QuestionFilled" circle text class="shrink-0" />
+              </template>
+              <div class="text-xs leading-5">
+                <div class="font-semibold text-gray-700 mb-2">{{ t('deviceAddress.addressHelpTitle') }}</div>
+
+                <div class="text-gray-400 mb-1">{{ t('deviceAddress.addressHelpSyntax') }}</div>
+                <div class="font-mono text-gray-800 bg-gray-50 rounded px-2 py-1 mb-3 break-all">
+                  {{ t(addressSpec.templateKey) }}
+                </div>
+
+                <div class="text-gray-400 mb-1">{{ t('deviceAddress.addressHelpExamples') }}</div>
+                <div class="font-mono text-gray-800 mb-3 space-y-0.5">
+                  <div v-for="eg in addressSpec.examples" :key="eg">{{ eg }}</div>
+                </div>
+
+                <div class="text-gray-400 mb-1">{{ t('deviceAddress.addressHelpPitfalls') }}</div>
+                <ul class="list-disc pl-4 text-gray-600 space-y-1.5">
+                  <li v-for="key in addressSpec.pitfallKeys" :key="key">{{ t(key) }}</li>
+                </ul>
+              </div>
+            </el-popover>
+          </div>
+          <!-- 常驻提示：占位符一输入就消失，而地址格式正是最需要一直看见的信息 -->
+          <div v-if="addressExample" class="w-full text-xs text-gray-400 leading-5 mt-1">
+            {{ t('deviceAddress.addressHint', { protocol: protocolName, example: addressExample }) }}
+          </div>
         </el-form-item>
 
         <el-form-item :label="t('deviceAddress.tag')" prop="label">
@@ -239,7 +271,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, CopyDocument, Delete, Download, EditPen, Upload } from '@element-plus/icons-vue'
+import { ArrowLeft, CopyDocument, Delete, Download, EditPen, QuestionFilled, Upload } from '@element-plus/icons-vue'
 import {
   getDeviceAddressList,
   addDeviceAddress,
@@ -251,6 +283,7 @@ import {
 import { getDataTypes } from '@/api/modules/protocol'
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
 import { useExcelImport } from '@/composables/useExcelImport'
+import { getAddressExample, getAddressSpec } from '@/utils/addressSyntax'
 import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
@@ -277,9 +310,11 @@ function normalizeDataTypes(data) {
 async function fetchDataTypes() {
   dataTypeLoading.value = true
   try {
-    // 优先取设备对象传入的协议名，缺省按 Omron.Net.CIP 处理
-    const protocolName = route.query.protocolName || 'Omron.Net.CIP'
-    const res = await getDataTypes(protocolName)
+    // 取设备对象传入的协议名；取不到就别猜（原来兜底到 Omron.Net.CIP，但那个名字
+    // 不是任何驱动注册的协议名，解析不到反而把问题藏起来），让下拉保持为空
+    // （局部变量改叫 proto：外层 protocolName 是 computed，同名遮蔽容易看混）
+    const proto = route.query.protocolName
+    const res = await getDataTypes(proto)
     dataTypeOptions.value = normalizeDataTypes(res)
   } catch {
     dataTypeOptions.value = []
@@ -323,6 +358,19 @@ const route = useRoute()
 const router = useRouter()
 const deviceObjectId = route.params.deviceObjectId
 const deviceObjectName = route.query.deviceObjectName || ''
+
+// ---------- 协议地址示例 ----------
+// 地址写法随协议完全不同（"D100" 在三菱指 D 寄存器、在欧姆龙 FINS 指 DM 区），
+// 实例化在 utils/addressSyntax.js，这里只负责取。协议未登记时回落到通用文案，
+// 宁可不举例也不给一个错的例子。
+const protocolName = computed(() => route.query.protocolName || '')
+const addressSpec = computed(() => getAddressSpec(protocolName.value))
+const addressExample = computed(() => getAddressExample(protocolName.value))
+const addressPlaceholder = computed(() =>
+  addressExample.value
+    ? t('deviceAddress.namePlaceholderExample', { example: addressExample.value })
+    : t('deviceAddress.namePlaceholder'),
+)
 
 function goBack() {
   router.push({ name: 'GatewayDeviceObject' })
