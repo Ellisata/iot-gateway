@@ -1,0 +1,34 @@
+{
+  "case": "fins-tcp",
+  "protocol": "Omron.FINS.TCP",
+  "results": [
+    {
+      "id": "d1",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "d2",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "d3",
+      "value": "0",
+      "dataType": "int32",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "d4",
+      "value": "0",
+      "dataType": "bcd",
+      "kind": "uint",
+      "quality": 192
+    }
+  ]
+}

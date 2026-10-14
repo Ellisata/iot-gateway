@@ -1,0 +1,8 @@
+node_modules
+dist
+*.local
+.DS_Store
+*.log
+# Claude Code 设置
+.claude/settings.json
+.claude/settings.local.json

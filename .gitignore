@@ -1,0 +1,40 @@
+# 编译输出
+iot-gateway
+iot-gateway.exe
+iot-gateway-linux-arm64
+iot-gateway-linux-arm
+*.exe
+release/
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+*.iml
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 临时文件
+tmp/
+temp/
+
+data/
+*.db
+
+log/
+*.log
+# Claude Code 设置
+.claude/settings.json
+.claude/settings.local.json
+
+docs/articles
+# 外部协议驱动插件构建产物（由 build.bat / package.bat / build.sh / release.sh 生成）
+# plugins/ 同时是本地直跑 exe 与发行包解压后的运行时目录，同样不入库
+plugins/
+plugins-windows/
+plugins-linux/
+plugins-linux-arm64/
+plugins-linux-arm/

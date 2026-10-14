@@ -1,0 +1,27 @@
+{
+  "case": "omron-cip",
+  "protocol": "Omron.CIP",
+  "results": [
+    {
+      "id": "t1",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "t2",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "t3",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    }
+  ]
+}

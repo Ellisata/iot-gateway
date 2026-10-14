@@ -1,0 +1,62 @@
+{
+  "case": "omron-cip-batch",
+  "protocol": "Omron.CIP",
+  "results": [
+    {
+      "id": "t0",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "t1",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "t2",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "t3",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "t4",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "t5",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "t6",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "t7",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    }
+  ]
+}

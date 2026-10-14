@@ -1,0 +1,136 @@
+{
+  "_comment": [
+    "协议行为等价的**共享输入**。生成侧（内置驱动）与消费侧（插件驱动）读的是同一份",
+    "点位清单，否则两边各写一份 fixture 会悄悄漂移，比对就失去意义。",
+    "",
+    "字段：",
+    "  protocol : iot_protocol.name，也是 driver.Create 的键",
+    "  scope    : 该协议的类型 scope",
+    "  fake     : testutil/fake 里的假 PLC 构造器（见 pluginhost/parity_test.go 的 switch）",
+    "  connect  : 协议 JSON 配置；port=0 表示填入假服务器的实际端口",
+    "  addresses: 传给 Read 的点位，顺序即断言顺序（驱动契约要求索引一一对应）",
+    "",
+    "case 名（本文件的键）可以与协议名不同：同一个协议可能需要多组配置",
+    "（如 omron-cip-batch 验证 maxTagsPerRequest 分批）各自的黄金基线。"
+  ],
+
+  "modbus-tcp": {
+    "protocol": "ModBus.TCP",
+    "scope": "modbus",
+    "fake": "modbus-tcp",
+    "connect": { "host": "127.0.0.1", "port": 0 },
+    "addresses": [
+      { "id": "a1", "name": "40001", "dataType": "int16" },
+      { "id": "a2", "name": "40002", "dataType": "int16" },
+      { "id": "a3", "name": "40003", "dataType": "int32" },
+      { "id": "a4", "name": "40008", "dataType": "float32" },
+      { "id": "a5", "name": "40020", "dataType": "bcd" },
+      { "id": "c1", "name": "00001", "dataType": "bool" }
+    ]
+  },
+
+  "mc-tcp": {
+    "protocol": "Mitsubishi.MC.TCP",
+    "scope": "mitsubishi",
+    "fake": "mc3e",
+    "connect": { "host": "127.0.0.1", "port": 0 },
+    "addresses": [
+      { "id": "d1", "name": "D0", "dataType": "int16" },
+      { "id": "d2", "name": "D1", "dataType": "int16" },
+      { "id": "d3", "name": "D2", "dataType": "float32" },
+      { "id": "m1", "name": "M0", "dataType": "bool" },
+      { "id": "d4", "name": "D100", "dataType": "bcd" }
+    ]
+  },
+
+  "s7": {
+    "protocol": "Siemens.S7",
+    "scope": "s7",
+    "fake": "s7",
+    "connect": { "host": "127.0.0.1", "port": 0, "rack": "0", "slot": "1" },
+    "addresses": [
+      { "id": "b1", "name": "DB1.DBB0", "dataType": "byte" },
+      { "id": "b2", "name": "DB1.DBB1", "dataType": "byte" },
+      { "id": "w1", "name": "DB1.DBW4", "dataType": "int" },
+      { "id": "w2", "name": "DB1.DBW6", "dataType": "word" },
+      { "id": "r1", "name": "DB1.DBD10", "dataType": "real" },
+      { "id": "x1", "name": "M0.1", "dataType": "bool" }
+    ]
+  },
+
+  "omron-cip": {
+    "protocol": "Omron.CIP",
+    "scope": "cip",
+    "fake": "omron-cip",
+    "connect": { "host": "127.0.0.1", "port": 0 },
+    "addresses": [
+      { "id": "t1", "name": "Tag_0", "dataType": "int16" },
+      { "id": "t2", "name": "Tag_1", "dataType": "int16" },
+      { "id": "t3", "name": "Tag_2", "dataType": "int16" }
+    ]
+  },
+
+  "omron-cip-batch": {
+    "protocol": "Omron.CIP",
+    "scope": "cip",
+    "fake": "omron-cip",
+    "connect": { "host": "127.0.0.1", "port": 0, "maxTagsPerRequest": 4 },
+    "addresses": [
+      { "id": "t0", "name": "Tag_0", "dataType": "int16" },
+      { "id": "t1", "name": "Tag_1", "dataType": "int16" },
+      { "id": "t2", "name": "Tag_2", "dataType": "int16" },
+      { "id": "t3", "name": "Tag_3", "dataType": "int16" },
+      { "id": "t4", "name": "Tag_4", "dataType": "int16" },
+      { "id": "t5", "name": "Tag_5", "dataType": "int16" },
+      { "id": "t6", "name": "Tag_6", "dataType": "int16" },
+      { "id": "t7", "name": "Tag_7", "dataType": "int16" }
+    ]
+  },
+
+  "rockwell-cip": {
+    "protocol": "Rockwell.CIP",
+    "scope": "rockwell",
+    "fake": "rockwell-cip",
+    "connect": { "host": "127.0.0.1", "port": 0 },
+    "addresses": [
+      { "id": "a0", "name": "Arr[0]", "dataType": "int16" },
+      { "id": "a1", "name": "Arr[1]", "dataType": "int16" },
+      { "id": "a2", "name": "Arr[2]", "dataType": "int16" },
+      { "id": "a3", "name": "Arr[3]", "dataType": "int16" },
+      { "id": "a4", "name": "Arr[4]", "dataType": "int16" },
+      { "id": "a5", "name": "Arr[5]", "dataType": "int16" },
+      { "id": "a6", "name": "Arr[6]", "dataType": "int16" },
+      { "id": "a7", "name": "Arr[7]", "dataType": "int16" },
+      { "id": "t9", "name": "Tag_9", "dataType": "int16" },
+      { "id": "t10", "name": "Tag_10", "dataType": "int16" }
+    ]
+  },
+
+  "fins-tcp": {
+    "protocol": "Omron.FINS.TCP",
+    "scope": "fins",
+    "fake": "fins-tcp",
+    "connect": { "host": "127.0.0.1", "port": 0, "transport": "TCP" },
+    "addresses": [
+      { "id": "d1", "name": "D0", "dataType": "int16" },
+      { "id": "d2", "name": "D1", "dataType": "int16" },
+      { "id": "d3", "name": "D2", "dataType": "int32" },
+      { "id": "d4", "name": "D100", "dataType": "bcd" }
+    ]
+  },
+
+  "opcua": {
+    "protocol": "OPC.UA",
+    "scope": "opcua",
+    "fake": "opcua",
+    "connect": { "host": "127.0.0.1", "port": 0 },
+    "addresses": [
+      { "id": "a0", "name": "ns=1;i=1001", "dataType": "int32" },
+      { "id": "a1", "name": "ns=1;i=1002", "dataType": "int32" },
+      { "id": "a2", "name": "ns=1;i=1003", "dataType": "int32" },
+      { "id": "a3", "name": "ns=1;i=1004", "dataType": "int32" },
+      { "id": "a4", "name": "ns=1;i=1005", "dataType": "int32" },
+      { "id": "missing", "name": "ns=1;i=777", "dataType": "int32" }
+    ]
+  }
+}

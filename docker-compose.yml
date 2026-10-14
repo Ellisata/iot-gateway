@@ -1,0 +1,37 @@
+# iot-gateway 构建部署(多阶段全流程构建: 前端构建 -> Go 编译 -> 运行镜像)
+#
+# 无需本地预构建,直接:
+#   docker compose up -d --build    # 构建镜像并后台启动
+#   docker compose logs -f          # 跟踪日志
+#   docker compose ps               # 查看状态(含健康检查)
+#   docker compose down             # 停止并移除容器
+services:
+  iot-gateway:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: iot-gateway:1.0
+    container_name: iot-gateway
+    restart: unless-stopped
+    ports:
+      - "9082:9082"
+      - "9083:9083"
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/app/data   # SQLite 数据库(data/iot-gateway.db)
+      - ./log:/app/log     # 运行日志
+      # 插件目录**刻意不挂载**:镜像里已经构建好了全部协议插件(见 backend/Dockerfile
+      # 的 driversrc/*/ 循环),而 `./plugins:/app/plugins` 这样的绑定挂载会把它
+      # **整个遮蔽**——宿主目录若为空,网关就一个协议都没有(设备全被静默跳过)。
+      #
+      # 需要在运行期换插件(灰度/热升级)时,再把下面这行取消注释,并**务必先把
+      # 发行包的 plugins/ 内容拷进宿主 ./plugins**;以 :ro 挂载是刻意加固:
+      # 插件无法改写自身二进制,也印证"网关不自动创建该目录"的约定。
+      # - ./plugins:/app/plugins:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9082/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

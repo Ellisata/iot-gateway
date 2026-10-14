@@ -1,0 +1,20 @@
+{
+  "scope": "s7",
+  "protocols": [
+    "Siemens.S7"
+  ],
+  "common": [
+    "Boolean",
+    "Date",
+    "String",
+    "Byte",
+    "Char",
+    "Short",
+    "Word",
+    "DWord",
+    "Long",
+    "Float",
+    "Double"
+  ],
+  "extended": null
+}

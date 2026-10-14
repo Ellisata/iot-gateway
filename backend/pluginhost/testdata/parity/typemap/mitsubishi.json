@@ -1,0 +1,22 @@
+{
+  "scope": "mitsubishi",
+  "protocols": [
+    "Mitsubishi.MC.Serial",
+    "Mitsubishi.MC.TCP"
+  ],
+  "common": [
+    "Boolean",
+    "String",
+    "Byte",
+    "Char",
+    "Short",
+    "Word",
+    "DWord",
+    "Long",
+    "Float",
+    "Double",
+    "BCD",
+    "LBCD"
+  ],
+  "extended": null
+}

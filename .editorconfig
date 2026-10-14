@@ -1,0 +1,16 @@
+# https://editorconfig.org
+#
+# 分层约定：.gitattributes 负责「checkout/clone 出来的行尾」，这里负责
+# 「编辑器保存时写回什么行尾」。两者都需要，缺一个就会出现
+# 「clone 下来是好的，改一行就坏了」。
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+
+# Windows 批处理必须是 CRLF：cmd.exe 解析不了 LF-only 的脚本，会把每一行
+# 切碎当命令执行（症状就是一堆乱码前缀的「不是内部或外部命令」报错）。
+# 脚本里带 GBK 中文注释时必现，纯 ASCII 的简单脚本有时侥幸能跑，别赌。
+[*.{bat,cmd}]
+end_of_line = crlf

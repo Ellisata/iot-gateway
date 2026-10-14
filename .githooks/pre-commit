@@ -1,0 +1,28 @@
+#!/bin/sh
+# 兜底：保证工作区里的 .bat / .cmd 永远是 CRLF。
+#
+# 为什么需要这一层：
+#   cmd.exe 解析不了 LF-only 的批处理，会把每一行切碎当成命令执行，报一串
+#   「'?-' 不是内部或外部命令」。仓库的 .gitattributes 已经声明了
+#   *.bat eol=crlf，所以 clone / checkout 出来的永远是 CRLF —— 唯一能把它们
+#   改回 LF 的就是本地编辑器保存（VS Code 的 files.eol 只对新文件生效，
+#   对已存在的文件不做转换）。这个钩子拦的就是这种情况。
+#
+# 启用（每份 clone 跑一次）：
+#     git config core.hooksPath .githooks
+#
+# 钩子只改行尾，不改内容：git 入库时本就把 CRLF 规范成 LF，所以这个改动
+# 不产生任何内容差异（git diff 为空）。末尾的 update-index --refresh 只是
+# 刷新索引里的 stat 缓存，否则 git status 会一直显示该文件 "modified"。
+
+for f in $(git ls-files -- '*.bat' '*.cmd'); do
+    [ -f "$f" ] || continue
+    case "$(git ls-files --eol -- "$f" | awk '{print $2}')" in
+        w/crlf | w/none) continue ;;
+    esac
+    perl -pi -e 's/\r?\n/\r\n/' "$f"
+    git update-index --refresh -- "$f" >/dev/null 2>&1
+    echo "[pre-commit] 行尾修正为 CRLF: $f"
+done
+
+exit 0

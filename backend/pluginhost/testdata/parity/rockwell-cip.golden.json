@@ -1,0 +1,76 @@
+{
+  "case": "rockwell-cip",
+  "protocol": "Rockwell.CIP",
+  "results": [
+    {
+      "id": "a0",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "a1",
+      "value": "1",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "a2",
+      "value": "2",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "a3",
+      "value": "3",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "a4",
+      "value": "4",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "a5",
+      "value": "5",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "a6",
+      "value": "6",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "a7",
+      "value": "7",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "t9",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "t10",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    }
+  ]
+}

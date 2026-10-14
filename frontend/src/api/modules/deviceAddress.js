@@ -1,0 +1,156 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
+import request from '@/api'
+
+/**
+ * 获取设备地址列表（分页）
+ * @param {Object} params - 查询参数
+ * @param {number} params.deviceObjectId - 设备对象 ID
+ * @param {string} [params.name] - 按名称搜索（可选）
+ * @param {number} params.page - 页码（从 1 开始）
+ * @param {number} params.size - 每页条数
+ * @returns {Promise<{records: Array, total: number}>}
+ */
+export function getDeviceAddressList(params = {}) {
+  return request({
+    url: '/deviceAddress/pageDeviceAddress',
+    method: 'get',
+    params: {
+      deviceId: params.deviceObjectId,
+      page: params.page,
+      size: params.size,
+      name: params.name || undefined,
+    },
+  })
+}
+
+/**
+ * 新增设备地址
+ * @param {Object} data
+ * @param {int} data.deviceObjectId - 所属设备对象 ID
+ * @param {string} data.name - 名称
+ * @param {string} data.label - 标签（地址名称的中文说明，如温度、电流）
+ * @param {string} data.dataType - 数据类型
+ * @param {string} data.rwPermission - 读写权限（R/W/RW）
+ * @param {number} data.scanFrequency - 扫描频率（ms）
+ * @param {string} [data.description] - 描述（可选）
+ * @param {number} [data.status] - 状态 0/1
+ * @returns {Promise}
+ */
+export function addDeviceAddress(data) {
+  return request({
+    url: '/deviceAddress/createDeviceAddress',
+    method: 'post',
+    data,
+  })
+}
+
+/**
+ * 修改设备地址
+ * @param {Object} data
+ * @param {string|number} data.id - ID
+ * @param {string} data.name - 名称
+ * @param {string} data.label - 标签（地址名称的中文说明，如温度、电流）
+ * @param {string} data.dataType - 数据类型
+ * @param {string} data.rwPermission - 读写权限
+ * @param {number} data.scanFrequency - 扫描频率
+ * @param {string} [data.description] - 描述
+ * @param {number} [data.status] - 状态
+ * @returns {Promise}
+ */
+export function updateDeviceAddress(data) {
+  return request({
+    url: '/deviceAddress/updateDeviceAddress',
+    method: 'post',
+    data,
+  })
+}
+
+/**
+ * 根据 ID 获取设备地址详情
+ * @param {string|number} id - 设备地址 ID
+ * @returns {Promise<Object>}
+ */
+export function getDeviceAddressById(id) {
+  return request({
+    url: `/deviceAddress/getDeviceAddressById/${id}`,
+    method: 'get',
+  })
+}
+
+/**
+ * 删除设备地址
+ * @param {string|number} id - 设备地址 ID
+ * @returns {Promise}
+ */
+export function deleteDeviceAddress(id) {
+  return request({
+    url: `/deviceAddress/deleteDeviceAddress/${id}`,
+    method: 'get',
+  })
+}
+
+/**
+ * 批量删除设备地址
+ *
+ * `deviceId` 是删除范围的前置约束，服务端只删这台设备名下的这些 id ——
+ * 务必带上，否则一个构造出来的请求能删掉别的设备的点位。
+ *
+ * 不因个别 id 不存在而失败：`deleted` 可能小于 `ids.length`（勾选后又被人删掉的
+ * 地址不在删除集里），这是正常结果，界面上提示"少删了几条"即可，不是错误。
+ *
+ * @param {{deviceId:string, ids:string[]}} data - ids 最多 200 条
+ * @returns {Promise<{requested:number, deleted:number}>}
+ */
+export function batchDeleteDeviceAddress(data) {
+  return request({
+    url: '/deviceAddress/batchDeleteDeviceAddress',
+    method: 'post',
+    data,
+  })
+}
+
+/**
+ * 监控设备地址标签数据（实时读取）
+ * @param {Object} params
+ * @param {number} params.objectId - 设备对象 ID
+ * @param {string} params.address - 设备地址
+ * @returns {Promise<Object>}
+ */
+export function monitorTagData(params = {}) {
+  return request({
+    url: '/deviceObject/monitorTagData',
+    method: 'post',
+    data: params,
+  })
+}
+
+/**
+ * 批量导入设备地址（Excel .xlsx）
+ * @param {File} file - 选择的 Excel 文件
+ * @param {string} deviceId - 所属设备对象 ID
+ * @returns {Promise<{total:number, success:number, failed:number, errors:Array<{row:number, name:string, reason:string}>}>}
+ */
+export function importDeviceAddresses(file, deviceId) {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('deviceId', deviceId)
+  return request({
+    url: '/deviceAddress/importDeviceAddress',
+    method: 'post',
+    data: formData,
+  })
+}
+
+/**
+ * 下载设备地址导入模板（.xlsx，六列：名称/标签/通用数据类型/读写权限/扫描频率/描述）
+ * @returns {Promise<Blob>}
+ */
+export function downloadDeviceAddressTemplate() {
+  return request({
+    url: '/deviceAddress/importDeviceAddressTemplate',
+    method: 'get',
+    responseType: 'blob',
+  })
+}

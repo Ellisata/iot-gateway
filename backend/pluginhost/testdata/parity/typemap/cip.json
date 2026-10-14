@@ -1,0 +1,21 @@
+{
+  "scope": "cip",
+  "protocols": [
+    "Omron.CIP"
+  ],
+  "common": [
+    "Boolean",
+    "String",
+    "Byte",
+    "Char",
+    "Short",
+    "Word",
+    "DWord",
+    "Long",
+    "Float",
+    "Double",
+    "BCD",
+    "LBCD"
+  ],
+  "extended": null
+}

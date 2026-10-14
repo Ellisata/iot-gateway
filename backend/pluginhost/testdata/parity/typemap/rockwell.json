@@ -1,0 +1,16 @@
+{
+  "scope": "rockwell",
+  "protocols": [
+    "Rockwell.CIP"
+  ],
+  "common": [
+    "Boolean",
+    "String",
+    "Char",
+    "Short",
+    "Long",
+    "Float",
+    "Double"
+  ],
+  "extended": null
+}

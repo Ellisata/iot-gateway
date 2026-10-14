@@ -1,0 +1,48 @@
+{
+  "case": "opcua",
+  "protocol": "OPC.UA",
+  "results": [
+    {
+      "id": "a0",
+      "value": "1",
+      "dataType": "int32",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "a1",
+      "value": "2",
+      "dataType": "int32",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "a2",
+      "value": "3",
+      "dataType": "int32",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "a3",
+      "value": "4",
+      "dataType": "int32",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "a4",
+      "value": "5",
+      "dataType": "int32",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "missing",
+      "value": "",
+      "dataType": "int32",
+      "kind": "int",
+      "quality": 1
+    }
+  ]
+}

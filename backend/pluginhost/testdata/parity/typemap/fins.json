@@ -1,0 +1,25 @@
+{
+  "scope": "fins",
+  "protocols": [
+    "Omron.FINS.HostLinkTCP",
+    "Omron.FINS.Serial",
+    "Omron.FINS.TCP",
+    "Omron.FINS.UDP"
+  ],
+  "common": [
+    "Boolean",
+    "Date",
+    "String",
+    "Byte",
+    "Char",
+    "Short",
+    "Word",
+    "DWord",
+    "Long",
+    "Float",
+    "Double",
+    "BCD",
+    "LBCD"
+  ],
+  "extended": null
+}

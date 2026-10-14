@@ -1,0 +1,20 @@
+{
+  "scope": "opcua",
+  "protocols": [
+    "OPC.UA"
+  ],
+  "common": [
+    "Boolean",
+    "Date",
+    "String",
+    "Byte",
+    "Char",
+    "Short",
+    "Word",
+    "DWord",
+    "Long",
+    "Float",
+    "Double"
+  ],
+  "extended": null
+}

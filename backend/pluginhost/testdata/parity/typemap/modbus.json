@@ -1,0 +1,26 @@
+{
+  "scope": "modbus",
+  "protocols": [
+    "ModBus.RTU",
+    "ModBus.TCP"
+  ],
+  "common": [
+    "Boolean",
+    "Date",
+    "String",
+    "Byte",
+    "Char",
+    "Short",
+    "Word",
+    "DWord",
+    "Long",
+    "Float",
+    "Double",
+    "BCD",
+    "LBCD"
+  ],
+  "extended": [
+    "Int",
+    "Real"
+  ]
+}

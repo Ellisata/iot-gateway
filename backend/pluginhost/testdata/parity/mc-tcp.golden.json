@@ -1,0 +1,41 @@
+{
+  "case": "mc-tcp",
+  "protocol": "Mitsubishi.MC.TCP",
+  "results": [
+    {
+      "id": "d1",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "d2",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "d3",
+      "value": "0",
+      "dataType": "float32",
+      "kind": "float",
+      "quality": 192
+    },
+    {
+      "id": "m1",
+      "value": "0",
+      "dataType": "bool",
+      "kind": "bool",
+      "quality": 192
+    },
+    {
+      "id": "d4",
+      "value": "0",
+      "dataType": "bcd",
+      "kind": "uint",
+      "quality": 192
+    }
+  ]
+}

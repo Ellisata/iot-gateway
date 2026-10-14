@@ -1,0 +1,48 @@
+{
+  "case": "s7",
+  "protocol": "Siemens.S7",
+  "results": [
+    {
+      "id": "b1",
+      "value": "0",
+      "dataType": "byte",
+      "kind": "uint",
+      "quality": 192
+    },
+    {
+      "id": "b2",
+      "value": "0",
+      "dataType": "byte",
+      "kind": "uint",
+      "quality": 192
+    },
+    {
+      "id": "w1",
+      "value": "0",
+      "dataType": "int",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "w2",
+      "value": "0",
+      "dataType": "word",
+      "kind": "uint",
+      "quality": 192
+    },
+    {
+      "id": "r1",
+      "value": "0",
+      "dataType": "real",
+      "kind": "float",
+      "quality": 192
+    },
+    {
+      "id": "x1",
+      "value": "0",
+      "dataType": "bool",
+      "kind": "bool",
+      "quality": 192
+    }
+  ]
+}

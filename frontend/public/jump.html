@@ -1,0 +1,175 @@
+<!doctype html>
+<!--
+  SPDX-License-Identifier: AGPL-3.0-only
+  Copyright (c) 2026 Edwin and iot-gateway contributors
+
+  免登录跳转中间页（由平台系统 iot-hand-data-analysis 生成地址并打开）。
+
+  为什么需要这一页：本网关的登录态存在**本域名**的 localStorage 里，而平台系统是
+  另一个 origin，跨域写不进来。所以平台把代登录换到的令牌拼在地址里交过来，由这一页
+  （跑在本域名下，写得进去）落地，再进 SPA —— 用户点一次即直达，不必二次登录。
+
+  地址形如：/admin/jump.html#token=<JWT>&url=/dashboard&user=admin
+
+  令牌放在片段（#）里而非查询串，是刻意的：片段不发往服务端，因而不会进
+  requestLogMiddleware 记下的访问日志，也不会随 Referer 外泄。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>正在进入管理端…</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: #f5f7fa;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      color: #1f2937;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 420px;
+      padding: 36px 32px;
+      background: #fff;
+      border-radius: 20px;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.04);
+    }
+
+    .spinner {
+      width: 34px;
+      height: 34px;
+      margin: 0 auto 20px;
+      border: 3px solid #dbeafe;
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+
+    .detail {
+      margin: 10px 0 0;
+      font-size: 13px;
+      line-height: 1.7;
+      color: #6b7280;
+      word-break: break-word;
+    }
+
+    .retry {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 9px 22px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    /* 出错时把转圈换成警示色，避免"卡住"与"失败"看起来一样 */
+    .card.is-error .spinner {
+      border-color: #fee2e2;
+      border-top-color: #ef4444;
+      animation: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="card" id="card">
+    <div class="spinner"></div>
+    <h1 id="title">正在进入管理端…</h1>
+    <p class="detail" id="detail"></p>
+    <a class="retry" id="retry" href="/admin" hidden>前往登录页</a>
+  </main>
+
+  <script>
+    (function () {
+      'use strict'
+
+      var DEFAULT_TARGET = '/dashboard'
+
+      /** 展示失败原因（不自动跳走，否则用户只会看到一个空白页） */
+      function fail(title, detail) {
+        document.getElementById('card').classList.add('is-error')
+        document.getElementById('title').textContent = title
+        document.getElementById('detail').textContent = detail
+        var retry = document.getElementById('retry')
+        retry.hidden = false
+        // 兜底给登录页的入口：令牌落不下去时，手动登录仍然是条出路
+        retry.href = adminBase() + '/login'
+      }
+
+      /**
+       * 本页所在的部署前缀（即 SPA 的 base，约定为 /admin）。
+       * 从当前地址推出来而不是写死，前缀变了这一页不用跟着改。
+       */
+      function adminBase() {
+        return location.pathname.replace(/\/[^/]*$/, '')
+      }
+
+      /**
+       * 只接受站内绝对路径。
+       * 必须排除 //host 这种协议相对地址 —— 否则一个被篡改的链接就能把
+       * 带着令牌的跳转引到任意站点去。
+       */
+      function sanitizeTarget(raw) {
+        if (typeof raw === 'string' && /^\/(?!\/)/.test(raw)) return raw
+        return DEFAULT_TARGET
+      }
+
+      var params = new URLSearchParams(location.hash.replace(/^#/, ''))
+      var token = params.get('token') || ''
+      var user = params.get('user') || 'admin'
+      var target = sanitizeTarget(params.get('url'))
+
+      if (!token) {
+        fail('缺少令牌参数', '这个地址应由平台系统生成并带着 #token=… 打开，请回到平台重新点「跳转」。')
+        return
+      }
+
+      try {
+        localStorage.setItem('token', token)
+        // 形状与网关登录页写入的一致：布局与 admin 专属路由都要读它，
+        // 少了 userInfo，跳过去会被当成普通用户并被打回仪表盘。
+        localStorage.setItem('userInfo', JSON.stringify({
+          name: user,
+          role: user === 'admin' ? 'admin' : 'user',
+        }))
+      } catch (e) {
+        fail('无法写入本地存储', '浏览器可能禁用了 localStorage（隐私模式或站点设置），放行后重试即可。')
+        return
+      }
+
+      // replace 而非 assign：带令牌的地址不该留在历史记录里被后退访问
+      location.replace(adminBase() + target)
+    })()
+  </script>
+</body>
+</html>

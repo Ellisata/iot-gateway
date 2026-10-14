@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
+package router
+
+import (
+	"github.com/gin-gonic/gin"
+
+	"iot-gateway/controller"
+)
+
+// DeviceAddressRoutes 设备地址路由
+func DeviceAddressRoutes(r gin.IRouter, ac *controller.DeviceAddressController) {
+	addr := r.Group("/deviceAddress")
+	{
+		addr.POST("/createDeviceAddress", ac.CreateDeviceAddress)
+		addr.POST("/updateDeviceAddress", ac.UpdateDeviceAddress)
+		addr.GET("/deleteDeviceAddress/:id", ac.DeleteDeviceAddress)
+		addr.POST("/batchDeleteDeviceAddress", ac.BatchDeleteDeviceAddress)
+		addr.GET("/getDeviceAddressById/:id", ac.GetDeviceAddressByID)
+		addr.GET("/pageDeviceAddress", ac.PageDeviceAddress)
+		addr.POST("/importDeviceAddress", ac.ImportDeviceAddress)
+		addr.GET("/importDeviceAddressTemplate", ac.ImportDeviceAddressTemplate)
+	}
+}

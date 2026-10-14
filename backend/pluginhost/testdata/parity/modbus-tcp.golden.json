@@ -1,0 +1,48 @@
+{
+  "case": "modbus-tcp",
+  "protocol": "ModBus.TCP",
+  "results": [
+    {
+      "id": "a1",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "a2",
+      "value": "0",
+      "dataType": "int16",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "a3",
+      "value": "0",
+      "dataType": "int32",
+      "kind": "int",
+      "quality": 192
+    },
+    {
+      "id": "a4",
+      "value": "0",
+      "dataType": "float32",
+      "kind": "float",
+      "quality": 192
+    },
+    {
+      "id": "a5",
+      "value": "0",
+      "dataType": "bcd",
+      "kind": "uint",
+      "quality": 192
+    },
+    {
+      "id": "c1",
+      "value": "0",
+      "dataType": "bool",
+      "kind": "bool",
+      "quality": 192
+    }
+  ]
+}

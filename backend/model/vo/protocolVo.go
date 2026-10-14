@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
+package vo
+
+import "encoding/json"
+
+// ProtocolVO 协议响应
+type ProtocolVO struct {
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	FormJSON    json.RawMessage `json:"formJson"`
+	Sort        int             `json:"sort"`
+	CreatedAt   string          `json:"createdAt"`
+	UpdatedAt   string          `json:"updatedAt"`
+}
