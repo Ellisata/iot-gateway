@@ -24,6 +24,7 @@ English | [简体中文](README.md)
 - **Out-of-process protocol plugins**: **all 15 protocol drivers are plugins** — the gateway binary contains no protocol implementation at all. Each driver is an `iot-driver-<name>` standalone executable dropped into the `plugins/` directory next to the binary to be **loaded automatically — no gateway rebuild, no downtime**; crashed plugin processes restart with backoff, wedged ones are detected and recycled, and replacing a binary hot-upgrades the plugin. See the [driver plugin guide](docs/driver-plugins.md) (中文).
 - **Acquisition engine**: worker-pool scheduled polling tasks; a background watcher detects configuration changes and applies **zero-downtime hot reload**.
 - **Push engine**: device-grouped batch dispatch; channel configs hot-reload; on network outage data lands in a **persistent local outbox** and is automatically re-sent once the connection recovers — no data loss.
+- **MQTT subscription into time-series databases**: subscribes to JSON messages on an external MQTT broker, maps them to collection records and writes them to enabled TDengine / InfluxDB channels — with wildcard topics, QoS, authentication, sample-message preview, connectivity testing and hot reload of subscription config.
 - **Disconnection alarms**: automatic detection of device poll failures and channel disconnections (debounce + state machine), recorded on offline/recovery edges, queryable in a unified alarm center.
 - **Web admin console**: dashboard, device objects, address tags, protocol management, channel management, alarms, log viewer and API key management — bilingual (EN/中文) UI.
 - **Open API**: read-only `/openApi/*` endpoints authenticated by an `X-Api-Key` header, for MES / ERP and other external systems.
@@ -96,6 +97,21 @@ English | [简体中文](README.md)
 | `tdengine-v3` | TDEngine 3.x via the official driver-go WebSocket driver (CGO-free, connects through taosAdapter) |
 | `influxdb-v3` | InfluxDB 3.x via a self-built Line-Protocol-over-HTTP client (no heavy official SDK) |
 
+
+## MQTT Subscription into Time-Series Databases
+
+Besides "collect → push", the gateway can also **ingest in the opposite direction**: subscribe to JSON messages on an external MQTT broker, map them into records identical to locally collected ones, and write them to enabled **TDengine / InfluxDB** channels. When devices or third-party platforms already publish data over MQTT, this funnels that data into the same time-series database.
+
+```
+External device / platform ──MQTT──▶ Broker ──subscribe──▶ subscription engine (JSON → record) ──▶ push engine ──▶ TDengine / InfluxDB
+```
+
+- **Time-series channels only**: records are delivered only to `tdengine-v3` / `influxdb-v3`, **never to plain channels such as MQTT** — delivering back to MQTT would self-excite when the subscribed topic is also a publish topic. Converted records reuse the push channels' batching, offline outbox cache and replay.
+- **Each subscription has its own connection**: broker / port / client ID / username & password / topic (`+` and `#` wildcards supported) / QoS `0`–`2` are configured per subscription. Before saving you can **test the connection** and **preview** the mapping against a sample message (neither is persisted).
+- **Mapping rules**: `root` selects the value root (default `$`; a top-level array is split into one record per element automatically, or write `$.data[*]` explicitly); target fields are a whitelist of collection-record fields (device ID / device name / point ID / point description / value / kind / quality, etc. — unknown fields are rejected on save); each field supports `path` (JSON path), `const` (fixed value), `template` (string interpolation) and `map` (value translation for external type and quality codes); `filter` holds implicit-AND conditions (`eq` / `neq` / `gt` / `gte` / `lt` / `lte` / `contains` / `in` / `notin` / `exists` / `notexists`).
+- **Collection time**: a timestamp carried by the message can be mapped to `collectedAt` (epoch seconds / milliseconds / microseconds / nanoseconds and common date formats, normalized to local time at millisecond precision). When absent or unrecognized, the batch arrival time is used.
+- **Device / point metadata**: the time-series database stores only IDs and values, so devices and points seen in subscribed messages are asynchronously indexed by the natural key `(deviceId, deviceAddressId)` on the "Subscription Devices & Points" page (no sampled values), for name-based lookup and later analytics.
+- Subscription configs are checksum-compared and hot-reloaded every 10 seconds, so create / update / delete / enable / disable needs **no gateway restart**. The runtime status view shows each subscription's connection state, message / record / error counts and last error.
 
 ## Quick Start
 
@@ -211,6 +227,7 @@ With all protocol drivers moved out of process, the **binary and the `plugins/` 
 | Device Objects / Address Tags | Manage devices grouped by gateway; maintain collection points and data types |
 | Protocol Management | Dynamic-form protocol parameter configuration (custom form JSON supported) |
 | Channel Management | MQTT / TDEngine / InfluxDB channel configuration and status monitoring |
+| Subscription Management | Subscribe to external MQTT messages and write them into time-series databases: mapping rules, sample preview, connectivity test and runtime status; the "Subscription Devices & Points" page indexes device / point metadata seen in messages |
 | Alarm Management | Device and channel disconnection alarms with history query |
 | Log Viewer | Browse and download gateway runtime logs online |
 | API Keys | Create / enable / disable Open API keys (admin) |
@@ -271,6 +288,7 @@ plugin:
 │   ├── driversrc/      # Protocol plugin sources (9 subdirs, each builds to iot-driver-<dir>)
 │   ├── plugins/        # Plugin runtime directory (build output; shipped in the release archive)
 │   ├── push/           # Push engine (mqtt/tdengine-v3/influxdb-v3 + outbox)
+│   ├── subscribe/      # MQTT subscription engine (JSON → collection-record mapping, writes to time-series DBs)
 │   ├── controller/ service/ model/  # HTTP layers (Controller → Service → Database)
 │   ├── database/sqlite/migrations/  # SQLite migration scripts
 │   ├── router/ middleware/          # Routing and middleware (JWT / Open API key / CORS)
