@@ -31,6 +31,11 @@ type pushPoint struct {
 func marshalBatch(records []collector.CollectedRecord, now string) ([]byte, error) {
 	points := make([]pushPoint, 0, len(records))
 	for _, r := range records {
+		// 外部订阅记录可携带逐条采集时间；本地点位留空，统一用批次时间。
+		collectedAt := r.CollectedAt
+		if collectedAt == "" {
+			collectedAt = now
+		}
 		points = append(points, pushPoint{
 			DeviceID:          r.DeviceID,
 			DeviceName:        r.DeviceName,
@@ -41,7 +46,7 @@ func marshalBatch(records []collector.CollectedRecord, now string) ([]byte, erro
 			Kind:              r.Kind,
 			Protocol:          r.Protocol,
 			Quality:           r.Quality,
-			CollectedAt:       now,
+			CollectedAt:       collectedAt,
 		})
 	}
 	payload, err := json.Marshal(points)

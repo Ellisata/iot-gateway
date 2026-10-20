@@ -80,6 +80,20 @@ const routes = [
         component: () => import('@/views/data-push/channel-form/IndexView.vue'),
         meta: { titleKey: 'menu.channelForm', icon: 'Document', roles: ['admin'] },
       },
+      // ---- 订阅管理路由 ----
+      // 外部 MQTT 报文 → 映射为采集记录 → 写入时序数据库（只投时序库通道）
+      {
+        path: 'subscription/mqtt',
+        name: 'MqttSubscription',
+        component: () => import('@/views/subscription/mqtt/IndexView.vue'),
+        meta: { titleKey: 'menu.mqttSubscription', icon: 'Message' },
+      },
+      {
+        path: 'subscription/device-point',
+        name: 'MqttSubscriptionDevicePoint',
+        component: () => import('@/views/subscription/devicePoint/IndexView.vue'),
+        meta: { titleKey: 'menu.subscriptionDevicePoint', icon: 'DataLine' },
+      },
       // ---- 报警管理路由 ----
       // 以下四个报警页（设备 / 通道 / 点位 / 超限）是同一个页面，表格实现只有一份
       // (views/alarm/AlarmTable.vue)，各自的 IndexView.vue 只是写死 targetType 的

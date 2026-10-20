@@ -321,6 +321,27 @@ func TestSubtableName(t *testing.T) {
 	}
 }
 
+// TestAppendBatchUsesPerRecordCollectedAt 外部订阅记录携带逐条采集时间时，
+// 每行使用自己的时间；留空的记录回落到批次时间。
+func TestAppendBatchUsesPerRecordCollectedAt(t *testing.T) {
+	withTime := rec("dev-1", "a1", driver.KindInt, "1", 192)
+	withTime.CollectedAt = "2026-08-18 10:00:01.250"
+	fallback := rec("dev-1", "a2", driver.KindInt, "2", 192)
+
+	ib := newInsertBuilder("iot", "collected_data")
+	if !ib.appendBatch("2026-08-18 10:00:00", []collector.CollectedRecord{withTime, fallback}) {
+		t.Fatal("appendBatch should accept a fresh batch")
+	}
+
+	sql := ib.String()
+	if !strings.Contains(sql, fmt.Sprintf("VALUES (%d,", wantTS("2026-08-18 10:00:01")+250)) {
+		t.Errorf("record timestamp should be used\nSQL: %s", sql)
+	}
+	if !strings.Contains(sql, fmt.Sprintf("VALUES (%d,", wantTS("2026-08-18 10:00:00"))) {
+		t.Errorf("record without timestamp should fall back to batch time\nSQL: %s", sql)
+	}
+}
+
 func TestCollectedAtMillis(t *testing.T) {
 	// 毫秒精度:亚秒级轮次时间戳唯一,避免 TDengine 同子表同时间戳覆盖
 	if got := collectedAtMillis("2026-08-18 10:00:00.123"); got != wantTS("2026-08-18 10:00:00")+123 {

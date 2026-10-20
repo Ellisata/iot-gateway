@@ -35,6 +35,7 @@ func newTestEngine() *gin.Engine {
 		(*controller.ProtocolController)(nil),
 		(*controller.PushChannelController)(nil),
 		(*controller.PushChannelFormController)(nil),
+		(*controller.MqttSubscriptionController)(nil),
 		(*controller.PushController)(nil),
 		(*controller.AlarmController)(nil),
 		(*controller.AlarmWebhookController)(nil),

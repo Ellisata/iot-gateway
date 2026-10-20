@@ -100,6 +100,10 @@ func (ch *mqttChannel) ConfigSig() string { return ch.sig }
 // Connected 返回当前连接状态（实现 push.Connectivity，供 Outbox 决定入队路由）
 func (ch *mqttChannel) Connected() bool { return ch.isConnected() }
 
+// IsTimeSeries 标记本通道不是时序数据库（实现 push.TimeSeriesChannel）。
+// 外部订阅数据只投时序库通道，不经过本通道回环发布。
+func (ch *mqttChannel) IsTimeSeries() bool { return false }
+
 // Enqueue 非阻塞入队，绝不阻塞采集线程（实现 push.Channel）。
 // 入队路由（直投内存队列 / 落盘 / 丢最旧）由 push.Outbox 统一决定。
 func (ch *mqttChannel) Enqueue(b push.PushBatch) { ch.ob.Enqueue(b) }

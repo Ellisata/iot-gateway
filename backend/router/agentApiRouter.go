@@ -49,6 +49,7 @@ func AgentApiRoutes(
 	pc *controller.ProtocolController,
 	pc2 *controller.PushChannelController,
 	pcf *controller.PushChannelFormController,
+	msc *controller.MqttSubscriptionController,
 	pus *controller.PushController,
 	ac2 *controller.AlarmController,
 	awc *controller.AlarmWebhookController,
@@ -81,6 +82,7 @@ func AgentApiRoutes(
 		ProtocolRoutes(g, pc)
 		PushChannelRoutes(g, pc2)
 		PushChannelFormRoutes(g, pcf)
+		MqttSubscriptionRoutes(g, msc)
 		PushRoutes(g, pus)
 
 		// 报警

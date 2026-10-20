@@ -71,6 +71,22 @@
         </el-menu-item>
       </el-sub-menu>
 
+      <!-- 订阅管理 -->
+      <el-sub-menu index="/subscription">
+        <template #title>
+          <el-icon><Message /></el-icon>
+          <span>{{ t('menu.subscription') }}</span>
+        </template>
+        <el-menu-item index="/subscription/mqtt">
+          <el-icon><Message /></el-icon>
+          <template #title>{{ t('menu.mqttSubscription') }}</template>
+        </el-menu-item>
+        <el-menu-item index="/subscription/device-point">
+          <el-icon><DataLine /></el-icon>
+          <template #title>{{ t('menu.subscriptionDevicePoint') }}</template>
+        </el-menu-item>
+      </el-sub-menu>
+
       <!-- 报警管理 -->
       <el-sub-menu index="/alarm">
         <template #title>

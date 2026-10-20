@@ -15,6 +15,7 @@ var ControllerProviderSet = wire.NewSet(
 	NewProtocolController,
 	NewPushChannelController,
 	NewPushChannelFormController,
+	NewMqttSubscriptionController,
 	NewPushController,
 	NewAlarmController,
 	NewAlarmWebhookController,

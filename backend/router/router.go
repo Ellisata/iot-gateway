@@ -110,6 +110,13 @@ func WithPushRoutes(pc *controller.PushController) RouteOption {
 	}
 }
 
+// WithMqttSubscriptionRoutes MQTT 订阅管理模块路由选项
+func WithMqttSubscriptionRoutes(mc *controller.MqttSubscriptionController) RouteOption {
+	return func(r *gin.Engine) {
+		MqttSubscriptionRoutes(r, mc)
+	}
+}
+
 // WithAlarmWebhookRoutes 报警通知配置模块路由选项
 func WithAlarmWebhookRoutes(awc *controller.AlarmWebhookController) RouteOption {
 	return func(r *gin.Engine) {
@@ -186,6 +193,7 @@ func WithAgentApiRoutes(
 	pc *controller.ProtocolController,
 	pc2 *controller.PushChannelController,
 	pcf *controller.PushChannelFormController,
+	msc *controller.MqttSubscriptionController,
 	pus *controller.PushController,
 	ac2 *controller.AlarmController,
 	awc *controller.AlarmWebhookController,
@@ -197,6 +205,6 @@ func WithAgentApiRoutes(
 	dsc *controller.DeviceScanController,
 ) RouteOption {
 	return func(r *gin.Engine) {
-		AgentApiRoutes(r, uc, dc, ac, cc, rc, pc, pc2, pcf, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc)
+		AgentApiRoutes(r, uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc)
 	}
 }

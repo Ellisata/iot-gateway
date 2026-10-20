@@ -59,7 +59,7 @@ func (ib *insertBuilder) appendBatch(collectedAt string, records []collector.Col
 		}
 	}
 
-	ts := collectedAtMillis(collectedAt)
+	batchTS := collectedAtMillis(collectedAt)
 	ib.sb.Grow(len(records) * 24)
 	for _, r := range records {
 		sub := subtableName(r.DeviceID, r.DeviceAddressID)
@@ -67,6 +67,13 @@ func (ib *insertBuilder) appendBatch(collectedAt string, records []collector.Col
 			continue // 批内重复子表:保留首条
 		}
 		ib.seen[sub] = struct{}{}
+
+		// 外部订阅记录可携带逐条采集时间（映射字段 collectedAt）；
+		// 本地点位留空，回落到批次落地时间。
+		ts := batchTS
+		if r.CollectedAt != "" {
+			ts = collectedAtMillis(r.CollectedAt)
+		}
 
 		if ib.rows > 0 {
 			ib.sb.WriteByte(' ')

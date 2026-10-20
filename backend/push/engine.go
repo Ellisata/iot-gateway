@@ -114,6 +114,23 @@ func (e *Engine) Refresh() error {
 // PushRecords 实现 collector.RecordSink：按设备分组后分发给各通道。
 // 非阻塞：通道 outbox 满时丢弃最旧，绝不阻塞采集线程。
 func (e *Engine) PushRecords(records []collector.CollectedRecord) {
+	e.pushRecords(records, nil)
+}
+
+// PushRecordsToTimeSeries 将外部来源（MQTT 订阅）的记录定向投递给时序数据库通道。
+//
+// 与 PushRecords 的唯一差异是通道过滤：只投给实现了 TimeSeriesChannel 且
+// IsTimeSeries 为真的通道，不投 MQTT 等其它通道。记录结构与采集记录完全一致，
+// 因此下游的攒批/缓存/补发逻辑原样复用。
+func (e *Engine) PushRecordsToTimeSeries(records []collector.CollectedRecord) {
+	e.pushRecords(records, func(ch Channel) bool {
+		tsc, ok := ch.(TimeSeriesChannel)
+		return ok && tsc.IsTimeSeries()
+	})
+}
+
+// pushRecords 按设备分组并分片后分发给满足 include 的通道（include 为 nil 表示全部）。
+func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(Channel) bool) {
 	if len(records) == 0 {
 		return
 	}
@@ -135,6 +152,9 @@ func (e *Engine) PushRecords(records []collector.CollectedRecord) {
 	e.mu.RLock()
 	chans := make([]Channel, 0, len(e.channels))
 	for _, ch := range e.channels {
+		if include != nil && !include(ch) {
+			continue
+		}
 		chans = append(chans, ch)
 	}
 	e.mu.RUnlock()

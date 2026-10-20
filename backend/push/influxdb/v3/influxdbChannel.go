@@ -80,6 +80,9 @@ func (ch *influxdbChannel) ConfigSig() string { return ch.sig }
 // Connected 返回当前连通状态(实现 push.Connectivity,供 Outbox 决定入队路由)
 func (ch *influxdbChannel) Connected() bool { return ch.connected.Load() }
 
+// IsTimeSeries 标记本通道写入时序数据库(实现 push.TimeSeriesChannel)
+func (ch *influxdbChannel) IsTimeSeries() bool { return true }
+
 // Enqueue 非阻塞入队,绝不阻塞采集线程(实现 push.Channel)。
 // 入队路由(直投内存队列 / 落盘 / 丢最旧)由 push.Outbox 统一决定。
 func (ch *influxdbChannel) Enqueue(b push.PushBatch) { ch.ob.Enqueue(b) }

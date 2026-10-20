@@ -22,4 +22,10 @@ type CollectedRecord struct {
 	// Quality 采集质量码（driver.QualityXxx：类别在高 2 位、成因在低 6 位）。
 	// 带 json tag 以保证断网缓存（push/spool）序列化回放后不丢失。
 	Quality int `json:"quality"`
+	// CollectedAt 采集时间（毫秒精度本地时间，如 "2026-10-19 17:05:30.123"）。
+	//
+	// 本地点位采集留空：推送引擎按批次落地时间统一补齐（见 push.Engine.pushRecords）。
+	// 外部 MQTT 订阅可在映射里配置 collectedAt，携带报文自带的时间；
+	// 时序通道逐条优先用它，留空/无法解析时才回落到批次时间。
+	CollectedAt string `json:"collectedAt,omitempty"`
 }

@@ -117,6 +117,11 @@ var (
 	PushChannelFormExistsEnum    = NewBusinessEnum("60011", "数据推送通道表单名称已存在", "err.push_channel_form_exists")
 	PushChannelFormNotExistsEnum = NewBusinessEnum("60012", "数据推送通道表单不存在", "err.push_channel_form_not_found")
 
+	// MQTT 订阅相关错误码
+	MqttSubscriptionExistsEnum      = NewBusinessEnum("60021", "MQTT 订阅名称已存在", "err.mqtt_subscription_exists")
+	MqttSubscriptionNotExistsEnum   = NewBusinessEnum("60022", "MQTT 订阅不存在", "err.mqtt_subscription_not_found")
+	MqttSubscriptionConnectFailEnum = NewBusinessEnum("60023", "MQTT 订阅连通性测试失败", "err.mqtt_subscription_connect_fail")
+
 	// 开放接口密钥相关错误码
 	OpenApiSecretExistsEnum    = NewBusinessEnum("70001", "开放接口密钥名称已存在", "err.open_api_secret_exists")
 	OpenApiSecretNotExistsEnum = NewBusinessEnum("70002", "开放接口密钥不存在", "err.open_api_secret_not_found")

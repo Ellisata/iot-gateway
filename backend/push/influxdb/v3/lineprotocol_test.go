@@ -231,6 +231,28 @@ func TestLineBuilderAggregatesBatches(t *testing.T) {
 	}
 }
 
+// TestAppendBatchUsesPerRecordCollectedAt 外部订阅记录携带逐条采集时间时，
+// 每行使用自己的时间；留空的记录回落到批次时间。
+func TestAppendBatchUsesPerRecordCollectedAt(t *testing.T) {
+	withTime := rec("dev-1", "a1", driver.KindInt, "1", 192)
+	withTime.CollectedAt = "2026-08-18 10:00:01.250"
+	fallback := rec("dev-1", "a2", driver.KindInt, "2", 192)
+
+	lb := newLineBuilder("collected_data")
+	lb.appendBatch("2026-08-18 10:00:00", []collector.CollectedRecord{withTime, fallback})
+
+	lines := strings.Split(lb.String(), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, want 2", len(lines))
+	}
+	if want := fmt.Sprint(wantTS("2026-08-18 10:00:01") + 250); !strings.HasSuffix(lines[0], " "+want) {
+		t.Errorf("first line should use record timestamp %s, got %q", want, lines[0])
+	}
+	if want := fmt.Sprint(wantTS("2026-08-18 10:00:00")); !strings.HasSuffix(lines[1], " "+want) {
+		t.Errorf("second line should fall back to batch timestamp %s, got %q", want, lines[1])
+	}
+}
+
 func TestCollectedAtMillis(t *testing.T) {
 	// 毫秒精度:亚秒级轮次时间戳唯一
 	if got := collectedAtMillis("2026-08-18 10:00:00.123"); got != wantTS("2026-08-18 10:00:00")+123 {

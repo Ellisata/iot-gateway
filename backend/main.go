@@ -83,6 +83,16 @@ func runGateway(stop <-chan struct{}) error {
 		logger.Error("push engine start failed: %v", err)
 	}
 
+	// 5.1 启动外部 MQTT 订阅管理器。
+	//
+	// 必须在推送引擎之后：订阅数据转换完成后直接投递给时序数据库通道，
+	// 推送引擎尚未加载通道时入队会被静默丢弃（见 push.Engine.PushRecordsToTimeSeries）。
+	// Start 同步加载一次订阅配置，broker 不可达只影响该订阅自身的重连，
+	// 不阻塞启动；配置非法只记日志并跳过该条。
+	if err := deps.Subscription.Start(); err != nil {
+		logger.Error("mqtt subscription manager start failed: %v", err)
+	}
+
 	// 6. 启动报警通知器（把报警推送到钉钉/企微/飞书等 Webhook）。
 	//
 	// 必须在报警巡检与采集引擎之前启动：Dispatcher 未启动时 Notify 会把事件
@@ -147,6 +157,9 @@ func runGateway(stop <-chan struct{}) error {
 	// 它没有 Start()（没人发起扫描之前不持有任何资源），所以这里只有 Stop。
 	defer deps.DeviceScan.Stop()
 	defer deps.CollectorEngine.Stop()
+	// Subscription 注册在 PushEngine 之后，因此比它先停止：先断开订阅、
+	// 不再有新的外部记录进入推送队列，再停推送引擎排空在途批次。
+	defer deps.Subscription.Stop()
 	defer deps.PushEngine.Stop()
 	defer deps.AlarmMonitor.Stop()
 	defer deps.Discovery.Stop()

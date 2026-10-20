@@ -31,6 +31,16 @@ type Channel interface {
 	TestConnectivity() error
 }
 
+// TimeSeriesChannel 标记接口：该通道的数据最终落在时序数据库（TDengine / InfluxDB）。
+//
+// MQTT 订阅的数据经此接口定向投递，避免再经推送引擎里的 MQTT 通道回环发布
+// （订阅主题与发布主题相同时会形成自激）。用可选接口而不是给 Channel 增加方法，
+// 是为了不强迫将来新增的非时序通道（如 Webhook）也回答一个与自身无关的问题。
+type TimeSeriesChannel interface {
+	Channel
+	IsTimeSeries() bool
+}
+
 // ChannelFactory 根据推送通道配置构建一个通道实例（未启动）。
 // db 注入用于通道级持久化（如断网本地缓存 push_outbox），不用的通道可忽略。
 type ChannelFactory func(db *gorm.DB, ch *po.PushChannel) (Channel, error)

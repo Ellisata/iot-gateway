@@ -205,6 +205,30 @@ func TestMarshalBatch(t *testing.T) {
 	}
 }
 
+// TestMarshalBatchUsesPerRecordCollectedAt 外部订阅记录携带逐条采集时间时使用它，
+// 留空的记录仍使用批次时间（本地点位行为不变）。
+func TestMarshalBatchUsesPerRecordCollectedAt(t *testing.T) {
+	records := []collector.CollectedRecord{
+		{DeviceID: "d1", DeviceAddressID: "a1", Value: "1", CollectedAt: "2026-08-18 10:00:01.250"},
+		{DeviceID: "d1", DeviceAddressID: "a2", Value: "2"},
+	}
+	payload, err := marshalBatch(records, "2026-08-18 10:00:00")
+	if err != nil {
+		t.Fatalf("marshalBatch failed: %v", err)
+	}
+
+	var points []pushPoint
+	if err := json.Unmarshal(payload, &points); err != nil {
+		t.Fatalf("payload not valid JSON: %v", err)
+	}
+	if points[0].CollectedAt != "2026-08-18 10:00:01.250" {
+		t.Errorf("point[0].collectedAt = %q", points[0].CollectedAt)
+	}
+	if points[1].CollectedAt != "2026-08-18 10:00:00" {
+		t.Errorf("point[1].collectedAt = %q, want batch time", points[1].CollectedAt)
+	}
+}
+
 // TestMarshalBatchQuality 质量码逐条原样出报文，且**没有任何多余的成因字段** ——
 // 成因已并进 quality，正常点位的报文与引入那一维之前**逐字节一致**。
 // 这里用原始 JSON 文本断言：坏点位只该多出一个数字，不该多出一个键。

@@ -319,6 +319,57 @@ var agentApiSurface = map[string]SurfaceEntry{
 		Note:   "热刷新推送配置（重建通道）。通常无需手动调",
 	},
 
+	// ==================== MQTT 订阅 ====================
+	"GET /mqttSubscription/pageMqttSubscription": {
+		Access: AccessRead,
+		Params: argQuery(dto.PageMqttSubscriptionDTO{}, nil),
+		Note:   "响应带 broker 口令等凭据",
+	},
+	"GET /mqttSubscription/pageMqttSubscriptionDevicePoint": {
+		Access: AccessRead,
+		Params: argQuery(dto.PageMqttSubscriptionDevicePointDTO{}, nil),
+		Note:   "订阅报文里出现过的设备/点位元信息索引，不含采样值",
+	},
+	"GET /mqttSubscription/getMqttSubscriptionById/:id": {
+		Access: AccessRead,
+		Params: argNone(),
+		Note:   "响应带 broker 口令等凭据",
+	},
+	"GET /mqttSubscription/status": {
+		Access: AccessRead,
+		Params: argNone(),
+		Note:   "各订阅的连接状态与收包/入库计数（只在内存中）",
+	},
+	"POST /mqttSubscription/createMqttSubscription": {
+		Access: AccessWrite,
+		Params: argBody(dto.CreateMqttSubscriptionDTO{}, map[string]string{
+			"mappingJson": "JSON → CollectedRecord 的映射规则（root/fields/filter）",
+			"status":      "1 启用 0 停用；省略 = 启用",
+		}),
+	},
+	"POST /mqttSubscription/updateMqttSubscription": {
+		Access: AccessWrite,
+		Params: argBody(dto.UpdateMqttSubscriptionDTO{}, map[string]string{
+			"mappingJson": "不传 = 沿用原映射规则",
+			"status":      "1 启用 0 停用；省略/null = 不改",
+		}),
+	},
+	"GET /mqttSubscription/deleteMqttSubscription/:id": {
+		Access: AccessWrite,
+		Params: argNone(),
+		Note:   "**用 GET 实现**。删除会断开该订阅并停止入库",
+	},
+	"POST /mqttSubscription/testConnectivity": {
+		Access: AccessProbe,
+		Params: argBody(dto.TestMqttSubscriptionDTO{}, nil),
+		Note:   "真实连接外部 broker 并立即断开，不保存配置",
+	},
+	"POST /mqttSubscription/preview": {
+		Access: AccessRead,
+		Params: argBody(dto.PreviewMqttSubscriptionDTO{}, nil),
+		Note:   "仅用样例报文试跑映射规则，不改网关状态",
+	},
+
 	// ==================== 推送通道表单 ====================
 	"GET /pushChannelForm/getPushChannelFormByName": {
 		Access: AccessRead,

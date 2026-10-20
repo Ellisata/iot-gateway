@@ -83,7 +83,7 @@
 
 ### 分层与依赖注入
 - Controller → Service → Database,上层依赖下层,下层不依赖上层。
-- 依赖通过 **Google Wire** 编译期组装,根节点为 `InitializeApp`([wire.go](wire.go)),返回 `AppDependencies{Engine, CollectorEngine, PushEngine, AlarmMonitor, DriverManager}`。`wire_gen.go` 为生成文件,改 `wire.go` 后执行 `go generate`。
+- 依赖通过 **Google Wire** 编译期组装,根节点为 `InitializeApp`([wire.go](wire.go)),返回 `AppDependencies{Engine, CollectorEngine, PushEngine, AlarmMonitor, DriverManager, Subscription}`。`wire_gen.go` 为生成文件,改 `wire.go` 后执行 `go generate`。
 - 启动顺序有硬约束([main.go](main.go)):**`DriverManager.Start()` 必须早于 `CollectorEngine.Start()`** —— 插件驱动要先完成注册,采集引擎建任务时才能为使用插件协议的设备创建驱动,否则这些设备首轮会被判为「协议不支持」而跳过。停止顺序相反(插件管理器最后停)。
 
 ### 协议插件([pluginhost/](pluginhost/), [driversrc/](driversrc/))
@@ -122,6 +122,38 @@
   真正的建连由通道的 `tryConnect` 负责,成功时须置位连通状态并 `Notify` 唤醒补发。
 - **生命周期有硬顺序**:`Start` → 通道跑自己的 worker 组 → `Close`(关 quit)→ 等 worker 组退出 →
   `Wait`(等落盘协程排空)。**worker 停服前还会把 outbox 中写失败的批次转投缓存**,提前收尾会丢数据。
+
+### MQTT 订阅([subscribe/](subscribe/))
+- 管理外部 broker 上的多条订阅:每行 `mqtt_subscription` = 一个独立 paho 客户端 + 一套
+  「JSON 报文 → `collector.CollectedRecord`」映射规则。收包后按规则转换,再经
+  `push.Engine.PushRecordsToTimeSeries` **只投递到时序数据库类通道**(TDengine / InfluxDB)。
+- **不投 MQTT 等非时序通道是刻意的**:订阅主题与发布主题相同时会形成自激。判据是可选接口
+  `push.TimeSeriesChannel`(新增通道若写时序库需实现 `IsTimeSeries() bool`)。
+- 映射 DSL 参考 iot-data-persistence:`root`(`$` 默认;整篇报文是数组时自动逐条拆条,
+  `$[*]` / `$.data[*]` 仍可显式指定)、`fields`(`path` / `const` /
+  `template` / `map`)、`filter`(隐式 AND);目标字段是 CollectedRecord 的 11 个字段白名单,
+  未知字段在保存时直接拒绝。身份字段的目标名是 `deviceId` / `deviceAddressId`
+  (早期配置里的 `deviceID` / `deviceAddressID` 在解析时自动归一,老订阅仍可加载;
+  CollectedRecord 的 JSON tag 保持原样,不影响断网缓存里已有批次)。数字统一 `UseNumber` 解码,大整数不丢精度。
+- `collectedAt` 是可选目标字段:报文自带时间时映射进来(epoch 秒/毫秒/微秒/纳秒、
+  `YYYY-MM-DD HH:mm:ss[.SSS]`、`YYYY/MM/DD`、RFC3339 均可识别),归一成毫秒精度本地时间;
+  未配置或无法识别时留空,时序通道逐条回落到批次落地时间。本地点位采集不使用该字段。
+  `map` 用于外部类型/质量码翻译(`kind`、`quality`):按路径取原始值后查映射表,
+  键比较忽略大小写并对纯数字做数值相等;未命中走 `default`。`quality` 的 `map`
+  必须配置整数默认值,避免把外部质量码原样当成网关质量码。
+- **设备/点位元信息落 SQLite**([subscribe/devicePointStore.go](subscribe/devicePointStore.go)):
+  转换成功的记录在投递时序库的同时,把 `deviceId / deviceName / deviceAddressId /
+  deviceAddressName / deviceAddressLabel / dataType / kind / protocol` 异步 upsert 进
+  `mqtt_subscription_device_point`,自然键 `(device_id, device_address_id)`(与时序库身份口径一致)。
+  时序库只存 ID 与数值,名称/说明在查询侧无处可查,这张表供后续统计分析按名称关联;它**不存采样值**。
+  收包协程只做内存查重 + 非阻塞入队(队列满则丢弃、下一条报文重试),写库由独立协程攒批完成
+  ——SQLite 只有一条写连接,不能在 paho 收包协程里直接写。元信息变化立即更新,
+  未变化时 `last_seen_at` 按分钟级节流刷新;空值不覆盖已有非空值(兼容未配置名称字段的历史订阅)。
+  管理器 `Start/Stop` 与落库器同生命周期,停机前排空队列。
+  对外查询走 `GET /mqttSubscription/pageMqttSubscriptionDevicePoint`(分页 + 设备/点位 ID、名称、协议模糊过滤;
+  `/agentApi` 镜像归为 read),前端页面在「订阅管理 → 订阅设备与点位」。
+- 订阅配置每 10s 比对校验和热加载;服务层增删改后也会立即 `Refresh()`。
+  未变化的订阅保留原连接,变化的断开重连。
 
 ### 协议驱动注册表([driver/driver.go](driver/driver.go))
 - **`driver/` 下没有任何协议实现**,只有协议无关的契约与注册表。全部协议由进程外插件在运行期经 `pluginhost` 调用 `driver.RegisterExternal("协议名", NewFunc)` 注册(内置协议已全部移除),`collector` 用 `driver.Create(protocol)` 创建实例。

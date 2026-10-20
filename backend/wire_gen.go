@@ -21,6 +21,7 @@ import (
 	"iot-gateway/realtime"
 	"iot-gateway/router"
 	"iot-gateway/service"
+	"iot-gateway/subscribe"
 	"iot-gateway/workerPool"
 	"runtime"
 )
@@ -65,6 +66,9 @@ func InitializeApp() (*AppDependencies, func()) {
 	pushChannelController := controller.NewPushChannelController(pushChannelService)
 	pushChannelFormService := service.NewPushChannelFormService(db)
 	pushChannelFormController := controller.NewPushChannelFormController(pushChannelFormService)
+	subscribeManager := subscribe.NewManager(db, engine)
+	mqttSubscriptionService := service.NewMqttSubscriptionService(db, subscribeManager)
+	mqttSubscriptionController := controller.NewMqttSubscriptionController(mqttSubscriptionService)
 	pushController := controller.NewPushController(engine)
 	alarmController := controller.NewAlarmController(alarmService)
 	alarmWebhookService := service.NewAlarmWebhookService(db, dispatcher)
@@ -84,7 +88,7 @@ func InitializeApp() (*AppDependencies, func()) {
 	devicescanEngine := devicescan.NewEngine(config, manager, manager)
 	deviceScanService := service.NewDeviceScanService(db, devicescanEngine, manager, collectorEngine)
 	deviceScanController := controller.NewDeviceScanController(deviceScanService)
-	v := ProvideRouteOptions(userController, deviceController, deviceAddressController, collectionController, realtimeController, protocolController, pushChannelController, pushChannelFormController, pushController, alarmController, alarmWebhookController, alarmWebhookFormController, logFileController, openApiSecretController, openApiSecretService, openApiController, gatewayController, pluginController, deviceScanController)
+	v := ProvideRouteOptions(userController, deviceController, deviceAddressController, collectionController, realtimeController, protocolController, pushChannelController, pushChannelFormController, mqttSubscriptionController, pushController, alarmController, alarmWebhookController, alarmWebhookFormController, logFileController, openApiSecretController, openApiSecretService, openApiController, gatewayController, pluginController, deviceScanController)
 	ginEngine := router.SetupRouter(v)
 	channelMonitor := alarm.NewChannelMonitor(db, engine, dispatcher)
 	announcer := discovery.NewAnnouncer(config, serviceGatewayService, openApiSecretService)
@@ -97,6 +101,7 @@ func InitializeApp() (*AppDependencies, func()) {
 		DriverManager:   manager,
 		Discovery:       announcer,
 		DeviceScan:      devicescanEngine,
+		Subscription:    subscribeManager,
 	}
 	return appDependencies, func() {
 	}
@@ -121,6 +126,9 @@ type AppDependencies struct {
 	// DeviceScan 局域网 PLC 扫描发现引擎（与 Discovery 方向相反：
 	// Discovery 广播"我在哪"，DeviceScan 去问"网段里谁在"）
 	DeviceScan *devicescan.Engine
+	// Subscription 外部 MQTT 订阅管理器：把订阅报文转换为采集记录后
+	// 定向投递到时序数据库类推送通道
+	Subscription *subscribe.Manager
 }
 
 // NewRecordSink 组装采集记录的扇出接收者。
@@ -148,6 +156,7 @@ func ProvideRouteOptions(
 	pc *controller.ProtocolController,
 	pc2 *controller.PushChannelController,
 	pcf *controller.PushChannelFormController,
+	msc *controller.MqttSubscriptionController,
 	pus *controller.PushController,
 	ac2 *controller.AlarmController,
 	awc *controller.AlarmWebhookController,
@@ -160,5 +169,5 @@ func ProvideRouteOptions(
 	plc *controller.PluginController,
 	dsc *controller.DeviceScanController,
 ) []router.RouteOption {
-	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectionRoutes(cc), router.WithRealtimeRoutes(rc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithAlarmWebhookRoutes(awc), router.WithAlarmWebhookFormRoutes(awfc), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac), router.WithGatewayRoutes(gc), router.WithPluginRoutes(plc), router.WithDeviceScanRoutes(dsc), router.WithAgentApiRoutes(uc, dc, ac, cc, rc, pc, pc2, pcf, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc)}
+	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectionRoutes(cc), router.WithRealtimeRoutes(rc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithMqttSubscriptionRoutes(msc), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithAlarmWebhookRoutes(awc), router.WithAlarmWebhookFormRoutes(awfc), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac), router.WithGatewayRoutes(gc), router.WithPluginRoutes(plc), router.WithDeviceScanRoutes(dsc), router.WithAgentApiRoutes(uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc)}
 }

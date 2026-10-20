@@ -54,9 +54,15 @@ func newLineBuilder(measurement string) *lineBuilder {
 // 常量前缀(measurement + device_id)只构建一次,逐点只渲染变化部分;
 // 空值/浮点 NaN/±Inf 无法表示时跳过该 point(见 formatFieldValue),不阻断整批。
 func (lb *lineBuilder) appendBatch(collectedAt string, records []collector.CollectedRecord) {
-	ts := collectedAtMillis(collectedAt)
+	batchTS := collectedAtMillis(collectedAt)
 	clear(lb.dedup)
 	for _, r := range records {
+		// 外部订阅记录可携带逐条采集时间（映射字段 collectedAt）；
+		// 本地点位留空，回落到批次落地时间。
+		ts := batchTS
+		if r.CollectedAt != "" {
+			ts = collectedAtMillis(r.CollectedAt)
+		}
 		if r.DeviceID != lb.curDevice {
 			// 设备切换(批间,或防御性批内):重建常量前缀,去重按 (设备,地址) 重新计数
 			lb.curDevice = r.DeviceID

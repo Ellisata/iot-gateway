@@ -25,6 +25,7 @@ import (
 	"iot-gateway/realtime"
 	"iot-gateway/router"
 	"iot-gateway/service"
+	"iot-gateway/subscribe"
 	"iot-gateway/workerPool"
 )
 
@@ -45,6 +46,9 @@ type AppDependencies struct {
 	// DeviceScan 局域网 PLC 扫描发现引擎（与 Discovery 方向相反：
 	// Discovery 广播"我在哪"，DeviceScan 去问"网段里谁在"）
 	DeviceScan *devicescan.Engine
+	// Subscription 外部 MQTT 订阅管理器：把订阅报文转换为采集记录后
+	// 定向投递到时序数据库类推送通道
+	Subscription *subscribe.Manager
 }
 
 // InitializeApp 构建完整的应用依赖图
@@ -61,6 +65,10 @@ func InitializeApp() (*AppDependencies, func()) {
 		collector.NewEngine,
 		// 推送引擎（实现 collector.RecordSink，接收采集数据）
 		push.NewEngine,
+		// 外部 MQTT 订阅管理器：订阅数据经映射转换后只投递到时序数据库通道。
+		// Sink 绑定到推送引擎的 PushRecordsToTimeSeries（见 push/engine.go）。
+		subscribe.NewManager,
+		wire.Bind(new(subscribe.Sink), new(*push.Engine)),
 		// 实时值快照（实现 collector.RecordSink，供前端实时数据页查询）
 		realtime.NewStore,
 		// 采集记录的扇出：快照 + 推送。采集引擎只接受单个 RecordSink，
@@ -150,6 +158,7 @@ func ProvideRouteOptions(
 	pc *controller.ProtocolController,
 	pc2 *controller.PushChannelController,
 	pcf *controller.PushChannelFormController,
+	msc *controller.MqttSubscriptionController,
 	pus *controller.PushController,
 	ac2 *controller.AlarmController,
 	awc *controller.AlarmWebhookController,
@@ -171,6 +180,7 @@ func ProvideRouteOptions(
 		router.WithProtocolRoutes(pc),
 		router.WithPushChannelRoutes(pc2),
 		router.WithPushChannelFormRoutes(pcf),
+		router.WithMqttSubscriptionRoutes(msc),
 		router.WithPushRoutes(pus),
 		router.WithAlarmRoutes(ac2),
 		router.WithAlarmWebhookRoutes(awc),
@@ -184,6 +194,6 @@ func ProvideRouteOptions(
 		// dsh（AI Agent）调用面：把上述领域路由再挂一遍到 /agentApi（**无鉴权**）。
 		// 刻意放在最后 —— 它复用同一批 controller，与前面各 With* 无顺序依赖。
 		// 风险与暴露清单见 router/agentApiRouter.go。
-		router.WithAgentApiRoutes(uc, dc, ac, cc, rc, pc, pc2, pcf, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc),
+		router.WithAgentApiRoutes(uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc),
 	}
 }
