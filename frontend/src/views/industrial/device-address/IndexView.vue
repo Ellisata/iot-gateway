@@ -4,34 +4,47 @@
 -->
 
 <template>
-  <div class="p-6">
-    <!-- 面包屑导航 -->
-    <div class="flex items-center gap-2 text-sm text-gray-500 mb-4">
-      <el-button text @click="goBack">
-        <el-icon><ArrowLeft /></el-icon>
-        {{ t('deviceAddress.backToList') }}
-      </el-button>
-    </div>
+  <div class="iot-page">
+    <header class="iot-head iot-enter">
+      <div>
+        <button type="button" class="iot-back" @click="goBack">
+          <el-icon><ArrowLeft /></el-icon>
+          {{ t('deviceAddress.backToList') }}
+        </button>
+        <p class="iot-eyebrow">
+          <span class="iot-eyebrow-dot" aria-hidden="true" />
+          {{ t('menu.deviceAddress') }}
+        </p>
+        <h1 class="iot-title">{{ t('deviceAddress.title') }} — {{ deviceObjectName }}</h1>
+        <p class="iot-sub">{{ t('deviceAddress.subtitle') }}</p>
+      </div>
+      <div class="iot-head-aside">
+        <div class="iot-stat">
+          <span class="iot-stat-num">{{ displayTotal }}</span>
+          <span class="iot-stat-label">{{ t('deviceAddress.totalUnit') }}</span>
+        </div>
+      </div>
+    </header>
 
-    <h1 class="text-2xl font-bold text-gray-800 mb-6">
-      {{ t('deviceAddress.title') }} — {{ deviceObjectName }}
-    </h1>
-
-    <!-- 工具栏 -->
-    <el-card shadow="never" class="mb-4">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
+    <!-- 工作区：筛选、批量动作、表格、分页共用一块表面 -->
+    <section ref="panelRef" class="iot-panel iot-enter" style="animation-delay: 60ms">
+      <div class="iot-toolbar">
+        <div class="iot-toolbar-filters">
           <el-input
             v-model="queryForm.name"
+            class="iot-search"
             :placeholder="t('deviceAddress.searchPlaceholder')"
             clearable
-            style="width: 240px"
             @keyup.enter="handleSearch"
-          />
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
           <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
           <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="iot-toolbar-actions">
           <!-- 批量删除放在这一组的最左边，且未勾选时置灰不移除：它是**破坏性**动作，
                和右边的下载/导入/新增不是一类；常驻在固定位置能让人形成固定预期，
                按勾选数变长的文案则让「删几条」在按下确认之前就可见。 -->
@@ -44,8 +57,9 @@
           >
             {{ batchDeleteLabel }}
           </el-button>
+          <span class="iot-sep" aria-hidden="true" />
           <el-button :icon="Download" @click="handleDownloadTemplate">{{ t('common.downloadTemplate') }}</el-button>
-          <el-button type="primary" :icon="Upload" :loading="importing" @click="handleImport">{{ t('common.import') }}</el-button>
+          <el-button :icon="Upload" :loading="importing" @click="handleImport">{{ t('common.import') }}</el-button>
           <!-- 「自动发现点位」。
                协议不支持时**置灰 + 提示，不隐藏** —— 隐藏会让人以为这个功能没做，
                而置灰加一句理由能让人知道"换条路"或"换个协议插件"。
@@ -65,100 +79,173 @@
               </el-button>
             </span>
           </el-tooltip>
-          <el-button type="primary" @click="handleAdd">{{ t('deviceAddress.add') }}</el-button>
+          <el-button type="primary" :icon="Plus" @click="handleAdd">{{ t('deviceAddress.add') }}</el-button>
           <input ref="fileInputRef" type="file" accept=".xlsx" class="hidden" @change="handleFileChange" />
         </div>
       </div>
-    </el-card>
 
-    <!-- 数据表格 -->
-    <el-card shadow="never">
       <el-table
         ref="tableRef"
+        class="iot-table"
         :data="tableData"
         v-loading="loading"
         row-key="id"
-        stripe
         style="width: 100%"
-        border
         @selection-change="handleSelectionChange"
       >
         <!-- 项目里没用 reserve-selection：跨页保留勾选会让「已勾选 N 条」与实际
              能删到的集合不一致（翻页后看不见的行还在里面），批量删除宁可让人重勾。 -->
-        <el-table-column type="selection" width="46" align="center" />
-        <el-table-column type="index" :label="t('common.index')" width="70" align="center" />
-        <el-table-column label="ID" width="190" align="center">
+        <el-table-column type="selection" width="44" align="center" />
+        <!-- 窄屏藏起序号与描述：十来列挤进 1000px 会把创建时间推到固定操作列底下，
+             反而让人以为数据丢了。两者都在宽屏回归。 -->
+        <el-table-column v-if="!compact" type="index" :label="t('common.index')" width="68" align="center" />
+
+        <el-table-column label="ID" width="150">
           <template #default="{ row }">
-            <div class="flex items-center justify-center gap-1">
+            <div class="iot-id-cell">
               <el-tooltip :content="String(row.id)" placement="top">
-                <span class="text-gray-600 truncate max-w-[120px] inline-block align-middle">
-                  {{ row.id }}
-                </span>
+                <span class="iot-id-text">{{ row.id }}</span>
               </el-tooltip>
-              <el-button
-                type="primary"
-                link
-                size="small"
-                :icon="CopyDocument"
-                @click="copyId(row.id)"
-              />
+              <el-tooltip :content="t('common.copy')" placement="top">
+                <button
+                  type="button"
+                  class="iot-copy-btn"
+                  :aria-label="t('common.copy')"
+                  @click="copyId(row.id)"
+                >
+                  <el-icon><CopyDocument /></el-icon>
+                </button>
+              </el-tooltip>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="name" :label="t('deviceAddress.addressName')" min-width="140" />
-        <el-table-column prop="label" :label="t('deviceAddress.tag')" min-width="140" show-overflow-tooltip />
-        <el-table-column prop="dataType" :label="t('deviceAddress.dataType')" width="130" align="center" />
-        <el-table-column prop="commonDataType" :label="t('deviceAddress.commonDataType')" width="140" align="center" />
-        <el-table-column prop="rwPermission" :label="t('deviceAddress.rwPermission')" width="110" align="center">
+
+        <!-- 地址是这一行的身份：小图标底座让「一个点位」在滚动中可被一眼拾取 -->
+        <el-table-column :label="t('deviceAddress.addressName')" min-width="200">
           <template #default="{ row }">
-            <el-tag
-              :type="row.rwPermission === 'RW' ? 'success' : row.rwPermission === 'R' ? 'primary' : 'warning'"
-              size="small"
-            >
-              {{ { R: t('deviceAddress.readonly'), W: t('deviceAddress.writeonly'), RW: t('deviceAddress.readwrite') }[row.rwPermission] || row.rwPermission }}
-            </el-tag>
+            <div class="iot-name-cell">
+              <span class="iot-name-mark" aria-hidden="true">
+                <el-icon><MapPin /></el-icon>
+              </span>
+              <span class="iot-name-text" :title="row.name">{{ row.name }}</span>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column prop="scanFrequency" :label="t('deviceAddress.scanFrequency')" width="120" align="center">
+        <el-table-column
+          prop="label"
+          :label="t('deviceAddress.tag')"
+          min-width="150"
+          show-overflow-tooltip
+          class-name="iot-col-muted"
+        />
+        <el-table-column :label="t('deviceAddress.dataType')" width="130" align="center">
+          <template #default="{ row }">
+            <span v-if="row.dataType" class="iot-chip">{{ row.dataType }}</span>
+            <span v-else class="iot-cell-muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('deviceAddress.commonDataType')" width="140" align="center">
+          <template #default="{ row }">
+            <span v-if="row.commonDataType" class="iot-chip">{{ row.commonDataType }}</span>
+            <span v-else class="iot-cell-muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('deviceAddress.rwPermission')" width="110" align="center">
+          <template #default="{ row }">
+            <span class="iot-pill" :class="rwClass(row.rwPermission)">
+              {{ rwLabel(row.rwPermission) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="t('deviceAddress.scanFrequency')"
+          width="116"
+          align="center"
+          class-name="iot-col-num"
+        >
           <template #default="{ row }">
             {{ row.scanFrequency }} ms
           </template>
         </el-table-column>
-        <el-table-column :label="t('deviceAddress.thresholdAlarm')" width="190" align="center">
+        <el-table-column :label="t('deviceAddress.thresholdAlarm')" width="180" align="center">
           <template #default="{ row }">
-            <el-tag v-if="row.thresholdEnabled !== 1" type="info" size="small">
+            <span v-if="row.thresholdEnabled !== 1" class="iot-pill is-gray">
               {{ t('deviceAddress.thresholdOff') }}
-            </el-tag>
-            <span v-else class="text-xs">
-              {{ conditionText(row) }}
+            </span>
+            <span v-else class="iot-cond">{{ conditionText(row) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          v-if="!compact"
+          prop="description"
+          :label="t('common.description')"
+          min-width="160"
+          show-overflow-tooltip
+          class-name="iot-col-muted"
+        />
+        <el-table-column :label="t('common.status')" width="110" align="center">
+          <template #default="{ row }">
+            <span class="iot-pill" :class="row.status === 1 ? 'is-green' : 'is-rose'">
+              <span class="iot-pill-dot" aria-hidden="true" />
+              {{ row.status === 1 ? t('common.enabled') : t('common.enableDisable.off') }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="description" :label="t('common.description')" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="status" :label="t('common.status')" width="100" align="center">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">
-              {{ row.status === 1 ? t('common.enabled') : t('common.enableDisable.off') }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="createdAt" :label="t('common.createdAt')" width="180" align="center" />
+        <el-table-column
+          prop="createdAt"
+          :label="t('common.createdAt')"
+          width="160"
+          class-name="iot-col-time"
+        />
         <el-table-column :label="t('common.action')" width="100" align="center" fixed="right">
           <template #default="{ row }">
-            <div class="flex items-center justify-center gap-2">
+            <div class="iot-row-actions">
               <el-tooltip :content="t('common.edit')" placement="top">
-                <el-button type="primary" link size="small" :icon="EditPen" @click="handleEdit(row)" />
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="EditPen"
+                  :aria-label="t('common.edit')"
+                  @click="handleEdit(row)"
+                />
               </el-tooltip>
               <el-tooltip :content="t('common.delete')" placement="top">
-                <el-button type="danger" link size="small" :icon="Delete" @click="handleDelete(row)" />
+                <el-button
+                  class="iot-row-btn"
+                  type="danger"
+                  link
+                  size="small"
+                  :icon="Delete"
+                  :aria-label="t('common.delete')"
+                  @click="handleDelete(row)"
+                />
               </el-tooltip>
             </div>
           </template>
         </el-table-column>
+
+        <template #empty>
+          <div class="iot-empty">
+            <span class="iot-empty-mark" aria-hidden="true">
+              <el-icon><MapPin /></el-icon>
+            </span>
+            <p class="iot-empty-title">
+              {{ queryForm.name
+                ? t('deviceAddress.emptySearch', { name: queryForm.name })
+                : t('deviceAddress.emptyTitle') }}
+            </p>
+            <p v-if="!queryForm.name" class="iot-empty-hint">{{ t('deviceAddress.emptyHint') }}</p>
+            <el-button v-if="queryForm.name" @click="handleReset">{{ t('common.reset') }}</el-button>
+            <el-button v-else type="primary" :icon="Plus" @click="handleAdd">
+              {{ t('deviceAddress.add') }}
+            </el-button>
+          </div>
+        </template>
       </el-table>
 
-      <!-- 分页 -->
-      <div class="flex justify-end mt-4">
+      <div class="iot-pager">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
@@ -170,11 +257,12 @@
           @current-change="fetchList"
         />
       </div>
-    </el-card>
+    </section>
 
     <!-- ========== 新增 / 编辑 对话框 ========== -->
     <el-dialog
       v-model="dialogVisible"
+      class="iot-dialog"
       :title="isEdit ? t('deviceAddress.editTitle') : t('deviceAddress.addTitle')"
       width="620px"
       :close-on-click-modal="false"
@@ -224,7 +312,7 @@
             </el-popover>
           </div>
           <!-- 常驻提示：占位符一输入就消失，而地址格式正是最需要一直看见的信息 -->
-          <div v-if="addressExample" class="w-full text-xs text-gray-400 leading-5 mt-1">
+          <div v-if="addressExample" class="iot-form-hint is-block">
             {{ t('deviceAddress.addressHint', { protocol: protocolName, example: addressExample }) }}
           </div>
         </el-form-item>
@@ -288,7 +376,7 @@
             :active-text="t('common.enabled')"
             :inactive-text="t('common.enableDisable.off')"
           />
-          <div class="w-full text-xs text-gray-400 leading-5 mt-1">
+          <div class="iot-form-hint is-block">
             {{ conditionUnsupported ? t('deviceAddress.opUnsupportedKind') : t('deviceAddress.thresholdHint') }}
           </div>
         </el-form-item>
@@ -400,7 +488,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -408,7 +496,9 @@ import {
   IconCopy as CopyDocument,
   IconDownload as Download,
   IconHelpCircleFilled as QuestionFilled,
+  IconMapPin as MapPin,
   IconPencil as EditPen,
+  IconPlus as Plus,
   IconSearch as Search,
   IconTrash as Delete,
   IconUpload as Upload,
@@ -562,6 +652,18 @@ const total = ref(0)
 const loading = ref(false)
 const tableData = ref([])
 
+// 首屏还没拿到数时显示占位符而不是 0：「0 个点位」是一个会被信以为真的假事实
+const displayTotal = computed(() =>
+  loading.value && tableData.value.length === 0 ? '—' : total.value,
+)
+
+// ---------- 窄屏列裁剪 ----------
+// 判据取**工作区的真实宽度**而不是窗口宽度：侧栏折叠后同一窗口会多出 176px，
+// 按 window.innerWidth 判断会在折叠后仍少显示两列。
+const panelRef = ref(null)
+const compact = ref(false)
+let panelObserver = null
+
 // ---------- 勾选（批量删除） ----------
 const tableRef = ref(null)
 const selectedRows = ref([])
@@ -698,7 +800,7 @@ async function handleDelete(row) {
       cancelButtonText: t('common.cancel'),
     })
     await deleteDeviceAddress(row.id)
-    ElMessage.success(t('protocol.deleteSuccess'))
+    ElMessage.success(t('deviceAddress.deleteSuccess'))
     fetchList()
   } catch {
     // 用户取消或删除失败，不做处理
@@ -914,6 +1016,21 @@ function boolLabel(v) {
   return v === '1' ? t('deviceAddress.boolTrue') : t('deviceAddress.boolFalse')
 }
 
+// 读写权限：胶囊只区分三种语义，不把 R/W/RW 直接当颜色码
+function rwClass(permission) {
+  if (permission === 'RW') return 'is-green'
+  if (permission === 'R') return 'is-blue'
+  return 'is-amber'
+}
+
+function rwLabel(permission) {
+  return {
+    R: t('deviceAddress.readonly'),
+    W: t('deviceAddress.writeonly'),
+    RW: t('deviceAddress.readwrite'),
+  }[permission] || permission || '—'
+}
+
 // ---------- 提交 ----------
 async function handleSubmit() {
   if (!formRef.value) return
@@ -947,15 +1064,15 @@ async function handleSubmit() {
     if (isEdit.value) {
       payload.id = formData.id
       await updateDeviceAddress(payload)
-      ElMessage.success(t('protocol.editSuccess'))
+      ElMessage.success(t('deviceAddress.editSuccess'))
     } else {
       await addDeviceAddress(payload)
-      ElMessage.success(t('protocol.addSuccess'))
+      ElMessage.success(t('deviceAddress.addSuccess'))
     }
     dialogVisible.value = false
     fetchList()
   } catch (err) {
-    
+
   } finally {
     submitting.value = false
   }
@@ -963,8 +1080,30 @@ async function handleSubmit() {
 
 // ---------- 初始化 ----------
 onMounted(() => {
+  // 十来列的固定宽度合计远超 1400px，低于 1550 就切到紧凑列 —— 差几个像素时表格
+  // 会横向滚动，固定操作列又会盖住创建时间，不如少两列让关键字段完整可见
+  if (typeof ResizeObserver !== 'undefined' && panelRef.value) {
+    panelObserver = new ResizeObserver(([entry]) => {
+      compact.value = entry.contentRect.width < 1550
+    })
+    panelObserver.observe(panelRef.value)
+  }
   fetchList()
   fetchDataTypes()
   fetchPointCapability()
 })
+
+onBeforeUnmount(() => {
+  panelObserver?.disconnect()
+})
 </script>
+
+<style scoped>
+/* 报警条件摘要：与地址/类型同属技术标识，用弱化的等宽字体 */
+.iot-cond {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+</style>

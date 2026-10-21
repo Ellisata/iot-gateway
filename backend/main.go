@@ -93,6 +93,12 @@ func runGateway(stop <-chan struct{}) error {
 		logger.Error("mqtt subscription manager start failed: %v", err)
 	}
 
+	// 5.2 启动大盘遥测采样器。
+	//
+	// 越早启动越好：趋势图的横轴从「本次运行」开始，晚启动只会让前几分钟
+	// 永远缺采样点。采样器只读各组件状态，不改变任何启动顺序。
+	deps.DashboardSampler.Start()
+
 	// 6. 启动报警通知器（把报警推送到钉钉/企微/飞书等 Webhook）。
 	//
 	// 必须在报警巡检与采集引擎之前启动：Dispatcher 未启动时 Notify 会把事件
@@ -166,6 +172,8 @@ func runGateway(stop <-chan struct{}) error {
 	// RuntimeConfig 注册在最末，因此**最先**执行：先关掉「运行开关」的更新入口，
 	// 避免停机过程中还有请求把刚停掉的 discovery 重新拉起来。
 	defer deps.RuntimeConfig.Close()
+	// 采样器最后注册、最先停止：停机过程中不再往趋势里写入半停机状态的采样点。
+	defer deps.DashboardSampler.Stop()
 
 	// 10. 启动 HTTP 服务器。使用 http.Server 而非 gin 的 Run，以便服务模式下优雅停机。
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

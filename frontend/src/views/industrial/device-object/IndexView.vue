@@ -797,7 +797,7 @@ async function handleDelete(row) {
       cancelButtonText: t('common.cancel'),
     })
     await deleteDeviceObject(row.id)
-    ElMessage.success(t('protocol.deleteSuccess'))
+    ElMessage.success(t('deviceObject.deleteSuccess'))
     fetchList()
   } catch {
     // 用户取消或删除失败，不做处理
@@ -936,16 +936,16 @@ async function handleSubmit() {
     if (isEdit.value) {
       payload.id = formData.id
       await updateDeviceObject(payload)
-      ElMessage.success(t('protocol.editSuccess'))
+      ElMessage.success(t('deviceObject.editSuccess'))
     } else {
       console.log(payload);
       await addDeviceObject(payload)
-      ElMessage.success(t('protocol.addSuccess'))
+      ElMessage.success(t('deviceObject.addSuccess'))
     }
     dialogVisible.value = false
     fetchList()
   } catch (err) {
-    const msg = isEdit.value ? t('protocol.editFailed') : t('protocol.addFailed')
+    const msg = isEdit.value ? t('deviceObject.editFailed') : t('deviceObject.addFailed')
     console.error(msg, err)
     ElMessage.error(err?.response?.data?.msg || err?.message || msg)
   } finally {
@@ -972,19 +972,8 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* 页面级 token 与首页/登录页同一套：白面、雾蓝画布、slate 文字，强调色只有一种蓝 */
+/* 色板与字体来自 styles/tokens.css，页面只管版式 */
 .device-page {
-  --surface: #fff;
-  --line: #e6ebf2;
-  --line-soft: #eef2f7;
-  --ink: #0f172a;
-  --ink-2: #475569;
-  --ink-3: #64748b;
-  --ink-4: #94a3b8;
-  --brand: #2563eb;
-  --brand-soft: #eff5ff;
-  --danger: #e11d48;
-
   max-width: 1400px;
   margin: 0 auto;
 }
@@ -1228,7 +1217,7 @@ onBeforeUnmount(() => {
 .id-text {
   overflow: hidden;
   max-width: 96px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--ink-4);
   text-overflow: ellipsis;

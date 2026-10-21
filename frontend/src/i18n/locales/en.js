@@ -115,6 +115,8 @@ export default {
     profile: 'Profile',
     changePassword: 'Change Password',
     logout: 'Sign Out',
+    resizeSidebar: 'Resize navigation',
+    resizeSidebarHint: 'Drag to resize the navigation, double-click to reset',
   },
 
   // ---------- Change password ----------
@@ -173,6 +175,45 @@ export default {
     addressCount: 'Address Count',
     totalErrors: 'Total Errors',
     viewDevices: 'View devices',
+
+    // ---------- Collection telemetry ----------
+    trendTitle: 'Collection telemetry',
+    trendSummary: '{rate} online ({online}/{collected}) · {points} pts/min',
+    trendRange: 'Time range',
+    trendRange6h: '6 hours',
+    trendRange24h: '24 hours',
+    trendLoading: 'Loading telemetry...',
+    trendEmpty: 'Trend starts accumulating when the gateway starts',
+    trendAccumulating: 'One sample per minute · {minutes} min so far',
+    trendRunningSince: 'This run · {minutes} min collected',
+    trendStopped: 'Collection stopped',
+    trendOnlineRate: 'Online rate',
+    trendThroughput: 'Collection throughput',
+    trendPerMinute: 'pts/min',
+    trendBadPoints: '{n} bad',
+    trendNoOverview: 'Online data unavailable',
+
+    // ---------- Recent events ----------
+    recentEvents: 'Recent events',
+    eventNoActive: 'No active alarms',
+    eventsLoading: 'Loading events...',
+    eventsEmpty: 'No alarms since this run started',
+    eventsEmptyHint: 'Device disconnects, recoveries and point issues appear here in time order.',
+
+    // ---------- Data outlet ----------
+    dataOutlet: 'Data outlet',
+    outletChannels: '{n} channels',
+    outletConnectedCount: '{connected}/{total} connected',
+    outletQueue: 'Queue {n}',
+    outletSpool: 'Backlog {n}',
+    outletLastSuccess: 'Last success {time}',
+    outletStopped: 'Stopped',
+    outletConnected: 'Connected',
+    outletDisconnected: 'Disconnected',
+    outletMore: '{n} more channels',
+    outletEmpty: 'No push channels configured',
+    outletEmptyHint: 'Once configured, connection state, queue and offline backlog appear here.',
+    outletConfigure: 'Configure',
   },
 
   // ---------- Device objects ----------
@@ -187,6 +228,11 @@ export default {
     add: 'Add Device Object',
     editTitle: 'Edit Device Object',
     addTitle: 'Add Device Object',
+    addSuccess: 'Added successfully',
+    editSuccess: 'Updated successfully',
+    deleteSuccess: 'Deleted successfully',
+    addFailed: 'Add failed',
+    editFailed: 'Update failed',
     protocol: 'Protocol',
     searchNameRequired: 'Please enter device object name',
     nameLength: 'Name must be 1-100 characters',
@@ -226,10 +272,18 @@ export default {
   deviceAddress: {
     backToList: 'Back to Device Objects',
     title: 'Device Address Tags',
+    subtitle: 'This device point table: address syntax, types, access permissions and scan intervals live here.',
+    totalUnit: 'points',
+    emptyTitle: 'No address tags yet',
+    emptyHint: 'Add an address, or use Point Discovery to scan a batch of candidate addresses from the device.',
+    emptySearch: 'No point matches "{name}"',
     searchPlaceholder: 'Search by address name',
     add: 'Add Address',
     editTitle: 'Edit Device Address',
     addTitle: 'Add Device Address',
+    addSuccess: 'Added successfully',
+    editSuccess: 'Updated successfully',
+    deleteSuccess: 'Deleted successfully',
     tag: 'Tag',
     dataType: 'Data Type',
     commonDataType: 'Common Data Type',
@@ -398,6 +452,9 @@ export default {
   // ---------- LAN device scan ----------
   deviceScan: {
     intro: 'Scan the subnets this gateway is attached to, find reachable PLCs and meters, then create devices from the results in one click.',
+    foundUnit: 'devices found',
+    configTitle: 'Scan settings',
+    progressTitle: 'Scan progress',
     disabled: 'LAN device scan is disabled (deviceScan.enabled). An administrator can enable it in the gateway config file and restart.',
     noProtocol: 'No plugin declares LAN scan capability. Make sure a scan-capable protocol plugin is installed (for example iot-driver-modbus).',
     noSubnet: 'This host has no usable IPv4 subnet, so there is nothing to scan. Check that the gateway is connected to the target network.',
@@ -424,7 +481,9 @@ export default {
     pollTimeout: 'Stopped refreshing the scan progress. Check the device list for results, or scan again.',
     scanningHint: 'Scanning. Found devices will show up here as they are discovered.',
     noResult: 'No device found yet.',
+    emptyHint: 'Pick your subnets and start a scan — discovered devices appear here as they are found.',
     resultTitle: 'Scan results',
+    resultHint: 'Select devices, fill in names and descriptions, then create them in one batch.',
     addDevices: 'Add as devices ({n})',
     noSelection: 'Select the devices to add first',
     addDialogTitle: 'Add as devices',
@@ -436,6 +495,7 @@ export default {
     duplicateSkip: 'Skip these',
     copied: 'Connection config copied',
     copyFailed: 'Copy failed; please select the text manually',
+    copyJson: 'Copy connection config',
     state: {
       running: 'Scanning',
       done: 'Finished',
@@ -458,6 +518,10 @@ export default {
   // ---------- Realtime device data ----------
   realtime: {
     title: 'Realtime Device Data',
+    subtitle: 'Values refresh on each poll; quality codes and collector state tell you whether they can be trusted.',
+    pointUnit: 'points',
+    emptyTitle: 'No realtime data yet',
+    emptyHint: 'Once the device is online and has enabled address tags, values will appear here.',
     backToList: 'Back to Device Objects',
     searchPlaceholder: 'Search by point name or label',
     autoRefresh: 'Auto Refresh',
@@ -512,6 +576,11 @@ export default {
   // Protocols are supplied by plugins only: no "add" and no "delete";
   // instead there is "restore default form" (take the plugin's current one).
   protocol: {
+    subtitle: 'Protocol rows come from plugins; manage display metadata here and edit form templates in Protocol Form Designer.',
+    totalUnit: 'protocols',
+    emptyTitle: 'No protocols yet',
+    emptyHint: 'Install or upload a protocol plugin and the gateway registers its protocol rows automatically.',
+    emptySearch: 'No protocol matches "{name}"',
     searchPlaceholder: 'Search by protocol name',
     editTitle: 'Edit Protocol',
     sort: 'Sort',
@@ -561,6 +630,11 @@ export default {
 
   // ---------- Channels ----------
   channel: {
+    subtitle: 'Channels that push collected data to external systems; connection parameters are defined by the channel form.',
+    totalUnit: 'channels',
+    emptyTitle: 'No push channels yet',
+    emptyHint: 'Add a channel, choose its type and fill in the connection parameters.',
+    emptySearch: 'No channel matches "{name}"',
     searchPlaceholder: 'Search by channel name',
     add: 'Add Channel',
     editTitle: 'Edit Channel',
@@ -591,6 +665,10 @@ export default {
   subscription: {
     subtitle: 'Subscribe to external MQTT topics, map JSON payloads to collection records, and write them into enabled TDengine / InfluxDB push channels',
     statusAutoRefresh: 'Runtime status refreshes every 5 seconds',
+    totalUnit: 'subscriptions',
+    emptyTitle: 'No MQTT subscriptions yet',
+    emptyHint: 'Add a subscription to map external MQTT payloads into collection records and push them to channels.',
+    emptySearch: 'No subscription matches the current filters',
     searchPlaceholder: 'Search by subscription name',
     statusAll: 'All statuses',
     add: 'Add Subscription',
@@ -713,6 +791,9 @@ export default {
 
   subscriptionDevicePoint: {
     subtitle: 'Devices and points seen in subscription payloads (sample values excluded)',
+    totalUnit: 'points',
+    emptyTitle: 'No subscribed points yet',
+    emptyHint: 'Once a subscription receives payloads, its devices and points appear here automatically.',
     firstSeenAt: 'First Seen',
     lastSeenAt: 'Last Seen',
     fetchFailed: 'Failed to load subscription device points',
@@ -720,6 +801,11 @@ export default {
 
   // ---------- Alarms ----------
   alarm: {
+    subtitle: 'Alarm events grouped by device, channel and point; status and level decide how soon they need attention.',
+    totalUnit: 'alarms',
+    emptyTitle: 'No alarms',
+    emptyHint: 'No alarm events in the current scope; new ones will appear here automatically.',
+    emptySearch: 'No alarm matches the current filters',
     deviceTitle: 'Device Alarms',
     channelTitle: 'Channel Alarms',
     pointTitle: 'Point Alarms',
@@ -734,6 +820,12 @@ export default {
     typeChannel: 'Channel',
     typePoint: 'Point',
     alarmTypeCol: 'Alarm Type',
+    // Event type labels: the backend hardcodes Chinese alarmTypeName, so the UI
+    // translates from alarmType itself (shared by the dashboard feed and alarm table).
+    alarmTypeOffline: 'Offline alarm',
+    alarmTypeQuality: 'Quality alarm',
+    alarmTypeThreshold: 'Threshold alarm',
+    alarmTypeRecover: 'Recovery',
     level: 'Level',
     levelCritical: 'Critical',
     levelError: 'Error',
@@ -750,6 +842,10 @@ export default {
   thresholdRecord: {
     title: 'Limit Records',
     hint: 'Every out-of-range sample is recorded (at most one per minute within a continuous excursion). Unlike "Point Limit Alarms", which need 3 consecutive breaching rounds, brief spikes appear only here. Keeps the last 7 days up to 20000 rows, older rows are pruned automatically.',
+    totalUnit: 'records',
+    emptyTitle: 'No limit records',
+    emptyHint: 'Each time a point crosses its alarm condition, the sample is recorded here.',
+
     searchPlaceholder: 'Search by point name',
     device: 'Device',
     point: 'Point',
@@ -804,6 +900,11 @@ export default {
 
   // ---------- Alarm Notifications (DingTalk / WeCom / Feishu / custom webhook) ----------
   alarmWebhook: {
+    subtitle: 'Push alarm events to WeCom, DingTalk, Feishu or a custom webhook; runtime health shows each channel queue.',
+    totalUnit: 'notifications',
+    emptyTitle: 'No notifications yet',
+    emptyHint: 'Add a notification to push alarm events to an external channel.',
+    emptySearch: 'No notification matches "{name}"',
     searchPlaceholder: 'Search by name',
     add: 'Add Notification',
     editTitle: 'Edit Notification',
@@ -859,6 +960,11 @@ export default {
 
   // ---------- Logs ----------
   log: {
+    subtitle: 'Inspect log files on this gateway; read the last few hundred lines when troubleshooting on site.',
+    filesTitle: 'Log Files',
+    totalUnit: 'files',
+    emptyTitle: 'No log files yet',
+    emptyHint: 'The gateway writes .log files into its log directory once it runs.',
     filesHint: '.log files in the log directory (sorted by modified time, descending)',
     fileName: 'File Name',
     size: 'Size',
@@ -873,6 +979,11 @@ export default {
 
   // ---------- API keys ----------
   apiKey: {
+    subtitle: 'Access keys for calling open APIs; the default key is announced on the LAN and cannot be removed or renamed.',
+    listTitle: 'Access Keys',
+    totalUnit: 'keys',
+    emptyTitle: 'No access keys yet',
+    emptyHint: 'Add a key to call the open APIs.',
     hint: 'Access keys for calling open APIs. Keep them safe after creation.',
     add: 'Add Key',
     keyContent: 'Key',
@@ -898,6 +1009,7 @@ export default {
 
   // ---------- Channel form designer ----------
   channelForm: {
+    subtitle: 'Design the connection parameter form for a channel — creating a channel collects parameters with it.',
     selectChannel: 'Select Channel:',
     selectChannelBtn: 'Select Channel',
     selectFirst: 'Please select a channel first',
@@ -909,6 +1021,7 @@ export default {
 
   // ---------- Protocol form designer ----------
   protocolForm: {
+    subtitle: 'Design the dynamic form for a protocol — device objects collect protocol parameters with it in step two.',
     selectProtocol: 'Select Protocol:',
     selectProtocolBtn: 'Select Protocol',
     selectFirst: 'Please select a protocol first',
@@ -920,6 +1033,9 @@ export default {
 
   // ---------- Selector components ----------
   selector: {
+    rowHint: 'Click any row to select that protocol.',
+    emptyTitle: 'No protocols available',
+    emptySearch: 'No protocol matches "{keyword}"',
     selectChannel: 'Select channel',
     selectAlarmWebhookType: 'Select notification type',
     selectProtocol: 'Select protocol',
@@ -935,6 +1051,10 @@ export default {
   // ---------- Excel import ----------
   excelImport: {
     resultTitle: 'Import Result',
+    totalLabel: 'Total',
+    successLabel: 'Succeeded',
+    failedLabel: 'Failed',
+    errorLead: 'These records were not imported — fix the reasons and import again.',
     total: 'Total {total} items',
     success: '{n} succeeded',
     failed: '{n} failed',
@@ -958,6 +1078,9 @@ export default {
 
   // ---------- System settings ----------
   systemSettings: {
+    subtitle: 'Maintain this gateway identity; the ID and version are generated by the system and synced on each start.',
+    identityTitle: 'Gateway Identity',
+    identityHint: 'Read-only fields are system-maintained; edit the name and description here.',
     id: 'Gateway ID',
     copyId: 'Copy Gateway ID',
     idCopied: 'Gateway ID copied',
@@ -978,6 +1101,7 @@ export default {
   runtimeConfig: {
     title: 'Runtime Switches',
     subtitle: 'These switches control gateway runtime behavior. Defaults come from default.yaml; changes here are stored in the database and override the defaults across restarts.',
+    overrideUnit: 'overrides',
     introTitle: 'Defaults and overrides',
     intro: 'Unchanged items use the value from default.yaml. Changes made here are saved as overrides and take precedence; Restore default removes the override. Items marked restart required take effect after the gateway restarts.',
     hotBadge: 'Applies immediately',

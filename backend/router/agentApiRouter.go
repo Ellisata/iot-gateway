@@ -62,6 +62,7 @@ func AgentApiRoutes(
 	plc *controller.PluginController,
 	dsc *controller.DeviceScanController,
 	scc *controller.SystemConfigController,
+	dbc *controller.DashboardController,
 ) {
 	g := r.Group(AgentApiPrefix)
 	{
@@ -80,6 +81,9 @@ func AgentApiRoutes(
 		// 采集与实时值
 		CollectionRoutes(g, cc)
 		RealtimeRoutes(g, rc)
+
+		// 大盘聚合（只读）
+		DashboardRoutes(g, dbc)
 
 		// 协议与推送
 		ProtocolRoutes(g, pc)

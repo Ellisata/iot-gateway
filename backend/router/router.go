@@ -187,6 +187,13 @@ func WithSystemConfigRoutes(scc *controller.SystemConfigController) RouteOption 
 	}
 }
 
+// WithDashboardRoutes 大盘聚合数据模块路由选项
+func WithDashboardRoutes(dbc *controller.DashboardController) RouteOption {
+	return func(r *gin.Engine) {
+		DashboardRoutes(r, dbc)
+	}
+}
+
 // WithAgentApiRoutes dsh（AI Agent）调用面路由选项（**无鉴权**）。
 //
 // 与其余 With* 的差别：它是**整组**挂载 —— 把各领域路由的同一份定义再挂一遍到
@@ -211,8 +218,9 @@ func WithAgentApiRoutes(
 	plc *controller.PluginController,
 	dsc *controller.DeviceScanController,
 	scc *controller.SystemConfigController,
+	dbc *controller.DashboardController,
 ) RouteOption {
 	return func(r *gin.Engine) {
-		AgentApiRoutes(r, uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc)
+		AgentApiRoutes(r, uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc)
 	}
 }

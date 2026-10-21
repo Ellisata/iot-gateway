@@ -4,30 +4,45 @@
 -->
 
 <template>
-  <div class="p-6">
-    <div class="flex items-end justify-between mb-6">
+  <div class="iot-page">
+    <!-- 页头：与工业物联网 / 数据推送各页同一套层级；右侧是自动刷新提示与订阅数 -->
+    <header class="iot-head iot-enter">
       <div>
-        <h1 class="text-2xl font-bold text-gray-800">{{ t('menu.mqttSubscription') }}</h1>
-        <p class="text-sm text-gray-500 mt-1">{{ t('subscription.subtitle') }}</p>
+        <p class="iot-eyebrow">
+          <span class="iot-eyebrow-dot" aria-hidden="true" />
+          {{ t('menu.subscription') }}
+        </p>
+        <h1 class="iot-title">{{ t('menu.mqttSubscription') }}</h1>
+        <p class="iot-sub">{{ t('subscription.subtitle') }}</p>
       </div>
-      <div class="flex items-center gap-2 text-sm text-gray-500">
-        <el-icon><Refresh /></el-icon>
-        <span>{{ t('subscription.statusAutoRefresh') }}</span>
+      <div class="iot-head-aside">
+        <span class="refresh-note">
+          <el-icon class="refresh-note-icon"><Refresh /></el-icon>
+          {{ t('subscription.statusAutoRefresh') }}
+        </span>
+        <div class="iot-stat">
+          <span class="iot-stat-num">{{ displayTotal }}</span>
+          <span class="iot-stat-label">{{ t('subscription.totalUnit') }}</span>
+        </div>
       </div>
-    </div>
+    </header>
 
-    <!-- 工具栏 -->
-    <el-card shadow="never" class="mb-4">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
+    <!-- 工作区：筛选、状态、表格、分页共用一块表面 -->
+    <section class="iot-panel iot-enter" style="animation-delay: 60ms">
+      <div class="iot-toolbar">
+        <div class="iot-toolbar-filters">
           <el-input
             v-model="queryForm.name"
+            class="iot-search"
             :placeholder="t('subscription.searchPlaceholder')"
             clearable
-            style="width: 240px"
             @keyup.enter="handleSearch"
-          />
-          <el-select v-model="queryForm.status" style="width: 130px">
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
+          <el-select v-model="queryForm.status" class="status-filter">
             <el-option :label="t('subscription.statusAll')" :value="''" />
             <el-option :label="t('common.enabled')" :value="1" />
             <el-option :label="t('common.disabled')" :value="0" />
@@ -35,77 +50,127 @@
           <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
           <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
         </div>
-        <el-button type="primary" @click="handleAdd">{{ t('subscription.add') }}</el-button>
+        <div class="iot-toolbar-actions">
+          <el-button type="primary" :icon="Plus" @click="handleAdd">{{ t('subscription.add') }}</el-button>
+        </div>
       </div>
-    </el-card>
 
-    <!-- 数据表格 -->
-    <el-card shadow="never">
-      <el-table :data="tableData" v-loading="loading" stripe style="width: 100%" border>
-        <el-table-column type="index" :label="t('common.index')" width="65" align="center" />
-        <el-table-column prop="name" :label="t('common.name')" min-width="150" show-overflow-tooltip>
+      <el-table class="iot-table" :data="tableData" v-loading="loading" style="width: 100%">
+        <el-table-column type="index" :label="t('common.index')" width="68" align="center" />
+
+        <!-- 名称是这一行的身份；描述作为第二行，避免再占一列 -->
+        <el-table-column :label="t('common.name')" min-width="210">
           <template #default="{ row }">
-            <div class="font-medium text-gray-800">{{ row.name }}</div>
-            <div v-if="row.description" class="text-xs text-gray-400 truncate">{{ row.description }}</div>
+            <div class="iot-name-cell">
+              <span class="iot-name-mark" aria-hidden="true">
+                <el-icon><Message /></el-icon>
+              </span>
+              <div class="sub-name-copy">
+                <span class="iot-name-text" :title="row.name">{{ row.name }}</span>
+                <span v-if="row.description" class="sub-name-desc" :title="row.description">
+                  {{ row.description }}
+                </span>
+              </div>
+            </div>
           </template>
         </el-table-column>
         <el-table-column :label="t('subscription.broker')" min-width="170" show-overflow-tooltip>
           <template #default="{ row }">
-            <span class="font-mono text-xs">{{ row.broker }}{{ row.port ? ':' + row.port : '' }}</span>
+            <span class="iot-mono">{{ row.broker }}{{ row.port ? ':' + row.port : '' }}</span>
           </template>
         </el-table-column>
         <el-table-column :label="t('subscription.topic')" min-width="190" show-overflow-tooltip>
           <template #default="{ row }">
-            <span class="font-mono text-xs">{{ row.topic }}</span>
+            <span class="iot-mono">{{ row.topic }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="qos" label="QoS" width="70" align="center" />
-        <el-table-column :label="t('subscription.runtime')" width="160" align="center">
+        <el-table-column label="QoS" width="78" align="center">
+          <template #default="{ row }">
+            <span class="iot-chip">QoS {{ row.qos }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('subscription.runtime')" width="180">
           <template #default="{ row }">
             <!-- 停用的订阅不参与运行：显示占位符，避免误读成「连接失败」 -->
-            <span v-if="row.status !== 1" class="text-xs text-gray-400">—</span>
-            <template v-else>
-              <el-tag v-if="statusOf(row) && statusOf(row).connected" type="success" size="small" effect="light">
-                {{ t('subscription.connected') }}
-              </el-tag>
-              <el-tag
-                v-else-if="statusOf(row) && statusOf(row).running"
-                type="warning"
-                size="small"
-                effect="light"
-              >
-                {{ t('subscription.reconnecting') }}
-              </el-tag>
-              <el-tag v-else type="info" size="small" effect="light">{{ t('subscription.disconnected') }}</el-tag>
-              <div v-if="statusOf(row)" class="text-xs text-gray-400 mt-1">
+            <span v-if="row.status !== 1" class="iot-cell-muted">—</span>
+            <div v-else class="runtime-cell">
+              <span class="iot-pill" :class="runtimeClass(row)">
+                <span class="iot-pill-dot" aria-hidden="true" />
+                {{ runtimeText(row) }}
+              </span>
+              <span v-if="statusOf(row)" class="runtime-counts">
                 {{ t('subscription.counts', { messages: statusOf(row).messages, records: statusOf(row).records }) }}
-              </div>
-            </template>
+              </span>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.status')" width="90" align="center">
+        <el-table-column :label="t('common.status')" width="110" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
+            <span class="iot-pill" :class="row.status === 1 ? 'is-green' : 'is-gray'">
+              <span class="iot-pill-dot" aria-hidden="true" />
               {{ row.status === 1 ? t('common.enabled') : t('common.disabled') }}
-            </el-tag>
+            </span>
           </template>
         </el-table-column>
-        <el-table-column prop="updatedAt" :label="t('common.updatedAt')" width="165" align="center" />
+        <el-table-column
+          prop="updatedAt"
+          :label="t('common.updatedAt')"
+          width="160"
+          class-name="iot-col-time"
+        />
         <el-table-column :label="t('common.action')" width="110" align="center" fixed="right">
           <template #default="{ row }">
-            <div class="flex items-center justify-center gap-2">
+            <div class="iot-row-actions">
               <el-tooltip :content="t('common.edit')" placement="top">
-                <el-button type="primary" link size="small" :icon="EditPen" @click="handleEdit(row)" />
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="EditPen"
+                  :aria-label="t('common.edit')"
+                  @click="handleEdit(row)"
+                />
               </el-tooltip>
               <el-tooltip :content="t('common.delete')" placement="top">
-                <el-button type="danger" link size="small" :icon="Delete" @click="handleDelete(row)" />
+                <el-button
+                  class="iot-row-btn"
+                  type="danger"
+                  link
+                  size="small"
+                  :icon="Delete"
+                  :aria-label="t('common.delete')"
+                  @click="handleDelete(row)"
+                />
               </el-tooltip>
             </div>
           </template>
         </el-table-column>
+
+        <template #empty>
+          <div class="iot-empty">
+            <span class="iot-empty-mark" aria-hidden="true">
+              <el-icon><Message /></el-icon>
+            </span>
+            <p class="iot-empty-title">
+              {{ queryForm.name || queryForm.status !== ''
+                ? t('subscription.emptySearch')
+                : t('subscription.emptyTitle') }}
+            </p>
+            <p v-if="!queryForm.name && queryForm.status === ''" class="iot-empty-hint">
+              {{ t('subscription.emptyHint') }}
+            </p>
+            <el-button v-if="queryForm.name || queryForm.status !== ''" @click="handleReset">
+              {{ t('common.reset') }}
+            </el-button>
+            <el-button v-else type="primary" :icon="Plus" @click="handleAdd">
+              {{ t('subscription.add') }}
+            </el-button>
+          </div>
+        </template>
       </el-table>
 
-      <div class="flex justify-end mt-4">
+      <div class="iot-pager">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
@@ -117,11 +182,12 @@
           @current-change="handleCurrentChange"
         />
       </div>
-    </el-card>
+    </section>
 
     <!-- 新增 / 编辑 对话框 -->
     <el-dialog
       v-model="dialogVisible"
+      class="iot-dialog subscription-dialog"
       :title="isEdit ? t('subscription.editTitle') : t('subscription.addTitle')"
       width="1000px"
       top="4vh"
@@ -137,331 +203,339 @@
           label-position="right"
           status-icon
         >
-          <el-divider content-position="left">{{ t('subscription.basicInfo') }}</el-divider>
-
-          <div class="grid grid-cols-2 gap-x-6">
-            <el-form-item :label="t('common.name')" prop="name">
-              <el-input v-model="formData.name" :placeholder="t('subscription.namePlaceholder')" maxlength="100" />
-            </el-form-item>
-            <el-form-item :label="t('subscription.broker')" prop="broker">
-              <el-input v-model="formData.broker" :placeholder="t('subscription.brokerPlaceholder')" />
-            </el-form-item>
-            <el-form-item :label="t('subscription.port')">
-              <el-input v-model="formData.port" :placeholder="t('subscription.portPlaceholder')" />
-            </el-form-item>
-            <el-form-item :label="t('subscription.clientId')">
-              <el-input v-model="formData.clientId" :placeholder="t('subscription.clientIdPlaceholder')" />
-            </el-form-item>
-            <el-form-item :label="t('subscription.username')">
-              <el-input v-model="formData.username" :placeholder="t('subscription.optional')" />
-            </el-form-item>
-            <el-form-item :label="t('subscription.password')">
-              <el-input
-                v-model="formData.password"
-                type="password"
-                show-password
-                :placeholder="t('subscription.optional')"
-              />
-            </el-form-item>
-            <el-form-item :label="t('subscription.topic')" prop="topic" class="col-span-2">
-              <el-input v-model="formData.topic" :placeholder="t('subscription.topicPlaceholder')">
-                <template #append>
-                  <span class="text-xs">{{ t('subscription.topicWildcardHint') }}</span>
-                </template>
-              </el-input>
-            </el-form-item>
-            <el-form-item :label="t('subscription.qos')">
-              <el-select v-model="formData.qos" style="width: 100%">
-                <el-option :value="0" label="0 — at most once" />
-                <el-option :value="1" label="1 — at least once" />
-                <el-option :value="2" label="2 — exactly once" />
-              </el-select>
-            </el-form-item>
-            <el-form-item :label="t('common.status')">
-              <el-switch
-                v-model="formData.status"
-                :active-value="1"
-                :inactive-value="0"
-                :active-text="t('common.enabled')"
-                :inactive-text="t('common.disabled')"
-              />
-            </el-form-item>
-            <el-form-item :label="t('common.description')" class="col-span-2">
-              <el-input
-                v-model="formData.description"
-                type="textarea"
-                :rows="2"
-                maxlength="200"
-                show-word-limit
-                :placeholder="t('subscription.descPlaceholder')"
-              />
-            </el-form-item>
-            <el-form-item :label="t('subscription.sort')">
-              <el-input-number v-model="formData.sort" :min="0" :max="9999" style="width: 100%" />
-            </el-form-item>
-            <div class="flex items-center justify-end">
-              <el-button type="primary" link :loading="testing" @click="handleTestConnectivity">
-                <el-icon class="mr-1"><Connection /></el-icon>{{ t('subscription.testConnection') }}
-              </el-button>
-            </div>
-          </div>
-
-          <el-divider content-position="left">{{ t('subscription.mapping') }}</el-divider>
-          <p class="text-xs text-gray-500 mb-3 leading-5">{{ t('subscription.mappingHint') }}</p>
-
-          <el-form-item :label="t('subscription.root')">
-            <div class="flex items-center gap-3 w-full">
-              <el-input v-model="rootPath" style="width: 220px" placeholder="$" />
-              <span class="text-xs text-gray-400">{{ t('subscription.rootHint') }}</span>
-            </div>
-          </el-form-item>
-
-          <div class="flex items-center justify-between mt-2 mb-2">
-            <span class="text-xs text-gray-400">{{ t('subscription.primaryFieldsHint') }}</span>
-            <div class="flex items-center gap-2">
-              <el-tag v-if="advancedConfiguredCount" type="warning" size="small" effect="plain">
-                {{ t('subscription.advancedConfigured', { count: advancedConfiguredCount }) }}
-              </el-tag>
-              <el-button
-                type="primary"
-                link
-                size="small"
-                @click="showAdvancedFields = !showAdvancedFields"
-              >
-                {{ showAdvancedFields ? t('subscription.hideAdvancedFields') : t('subscription.showAdvancedFields') }}
-              </el-button>
-            </div>
-          </div>
-
-          <div class="mapping-table">
-            <div class="mapping-head">
-              <span>{{ t('subscription.targetField') }}</span>
-              <span>{{ t('subscription.source') }}</span>
-              <span>{{ t('subscription.value') }}</span>
-            </div>
-            <template v-for="def in visibleFieldDefs" :key="def.key">
-              <div class="mapping-row">
-                <div class="mapping-label">
-                  <span class="text-gray-700">{{ t(def.labelKey) }}</span>
-                  <span v-if="def.required" class="text-red-500 ml-1">*</span>
-                  <span class="font-mono text-[11px] text-gray-400 ml-2">{{ def.key }}</span>
-                </div>
-                <el-select
-                  v-model="fieldMap[def.key].source"
-                  size="small"
-                  style="width: 118px"
-                  @change="handleSourceChange(def.key)"
-                >
-                  <el-option :label="t('subscription.sourcePath')" value="path" />
-                  <el-option :label="t('subscription.sourceConst')" value="const" />
-                  <el-option :label="t('subscription.sourceTemplate')" value="template" />
-                  <el-option
-                    v-if="def.key === 'kind' || def.key === 'quality'"
-                    :label="t('subscription.sourceMap')"
-                    value="map"
-                  />
-                </el-select>
-                <!-- kind 是受控枚举：固定值时直接给下拉，避免操作人员手填出 Float/Int 等无效值 -->
-                <el-select
-                  v-if="def.key === 'kind' && fieldMap[def.key].source === 'const'"
-                  v-model="fieldMap[def.key].value"
-                  size="small"
-                  clearable
-                  :placeholder="t('subscription.kindAuto')"
-                >
-                  <el-option :label="t('subscription.kindAuto')" value="" />
-                  <el-option
-                    v-for="opt in KIND_OPTIONS"
-                    :key="opt.value"
-                    :label="t(opt.labelKey)"
-                    :value="opt.value"
-                  />
-                </el-select>
+          <!-- ========== 基本信息 ========== -->
+          <section class="sub-section is-first">
+            <p class="sub-section-title">{{ t('subscription.basicInfo') }}</p>
+            <div class="grid grid-cols-2 gap-x-6">
+              <el-form-item :label="t('common.name')" prop="name">
+                <el-input v-model="formData.name" :placeholder="t('subscription.namePlaceholder')" maxlength="100" />
+              </el-form-item>
+              <el-form-item :label="t('subscription.broker')" prop="broker">
+                <el-input v-model="formData.broker" :placeholder="t('subscription.brokerPlaceholder')" />
+              </el-form-item>
+              <el-form-item :label="t('subscription.port')">
+                <el-input v-model="formData.port" :placeholder="t('subscription.portPlaceholder')" />
+              </el-form-item>
+              <el-form-item :label="t('subscription.clientId')">
+                <el-input v-model="formData.clientId" :placeholder="t('subscription.clientIdPlaceholder')" />
+              </el-form-item>
+              <el-form-item :label="t('subscription.username')">
+                <el-input v-model="formData.username" :placeholder="t('subscription.optional')" />
+              </el-form-item>
+              <el-form-item :label="t('subscription.password')">
                 <el-input
-                  v-else-if="fieldMap[def.key].source === 'map'"
-                  v-model="fieldMap[def.key].path"
-                  size="small"
-                  :placeholder="
-                    def.key === 'quality'
-                      ? t('subscription.qualityMapPathPlaceholder')
-                      : t('subscription.kindMapPathPlaceholder')
-                  "
-                  clearable
+                  v-model="formData.password"
+                  type="password"
+                  show-password
+                  :placeholder="t('subscription.optional')"
                 />
+              </el-form-item>
+              <el-form-item :label="t('subscription.topic')" prop="topic" class="col-span-2">
+                <el-input v-model="formData.topic" :placeholder="t('subscription.topicPlaceholder')">
+                  <template #append>
+                    <span class="text-xs">{{ t('subscription.topicWildcardHint') }}</span>
+                  </template>
+                </el-input>
+              </el-form-item>
+              <el-form-item :label="t('subscription.qos')">
+                <el-select v-model="formData.qos" style="width: 100%">
+                  <el-option :value="0" label="0 — at most once" />
+                  <el-option :value="1" label="1 — at least once" />
+                  <el-option :value="2" label="2 — exactly once" />
+                </el-select>
+              </el-form-item>
+              <el-form-item :label="t('common.status')">
+                <el-switch
+                  v-model="formData.status"
+                  :active-value="1"
+                  :inactive-value="0"
+                  :active-text="t('common.enabled')"
+                  :inactive-text="t('common.disabled')"
+                />
+              </el-form-item>
+              <el-form-item :label="t('common.description')" class="col-span-2">
                 <el-input
-                  v-else
-                  v-model="fieldMap[def.key].value"
-                  size="small"
-                  :placeholder="valuePlaceholder(def)"
-                  clearable
+                  v-model="formData.description"
+                  type="textarea"
+                  :rows="2"
+                  maxlength="200"
+                  show-word-limit
+                  :placeholder="t('subscription.descPlaceholder')"
                 />
+              </el-form-item>
+              <el-form-item :label="t('subscription.sort')">
+                <el-input-number v-model="formData.sort" :min="0" :max="9999" style="width: 100%" />
+              </el-form-item>
+              <div class="sub-test-row">
+                <el-button type="primary" link :loading="testing" @click="handleTestConnectivity">
+                  <el-icon class="mr-1"><Connection /></el-icon>{{ t('subscription.testConnection') }}
+                </el-button>
               </div>
+            </div>
+          </section>
 
-              <!-- 外部系统自有定义 → 本系统 kind / quality 的逐项翻译 -->
-              <div
-                v-if="(def.key === 'kind' || def.key === 'quality') && fieldMap[def.key].source === 'map'"
-                class="mapping-map-row"
-              >
-                <div class="flex items-center justify-between mb-2">
-                  <span class="text-xs text-gray-500">
-                    {{ def.key === 'kind' ? t('subscription.kindMapHint') : t('subscription.qualityMapHint') }}
-                  </span>
-                  <el-button type="primary" link size="small" @click="addMapRow(def.key)">
-                    <el-icon class="mr-1"><Plus /></el-icon>{{ t('subscription.addKindMap') }}
-                  </el-button>
-                </div>
-                <div
-                  v-if="fieldMap[def.key].mappingRows.length === 0"
-                  class="text-xs text-gray-400 mb-2"
+          <!-- ========== 映射规则 ========== -->
+          <section class="sub-section">
+            <p class="sub-section-title">{{ t('subscription.mapping') }}</p>
+            <p class="sub-section-hint">{{ t('subscription.mappingHint') }}</p>
+
+            <el-form-item :label="t('subscription.root')">
+              <div class="sub-root-row">
+                <el-input v-model="rootPath" style="width: 220px" placeholder="$" />
+                <span class="sub-inline-hint">{{ t('subscription.rootHint') }}</span>
+              </div>
+            </el-form-item>
+
+            <div class="sub-inline-row">
+              <span class="sub-inline-hint">{{ t('subscription.primaryFieldsHint') }}</span>
+              <div class="sub-inline-actions">
+                <span v-if="advancedConfiguredCount" class="iot-pill is-amber">
+                  {{ t('subscription.advancedConfigured', { count: advancedConfiguredCount }) }}
+                </span>
+                <el-button
+                  type="primary"
+                  link
+                  size="small"
+                  @click="showAdvancedFields = !showAdvancedFields"
                 >
-                  {{ t('subscription.kindMapEmpty') }}
-                </div>
-                <div
-                  v-for="(pair, idx) in fieldMap[def.key].mappingRows"
-                  :key="idx"
-                  class="kind-map-row"
-                >
-                  <el-input
-                    v-model="pair.from"
-                    size="small"
-                    :placeholder="t('subscription.kindMapFromPlaceholder')"
-                  />
-                  <el-icon class="text-gray-400"><Right /></el-icon>
+                  {{ showAdvancedFields ? t('subscription.hideAdvancedFields') : t('subscription.showAdvancedFields') }}
+                </el-button>
+              </div>
+            </div>
+
+            <div class="mapping-table">
+              <div class="mapping-head">
+                <span>{{ t('subscription.targetField') }}</span>
+                <span>{{ t('subscription.source') }}</span>
+                <span>{{ t('subscription.value') }}</span>
+              </div>
+              <template v-for="def in visibleFieldDefs" :key="def.key">
+                <div class="mapping-row">
+                  <div class="mapping-label">
+                    <span class="text-gray-700">{{ t(def.labelKey) }}</span>
+                    <span v-if="def.required" class="text-red-500 ml-1">*</span>
+                    <span class="font-mono text-[11px] text-gray-400 ml-2">{{ def.key }}</span>
+                  </div>
                   <el-select
-                    v-model="pair.to"
+                    v-model="fieldMap[def.key].source"
+                    size="small"
+                    style="width: 118px"
+                    @change="handleSourceChange(def.key)"
+                  >
+                    <el-option :label="t('subscription.sourcePath')" value="path" />
+                    <el-option :label="t('subscription.sourceConst')" value="const" />
+                    <el-option :label="t('subscription.sourceTemplate')" value="template" />
+                    <el-option
+                      v-if="def.key === 'kind' || def.key === 'quality'"
+                      :label="t('subscription.sourceMap')"
+                      value="map"
+                    />
+                  </el-select>
+                  <!-- kind 是受控枚举：固定值时直接给下拉，避免操作人员手填出 Float/Int 等无效值 -->
+                  <el-select
+                    v-if="def.key === 'kind' && fieldMap[def.key].source === 'const'"
+                    v-model="fieldMap[def.key].value"
                     size="small"
                     clearable
-                    :placeholder="
-                      def.key === 'kind'
-                        ? t('subscription.kindMapToPlaceholder')
-                        : t('subscription.qualityMapToPlaceholder')
-                    "
+                    :placeholder="t('subscription.kindAuto')"
                   >
+                    <el-option :label="t('subscription.kindAuto')" value="" />
                     <el-option
-                      v-for="opt in targetOptions(def.key)"
+                      v-for="opt in KIND_OPTIONS"
                       :key="opt.value"
                       :label="t(opt.labelKey)"
                       :value="opt.value"
                     />
                   </el-select>
-                  <el-button
-                    type="danger"
-                    link
+                  <el-input
+                    v-else-if="fieldMap[def.key].source === 'map'"
+                    v-model="fieldMap[def.key].path"
                     size="small"
-                    :icon="Delete"
-                    @click="fieldMap[def.key].mappingRows.splice(idx, 1)"
+                    :placeholder="
+                      def.key === 'quality'
+                        ? t('subscription.qualityMapPathPlaceholder')
+                        : t('subscription.kindMapPathPlaceholder')
+                    "
+                    clearable
+                  />
+                  <el-input
+                    v-else
+                    v-model="fieldMap[def.key].value"
+                    size="small"
+                    :placeholder="valuePlaceholder(def)"
+                    clearable
                   />
                 </div>
-                <div class="flex items-center gap-2 mt-2">
-                  <span class="text-xs text-gray-500">{{ t('subscription.kindMapDefault') }}</span>
-                  <el-select
-                    v-model="fieldMap[def.key].default"
-                    size="small"
-                    :clearable="def.key === 'kind'"
-                    style="width: 260px"
-                    :placeholder="
-                      def.key === 'kind'
-                        ? t('subscription.kindKeepRaw')
-                        : t('subscription.qualityMapDefaultPlaceholder')
-                    "
+
+                <!-- 外部系统自有定义 → 本系统 kind / quality 的逐项翻译 -->
+                <div
+                  v-if="(def.key === 'kind' || def.key === 'quality') && fieldMap[def.key].source === 'map'"
+                  class="mapping-map-row"
+                >
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs text-gray-500">
+                      {{ def.key === 'kind' ? t('subscription.kindMapHint') : t('subscription.qualityMapHint') }}
+                    </span>
+                    <el-button type="primary" link size="small" @click="addMapRow(def.key)">
+                      <el-icon class="mr-1"><Plus /></el-icon>{{ t('subscription.addKindMap') }}
+                    </el-button>
+                  </div>
+                  <div
+                    v-if="fieldMap[def.key].mappingRows.length === 0"
+                    class="text-xs text-gray-400 mb-2"
                   >
-                    <el-option
-                      v-if="def.key === 'kind'"
-                      :label="t('subscription.kindKeepRaw')"
-                      value=""
+                    {{ t('subscription.kindMapEmpty') }}
+                  </div>
+                  <div
+                    v-for="(pair, idx) in fieldMap[def.key].mappingRows"
+                    :key="idx"
+                    class="kind-map-row"
+                  >
+                    <el-input
+                      v-model="pair.from"
+                      size="small"
+                      :placeholder="t('subscription.kindMapFromPlaceholder')"
                     />
-                    <el-option
-                      v-for="opt in targetOptions(def.key)"
-                      :key="opt.value"
-                      :label="t(opt.labelKey)"
-                      :value="opt.value"
+                    <el-icon class="text-gray-400"><Right /></el-icon>
+                    <el-select
+                      v-model="pair.to"
+                      size="small"
+                      clearable
+                      :placeholder="
+                        def.key === 'kind'
+                          ? t('subscription.kindMapToPlaceholder')
+                          : t('subscription.qualityMapToPlaceholder')
+                      "
+                    >
+                      <el-option
+                        v-for="opt in targetOptions(def.key)"
+                        :key="opt.value"
+                        :label="t(opt.labelKey)"
+                        :value="opt.value"
+                      />
+                    </el-select>
+                    <el-button
+                      type="danger"
+                      link
+                      size="small"
+                      :icon="Delete"
+                      @click="fieldMap[def.key].mappingRows.splice(idx, 1)"
                     />
-                  </el-select>
+                  </div>
+                  <div class="flex items-center gap-2 mt-2">
+                    <span class="text-xs text-gray-500">{{ t('subscription.kindMapDefault') }}</span>
+                    <el-select
+                      v-model="fieldMap[def.key].default"
+                      size="small"
+                      :clearable="def.key === 'kind'"
+                      style="width: 260px"
+                      :placeholder="
+                        def.key === 'kind'
+                          ? t('subscription.kindKeepRaw')
+                          : t('subscription.qualityMapDefaultPlaceholder')
+                      "
+                    >
+                      <el-option
+                        v-if="def.key === 'kind'"
+                        :label="t('subscription.kindKeepRaw')"
+                        value=""
+                      />
+                      <el-option
+                        v-for="opt in targetOptions(def.key)"
+                        :key="opt.value"
+                        :label="t(opt.labelKey)"
+                        :value="opt.value"
+                      />
+                    </el-select>
+                  </div>
                 </div>
-              </div>
-            </template>
-          </div>
-          <p class="text-xs text-gray-400 mt-2 leading-5">{{ t('subscription.kindHint') }}</p>
-
-          <div class="flex items-center justify-between mt-5 mb-2">
-            <span class="text-sm font-medium text-gray-700">{{ t('subscription.filter') }}</span>
-            <el-button type="primary" link size="small" @click="addFilter">
-              <el-icon class="mr-1"><Plus /></el-icon>{{ t('subscription.addFilter') }}
-            </el-button>
-          </div>
-          <p class="text-xs text-gray-500 mb-2">{{ t('subscription.filterHint') }}</p>
-          <div v-if="filterRows.length === 0" class="text-xs text-gray-400 py-2">
-            {{ t('subscription.noFilter') }}
-          </div>
-          <div v-for="(f, idx) in filterRows" :key="idx" class="filter-row">
-            <el-input v-model="f.path" size="small" :placeholder="t('subscription.filterPath')" />
-            <el-select v-model="f.op" size="small" style="width: 128px">
-              <el-option v-for="op in FILTER_OPS" :key="op" :label="op" :value="op" />
-            </el-select>
-            <el-input
-              v-if="f.op === 'in' || f.op === 'notin'"
-              v-model="f.valuesText"
-              size="small"
-              :placeholder="t('subscription.filterValues')"
-            />
-            <el-input
-              v-else-if="f.op !== 'exists' && f.op !== 'notexists'"
-              v-model="f.value"
-              size="small"
-              :placeholder="t('subscription.filterValue')"
-            />
-            <span v-else class="text-xs text-gray-400">{{ t('subscription.filterNoValue') }}</span>
-            <el-button type="danger" link size="small" :icon="Delete" @click="filterRows.splice(idx, 1)" />
-          </div>
-
-          <el-divider content-position="left">{{ t('subscription.preview') }}</el-divider>
-          <div class="flex items-start gap-3">
-            <div class="flex-1">
-              <div class="flex items-center gap-2 mb-2">
-                <span class="text-xs text-gray-500">{{ t('subscription.samplePreset') }}</span>
-                <el-button type="primary" link size="small" @click="useSample('minimal')">
-                  {{ t('subscription.sampleMinimal') }}
-                </el-button>
-                <el-button type="primary" link size="small" @click="useSample('advanced')">
-                  {{ t('subscription.sampleAdvanced') }}
-                </el-button>
-              </div>
-              <el-input
-                v-model="sampleText"
-                type="textarea"
-                :rows="9"
-                spellcheck="false"
-                :placeholder="t('subscription.samplePlaceholder')"
-              />
+              </template>
             </div>
-            <div class="w-[280px]">
-              <el-button type="primary" plain size="small" :loading="previewing" @click="handlePreview">
-                {{ t('subscription.runPreview') }}
+            <p class="sub-hint">{{ t('subscription.kindHint') }}</p>
+
+            <div class="sub-inline-row is-filter-head">
+              <div>
+                <p class="sub-group-title">{{ t('subscription.filter') }}</p>
+                <p class="sub-section-hint is-tight">{{ t('subscription.filterHint') }}</p>
+              </div>
+              <el-button type="primary" link size="small" @click="addFilter">
+                <el-icon class="mr-1"><Plus /></el-icon>{{ t('subscription.addFilter') }}
               </el-button>
             </div>
-          </div>
-
-          <!-- 预览结果整行展示：主字段固定 8 列，dataType / protocol 按需追加。
-               结果区独立成块并带标题，点预览后自动滚到这里，避免表格在折叠线以下被忽略。 -->
-          <div v-if="previewResult" ref="previewResultRef" class="preview-result mt-3">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="text-sm font-medium text-gray-700">{{ t('subscription.previewResult') }}</span>
-              <el-tag v-if="!previewResult.error" type="success" size="small" effect="plain">
-                {{ t('subscription.previewSummary', { count: previewResult.count, skipped: previewResult.skipped }) }}
-              </el-tag>
+            <p v-if="filterRows.length === 0" class="sub-empty">{{ t('subscription.noFilter') }}</p>
+            <div v-for="(f, idx) in filterRows" :key="idx" class="filter-row">
+              <el-input v-model="f.path" size="small" :placeholder="t('subscription.filterPath')" />
+              <el-select v-model="f.op" size="small" style="width: 128px">
+                <el-option v-for="op in FILTER_OPS" :key="op" :label="op" :value="op" />
+              </el-select>
+              <el-input
+                v-if="f.op === 'in' || f.op === 'notin'"
+                v-model="f.valuesText"
+                size="small"
+                :placeholder="t('subscription.filterValues')"
+              />
+              <el-input
+                v-else-if="f.op !== 'exists' && f.op !== 'notexists'"
+                v-model="f.value"
+                size="small"
+                :placeholder="t('subscription.filterValue')"
+              />
+              <span v-else class="text-xs text-gray-400">{{ t('subscription.filterNoValue') }}</span>
+              <el-button type="danger" link size="small" :icon="Delete" @click="filterRows.splice(idx, 1)" />
             </div>
-            <el-alert
-              v-if="previewResult.error"
-              type="warning"
-              :title="previewResult.error"
-              :closable="false"
-              show-icon
-            />
-            <div
-              v-else-if="previewResult.records && previewResult.records.length"
-              class="preview-table"
-            >
-              <el-table :data="previewRows" size="small" border max-height="240">
+          </section>
+
+          <!-- ========== 预览 ========== -->
+          <section class="sub-section">
+            <p class="sub-section-title">{{ t('subscription.preview') }}</p>
+            <div class="sub-preview">
+              <div class="sub-preview-main">
+                <div class="sub-sample-presets">
+                  <span class="sub-inline-hint">{{ t('subscription.samplePreset') }}</span>
+                  <el-button type="primary" link size="small" @click="useSample('minimal')">
+                    {{ t('subscription.sampleMinimal') }}
+                  </el-button>
+                  <el-button type="primary" link size="small" @click="useSample('advanced')">
+                    {{ t('subscription.sampleAdvanced') }}
+                  </el-button>
+                </div>
+                <el-input
+                  v-model="sampleText"
+                  type="textarea"
+                  :rows="9"
+                  spellcheck="false"
+                  :placeholder="t('subscription.samplePlaceholder')"
+                />
+              </div>
+              <div class="sub-preview-side">
+                <el-button type="primary" plain size="small" :loading="previewing" @click="handlePreview">
+                  {{ t('subscription.runPreview') }}
+                </el-button>
+              </div>
+            </div>
+
+            <!-- 预览结果整行展示：主字段固定 8 列，dataType / protocol 按需追加。
+                 结果区独立成块并带标题，点预览后自动滚到这里，避免表格在折叠线以下被忽略。 -->
+            <div v-if="previewResult" ref="previewResultRef" class="preview-result">
+              <div class="preview-head">
+                <span class="sub-group-title">{{ t('subscription.previewResult') }}</span>
+                <span v-if="!previewResult.error" class="iot-pill is-green">
+                  {{ t('subscription.previewSummary', { count: previewResult.count, skipped: previewResult.skipped }) }}
+                </span>
+              </div>
+              <div v-if="previewResult.error" class="iot-notice is-warning is-inline preview-error">
+                <span class="iot-notice-mark" aria-hidden="true">
+                  <el-icon><AlertTriangle /></el-icon>
+                </span>
+                <p class="iot-notice-text">{{ previewResult.error }}</p>
+              </div>
+              <el-table
+                v-else-if="previewResult.records && previewResult.records.length"
+                class="iot-mini-table preview-table"
+                :data="previewRows"
+                size="small"
+                max-height="240"
+              >
                 <el-table-column prop="deviceId" label="deviceId" min-width="90" show-overflow-tooltip />
                 <el-table-column prop="deviceName" label="deviceName" min-width="100" show-overflow-tooltip />
                 <el-table-column prop="deviceAddressId" label="deviceAddressId" min-width="105" show-overflow-tooltip />
@@ -482,11 +556,9 @@
                   <el-table-column prop="protocol" label="protocol" width="90" show-overflow-tooltip />
                 </template>
               </el-table>
+              <p v-else class="sub-empty">{{ t('subscription.previewEmpty') }}</p>
             </div>
-            <div v-else class="text-xs text-gray-400">
-              {{ t('subscription.previewEmpty') }}
-            </div>
-          </div>
+          </section>
         </el-form>
       </div>
 
@@ -503,10 +575,13 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'v
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   IconAffiliate as Connection,
+  IconAlertTriangle as AlertTriangle,
   IconChevronRight as Right,
+  IconMessage as Message,
   IconPencil as EditPen,
   IconPlus as Plus,
   IconRefresh as Refresh,
+  IconSearch as Search,
   IconTrash as Delete,
 } from '@tabler/icons-vue'
 import { useI18n } from 'vue-i18n'
@@ -710,8 +785,28 @@ const total = ref(0)
 const queryForm = reactive({ name: '', status: '' })
 const statusMap = ref({})
 
+// 首屏还没拿到数时显示占位符而不是 0：0 条订阅会被当成"还没配任何订阅"
+const displayTotal = computed(() =>
+  loading.value && tableData.value.length === 0 ? '—' : total.value
+)
+
 function statusOf(row) {
   return statusMap.value[row.id]
+}
+
+// 运行态：连接成功 / 重连中 / 未连接。重连中带呼吸点，表示状态还在变化。
+function runtimeClass(row) {
+  const s = statusOf(row)
+  if (s?.connected) return 'is-green'
+  if (s?.running) return 'is-amber is-live'
+  return 'is-gray'
+}
+
+function runtimeText(row) {
+  const s = statusOf(row)
+  if (s?.connected) return t('subscription.connected')
+  if (s?.running) return t('subscription.reconnecting')
+  return t('subscription.disconnected')
 }
 
 async function fetchList() {
@@ -1238,16 +1333,160 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* ---------- 列表 ---------- */
+.status-filter {
+  width: 130px;
+}
+
+.refresh-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+
+.refresh-note-icon {
+  font-size: 14px;
+  color: var(--brand);
+}
+
+/* 名称两行：主名称 + 描述，描述不抢主名称的视觉重量 */
+.sub-name-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.45;
+}
+
+.sub-name-desc {
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--ink-4);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.runtime-counts {
+  font-size: 11.5px;
+  color: var(--ink-4);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 对话框 ---------- */
 .subscription-dialog-body {
   max-height: 70vh;
   overflow-y: auto;
   padding-right: 8px;
 }
 
+/* 三段（基本信息 / 映射规则 / 预览）用发丝线接续，不再用 el-divider 的居中留白 */
+.sub-section {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.sub-section.is-first {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.sub-section-title {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.sub-section-hint {
+  margin: -4px 0 12px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-4);
+}
+
+.sub-section-hint.is-tight {
+  margin: 2px 0 0;
+}
+
+.sub-group-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.sub-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-4);
+}
+
+.sub-inline-hint {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-4);
+}
+
+.sub-root-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.sub-inline-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 8px 0;
+}
+
+.sub-inline-row.is-filter-head {
+  margin: 18px 0 10px;
+}
+
+.sub-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sub-empty {
+  margin: 0;
+  padding: 8px 0;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+.sub-test-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-top: 6px;
+}
+
+/* 映射表：与列表同源的表头底色与发丝线，去掉灰色外框的厚重感 */
 .mapping-table {
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 6px;
   overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
 }
 
 .mapping-head,
@@ -1256,21 +1495,24 @@ onBeforeUnmount(() => {
   grid-template-columns: 260px 130px 1fr;
   align-items: center;
   gap: 10px;
-  padding: 6px 12px;
+  padding: 7px 12px;
 }
 
 .mapping-head {
-  background: var(--el-fill-color-light);
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
+  background: #f8fafc;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
 
 .mapping-row {
-  border-top: 1px solid var(--el-border-color-lighter);
+  border-top: 1px solid var(--line-soft);
+  transition: background-color 0.15s ease;
 }
 
-.mapping-row:nth-child(odd) {
-  background: var(--el-fill-color-blank);
+.mapping-row:hover {
+  background: #f8fbff;
 }
 
 .mapping-label {
@@ -1279,11 +1521,11 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-/* kind 值映射编辑器：紧跟在 kind 行下方，占满整行宽度 */
+/* kind / quality 值映射编辑器：紧跟在对应行下方，占满整行宽度 */
 .mapping-map-row {
   padding: 10px 12px 12px;
-  border-top: 1px dashed var(--el-border-color-lighter);
-  background: var(--el-fill-color-lighter);
+  background: #fbfcfe;
+  border-top: 1px dashed var(--line);
 }
 
 .kind-map-row {
@@ -1294,17 +1536,90 @@ onBeforeUnmount(() => {
   margin-bottom: 6px;
 }
 
+/* 过滤条件：一行一条，底部用发丝线分隔 */
 .filter-row {
   display: grid;
   grid-template-columns: 1fr 128px 1fr 36px;
   align-items: center;
   gap: 8px;
-  padding: 4px 0;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.filter-row:last-child {
+  border-bottom: none;
+}
+
+/* ---------- 预览 ---------- */
+.sub-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.sub-preview-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.sub-preview-side {
+  width: 132px;
+  padding-top: 24px;
+}
+
+.sub-sample-presets {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.preview-result {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.iot-notice.preview-error {
+  margin: 0;
 }
 
 .preview-table {
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 6px;
   overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+}
+
+/* 映射表/过滤行里的输入控件：与页面的 9px 圆角保持同一家族 */
+.mapping-table :deep(.el-input__wrapper),
+.mapping-table :deep(.el-select__wrapper),
+.filter-row :deep(.el-input__wrapper),
+.filter-row :deep(.el-select__wrapper) {
+  border-radius: 7px;
+  box-shadow: 0 0 0 1px var(--line) inset;
+}
+
+@media (max-width: 860px) {
+  .mapping-head,
+  .mapping-row {
+    grid-template-columns: 1fr;
+  }
+
+  .sub-preview {
+    flex-direction: column;
+  }
+
+  .sub-preview-side {
+    width: 100%;
+    padding-top: 0;
+  }
 }
 </style>

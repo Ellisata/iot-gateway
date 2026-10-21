@@ -26,4 +26,5 @@ var ServiceProviderSet = wire.NewSet(
 	NewPluginService,
 	NewDeviceScanService,
 	NewSystemConfigService,
+	NewDashboardService,
 )

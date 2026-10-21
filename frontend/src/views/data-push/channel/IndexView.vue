@@ -4,63 +4,137 @@
 -->
 
 <template>
-  <div class="p-6">
-    <h1 class="text-2xl font-bold text-gray-800 mb-6">{{ t('menu.channel') }}</h1>
+  <div class="iot-page">
+    <!-- 页头：与工业物联网各页同一套字号/留白层级；右侧常驻通道数 -->
+    <header class="iot-head iot-enter">
+      <div>
+        <p class="iot-eyebrow">
+          <span class="iot-eyebrow-dot" aria-hidden="true" />
+          {{ t('menu.dataPush') }}
+        </p>
+        <h1 class="iot-title">{{ t('menu.channel') }}</h1>
+        <p class="iot-sub">{{ t('channel.subtitle') }}</p>
+      </div>
+      <div class="iot-head-aside">
+        <div class="iot-stat">
+          <span class="iot-stat-num">{{ displayTotal }}</span>
+          <span class="iot-stat-label">{{ t('channel.totalUnit') }}</span>
+        </div>
+      </div>
+    </header>
 
-    <!-- 工具栏 -->
-    <el-card shadow="never" class="mb-4">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
+    <!-- 工作区：筛选、表格、分页共用一块表面 -->
+    <section class="iot-panel iot-enter" style="animation-delay: 60ms">
+      <div class="iot-toolbar">
+        <div class="iot-toolbar-filters">
           <el-input
             v-model="queryForm.name"
+            class="iot-search"
             :placeholder="t('channel.searchPlaceholder')"
             clearable
-            style="width: 240px"
             @keyup.enter="handleSearch"
-          />
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
           <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
           <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
         </div>
-        <el-button type="primary" @click="handleAdd">{{ t('channel.add') }}</el-button>
+        <div class="iot-toolbar-actions">
+          <el-button type="primary" :icon="Plus" @click="handleAdd">{{ t('channel.add') }}</el-button>
+        </div>
       </div>
-    </el-card>
 
-    <!-- 数据表格 -->
-    <el-card shadow="never">
       <el-table
+        class="iot-table"
         :data="tableData"
         v-loading="loading"
-        stripe
         style="width: 100%"
-        border
       >
-        <el-table-column type="index" :label="t('common.index')" width="70" align="center" />
-        <el-table-column prop="name" :label="t('common.name')" min-width="140" />
-        <el-table-column prop="description" :label="t('common.description')" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="status" :label="t('common.status')" width="100" align="center">
+        <el-table-column type="index" :label="t('common.index')" width="68" align="center" />
+
+        <!-- 通道名是这一行的身份：小图标底座让「一个推送出口」在滚动中可被一眼拾取 -->
+        <el-table-column :label="t('common.name')" min-width="200">
           <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
-              {{ row.status === 1 ? t('common.enabled') : t('common.disabled') }}
-            </el-tag>
+            <div class="iot-name-cell">
+              <span class="iot-name-mark" aria-hidden="true">
+                <el-icon><Broadcast /></el-icon>
+              </span>
+              <span class="iot-name-text" :title="row.name">{{ row.name }}</span>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" :label="t('common.createdAt')" width="180" align="center" />
-        <el-table-column :label="t('common.action')" width="130" align="center" fixed="right">
+        <el-table-column
+          prop="description"
+          :label="t('common.description')"
+          min-width="240"
+          show-overflow-tooltip
+          class-name="iot-col-muted"
+        />
+        <el-table-column :label="t('common.status')" width="112" align="center">
           <template #default="{ row }">
-            <div class="flex items-center justify-center gap-2">
+            <span class="iot-pill" :class="row.status === 1 ? 'is-green' : 'is-gray'">
+              <span class="iot-pill-dot" aria-hidden="true" />
+              {{ row.status === 1 ? t('common.enabled') : t('common.disabled') }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="createdAt"
+          :label="t('common.createdAt')"
+          width="160"
+          class-name="iot-col-time"
+        />
+        <el-table-column :label="t('common.action')" width="110" align="center" fixed="right">
+          <template #default="{ row }">
+            <div class="iot-row-actions">
               <el-tooltip :content="t('common.edit')" placement="top">
-                <el-button type="primary" link size="small" :icon="EditPen" @click="handleEdit(row)" />
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="EditPen"
+                  :aria-label="t('common.edit')"
+                  @click="handleEdit(row)"
+                />
               </el-tooltip>
               <el-tooltip :content="t('common.delete')" placement="top">
-                <el-button type="danger" link size="small" :icon="Delete" @click="handleDelete(row)" />
+                <el-button
+                  class="iot-row-btn"
+                  type="danger"
+                  link
+                  size="small"
+                  :icon="Delete"
+                  :aria-label="t('common.delete')"
+                  @click="handleDelete(row)"
+                />
               </el-tooltip>
             </div>
           </template>
         </el-table-column>
+
+        <template #empty>
+          <div class="iot-empty">
+            <span class="iot-empty-mark" aria-hidden="true">
+              <el-icon><Broadcast /></el-icon>
+            </span>
+            <p class="iot-empty-title">
+              {{ queryForm.name
+                ? t('channel.emptySearch', { name: queryForm.name })
+                : t('channel.emptyTitle') }}
+            </p>
+            <p v-if="!queryForm.name" class="iot-empty-hint">{{ t('channel.emptyHint') }}</p>
+            <el-button v-if="queryForm.name" @click="handleReset">{{ t('common.reset') }}</el-button>
+            <el-button v-else type="primary" :icon="Plus" @click="handleAdd">
+              {{ t('channel.add') }}
+            </el-button>
+          </div>
+        </template>
       </el-table>
 
-      <!-- 分页 -->
-      <div class="flex justify-end mt-4">
+      <div class="iot-pager">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
@@ -72,13 +146,14 @@
           @current-change="handleCurrentChange"
         />
       </div>
-    </el-card>
+    </section>
 
     <!-- 新增 / 编辑 对话框 -->
     <el-dialog
       v-model="dialogVisible"
+      class="iot-dialog"
       :title="isEdit ? t('channel.editTitle') : t('channel.addTitle')"
-      width="580px"
+      width="620px"
       :close-on-click-modal="false"
       @close="handleDialogClose"
     >
@@ -118,27 +193,36 @@
         </el-form-item>
       </el-form>
 
-      <!-- 动态连接配置表单：根据所选通道名称加载 -->
-      <template v-if="formData.name">
-        <el-divider content-position="left">{{ t('channel.connectConfig') }}</el-divider>
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-sm font-medium text-gray-600">{{ t('channel.connectParams') }}</span>
+      <!-- 动态连接配置表单：根据所选通道名称加载。
+           用一条发丝线接续，而不是 el-divider —— 分隔线会带着一段居中留白，
+           把「基本信息」和「连接参数」切成两张互不相干的表。 -->
+      <div v-if="formData.name" class="channel-section">
+        <div class="channel-section-head">
+          <div class="channel-section-headline">
+            <span class="channel-section-mark" aria-hidden="true">
+              <el-icon><Connection /></el-icon>
+            </span>
+            <div>
+              <p class="channel-section-name">{{ t('channel.connectConfig') }}</p>
+              <p class="channel-section-sub">{{ t('channel.connectParams') }}</p>
+            </div>
+          </div>
           <el-button
             type="primary"
             link
             :loading="testingConnection"
             @click="handleTestConnectivity"
           >
-            <el-icon class="mr-1"><Connection /></el-icon> {{ t('channel.testConnection') }}
+            {{ t('channel.testConnection') }}
           </el-button>
         </div>
-        <div v-loading="dynamicFormLoading" class="min-h-[60px] pb-2">
-          <div
+        <div v-loading="dynamicFormLoading" class="dynamic-form-wrapper">
+          <p
             v-if="!dynamicFormLoading && !dynamicFormRule.length"
-            class="text-sm text-gray-400 py-2"
+            class="channel-empty-config"
           >
             {{ t('channel.noConnectConfig') }}
-          </div>
+          </p>
           <form-create
             v-else
             :key="dynamicFormKey"
@@ -147,7 +231,7 @@
             @mounted="handleDynamicFormMounted"
           />
         </div>
-      </template>
+      </div>
 
       <template #footer>
         <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
@@ -156,16 +240,18 @@
         </el-button>
       </template>
     </el-dialog>
-
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   IconAffiliate as Connection,
+  IconBroadcast as Broadcast,
   IconPencil as EditPen,
+  IconPlus as Plus,
+  IconSearch as Search,
   IconTrash as Delete,
 } from '@tabler/icons-vue'
 import {
@@ -195,6 +281,11 @@ const tableData = ref([])
 const currentPage = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
+
+// 首屏还没拿到数时显示占位符而不是 0：0 个通道会被当成"还没配任何推送出口"
+const displayTotal = computed(() =>
+  loading.value && tableData.value.length === 0 ? '—' : total.value,
+)
 
 // ---------- 获取列表（分页） ----------
 async function fetchList() {
@@ -539,3 +630,77 @@ onMounted(() => {
   fetchList()
 })
 </script>
+
+<style scoped>
+/* 连接配置区：在对话框里用发丝线接续基本信息，不再另起一张卡片 */
+.channel-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.channel-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.channel-section-headline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.channel-section-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
+.channel-section-mark .el-icon {
+  font-size: 15px;
+}
+
+.channel-section-name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.channel-section-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+.dynamic-form-wrapper {
+  min-height: 60px;
+  padding-bottom: 8px;
+}
+
+.channel-empty-config {
+  margin: 0;
+  padding: 10px 0;
+  font-size: 12.5px;
+  color: var(--ink-4);
+}
+
+/* 插件声明的连接参数收成一列，避免通栏输入框压着一个小步进器
+   （与设备对象页的协议参数表单同一写法） */
+.dynamic-form-wrapper :deep(.el-input),
+.dynamic-form-wrapper :deep(.el-input-number),
+.dynamic-form-wrapper :deep(.el-select) {
+  width: 100%;
+  max-width: 280px;
+}
+</style>

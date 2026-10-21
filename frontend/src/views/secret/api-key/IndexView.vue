@@ -4,47 +4,87 @@
 -->
 
 <template>
-  <div class="p-6">
-    <h1 class="text-2xl font-bold text-gray-800 mb-6">API Key</h1>
-
-    <!-- 工具栏 -->
-    <el-card shadow="never" class="mb-4">
-      <div class="flex items-center justify-between">
-        <span class="text-gray-500 text-sm">{{ t('apiKey.hint') }}</span>
-        <el-button type="primary" @click="handleAdd">{{ t('apiKey.add') }}</el-button>
+  <div class="iot-page">
+    <header class="iot-head iot-enter">
+      <div>
+        <p class="iot-eyebrow">
+          <span class="iot-eyebrow-dot" aria-hidden="true" />
+          {{ t('menu.secret') }}
+        </p>
+        <h1 class="iot-title">API Key</h1>
+        <p class="iot-sub">{{ t('apiKey.subtitle') }}</p>
       </div>
-    </el-card>
+      <div class="iot-head-aside">
+        <div class="iot-stat">
+          <span class="iot-stat-num">{{ displayTotal }}</span>
+          <span class="iot-stat-label">{{ t('apiKey.totalUnit') }}</span>
+        </div>
+      </div>
+    </header>
 
-    <!-- 数据表格 -->
-    <el-card shadow="never">
-      <el-table :data="tableData" v-loading="loading" stripe style="width: 100%" border>
-        <el-table-column type="index" :label="t('common.index')" width="70" align="center" />
-        <el-table-column prop="name" :label="t('common.name')" min-width="160">
+    <section class="iot-panel iot-enter" style="animation-delay: 60ms">
+      <div class="iot-toolbar">
+        <div class="iot-toolbar-lead">
+          <span class="iot-mark" aria-hidden="true">
+            <el-icon><Key /></el-icon>
+          </span>
+          <div class="iot-toolbar-copy">
+            <p class="iot-toolbar-title">{{ t('apiKey.listTitle') }}</p>
+            <p class="iot-toolbar-sub">{{ t('apiKey.hint') }}</p>
+          </div>
+        </div>
+        <div class="iot-toolbar-actions">
+          <el-button type="primary" :icon="Plus" @click="handleAdd">{{ t('apiKey.add') }}</el-button>
+        </div>
+      </div>
+
+      <el-table class="iot-table" :data="tableData" v-loading="loading" style="width: 100%">
+        <el-table-column type="index" :label="t('common.index')" width="68" align="center" />
+
+        <el-table-column :label="t('common.name')" min-width="190">
           <template #default="{ row }">
-            <div class="flex items-center gap-2">
-              <span>{{ row.name }}</span>
+            <div class="iot-name-cell">
+              <span class="iot-name-mark" aria-hidden="true">
+                <el-icon><Key /></el-icon>
+              </span>
+              <span class="iot-name-text" :title="row.name">{{ row.name }}</span>
               <!-- 默认密钥由启动播种创建、随局域网广播发布，不可删除或改名 -->
-              <el-tag v-if="row.isDefault" type="info" size="small" effect="plain">
-                {{ t('apiKey.defaultTag') }}
-              </el-tag>
+              <span v-if="row.isDefault" class="iot-pill is-blue">{{ t('apiKey.defaultTag') }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column :label="t('apiKey.keyContent')" min-width="260">
+        <el-table-column :label="t('apiKey.keyContent')" min-width="280">
           <template #default="{ row }">
-            <div class="flex items-center gap-2">
-              <span class="font-mono text-sm">{{ maskKey(row.key) }}</span>
+            <div class="apikey-cell">
+              <span class="apikey-text">{{ maskKey(row.key) }}</span>
               <el-tooltip :content="t('apiKey.copyKey')" placement="top">
-                <el-button type="primary" link size="small" :icon="CopyDocument" @click="handleCopyKey(row)" />
+                <button
+                  type="button"
+                  class="iot-copy-btn"
+                  :aria-label="t('apiKey.copyKey')"
+                  @click="handleCopyKey(row)"
+                >
+                  <el-icon><CopyDocument /></el-icon>
+                </button>
               </el-tooltip>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" :label="t('common.createdAt')" width="180" align="center" />
-        <el-table-column prop="updatedAt" :label="t('common.updatedAt')" width="180" align="center" />
-        <el-table-column :label="t('common.action')" width="130" align="center" fixed="right">
+        <el-table-column
+          prop="createdAt"
+          :label="t('common.createdAt')"
+          width="160"
+          class-name="iot-col-time"
+        />
+        <el-table-column
+          prop="updatedAt"
+          :label="t('common.updatedAt')"
+          width="160"
+          class-name="iot-col-time"
+        />
+        <el-table-column :label="t('common.action')" width="110" align="center" fixed="right">
           <template #default="{ row }">
-            <div class="flex items-center justify-center gap-2">
+            <div class="iot-row-actions">
               <!-- 禁用的按钮不派发鼠标事件，必须套一层 span，否则 tooltip 不弹（也就说不出为什么禁用） -->
               <el-tooltip
                 :content="row.isDefault ? t('apiKey.builtinLocked') : t('apiKey.rename')"
@@ -52,11 +92,13 @@
               >
                 <span>
                   <el-button
+                    class="iot-row-btn"
                     type="primary"
                     link
                     size="small"
                     :icon="EditPen"
                     :disabled="row.isDefault"
+                    :aria-label="t('apiKey.rename')"
                     @click="handleEdit(row)"
                   />
                 </span>
@@ -67,11 +109,13 @@
               >
                 <span>
                   <el-button
+                    class="iot-row-btn"
                     type="danger"
                     link
                     size="small"
                     :icon="Delete"
                     :disabled="row.isDefault"
+                    :aria-label="t('common.delete')"
                     @click="handleDelete(row)"
                   />
                 </span>
@@ -79,12 +123,26 @@
             </div>
           </template>
         </el-table-column>
+
+        <template #empty>
+          <div class="iot-empty">
+            <span class="iot-empty-mark" aria-hidden="true">
+              <el-icon><Key /></el-icon>
+            </span>
+            <p class="iot-empty-title">{{ t('apiKey.emptyTitle') }}</p>
+            <p class="iot-empty-hint">{{ t('apiKey.emptyHint') }}</p>
+            <el-button type="primary" :icon="Plus" @click="handleAdd">
+              {{ t('apiKey.add') }}
+            </el-button>
+          </div>
+        </template>
       </el-table>
-    </el-card>
+    </section>
 
     <!-- 新增 / 修改名称 对话框 -->
     <el-dialog
       v-model="dialogVisible"
+      class="iot-dialog"
       :title="isEdit ? t('apiKey.editTitle') : t('apiKey.addTitle')"
       width="520px"
       :close-on-click-modal="false"
@@ -116,11 +174,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   IconCopy as CopyDocument,
+  IconKey as Key,
   IconPencil as EditPen,
+  IconPlus as Plus,
   IconTrash as Delete,
 } from '@tabler/icons-vue'
 import { useI18n } from 'vue-i18n'
@@ -136,6 +196,11 @@ import {
 // ---------- 表格数据 ----------
 const loading = ref(false)
 const tableData = ref([])
+
+// 首屏还没拿到数时显示占位符而不是 0：0 个密钥会被当成"开放接口还没配访问凭据"
+const displayTotal = computed(() =>
+  loading.value && tableData.value.length === 0 ? '—' : tableData.value.length
+)
 
 /** 密钥脱敏展示：保留前 6 位与后 4 位 */
 function maskKey(key) {
@@ -201,7 +266,7 @@ async function handleDelete(row) {
       cancelButtonText: t('common.cancel'),
     })
     await deleteSecret(row.id)
-    ElMessage.success('删除成功')
+    ElMessage.success(t('apiKey.deleteSuccess'))
     fetchList()
   } catch {
     // 用户取消或删除失败，不做处理
@@ -235,7 +300,7 @@ async function handleSubmit() {
     dialogVisible.value = false
     fetchList()
   } catch (err) {
-    
+
   } finally {
     submitting.value = false
   }
@@ -283,3 +348,21 @@ onMounted(() => {
   fetchList()
 })
 </script>
+
+<style scoped>
+.apikey-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.apikey-text {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--ink-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>

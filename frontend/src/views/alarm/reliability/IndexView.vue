@@ -4,79 +4,103 @@
 -->
 
 <template>
-  <div class="p-6">
-    <h1 class="text-2xl font-bold text-gray-800 mb-2">{{ t('reliability.title') }}</h1>
-    <!-- 常驻说明：这一页的两个榜单都**只覆盖出过问题的对象**，不写清楚会被读成全量清单 -->
-    <p class="text-xs text-gray-400 leading-5 mb-6">
-      {{ t('reliability.hint') }}
-      <!-- 括号随语言走（中文全角 / 英文半角），不写死在模板里 -->
-      <span v-if="gatewayName">{{ t('reliability.gatewaySuffix', { name: gatewayName }) }}</span>
-    </p>
+  <div class="iot-page">
+    <header class="iot-head iot-enter">
+      <div>
+        <p class="iot-eyebrow">
+          <span class="iot-eyebrow-dot" aria-hidden="true" />
+          {{ t('menu.alarm') }}
+        </p>
+        <h1 class="iot-title">{{ t('reliability.title') }}</h1>
+        <!-- 常驻说明：这一页的两个榜单都**只覆盖出过问题的对象**，不写清楚会被读成全量清单 -->
+        <p class="iot-sub">
+          {{ t('reliability.hint') }}
+          <!-- 括号随语言走（中文全角 / 英文半角），不写死在模板里 -->
+          <span v-if="gatewayName">{{ t('reliability.gatewaySuffix', { name: gatewayName }) }}</span>
+        </p>
+      </div>
+    </header>
 
     <!-- 筛选工具栏：时间窗是必填的，两个榜单共用同一个窗口 -->
-    <el-card shadow="never" class="mb-4">
-      <div class="flex flex-wrap items-center gap-3">
-        <span class="text-sm text-gray-500">{{ t('reliability.rangeLabel') }}</span>
-        <!-- 两个独立选择器，不用 daterange：两个组件的面板都停在所选日期所在月 -->
-        <el-date-picker
-          v-model="startDate"
-          type="date"
-          value-format="YYYY-MM-DD"
-          :placeholder="t('reliability.rangeStart')"
-          :disabled-date="disableFuture"
-          :clearable="false"
-          style="width: 150px"
-          @change="onStartChange"
-        />
-        <span class="text-sm text-gray-400">{{ t('reliability.rangeSeparator') }}</span>
-        <el-date-picker
-          v-model="endDate"
-          type="date"
-          value-format="YYYY-MM-DD"
-          :placeholder="t('reliability.rangeEnd')"
-          :disabled-date="disableEnd"
-          :clearable="false"
-          style="width: 150px"
-        />
-        <el-button type="primary" :loading="loading" @click="handleSearch">
-          {{ t('common.search') }}
-        </el-button>
-        <span v-if="windowDays" class="text-xs text-gray-400">
-          {{ t('reliability.windowDays', { n: windowDays }) }}
-        </span>
+    <section class="iot-panel iot-enter" style="animation-delay: 60ms">
+      <div class="iot-toolbar">
+        <div class="iot-toolbar-filters">
+          <span class="range-label">{{ t('reliability.rangeLabel') }}</span>
+          <!-- 两个独立选择器，不用 daterange：两个组件的面板都停在所选日期所在月 -->
+          <el-date-picker
+            v-model="startDate"
+            class="range-picker"
+            type="date"
+            value-format="YYYY-MM-DD"
+            :placeholder="t('reliability.rangeStart')"
+            :disabled-date="disableFuture"
+            :clearable="false"
+            @change="onStartChange"
+          />
+          <span class="range-sep">{{ t('reliability.rangeSeparator') }}</span>
+          <el-date-picker
+            v-model="endDate"
+            class="range-picker"
+            type="date"
+            value-format="YYYY-MM-DD"
+            :placeholder="t('reliability.rangeEnd')"
+            :disabled-date="disableEnd"
+            :clearable="false"
+          />
+          <el-button type="primary" :loading="loading" @click="handleSearch">
+            {{ t('common.search') }}
+          </el-button>
+          <span v-if="windowDays" class="range-days">
+            {{ t('reliability.windowDays', { n: windowDays }) }}
+          </span>
+        </div>
       </div>
-    </el-card>
+    </section>
 
     <!-- 设备可靠性排行 -->
-    <el-card shadow="never" class="mb-4">
-      <template #header>
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <span class="font-bold text-gray-700">{{ t('reliability.deviceCard') }}</span>
-            <span class="ml-2 text-xs text-gray-400">{{ t('reliability.deviceNote') }}</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-gray-400">{{ t('reliability.limit') }}</span>
-            <el-select v-model="deviceLimit" style="width: 100px" size="small" @change="fetchDevice">
-              <el-option v-for="opt in DEVICE_LIMITS" :key="opt.value" :label="opt.label" :value="opt.value" />
-            </el-select>
+    <section class="iot-panel iot-enter" style="animation-delay: 120ms">
+      <div class="iot-toolbar">
+        <div class="iot-toolbar-lead">
+          <span class="iot-mark" aria-hidden="true">
+            <el-icon><DeviceDesktop /></el-icon>
+          </span>
+          <div class="iot-toolbar-copy">
+            <p class="iot-toolbar-title">{{ t('reliability.deviceCard') }}</p>
+            <p class="iot-toolbar-sub">{{ t('reliability.deviceNote') }}</p>
           </div>
         </div>
-      </template>
+        <div class="iot-toolbar-actions">
+          <span class="limit-label">{{ t('reliability.limit') }}</span>
+          <el-select
+            v-model="deviceLimit"
+            class="limit-select"
+            size="small"
+            @change="fetchDevice"
+          >
+            <el-option v-for="opt in DEVICE_LIMITS" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
+        </div>
+      </div>
 
-      <el-table
-        :data="deviceRows"
-        v-loading="deviceLoading"
-        stripe
-        border
-        style="width: 100%"
-        :empty-text="deviceEmptyText"
-      >
-        <el-table-column prop="ranking" :label="t('reliability.rank')" width="70" align="center" />
-        <el-table-column :label="t('reliability.device')" min-width="160" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.deviceName || row.deviceId }}</template>
+      <el-table class="iot-table" :data="deviceRows" v-loading="deviceLoading" style="width: 100%">
+        <el-table-column :label="t('reliability.rank')" width="78" align="center">
+          <template #default="{ row }">
+            <span class="rank-badge" :class="{ 'is-top': row.ranking <= 3 }">#{{ row.ranking }}</span>
+          </template>
         </el-table-column>
-        <el-table-column :label="t('reliability.availability')" width="180">
+        <el-table-column :label="t('reliability.device')" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <div class="iot-name-cell">
+              <span class="iot-name-mark" aria-hidden="true">
+                <el-icon><DeviceDesktop /></el-icon>
+              </span>
+              <span class="iot-name-text" :title="row.deviceName || row.deviceId">
+                {{ row.deviceName || row.deviceId }}
+              </span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('reliability.availability')" width="200">
           <template #default="{ row }">
             <div class="avail">
               <span class="avail-num" :class="toneClass(row.availability)">
@@ -97,75 +121,96 @@
           :label="t('reliability.episodes')"
           width="110"
           align="center"
+          class-name="iot-col-num"
         />
-        <el-table-column :label="t('reliability.downDuration')" width="150" align="center">
+        <el-table-column :label="t('reliability.downDuration')" width="150" align="center" class-name="iot-col-num">
           <template #default="{ row }">{{ formatDuration(row.downSeconds) }}</template>
         </el-table-column>
-        <el-table-column :label="t('reliability.mttr')" width="150" align="center">
+        <el-table-column :label="t('reliability.mttr')" width="150" align="center" class-name="iot-col-num">
           <!-- 后端用 -1 表示「窗口内没有已完成的故障段」，不是「修复耗时 -1 秒」 -->
           <template #default="{ row }">
-            <span v-if="row.mttrSeconds < 0" class="text-gray-400">{{ EMPTY }}</span>
+            <span v-if="row.mttrSeconds < 0" class="iot-cell-muted">{{ EMPTY }}</span>
             <span v-else>{{ formatDuration(row.mttrSeconds) }}</span>
           </template>
         </el-table-column>
+
+        <template #empty>
+          <div class="rank-empty">{{ deviceEmptyText }}</div>
+        </template>
       </el-table>
-    </el-card>
+    </section>
 
     <!-- 点位异常排行 -->
-    <el-card shadow="never">
-      <template #header>
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <span class="font-bold text-gray-700">{{ t('reliability.pointCard') }}</span>
-            <span class="ml-2 text-xs text-gray-400">{{ t('reliability.pointNote') }}</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-gray-400">{{ t('reliability.limit') }}</span>
-            <el-select v-model="pointLimit" style="width: 100px" size="small" @change="fetchPoint">
-              <el-option v-for="opt in POINT_LIMITS" :key="opt.value" :label="opt.label" :value="opt.value" />
-            </el-select>
+    <section class="iot-panel iot-enter" style="animation-delay: 180ms">
+      <div class="iot-toolbar">
+        <div class="iot-toolbar-lead">
+          <span class="iot-mark" aria-hidden="true">
+            <el-icon><Point /></el-icon>
+          </span>
+          <div class="iot-toolbar-copy">
+            <p class="iot-toolbar-title">{{ t('reliability.pointCard') }}</p>
+            <p class="iot-toolbar-sub">{{ t('reliability.pointNote') }}</p>
           </div>
         </div>
-      </template>
+        <div class="iot-toolbar-actions">
+          <span class="limit-label">{{ t('reliability.limit') }}</span>
+          <el-select
+            v-model="pointLimit"
+            class="limit-select"
+            size="small"
+            @change="fetchPoint"
+          >
+            <el-option v-for="opt in POINT_LIMITS" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
+        </div>
+      </div>
 
-      <el-table
-        :data="pointRows"
-        v-loading="pointLoading"
-        stripe
-        border
-        style="width: 100%"
-        :empty-text="pointEmptyText"
-      >
-        <el-table-column prop="ranking" :label="t('reliability.rank')" width="70" align="center" />
-        <el-table-column
-          prop="targetName"
-          :label="t('reliability.point')"
-          min-width="200"
-          show-overflow-tooltip
-        />
+      <el-table class="iot-table" :data="pointRows" v-loading="pointLoading" style="width: 100%">
+        <el-table-column :label="t('reliability.rank')" width="78" align="center">
+          <template #default="{ row }">
+            <span class="rank-badge" :class="{ 'is-top': row.ranking <= 3 }">#{{ row.ranking }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('reliability.point')" min-width="240" show-overflow-tooltip>
+          <template #default="{ row }">
+            <div class="iot-name-cell">
+              <span class="iot-name-mark" aria-hidden="true">
+                <el-icon><Point /></el-icon>
+              </span>
+              <span class="iot-name-text" :title="row.targetName">{{ row.targetName }}</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column
           prop="qualityEpisodes"
           :label="t('reliability.qualityEpisodes')"
           width="130"
           align="center"
+          class-name="iot-col-num"
         />
         <el-table-column
           prop="thresholdEpisodes"
           :label="t('reliability.thresholdEpisodes')"
           width="130"
           align="center"
+          class-name="iot-col-num"
         />
         <el-table-column
           prop="totalEpisodes"
           :label="t('reliability.totalEpisodes')"
           width="110"
           align="center"
+          class-name="iot-col-num"
         />
-        <el-table-column :label="t('reliability.lastOccur')" width="180" align="center">
+        <el-table-column :label="t('reliability.lastOccur')" width="170" class-name="iot-col-time">
           <template #default="{ row }">{{ row.lastOccurTime || EMPTY }}</template>
         </el-table-column>
+
+        <template #empty>
+          <div class="rank-empty">{{ pointEmptyText }}</div>
+        </template>
       </el-table>
-    </el-card>
+    </section>
   </div>
 </template>
 
@@ -173,6 +218,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
+import {
+  IconDeviceDesktop as DeviceDesktop,
+  IconPoint as Point,
+} from '@tabler/icons-vue'
 import { getDeviceReliability, getPointAbnormal } from '@/api/modules/alarm'
 
 const { t } = useI18n()
@@ -407,6 +456,48 @@ onMounted(handleSearch)
 </script>
 
 <style scoped>
+.range-label,
+.limit-label {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.range-sep,
+.range-days {
+  font-size: 12px;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+
+.range-picker {
+  width: 150px;
+}
+
+.limit-select {
+  width: 100px;
+}
+
+/* 排名：前三名的角标染品牌色，其余保持中性 —— 一眼看出榜单头部 */
+.rank-badge {
+  display: inline-block;
+  min-width: 30px;
+  padding: 2px 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+  text-align: center;
+  background: #f1f5f9;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-badge.is-top {
+  color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
 /* 可用率：数字与细条同色，读「多少」和读「好赖」是同一个动作 */
 .avail {
   display: flex;
@@ -426,27 +517,35 @@ onMounted(handleSearch)
   flex: 1;
   height: 6px;
   overflow: hidden;
-  background: var(--el-fill-color);
+  background: #eef2f7;
   border-radius: 3px;
 }
 
 .avail-fill {
   display: block;
   height: 100%;
-  border-radius: 3px;
   background: currentColor;
+  border-radius: 3px;
   transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .is-good {
-  color: var(--el-color-success);
+  color: #047857;
 }
 
 .is-warn {
-  color: var(--el-color-warning);
+  color: #b45309;
 }
 
 .is-bad {
-  color: var(--el-color-danger);
+  color: #be123c;
+}
+
+/* 榜单空态：一句话即可，不重复主表格那套大图标 */
+.rank-empty {
+  padding: 40px 16px;
+  font-size: 12.5px;
+  color: var(--ink-4);
+  text-align: center;
 }
 </style>

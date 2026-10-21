@@ -1,0 +1,868 @@
+/* SPDX-License-Identifier: AGPL-3.0-only
+   Copyright (c) 2026 Edwin and iot-gateway contributors */
+
+/* ==========================================================================
+   控制台共用的页面视觉语言（工业物联网 / 数据推送等模块）
+   --------------------------------------------------------------------------
+   与 device-object / device-scan 两页同一套 token：白面、雾蓝画布、slate 文字，
+   强调色只有一种蓝。新页面在外层挂 .iot-page，再按下面的 iot-* 类拼装
+   （iot- 只是这套页面语言的历史命名空间，与具体业务模块无关）：
+
+     header.iot-head          页头（eyebrow / 标题 / 副标题 / 右侧计数）
+     section.iot-panel        一块白色工作区（工具条 + 表格 + 分页）
+     div.iot-toolbar          工具栏（筛选在左、动作在右）
+     table.iot-table          数据表格（无边框、浅表头、行悬停）
+     div.iot-pager            分页（与表格同处一块表面，用发丝线收尾）
+
+   对话框被 teleport 到 body，类名是全局的：.iot-dialog / .iot-mini-table。
+   ========================================================================== */
+
+/* 色板与字体来自 styles/tokens.css，页面只管版式 */
+.iot-page {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* 页头与工作区错峰落位；动画挂在区级包裹层，不挂表格行，避免影响 hover 重绘 */
+.iot-enter {
+  animation: iotPageEnter 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes iotPageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------- 页头 ---------- */
+.iot-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.iot-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--ink-3);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.iot-back:hover {
+  color: var(--brand);
+}
+
+.iot-back .el-icon {
+  font-size: 14px;
+}
+
+.iot-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #7c8ca3;
+}
+
+.iot-eyebrow-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+}
+
+.iot-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.iot-sub {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+.iot-head-aside {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 4px;
+}
+
+.iot-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.iot-stat-num {
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.iot-stat-label {
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+/* ---------- 工作区 ---------- */
+.iot-panel {
+  margin-bottom: 16px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.iot-panel:last-of-type {
+  margin-bottom: 0;
+}
+
+.iot-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  padding: 16px 20px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.iot-toolbar-lead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.iot-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
+.iot-mark .el-icon {
+  font-size: 17px;
+}
+
+.iot-toolbar-copy {
+  min-width: 0;
+}
+
+.iot-toolbar-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.iot-toolbar-sub {
+  margin: 2px 0 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-4);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iot-toolbar-filters,
+.iot-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 输入框与按钮统一 34px 高、9px 圆角：并排时不再有 1px 的错位 */
+.iot-toolbar .el-input__wrapper,
+.iot-toolbar .el-select__wrapper {
+  min-height: 34px;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line) inset;
+  transition: box-shadow 0.18s ease;
+}
+
+.iot-toolbar .el-input__wrapper:hover,
+.iot-toolbar .el-select__wrapper:hover {
+  box-shadow: 0 0 0 1px #cbd8e6 inset;
+}
+
+.iot-toolbar .el-input__wrapper.is-focus,
+.iot-toolbar .el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--brand) inset, 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.iot-toolbar .el-input__prefix {
+  color: var(--ink-4);
+}
+
+.iot-toolbar .el-button {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-weight: 500;
+}
+
+.iot-search {
+  width: 272px;
+}
+
+/* 破坏性动作与其余按钮之间的短分隔：不画横线，只用一根 20px 的竖线分组 */
+.iot-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: var(--line);
+}
+
+/* ---------- 表格 ---------- */
+.iot-table {
+  --el-table-border-color: transparent;
+  /* 单元格必须是**实底**：固定列靠自己的背景遮住横向滚动时从下面穿过的内容 */
+  --el-table-bg-color: #fff;
+  --el-table-tr-bg-color: #fff;
+  --el-table-header-bg-color: #f8fafc;
+  --el-table-row-hover-bg-color: #f8fbff;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.iot-table td.el-table__cell {
+  background-color: #fff;
+}
+
+.iot-table .el-table__body tr:hover > td.el-table__cell {
+  background-color: #f8fbff;
+}
+
+/* Element 默认在表体底部画一条贯穿线，与卡片圆角相撞时会在两角露头 */
+.iot-table .el-table__inner-wrapper::before {
+  display: none;
+}
+
+.iot-table th.el-table__cell {
+  height: 42px;
+  padding: 0;
+  background: #f8fafc;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--line);
+}
+
+/* 表头宁可截断也不折行：两行表头会把行高顶开，整张表的基线随之跳动 */
+.iot-table th .cell {
+  white-space: nowrap;
+}
+
+.iot-table tr.el-table__row td.el-table__cell {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+/* 弹窗/折叠区里的紧凑表格：一行短一截，仍然保留同一套表头与行线 */
+.iot-table.is-compact tr.el-table__row td.el-table__cell {
+  padding: 7px 0;
+}
+
+.iot-table.is-compact th.el-table__cell {
+  height: 36px;
+  font-size: 11.5px;
+}
+
+.iot-table .el-table__body tr:last-child td.el-table__cell {
+  border-bottom: none;
+}
+
+.iot-table .cell {
+  padding: 0 16px;
+}
+
+.iot-table.is-compact .cell {
+  padding: 0 12px;
+}
+
+.iot-table .el-checkbox__inner {
+  border-radius: 4px;
+}
+
+.iot-table .iot-col-time .cell {
+  padding: 0 12px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.iot-table .iot-col-muted .cell {
+  color: var(--ink-3);
+}
+
+.iot-table .iot-col-num .cell {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.iot-cell-muted {
+  color: var(--ink-4);
+}
+
+.iot-mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ID：等宽字体压低存在感，复制按钮常驻但低对比，悬停整行才完全显形 */
+.iot-id-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.iot-id-text {
+  overflow: hidden;
+  max-width: 96px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-4);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iot-copy-btn {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--ink-4);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.iot-copy-btn .el-icon {
+  font-size: 14px;
+}
+
+.iot-table .el-table__row:hover .iot-copy-btn {
+  opacity: 1;
+}
+
+.iot-copy-btn:hover {
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.iot-copy-btn:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.5);
+  outline-offset: 1px;
+  opacity: 1;
+}
+
+/* 名称：一行一个身份，小图标底座让它在滚动中可被一眼拾取 */
+.iot-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.iot-name-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
+.iot-name-mark .el-icon {
+  font-size: 15px;
+}
+
+.iot-name-text {
+  overflow: hidden;
+  font-weight: 600;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 技术标识（协议名、类型名）用中性 chip，避免和状态色抢语义 */
+.iot-chip {
+  display: inline-block;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 2px 8px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--ink-2);
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+  background: #f1f5f9;
+  border: 1px solid #e8edf4;
+  border-radius: 6px;
+}
+
+/* 状态胶囊：软底色 + 圆点，比实心 el-tag 安静，红绿只留给真正需要区分的两态 */
+.iot-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  border-radius: 999px;
+}
+
+.iot-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.iot-pill.is-green {
+  color: #047857;
+  background: #ecfdf5;
+}
+
+.iot-pill.is-rose {
+  color: #be123c;
+  background: #fff1f2;
+}
+
+.iot-pill.is-blue {
+  color: #1d4ed8;
+  background: var(--brand-soft);
+}
+
+.iot-pill.is-amber {
+  color: #b45309;
+  background: #fffbeb;
+}
+
+.iot-pill.is-gray {
+  color: var(--ink-2);
+  background: #f1f5f9;
+}
+
+.iot-pill.is-live .iot-pill-dot {
+  animation: iotStatusPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes iotStatusPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* 行内操作：默认中性灰，悬停才染蓝/红/琥珀，四个图标不再每行都喊一次 */
+.iot-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.iot-table .iot-row-btn.el-button {
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  color: var(--ink-4);
+  border-radius: 8px;
+}
+
+.iot-table .iot-row-btn.el-button .el-icon {
+  font-size: 16px;
+}
+
+.iot-table .iot-row-btn.el-button:hover {
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.iot-table .iot-row-btn.el-button.el-button--danger:hover {
+  color: var(--danger);
+  background: #fff1f2;
+}
+
+.iot-table .iot-row-btn.el-button.el-button--warning:hover {
+  color: #b45309;
+  background: #fffbeb;
+}
+
+.iot-table .iot-row-btn.el-button.el-button--success:hover {
+  color: #047857;
+  background: #ecfdf5;
+}
+
+/* ---------- 空表 ---------- */
+.iot-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 44px 16px 48px;
+}
+
+.iot-empty-mark {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 14px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
+.iot-empty-mark .el-icon {
+  font-size: 26px;
+}
+
+.iot-empty-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.iot-empty-hint {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-4);
+}
+
+.iot-empty .el-button {
+  margin-top: 16px;
+}
+
+/* ---------- 分页 ---------- */
+.iot-pager {
+  display: flex;
+  justify-content: flex-end;
+  padding: 14px 20px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.iot-pager.is-flush {
+  margin-top: 12px;
+  padding: 0;
+  border-top: 0;
+}
+
+.iot-pager .el-pagination {
+  --el-pagination-button-bg-color: #f4f6fa;
+  --el-pagination-hover-color: var(--brand);
+}
+
+.iot-pager .el-pager li,
+.iot-pager .btn-prev,
+.iot-pager .btn-next {
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+/* ---------- 通知条 ---------- */
+.iot-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 11px 14px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  border: 1px solid transparent;
+  border-radius: 12px;
+}
+
+.iot-notice.is-inline {
+  margin: 12px 0 0;
+}
+
+.iot-notice.is-info {
+  color: #1e40af;
+  background: #f5f9ff;
+  border-color: #dbe8fb;
+}
+
+.iot-notice.is-warning {
+  color: #92400e;
+  background: #fffbeb;
+  border-color: #fce7b4;
+}
+
+.iot-notice.is-error {
+  color: #9f1239;
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+
+.iot-notice.is-success {
+  color: #047857;
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+
+.iot-notice-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+}
+
+.iot-notice-mark .el-icon {
+  font-size: 16px;
+}
+
+.iot-notice-text {
+  margin: 0;
+  white-space: pre-line;
+}
+
+/* ---------- 小表格（弹窗 / 折叠区） ---------- */
+.iot-mini-table {
+  --el-table-border-color: transparent;
+  --el-table-bg-color: #fff;
+  --el-table-tr-bg-color: #fff;
+  --el-table-header-bg-color: #f8fafc;
+  --el-table-row-hover-bg-color: #f8fbff;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.iot-mini-table .el-table__inner-wrapper::before {
+  display: none;
+}
+
+.iot-mini-table th.el-table__cell {
+  height: 36px;
+  padding: 0;
+  background: #f8fafc;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--line);
+}
+
+.iot-mini-table tr.el-table__row td.el-table__cell {
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.iot-mini-table .el-table__body tr:last-child td.el-table__cell {
+  border-bottom: none;
+}
+
+.iot-mini-table .cell {
+  padding: 0 12px;
+}
+
+/* ---------- 对话框（el-dialog teleport 到 body，因此是全局类名） ----------
+   token 挂在 :root 上，弹窗被搬到 body 后同样能继承，不必在这里复制色板。 */
+.iot-dialog {
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px -24px rgba(15, 23, 42, 0.35);
+}
+
+.iot-dialog .el-dialog__header {
+  margin: 0;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.iot-dialog .el-dialog__title {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.iot-dialog .el-dialog__headerbtn {
+  top: 12px;
+  right: 12px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+.iot-dialog .el-dialog__headerbtn:hover {
+  background: #f4f6fa;
+}
+
+.iot-dialog .el-dialog__body {
+  padding: 20px 24px 8px;
+}
+
+.iot-dialog .el-dialog__footer {
+  padding: 14px 24px 18px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.iot-dialog .el-form-item__label {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.iot-dialog-hint {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--ink-3);
+  background: #f8fafc;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+}
+
+.iot-dialog-hint.is-quiet {
+  margin: 12px 0 0;
+  padding: 0;
+  color: var(--ink-4);
+  background: transparent;
+  border: 0;
+}
+
+.iot-dialog-lead {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+
+/* 只读 JSON / 配置预览 */
+.iot-code {
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  max-height: min(500px, 60vh);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+/* 表单里的常驻说明：占位符一输入就消失，而格式/范围正是最需要一直看见的信息 */
+.iot-form-hint {
+  margin-left: 12px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-4);
+}
+
+.iot-form-hint.is-block {
+  flex: 0 0 100%;
+  margin: 6px 0 0;
+}
+
+@media (max-width: 900px) {
+  .iot-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .iot-head-aside {
+    padding-bottom: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .iot-toolbar-filters,
+  .iot-toolbar-actions {
+    width: 100%;
+  }
+
+  .iot-toolbar-actions {
+    justify-content: flex-end;
+  }
+
+  .iot-search {
+    width: 100%;
+  }
+
+  .iot-form-hint {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iot-enter,
+  .iot-pill.is-live .iot-pill-dot {
+    animation: none;
+  }
+
+  .iot-page *,
+  .iot-page *::before,
+  .iot-page *::after {
+    transition: none !important;
+  }
+}

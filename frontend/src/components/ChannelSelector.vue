@@ -5,10 +5,10 @@
 
 <template>
   <el-select
+    class="selector-field"
     :model-value="modelValue"
     :placeholder="resolvedPlaceholder"
     :disabled="disabled"
-    style="width: 280px"
     @update:model-value="handleChange"
   >
     <el-option
@@ -57,3 +57,16 @@ function handleChange(value) {
   emit('select', { name: value, id: '' })
 }
 </script>
+
+<style scoped>
+/* 与 ProtocolSelector 的触发器同宽同高：两者都出现在设备/通道配置表单里 */
+.selector-field {
+  width: 280px;
+  max-width: 100%;
+}
+
+.selector-field :deep(.el-select__wrapper) {
+  min-height: 34px;
+  border-radius: 9px;
+}
+</style>

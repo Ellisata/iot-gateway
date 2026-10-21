@@ -115,6 +115,8 @@ export default {
     profile: '个人中心',
     changePassword: '修改密码',
     logout: '退出登录',
+    resizeSidebar: '调整菜单宽度',
+    resizeSidebarHint: '拖动调整菜单宽度，双击恢复默认',
   },
 
   // ---------- 修改密码 ----------
@@ -173,6 +175,45 @@ export default {
     addressCount: '采集地址数',
     totalErrors: '累计错误',
     viewDevices: '查看设备',
+
+    // ---------- 采集遥测 ----------
+    trendTitle: '采集遥测',
+    trendSummary: '在线率 {rate}（{online}/{collected}）· {points} 点/分',
+    trendRange: '时间范围',
+    trendRange6h: '6 小时',
+    trendRange24h: '24 小时',
+    trendLoading: '遥测加载中...',
+    trendEmpty: '趋势从网关启动后开始积累',
+    trendAccumulating: '每分钟一个采样点，当前已积累 {minutes} 分钟',
+    trendRunningSince: '本次运行 · 已积累 {minutes} 分钟',
+    trendStopped: '采集已停止',
+    trendOnlineRate: '在线率',
+    trendThroughput: '采集吞吐',
+    trendPerMinute: '点/分',
+    trendBadPoints: '坏点 {n}',
+    trendNoOverview: '在线数据暂不可用',
+
+    // ---------- 最近事件 ----------
+    recentEvents: '最近事件',
+    eventNoActive: '无活动报警',
+    eventsLoading: '事件加载中...',
+    eventsEmpty: '本次运行以来没有报警',
+    eventsEmptyHint: '设备断联、恢复与点位异常会按时间出现在这里。',
+
+    // ---------- 数据出口 ----------
+    dataOutlet: '数据出口',
+    outletChannels: '{n} 个通道',
+    outletConnectedCount: '{connected}/{total} 已连接',
+    outletQueue: '队列 {n}',
+    outletSpool: '积压 {n}',
+    outletLastSuccess: '最后成功 {time}',
+    outletStopped: '未运行',
+    outletConnected: '已连接',
+    outletDisconnected: '未连接',
+    outletMore: '另有 {n} 个通道',
+    outletEmpty: '尚未配置推送通道',
+    outletEmptyHint: '配置后，这里会显示每个通道的连接状态、队列与断网缓存积压。',
+    outletConfigure: '去配置',
   },
 
   // ---------- 设备对象管理 ----------
@@ -187,6 +228,11 @@ export default {
     add: '新增设备对象',
     editTitle: '编辑设备对象',
     addTitle: '新增设备对象',
+    addSuccess: '新增成功',
+    editSuccess: '编辑成功',
+    deleteSuccess: '删除成功',
+    addFailed: '新增失败',
+    editFailed: '编辑失败',
     protocol: '协议',
     searchNameRequired: '请输入设备对象名称',
     nameLength: '名称长度在 1 到 100 个字符',
@@ -226,10 +272,18 @@ export default {
   deviceAddress: {
     backToList: '返回设备对象列表',
     title: '设备地址标签',
+    subtitle: '这台设备的点位表：地址写法、类型、读写权限与采集频率都在这里维护。',
+    totalUnit: '个点位',
+    emptyTitle: '还没有配置点位',
+    emptyHint: '新增点位，或用「自动发现点位」从设备扫描出一批候选地址。',
+    emptySearch: '没有匹配「{name}」的点位',
     searchPlaceholder: '请输入地址名称搜索',
     add: '新增地址',
     editTitle: '编辑设备地址',
     addTitle: '新增设备地址',
+    addSuccess: '新增成功',
+    editSuccess: '编辑成功',
+    deleteSuccess: '删除成功',
     tag: '标签',
     dataType: '数据类型',
     commonDataType: '通用数据类型',
@@ -393,6 +447,9 @@ export default {
   // ---------- 局域网扫描发现 ----------
   deviceScan: {
     intro: '扫描网关所在网段，找出可连接的 PLC 与仪表，勾选后一键建成设备。',
+    foundUnit: '台设备已发现',
+    configTitle: '扫描配置',
+    progressTitle: '扫描进度',
     disabled: '局域网扫描功能未启用（deviceScan.enabled）。管理员可在网关配置文件中打开后重启。',
     noProtocol: '当前没有插件声明局域网扫描能力。请确认已安装带扫描能力的协议插件（如 iot-driver-modbus）。',
     noSubnet: '本机没有可用的 IPv4 网段，无法扫描。请确认网关已接入目标网络。',
@@ -419,7 +476,9 @@ export default {
     pollTimeout: '扫描轮询超时，已停止刷新。请到设备列表确认结果，或重新扫描。',
     scanningHint: '正在扫描，扫到的设备会陆续出现在这里。',
     noResult: '还没有扫到设备。',
+    emptyHint: '选择网段后开始扫描，扫到的设备会陆续出现在这里。',
     resultTitle: '扫描结果',
+    resultHint: '勾选扫描到的设备，补充名称与说明后批量添加。',
     addDevices: '添加为设备（{n}）',
     noSelection: '请先勾选要添加的设备',
     addDialogTitle: '添加为设备',
@@ -431,6 +490,7 @@ export default {
     duplicateSkip: '不建这些',
     copied: '连接配置已复制',
     copyFailed: '复制失败，请手动选择文本',
+    copyJson: '复制连接配置',
     state: {
       running: '扫描中',
       done: '已完成',
@@ -453,6 +513,10 @@ export default {
   // ---------- 设备实时数据 ----------
   realtime: {
     title: '设备实时数据',
+    subtitle: '实时值随轮询刷新；质量码与采集状态用于判断数据是否可信。',
+    pointUnit: '个点位',
+    emptyTitle: '暂无实时数据',
+    emptyHint: '设备在线且已配置启用的采集地址后，值会出现在这里。',
     backToList: '返回设备对象列表',
     searchPlaceholder: '请输入点位名称或说明搜索',
     autoRefresh: '自动刷新',
@@ -505,6 +569,11 @@ export default {
   // 协议只能由插件供给：没有「新增协议」「删除协议」，
   // 对应地有「恢复默认表单」（把表单换回插件当前声明的那一份）。
   protocol: {
+    subtitle: '协议行由插件供给；这里维护显示信息，表单模板在「协议表单配置」中编辑。',
+    totalUnit: '个协议',
+    emptyTitle: '暂无协议',
+    emptyHint: '安装或上传协议插件后，网关会自动登记协议行。',
+    emptySearch: '没有匹配「{name}」的协议',
     searchPlaceholder: '请输入协议名称搜索',
     editTitle: '编辑协议',
     sort: '排序',
@@ -551,6 +620,11 @@ export default {
 
   // ---------- 通道管理 ----------
   channel: {
+    subtitle: '把采集数据推送到外部系统的通道；连接参数由通道表单定义。',
+    totalUnit: '个通道',
+    emptyTitle: '还没有推送通道',
+    emptyHint: '新增一个通道，选择通道类型并填写连接参数。',
+    emptySearch: '没有匹配「{name}」的通道',
     searchPlaceholder: '请输入通道名称搜索',
     add: '新增通道',
     editTitle: '编辑通道',
@@ -581,6 +655,10 @@ export default {
   subscription: {
     subtitle: '订阅外部 MQTT 报文，按映射规则转换为采集记录后写入已启用的 TDengine / InfluxDB 推送通道',
     statusAutoRefresh: '运行状态每 5 秒自动刷新',
+    totalUnit: '条订阅',
+    emptyTitle: '还没有 MQTT 订阅',
+    emptyHint: '新增订阅，把外部 MQTT 报文映射为采集记录并写入推送通道。',
+    emptySearch: '没有匹配筛选条件的订阅',
     searchPlaceholder: '请输入订阅名称搜索',
     statusAll: '全部状态',
     add: '新增订阅',
@@ -703,6 +781,9 @@ export default {
 
   subscriptionDevicePoint: {
     subtitle: '订阅报文里出现过的设备与点位信息（不含采样值）',
+    totalUnit: '个点位',
+    emptyTitle: '还没有订阅点位',
+    emptyHint: '订阅收到报文后，设备与点位会自动出现在这里。',
     firstSeenAt: '首次出现',
     lastSeenAt: '最近出现',
     fetchFailed: '获取订阅设备与点位失败',
@@ -710,6 +791,11 @@ export default {
 
   // ---------- 报警管理 ----------
   alarm: {
+    subtitle: '按设备、通道、点位归集的报警事件；状态与级别决定处置优先级。',
+    totalUnit: '条报警',
+    emptyTitle: '暂无报警',
+    emptyHint: '所选范围内没有报警事件；有新事件时这里会自动出现。',
+    emptySearch: '没有匹配筛选条件的报警',
     deviceTitle: '设备报警',
     channelTitle: '通道报警',
     pointTitle: '点位报警',
@@ -724,6 +810,12 @@ export default {
     typeChannel: '通道',
     typePoint: '点位',
     alarmTypeCol: '报警类型',
+    // 事件类型文案：后端 alarmTypeName 是中文硬编码，前端按 alarmType 自行翻译，
+    // 避免英文界面里混进中文（大盘事件流与报警表共用这组 key）
+    alarmTypeOffline: '断联报警',
+    alarmTypeQuality: '采集质量报警',
+    alarmTypeThreshold: '超限报警',
+    alarmTypeRecover: '恢复记录',
     level: '级别',
     levelCritical: '严重',
     levelError: '错误',
@@ -740,6 +832,9 @@ export default {
   thresholdRecord: {
     title: '越限记录',
     hint: '记录每个越限样本（同一段连续越限内最快每分钟一条）。与「点位超限报警」不同：报警要连续 3 轮越限才产生，短时尖峰只在这里看得到。仅保留最近 7 天、最多 2 万条，超出自动清理。',
+    totalUnit: '条记录',
+    emptyTitle: '暂无越限记录',
+    emptyHint: '点位越过报警条件时会在这里逐条留证。',
     searchPlaceholder: '请输入点位名称搜索',
     device: '设备',
     point: '点位',
@@ -794,6 +889,11 @@ export default {
 
   // ---------- 报警通知配置（钉钉 / 企微 / 飞书 / 自定义 Webhook） ----------
   alarmWebhook: {
+    subtitle: '把报警事件推送到企业微信、钉钉、飞书或自定义 Webhook；运行状态可查看各通道队列。',
+    totalUnit: '个通知配置',
+    emptyTitle: '还没有通知配置',
+    emptyHint: '新增一个通知配置，把报警事件推送到外部渠道。',
+    emptySearch: '没有匹配「{name}」的通知配置',
     searchPlaceholder: '请输入名称搜索',
     add: '新增通知',
     editTitle: '编辑通知',
@@ -849,6 +949,11 @@ export default {
 
   // ---------- 日志管理 ----------
   log: {
+    subtitle: '查看网关本机日志文件，按需读取末尾若干行，便于现场排查问题。',
+    filesTitle: '日志文件',
+    totalUnit: '个文件',
+    emptyTitle: '暂无日志文件',
+    emptyHint: '网关运行后会在日志目录下生成 .log 文件。',
     filesHint: '日志目录下的 .log 文件（按修改时间倒序）',
     fileName: '文件名',
     size: '大小',
@@ -863,6 +968,11 @@ export default {
 
   // ---------- 密钥管理 ----------
   apiKey: {
+    subtitle: '用于调用开放接口的访问密钥；默认密钥随局域网广播发布，不可删除或改名。',
+    listTitle: '访问密钥',
+    totalUnit: '个密钥',
+    emptyTitle: '还没有访问密钥',
+    emptyHint: '新增一个密钥，用于调用开放接口。',
     hint: '用于调用开放接口的访问密钥，创建后请妥善保存',
     add: '新增密钥',
     keyContent: '密钥内容',
@@ -887,6 +997,7 @@ export default {
 
   // ---------- 通道表单管理 ----------
   channelForm: {
+    subtitle: '为通道配置连接参数表单；新建通道时按这份表单收集连接参数。',
     selectChannel: '选择通道：',
     selectChannelBtn: '选择通道',
     selectFirst: '请先选择一个通道',
@@ -898,6 +1009,7 @@ export default {
 
   // ---------- 协议表单配置 ----------
   protocolForm: {
+    subtitle: '为协议配置动态表单：设备对象在第二步按这份表单收集协议参数。',
     selectProtocol: '选择协议：',
     selectProtocolBtn: '选择协议',
     selectFirst: '请先选择一个协议',
@@ -909,6 +1021,9 @@ export default {
 
   // ---------- 选择器组件 ----------
   selector: {
+    rowHint: '点击任意一行即可选中该协议。',
+    emptyTitle: '暂无可选协议',
+    emptySearch: '没有匹配「{keyword}」的协议',
     selectChannel: '请选择通道',
     selectAlarmWebhookType: '请选择通知类型',
     selectProtocol: '请选择协议',
@@ -924,6 +1039,10 @@ export default {
   // ---------- Excel 导入 ----------
   excelImport: {
     resultTitle: '导入结果',
+    totalLabel: '总记录',
+    successLabel: '成功',
+    failedLabel: '失败',
+    errorLead: '以下记录未导入，请按失败原因修正后重新导入。',
     total: '共 {total} 条',
     success: '成功 {n} 条',
     failed: '失败 {n} 条',
@@ -947,6 +1066,9 @@ export default {
 
   // ---------- 系统设置 ----------
   systemSettings: {
+    subtitle: '维护网关身份信息；ID 与版本由系统生成并在每次启动时同步。',
+    identityTitle: '网关身份',
+    identityHint: '只读字段由系统维护，名称与描述可在此修改。',
     id: '网关 ID',
     copyId: '复制网关 ID',
     idCopied: '网关 ID 已复制',
@@ -967,6 +1089,7 @@ export default {
   runtimeConfig: {
     title: '运行开关',
     subtitle: '这些开关决定网关的运行时行为。默认值来自 default.yaml；在此修改会写入数据库并长期覆盖默认值，重启后仍然有效。',
+    overrideUnit: '项页面覆盖',
     introTitle: '默认值与覆盖值',
     intro: '没有改过的项使用 default.yaml 的值。页面修改会保存为覆盖值，并优先于 default.yaml；「恢复默认」删除覆盖值，回到 default.yaml 的设置。标注「重启后生效」的项需要重启网关。',
     hotBadge: '立即生效',

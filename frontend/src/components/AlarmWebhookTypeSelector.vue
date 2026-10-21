@@ -5,11 +5,11 @@
 
 <template>
   <el-select
+    class="selector-field"
     :model-value="modelValue"
     :placeholder="resolvedPlaceholder"
     :disabled="disabled"
     :loading="loading"
-    style="width: 280px"
     @update:model-value="handleChange"
   >
     <el-option
@@ -93,3 +93,16 @@ function handleChange(value) {
 
 onMounted(loadTypes)
 </script>
+
+<style scoped>
+/* 与 ProtocolSelector / ChannelSelector 同一套控件尺度 */
+.selector-field {
+  width: 280px;
+  max-width: 100%;
+}
+
+.selector-field :deep(.el-select__wrapper) {
+  min-height: 34px;
+  border-radius: 9px;
+}
+</style>

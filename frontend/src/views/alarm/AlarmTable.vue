@@ -12,76 +12,151 @@
 -->
 
 <template>
-  <div class="p-6">
-    <h1 class="text-2xl font-bold text-gray-800 mb-6">{{ pageTitle }}</h1>
-
-    <!-- 筛选工具栏 -->
-    <el-card shadow="never" class="mb-4">
-      <div class="flex flex-wrap items-center gap-3">
-        <el-input
-          v-model="queryForm.targetName"
-          :placeholder="t('alarm.targetNamePlaceholder')"
-          clearable
-          style="width: 240px"
-          @keyup.enter="handleSearch"
-        />
-        <el-select
-          v-model="queryForm.status"
-          :placeholder="t('alarm.alarmStatus')"
-          clearable
-          style="width: 150px"
-        >
-          <el-option :label="t('alarm.statusActive')" value="active" />
-          <el-option :label="t('alarm.statusCleared')" value="cleared" />
-        </el-select>
-        <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
-        <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
+  <div class="iot-page">
+    <header class="iot-head iot-enter">
+      <div>
+        <p class="iot-eyebrow">
+          <span class="iot-eyebrow-dot" aria-hidden="true" />
+          {{ t('menu.alarm') }}
+        </p>
+        <h1 class="iot-title">{{ pageTitle }}</h1>
+        <p class="iot-sub">{{ t('alarm.subtitle') }}</p>
       </div>
-    </el-card>
+      <div class="iot-head-aside">
+        <div class="iot-stat">
+          <span class="iot-stat-num">{{ displayTotal }}</span>
+          <span class="iot-stat-label">{{ t('alarm.totalUnit') }}</span>
+        </div>
+      </div>
+    </header>
 
-    <!-- 报警数据表格 -->
-    <el-card shadow="never">
-      <el-table
-        :data="tableData"
-        v-loading="loading"
-        stripe
-        border
-        style="width: 100%"
-      >
-        <el-table-column type="index" :label="t('common.index')" width="70" align="center" />
-        <el-table-column prop="targetName" :label="t('alarm.targetName')" min-width="140" show-overflow-tooltip />
-        <el-table-column prop="targetType" :label="t('alarm.targetType')" width="100" align="center">
+    <!-- 工作区：筛选、表格、分页共用一块表面 -->
+    <section ref="panelRef" class="iot-panel iot-enter" style="animation-delay: 60ms">
+      <div class="iot-toolbar">
+        <div class="iot-toolbar-filters">
+          <el-input
+            v-model="queryForm.targetName"
+            class="iot-search"
+            :placeholder="t('alarm.targetNamePlaceholder')"
+            clearable
+            @keyup.enter="handleSearch"
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
+          <el-select
+            v-model="queryForm.status"
+            class="status-filter"
+            :placeholder="t('alarm.alarmStatus')"
+            clearable
+          >
+            <el-option :label="t('alarm.statusActive')" value="active" />
+            <el-option :label="t('alarm.statusCleared')" value="cleared" />
+          </el-select>
+          <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
+          <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
+        </div>
+      </div>
+
+      <el-table class="iot-table" :data="tableData" v-loading="loading" style="width: 100%">
+        <!-- 窄屏藏起序号与目标类型：报警页已经按类型分页展示，同一页里每行的
+             目标类型都相同，这一列是重复信息；序号只是行号。两者都在宽屏回归。 -->
+        <el-table-column
+          v-if="!compact"
+          type="index"
+          :label="t('common.index')"
+          width="60"
+          align="center"
+        />
+
+        <!-- 目标名称是这一行的身份：小图标底座让报警对象在滚动中可被一眼拾取 -->
+        <el-table-column :label="t('alarm.targetName')" :min-width="compact ? 155 : 170">
           <template #default="{ row }">
-            {{ targetTypeName(row.targetType) }}
+            <div class="iot-name-cell">
+              <span class="iot-name-mark" aria-hidden="true">
+                <el-icon><Bell /></el-icon>
+              </span>
+              <span class="iot-name-text" :title="row.targetName">{{ row.targetName || '—' }}</span>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column prop="alarmTypeName" :label="t('alarm.alarmTypeCol')" width="110" align="center">
+        <el-table-column v-if="!compact" :label="t('alarm.targetType')" width="96" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.alarmType === 'recover' ? 'success' : 'danger'" size="small">
-              {{ row.alarmTypeName }}
-            </el-tag>
+            <span class="iot-chip">{{ targetTypeName(row.targetType) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="level" :label="t('alarm.level')" width="90" align="center">
+        <el-table-column :label="t('alarm.alarmTypeCol')" width="110" align="center">
           <template #default="{ row }">
-            <el-tag :type="levelTagType(row.level)" size="small">{{ levelName(row.level) }}</el-tag>
+            <span
+              class="iot-pill"
+              :class="row.alarmType === 'recover' ? 'is-green' : 'is-rose'"
+            >
+              <span class="iot-pill-dot" aria-hidden="true" />
+              {{ alarmTypeLabel(row) }}
+            </span>
           </template>
         </el-table-column>
-        <el-table-column prop="content" :label="t('alarm.content')" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="statusName" :label="t('alarm.statusCol')" width="100" align="center">
+        <el-table-column :label="t('alarm.level')" width="88" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'active' ? 'danger' : 'success'" size="small">
-              {{ row.statusName }}
-            </el-tag>
+            <span class="iot-pill" :class="levelPillClass(row.level)">{{ levelName(row.level) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="firstOccurTime" :label="t('alarm.firstOccurTime')" width="170" align="center" />
-        <el-table-column prop="lastOccurTime" :label="t('alarm.lastOccurTime')" width="170" align="center" />
-        <el-table-column prop="clearTime" :label="t('alarm.clearTime')" width="170" align="center" />
+        <el-table-column
+          prop="content"
+          :label="t('alarm.content')"
+          :min-width="compact ? 150 : 180"
+          show-overflow-tooltip
+          class-name="iot-col-muted"
+        />
+        <el-table-column :label="t('alarm.statusCol')" width="104" align="center">
+          <template #default="{ row }">
+            <span class="iot-pill" :class="row.status === 'active' ? 'is-rose' : 'is-green'">
+              <span class="iot-pill-dot" aria-hidden="true" />
+              {{ statusLabel(row) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="firstOccurTime"
+          :label="t('alarm.firstOccurTime')"
+          width="150"
+          class-name="iot-col-time"
+        />
+        <el-table-column
+          prop="lastOccurTime"
+          :label="t('alarm.lastOccurTime')"
+          width="150"
+          class-name="iot-col-time"
+        />
+        <el-table-column
+          prop="clearTime"
+          :label="t('alarm.clearTime')"
+          width="150"
+          class-name="iot-col-time"
+        />
+
+        <template #empty>
+          <div class="iot-empty">
+            <span class="iot-empty-mark" aria-hidden="true">
+              <el-icon><Bell /></el-icon>
+            </span>
+            <p class="iot-empty-title">
+              {{ queryForm.targetName || queryForm.status
+                ? t('alarm.emptySearch')
+                : t('alarm.emptyTitle') }}
+            </p>
+            <p v-if="!queryForm.targetName && !queryForm.status" class="iot-empty-hint">
+              {{ t('alarm.emptyHint') }}
+            </p>
+            <el-button v-if="queryForm.targetName || queryForm.status" @click="handleReset">
+              {{ t('common.reset') }}
+            </el-button>
+          </div>
+        </template>
       </el-table>
 
-      <!-- 分页 -->
-      <div class="flex justify-end mt-4">
+      <div class="iot-pager">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
@@ -93,13 +168,17 @@
           @current-change="handleCurrentChange"
         />
       </div>
-    </el-card>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
+import {
+  IconBell as Bell,
+  IconSearch as Search,
+} from '@tabler/icons-vue'
 import { ALARM_TARGET_TYPES, getAlarmPage } from '@/api/modules/alarm'
 
 const { t } = useI18n()
@@ -155,6 +234,11 @@ const currentPage = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
 
+// 首屏还没拿到数时显示占位符而不是 0：「0 条报警」会被当成"最近没有任何报警"
+const displayTotal = computed(() =>
+  loading.value && tableData.value.length === 0 ? '—' : total.value
+)
+
 // ---------- 获取列表（分页） ----------
 async function fetchList() {
   loading.value = true
@@ -201,6 +285,25 @@ function handleCurrentChange(val) {
   fetchList()
 }
 
+// ---------- 类型 / 状态展示 ----------
+// 后端的 alarmTypeName / statusName 是中文硬编码，英文界面下也会返回中文。
+// 按枚举值在前端翻译，未知值回退到后端文案，避免新类型出现时整列空白。
+const ALARM_TYPE_KEYS = {
+  offline: 'alarm.alarmTypeOffline',
+  quality: 'alarm.alarmTypeQuality',
+  threshold: 'alarm.alarmTypeThreshold',
+  recover: 'alarm.alarmTypeRecover',
+}
+
+function alarmTypeLabel(row) {
+  const key = ALARM_TYPE_KEYS[row.alarmType]
+  return key ? t(key) : row.alarmTypeName
+}
+
+function statusLabel(row) {
+  return row.status === 'active' ? t('alarm.statusActive') : t('alarm.statusCleared')
+}
+
 // ---------- 级别展示 ----------
 function levelName(level) {
   const map = {
@@ -212,18 +315,44 @@ function levelName(level) {
   return map[level] ? t(map[level]) : level || '—'
 }
 
-function levelTagType(level) {
+// 级别用软底胶囊：critical / error 都落在红系，warning 琥珀、info 中性；
+// 不再使用实心 el-tag，避免整列都在喊。
+function levelPillClass(level) {
   const map = {
-    critical: 'danger',
-    error: 'danger',
-    warning: 'warning',
-    info: 'info',
+    critical: 'is-rose',
+    error: 'is-rose',
+    warning: 'is-amber',
+    info: 'is-gray',
   }
-  return map[level] || 'info'
+  return map[level] || 'is-gray'
 }
+
+// ---------- 紧凑列 ----------
+// 宽屏十列合计 1258px，1600 分辨率下正好放得下；再窄就会横向滚动。
+// 阈值按面板实际宽度算而不是 window.innerWidth：侧栏可拖动、可折叠，
+// 用视口宽度判断会在侧栏折叠后仍少显示两列。
+const panelRef = ref(null)
+const compact = ref(false)
+let panelObserver = null
 
 // ---------- 初始化 ----------
 onMounted(() => {
+  if (typeof ResizeObserver !== 'undefined' && panelRef.value) {
+    panelObserver = new ResizeObserver(([entry]) => {
+      compact.value = entry.contentRect.width < 1300
+    })
+    panelObserver.observe(panelRef.value)
+  }
   fetchList()
 })
+
+onBeforeUnmount(() => {
+  panelObserver?.disconnect()
+})
 </script>
+
+<style scoped>
+.status-filter {
+  width: 150px;
+}
+</style>

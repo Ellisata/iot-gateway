@@ -4,23 +4,27 @@
 -->
 
 <template>
-  <div class="h-screen flex flex-col bg-[#f5f7fa]">
-    <!-- 独立阅读页顶栏（不在管理端主布局内，供新窗口打开） -->
-    <header class="flex items-center justify-between px-6 border-b bg-white" style="height: 60px">
-      <div class="flex items-center gap-3">
-        <el-icon class="text-lg text-[#409eff]"><Document /></el-icon>
-        <span class="font-bold text-base">{{ t('openApiDoc.title') }}</span>
-        <span class="text-xs text-gray-400">{{ t('openApiDoc.subtitle') }}</span>
+  <div class="doc-page">
+    <!-- 独立阅读页顶栏（不在管理端主布局内，供新窗口打开）：与控制台同一套字号/配色 -->
+    <header class="doc-head">
+      <div class="doc-brand">
+        <span class="doc-brand-mark" aria-hidden="true">
+          <el-icon><Document /></el-icon>
+        </span>
+        <div class="doc-brand-copy">
+          <p class="doc-brand-title">{{ t('openApiDoc.title') }}</p>
+          <p class="doc-brand-sub">{{ t('openApiDoc.subtitle') }}</p>
+        </div>
       </div>
       <el-button text type="primary" @click="router.push('/dashboard')">
         <el-icon class="mr-1"><Back /></el-icon>{{ t('openApiDoc.backToConsole') }}
       </el-button>
     </header>
 
-    <main ref="scrollMain" class="flex-1 overflow-y-auto p-6" @scroll.passive="onScroll">
-      <div class="mx-auto max-w-[1240px] flex gap-5 items-start">
+    <main ref="scrollMain" class="doc-main" @scroll.passive="onScroll">
+      <div class="doc-layout">
         <!-- 左侧目录导航（从渲染后的标题动态生成，支持整体折叠与分组展开收起） -->
-        <aside v-if="tocTree.length" class="w-56 shrink-0 sticky top-6">
+        <aside v-if="tocTree.length" class="doc-aside">
           <div class="toc-panel">
             <button type="button" class="toc-title" @click="panelCollapsed = !panelCollapsed">
               <span>{{ t('openApiDoc.toc') }}</span>
@@ -59,12 +63,17 @@
           </div>
         </aside>
 
-        <el-card shadow="never" class="flex-1 api-doc-card">
+        <section class="doc-surface">
           <!-- 文档由后端 go:embed 内置 markdown 渲染为 HTML，此处仅展示 -->
-          <div v-if="loading" v-loading="loading" class="h-48" />
+          <div v-if="loading" v-loading="loading" class="doc-loading" />
           <div v-show="!loading && docHtml" ref="contentRef" class="api-doc-content" v-html="docHtml" />
-          <el-empty v-if="!loading && !docHtml" :description="t('openApiDoc.loadFailed')" />
-        </el-card>
+          <div v-if="!loading && !docHtml" class="iot-empty">
+            <span class="iot-empty-mark" aria-hidden="true">
+              <el-icon><Document /></el-icon>
+            </span>
+            <p class="iot-empty-title">{{ t('openApiDoc.loadFailed') }}</p>
+          </div>
+        </section>
       </div>
     </main>
   </div>
@@ -177,158 +186,331 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/* 阅读页在独立窗口打开：token 挂在 :root 上，独立渲染也能继承 */
+.doc-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  color: var(--ink-2);
+  background: #f6f8fb;
+}
+
+/* ---------- 顶栏 ---------- */
+.doc-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 60px;
+  padding: 0 24px;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+}
+
+.doc-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.doc-brand-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
+.doc-brand-mark .el-icon {
+  font-size: 17px;
+}
+
+.doc-brand-copy {
+  min-width: 0;
+}
+
+.doc-brand-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.doc-brand-sub {
+  margin: 2px 0 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-4);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 布局 ---------- */
+.doc-main {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.doc-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  max-width: 1240px;
+  margin: 0 auto;
+}
+
+.doc-aside {
+  position: sticky;
+  top: 0;
+  flex: none;
+  width: 224px;
+}
+
+.doc-surface {
+  flex: 1;
+  min-width: 0;
+  max-width: 920px;
+  padding: 24px 28px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.doc-loading {
+  height: 192px;
+}
+
 /* ---------- 左侧目录 ---------- */
 .toc-panel {
+  padding: 10px 0;
+  overflow: hidden;
   background: #fff;
-  border-radius: 6px;
-  padding: 12px 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
+
 .toc-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: calc(100% - 24px);
-  margin: 0 12px 8px;
-  padding: 4px 4px 10px;
-  font-size: 13px;
+  width: 100%;
+  padding: 6px 16px 10px;
+  font-size: 12.5px;
   font-weight: 600;
-  color: #303133;
+  color: var(--ink-2);
   background: none;
-  border: none;
-  border-bottom: 1px solid #ebeef5;
-  border-radius: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
   cursor: pointer;
 }
+
 .toc-caret {
-  color: #909399;
+  color: var(--ink-4);
   transition: transform 0.25s;
 }
+
 .toc-caret.is-folded {
   transform: rotate(-90deg);
 }
+
 .toc-list {
   display: flex;
   flex-direction: column;
+  max-height: calc(100vh - 200px);
   padding-top: 6px;
-  max-height: calc(100vh - 180px);
   overflow-y: auto;
 }
+
 .toc-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 4px;
-  font-size: 13px;
+  padding: 6px 16px;
+  font-size: 12.5px;
   line-height: 1.5;
-  padding: 6px 12px;
-  color: #606266;
+  color: var(--ink-3);
   text-decoration: none;
   border-left: 2px solid transparent;
+  transition: color 0.15s ease, background-color 0.15s ease;
 }
+
 .toc-item.is-l2 {
   font-weight: 500;
 }
+
 .toc-item.is-l3 {
   padding-left: 34px;
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-4);
   white-space: normal;
   word-break: break-all;
 }
+
 .toc-item:hover {
-  color: #409eff;
+  color: var(--brand);
+  background: #f8fafc;
 }
+
 .toc-item.is-active {
-  color: #409eff;
   font-weight: 600;
-  border-left-color: #409eff;
-  background: #ecf5ff;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-left-color: var(--brand);
 }
+
 .toc-item-text {
   white-space: normal;
   word-break: break-all;
 }
+
 .toc-caret.is-group {
   flex-shrink: 0;
   margin-right: -2px;
 }
 
-.api-doc-card {
-  max-width: 920px;
+/* ---------- 文档正文 ---------- */
+.api-doc-content {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink-2);
 }
 
-.api-doc-content {
-  line-height: 1.75;
-  color: #303133;
-  font-size: 14px;
+.api-doc-content :deep(h1),
+.api-doc-content :deep(h2),
+.api-doc-content :deep(h3) {
+  color: var(--ink);
 }
+
 .api-doc-content :deep(h2),
 .api-doc-content :deep(h3) {
   /* 锚点跳转预留高度，避免标题被顶栏/容器边缘裁住 */
   scroll-margin-top: 24px;
 }
+
 .api-doc-content :deep(h1) {
-  font-size: 22px;
-  margin: 12px 0 16px;
-  border-bottom: 1px solid #ebeef5;
   padding-bottom: 8px;
+  margin: 12px 0 16px;
+  font-size: 22px;
+  border-bottom: 1px solid var(--line-soft);
 }
+
 .api-doc-content :deep(h2) {
-  font-size: 18px;
   margin: 24px 0 12px;
+  font-size: 18px;
 }
+
 .api-doc-content :deep(h3) {
-  font-size: 15px;
   margin: 20px 0 10px;
+  font-size: 15px;
 }
+
 .api-doc-content :deep(p),
 .api-doc-content :deep(li) {
   margin: 6px 0;
 }
+
 .api-doc-content :deep(ul),
 .api-doc-content :deep(ol) {
   padding-left: 24px;
 }
+
+.api-doc-content :deep(a) {
+  color: var(--brand);
+  text-decoration: none;
+}
+
+.api-doc-content :deep(a:hover) {
+  text-decoration: underline;
+}
+
 .api-doc-content :deep(blockquote) {
   margin: 10px 0;
   padding: 8px 14px;
-  border-left: 3px solid #e6a23c;
-  background: #fdf6ec;
-  color: #b88230;
+  color: #92400e;
+  background: #fffbeb;
+  border-left: 3px solid #f59e0b;
+  border-radius: 0 8px 8px 0;
 }
+
 .api-doc-content :deep(code) {
-  background: #f5f7fa;
   padding: 1px 6px;
-  border-radius: 3px;
   font-size: 13px;
-  color: #c7254e;
+  color: #be123c;
+  background: #f1f5f9;
+  border-radius: 5px;
 }
+
 .api-doc-content :deep(pre code) {
   display: block;
-  padding: 12px;
-  border-radius: 6px;
-  color: #d4d4d4;
-  background: #282c34;
+  padding: 14px 16px;
   overflow-x: auto;
   line-height: 1.6;
+  color: #d4d4d4;
+  background: #282c34;
+  border-radius: 12px;
 }
+
 .api-doc-content :deep(table) {
-  border-collapse: collapse;
   width: auto;
   min-width: 50%;
   margin: 10px 0;
+  border-collapse: collapse;
 }
+
 .api-doc-content :deep(th),
 .api-doc-content :deep(td) {
-  border: 1px solid #ebeef5;
   padding: 7px 12px;
   text-align: left;
+  border: 1px solid var(--line-soft);
 }
+
 .api-doc-content :deep(th) {
-  background: #f5f7fa;
   font-weight: 600;
+  background: #f8fafc;
 }
+
 .api-doc-content :deep(tr:nth-child(even)) {
-  background: #fafafa;
+  background: #fbfcfe;
+}
+
+@media (max-width: 920px) {
+  .doc-head {
+    padding: 0 16px;
+  }
+
+  .doc-main {
+    padding: 16px;
+  }
+
+  .doc-layout {
+    flex-direction: column;
+  }
+
+  .doc-aside {
+    position: static;
+    width: 100%;
+  }
+
+  .toc-list {
+    max-height: 240px;
+  }
+
+  .doc-surface {
+    width: 100%;
+    max-width: none;
+    padding: 20px;
+  }
 }
 </style>

@@ -4,65 +4,159 @@
 -->
 
 <template>
-  <div class="p-6">
-    <h1 class="text-2xl font-bold text-gray-800 mb-6">{{ t('menu.protocol') }}</h1>
+  <div class="iot-page">
+    <!-- 页头：与设备对象页同一套字号/留白层级；右侧常驻协议数 -->
+    <header class="iot-head iot-enter">
+      <div>
+        <p class="iot-eyebrow">
+          <span class="iot-eyebrow-dot" aria-hidden="true" />
+          {{ t('menu.industrial') }}
+        </p>
+        <h1 class="iot-title">{{ t('menu.protocol') }}</h1>
+        <p class="iot-sub">{{ t('protocol.subtitle') }}</p>
+      </div>
+      <div class="iot-head-aside">
+        <div class="iot-stat">
+          <span class="iot-stat-num">{{ displayTotal }}</span>
+          <span class="iot-stat-label">{{ t('protocol.totalUnit') }}</span>
+        </div>
+      </div>
+    </header>
 
-    <!-- 工具栏 -->
-    <el-card shadow="never" class="mb-4">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
+    <!-- 工作区：筛选、表格、分页共用一块表面 -->
+    <section class="iot-panel iot-enter" style="animation-delay: 60ms">
+      <div class="iot-toolbar">
+        <div class="iot-toolbar-filters">
           <el-input
             v-model="queryForm.name"
+            class="iot-search"
             :placeholder="t('protocol.searchPlaceholder')"
             clearable
-            style="width: 240px"
             @keyup.enter="handleSearch"
-          />
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
           <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
           <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
         </div>
         <!-- 只有「新增插件」这一个入口：协议行全部由插件供给，手工建的行没有驱动与之对应 -->
-        <div class="flex items-center gap-3">
-          <el-button v-if="userStore.isAdmin" type="primary" @click="handleOpenPluginDialog">
+        <div class="iot-toolbar-actions">
+          <el-button
+            v-if="userStore.isAdmin"
+            type="primary"
+            :icon="Plus"
+            @click="handleOpenPluginDialog"
+          >
             {{ t('protocol.addPlugin') }}
           </el-button>
         </div>
       </div>
-    </el-card>
 
-    <!-- 数据表格 -->
-    <el-card shadow="never">
       <el-table
+        class="iot-table"
         :data="tableData"
         v-loading="loading"
-        stripe
         style="width: 100%"
-        border
       >
-        <el-table-column type="index" :label="t('common.index')" width="70" align="center" />
-        <el-table-column prop="name" :label="t('common.name')" min-width="140" />
-        <el-table-column prop="description" :label="t('common.description')" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="sort" :label="t('protocol.sort')" width="80" align="center" />
-        <el-table-column prop="createdAt" :label="t('common.createdAt')" width="180" align="center" />
-        <el-table-column :label="t('common.action')" width="130" align="center" fixed="right">
+        <el-table-column type="index" :label="t('common.index')" width="68" align="center" />
+
+        <!-- 协议名是这一行的身份：小图标底座让「一个协议」在滚动中可被一眼拾取 -->
+        <el-table-column :label="t('common.name')" min-width="200">
           <template #default="{ row }">
-            <div class="flex items-center justify-center gap-2">
+            <div class="iot-name-cell">
+              <span class="iot-name-mark" aria-hidden="true">
+                <el-icon><PlugConnected /></el-icon>
+              </span>
+              <span class="iot-name-text" :title="row.name">{{ row.name }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="description"
+          :label="t('common.description')"
+          min-width="220"
+          show-overflow-tooltip
+          class-name="iot-col-muted"
+        />
+        <el-table-column :label="t('protocol.sort')" width="88" align="center" class-name="iot-col-num">
+          <template #default="{ row }">
+            <span :class="row.sort == null ? 'iot-cell-muted' : ''">{{ row.sort ?? '—' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="createdAt"
+          :label="t('common.createdAt')"
+          width="160"
+          class-name="iot-col-time"
+        />
+        <el-table-column :label="t('common.action')" width="140" align="center" fixed="right">
+          <template #default="{ row }">
+            <div class="iot-row-actions">
               <el-tooltip :content="t('protocol.viewForm')" placement="top">
-                <el-button type="primary" link size="small" :icon="View" @click="handleViewForm(row)" />
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="View"
+                  :aria-label="t('protocol.viewForm')"
+                  @click="handleViewForm(row)"
+                />
               </el-tooltip>
               <el-tooltip v-if="userStore.isAdmin" :content="t('common.edit')" placement="top">
-                <el-button type="primary" link size="small" :icon="EditPen" @click="handleEdit(row)" />
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="EditPen"
+                  :aria-label="t('common.edit')"
+                  @click="handleEdit(row)"
+                />
               </el-tooltip>
+              <!-- 恢复默认表单会覆盖当前改动，用琥珀色提示它与编辑不是同一类动作 -->
               <el-tooltip v-if="userStore.isAdmin" :content="t('protocol.resetForm')" placement="top">
-                <el-button type="warning" link size="small" :icon="RefreshLeft" @click="handleResetForm(row)" />
+                <el-button
+                  class="iot-row-btn"
+                  type="warning"
+                  link
+                  size="small"
+                  :icon="RefreshLeft"
+                  :aria-label="t('protocol.resetForm')"
+                  @click="handleResetForm(row)"
+                />
               </el-tooltip>
             </div>
           </template>
         </el-table-column>
+
+        <template #empty>
+          <div class="iot-empty">
+            <span class="iot-empty-mark" aria-hidden="true">
+              <el-icon><PlugConnected /></el-icon>
+            </span>
+            <p class="iot-empty-title">
+              {{ queryForm.name
+                ? t('protocol.emptySearch', { name: queryForm.name })
+                : t('protocol.emptyTitle') }}
+            </p>
+            <p v-if="!queryForm.name" class="iot-empty-hint">{{ t('protocol.emptyHint') }}</p>
+            <el-button v-if="queryForm.name" @click="handleReset">{{ t('common.reset') }}</el-button>
+            <el-button
+              v-else-if="userStore.isAdmin"
+              type="primary"
+              :icon="Plus"
+              @click="handleOpenPluginDialog"
+            >
+              {{ t('protocol.addPlugin') }}
+            </el-button>
+          </div>
+        </template>
       </el-table>
 
-      <!-- 分页 -->
-      <div class="flex justify-end mt-4">
+      <div class="iot-pager">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
@@ -74,11 +168,12 @@
           @current-change="handleCurrentChange"
         />
       </div>
-    </el-card>
+    </section>
 
     <!-- 编辑协议对话框（无新增模式：协议只能由插件供给） -->
     <el-dialog
       v-model="dialogVisible"
+      class="iot-dialog"
       :title="t('protocol.editTitle')"
       width="580px"
       :close-on-click-modal="false"
@@ -96,7 +191,7 @@
              改名会让引用它的设备静默停采（后端也会拒绝） -->
         <el-form-item :label="t('common.name')" prop="name">
           <el-input v-model="formData.name" disabled />
-          <div class="text-xs text-gray-500 mt-1 leading-relaxed">
+          <div class="iot-form-hint is-block">
             {{ t('protocol.nameImmutableHint') }}
           </div>
         </el-form-item>
@@ -130,26 +225,26 @@
     <!-- 查看表单对话框 -->
     <el-dialog
       v-model="viewDialogVisible"
+      class="iot-dialog"
       :title="t('protocol.viewFormTitle', { name: viewFormName })"
       width="min(800px, 92vw)"
       :close-on-click-modal="false"
       @close="handleViewDialogClose"
     >
-      <div v-loading="viewFormLoading" class="min-h-[200px]">
-        <el-alert
-          v-if="viewFormError"
-          :title="viewFormError"
-          type="warning"
-          show-icon
-          :closable="false"
-        />
+      <div v-loading="viewFormLoading" class="view-body">
+        <div v-if="viewFormError" class="iot-notice is-warning">
+          <span class="iot-notice-mark" aria-hidden="true">
+            <el-icon><AlertTriangle /></el-icon>
+          </span>
+          <p class="iot-notice-text">{{ viewFormError }}</p>
+        </div>
         <pre
           v-if="viewFormRawJson && !viewFormLoading"
-          class="bg-gray-50 border border-gray-200 rounded p-4 text-sm leading-relaxed overflow-auto max-h-[min(500px,60vh)] whitespace-pre-wrap break-all"
+          class="iot-code"
         >{{ viewFormRawJson }}</pre>
       </div>
       <template #footer>
-        <el-button @click="handleCopyJson" :disabled="!viewFormRawJson" v-if="viewFormRawJson">
+        <el-button v-if="viewFormRawJson" :disabled="!viewFormRawJson" @click="handleCopyJson">
           {{ t('protocol.copyJson') }}
         </el-button>
         <el-button @click="viewDialogVisible = false">{{ t('common.close') }}</el-button>
@@ -159,14 +254,21 @@
     <!-- 新增插件（批量上传）对话框 -->
     <el-dialog
       v-model="pluginDialogVisible"
+      class="iot-dialog"
       :title="t('protocol.pluginDialogTitle')"
       width="min(720px, 94vw)"
       :close-on-click-modal="false"
       @close="handlePluginDialogClose"
     >
-      <div v-loading="pluginInfoLoading" class="min-h-[60px]">
+      <div v-loading="pluginInfoLoading" class="plugin-body">
         <!-- 目标环境：先说清「该传什么样的文件」，再让用户选文件 -->
-        <el-descriptions v-if="pluginInfo" :column="1" size="small" border class="mb-4">
+        <el-descriptions
+          v-if="pluginInfo"
+          :column="1"
+          size="small"
+          border
+          class="plugin-meta"
+        >
           <el-descriptions-item :label="t('protocol.pluginTarget')">
             {{ pluginInfo.os }}/{{ pluginInfo.arch }}
           </el-descriptions-item>
@@ -178,18 +280,17 @@
           </el-descriptions-item>
         </el-descriptions>
 
-        <el-alert
-          v-if="pluginInfo && !pluginInfo.enabled"
-          :title="t('protocol.pluginDisabled')"
-          type="error"
-          show-icon
-          :closable="false"
-          class="mb-4"
-        />
+        <div v-if="pluginInfo && !pluginInfo.enabled" class="iot-notice is-error">
+          <span class="iot-notice-mark" aria-hidden="true">
+            <el-icon><AlertTriangle /></el-icon>
+          </span>
+          <p class="iot-notice-text">{{ t('protocol.pluginDisabled') }}</p>
+        </div>
 
         <el-upload
           ref="pluginUploadRef"
           v-model:file-list="pluginFileList"
+          class="plugin-upload"
           drag
           multiple
           :auto-upload="false"
@@ -208,20 +309,21 @@
         </el-upload>
 
         <!-- 逐文件结果：失败项直接给出后端的原因（含平台不符的实际格式） -->
-        <div v-if="pluginResult" class="mt-4">
-          <el-alert
-            :title="pluginResultTitle"
-            :type="pluginResult.failed === 0 ? 'success' : 'warning'"
-            show-icon
-            :closable="false"
-          />
-          <div v-if="pluginResult.hint" class="text-xs text-gray-500 mt-2 leading-relaxed">
-            {{ pluginResult.hint }}
-          </div>
+        <div v-if="pluginResult" class="plugin-result">
           <div
-            v-if="pluginRefreshing"
-            class="flex items-center gap-1 text-xs text-blue-500 mt-2"
+            class="iot-notice"
+            :class="pluginResult.failed === 0 ? 'is-success' : 'is-warning'"
           >
+            <span class="iot-notice-mark" aria-hidden="true">
+              <el-icon>
+                <Check v-if="pluginResult.failed === 0" />
+                <AlertTriangle v-else />
+              </el-icon>
+            </span>
+            <p class="iot-notice-text">{{ pluginResultTitle }}</p>
+          </div>
+          <p v-if="pluginResult.hint" class="plugin-note">{{ pluginResult.hint }}</p>
+          <div v-if="pluginRefreshing" class="plugin-refresh">
             <el-icon class="is-loading"><loading /></el-icon>
             {{ t('protocol.pluginListRefreshing') }}
           </div>
@@ -229,9 +331,8 @@
           <el-table
             v-if="pluginResult.errors?.length"
             :data="pluginResult.errors"
+            class="iot-mini-table plugin-errors"
             size="small"
-            border
-            class="mt-3"
           >
             <el-table-column
               prop="name"
@@ -247,13 +348,13 @@
             />
           </el-table>
 
-          <div
+          <p
             v-for="(warn, i) in pluginResult.warnings || []"
             :key="i"
-            class="text-xs text-gray-500 mt-2"
+            class="plugin-note"
           >
             {{ warn }}
-          </div>
+          </p>
         </div>
       </div>
 
@@ -276,11 +377,16 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  IconAlertTriangle as AlertTriangle,
+  IconCheck as Check,
   IconCloudUpload as UploadFilled,
   IconEye as View,
   IconLoader2 as Loading,
   IconPencil as EditPen,
+  IconPlugConnected as PlugConnected,
+  IconPlus as Plus,
   IconRotate as RefreshLeft,
+  IconSearch as Search,
 } from '@tabler/icons-vue'
 import { useUserStore } from '@/store'
 import { useI18n } from 'vue-i18n'
@@ -308,6 +414,11 @@ const tableData = ref([])
 const currentPage = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
+
+// 首屏还没拿到数时显示占位符而不是 0：0 个协议会被当成"一个插件都没装"
+const displayTotal = computed(() =>
+  loading.value && tableData.value.length === 0 ? '—' : total.value,
+)
 
 // ---------- 获取列表（分页） ----------
 //
@@ -684,3 +795,112 @@ onUnmounted(() => {
   pluginPollToken++
 })
 </script>
+
+<style scoped>
+.view-body {
+  min-height: 200px;
+}
+
+.plugin-body {
+  min-height: 60px;
+}
+
+/* 插件环境说明表：去掉通用边框的灰，让「平台 / 目录 / 命名规则」读起来是一段说明 */
+.plugin-meta {
+  margin-bottom: 16px;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.plugin-meta :deep(.el-descriptions__body) {
+  background: #fbfcfe;
+}
+
+.plugin-meta :deep(.el-descriptions__label) {
+  width: 96px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-4);
+}
+
+.plugin-meta :deep(.el-descriptions__content) {
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.plugin-meta :deep(.el-descriptions__cell) {
+  border-color: var(--line-soft);
+}
+
+/* 上传区：虚线框同色系，悬停才染蓝，避免整块区域过重 */
+.plugin-upload {
+  display: block;
+}
+
+.plugin-upload :deep(.el-upload) {
+  width: 100%;
+}
+
+.plugin-upload :deep(.el-upload-dragger) {
+  padding: 26px 16px;
+  background: #fbfcfe;
+  border: 1px dashed #d7e0ea;
+  border-radius: 14px;
+  transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.plugin-upload :deep(.el-upload-dragger:hover) {
+  background: var(--brand-soft);
+  border-color: var(--brand);
+}
+
+.plugin-upload :deep(.el-icon--upload) {
+  margin-bottom: 6px;
+  font-size: 38px;
+  color: var(--brand);
+}
+
+.plugin-upload :deep(.el-upload__text) {
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.plugin-upload :deep(.el-upload__text em) {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--brand);
+}
+
+.plugin-upload :deep(.el-upload__tip) {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+.plugin-result {
+  margin-top: 16px;
+}
+
+.plugin-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-4);
+}
+
+.plugin-refresh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--brand);
+}
+
+.plugin-errors {
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+}
+</style>

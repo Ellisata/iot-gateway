@@ -4,78 +4,161 @@
 -->
 
 <template>
-  <div class="p-6">
-    <h1 class="text-2xl font-bold text-gray-800 mb-6">{{ t('menu.alarmWebhook') }}</h1>
+  <div class="iot-page">
+    <header class="iot-head iot-enter">
+      <div>
+        <p class="iot-eyebrow">
+          <span class="iot-eyebrow-dot" aria-hidden="true" />
+          {{ t('menu.alarm') }}
+        </p>
+        <h1 class="iot-title">{{ t('menu.alarmWebhook') }}</h1>
+        <p class="iot-sub">{{ t('alarmWebhook.subtitle') }}</p>
+      </div>
+      <div class="iot-head-aside">
+        <div class="iot-stat">
+          <span class="iot-stat-num">{{ displayTotal }}</span>
+          <span class="iot-stat-label">{{ t('alarmWebhook.totalUnit') }}</span>
+        </div>
+      </div>
+    </header>
 
-    <!-- 工具栏 -->
-    <el-card shadow="never" class="mb-4">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
+    <!-- 工作区：筛选、表格、分页共用一块表面 -->
+    <section class="iot-panel iot-enter" style="animation-delay: 60ms">
+      <div class="iot-toolbar">
+        <div class="iot-toolbar-filters">
           <el-input
             v-model="queryForm.name"
+            class="iot-search"
             :placeholder="t('alarmWebhook.searchPlaceholder')"
             clearable
-            style="width: 240px"
             @keyup.enter="handleSearch"
-          />
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
           <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
           <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
         </div>
-        <div class="flex items-center gap-3">
-          <el-button @click="handleShowStatus">
-            <el-icon class="mr-1"><DataLine /></el-icon>
+        <div class="iot-toolbar-actions">
+          <el-button :icon="DataLine" @click="handleShowStatus">
             {{ t('alarmWebhook.statusHealth') }}
           </el-button>
-          <el-button type="primary" @click="handleAdd">{{ t('alarmWebhook.add') }}</el-button>
+          <el-button type="primary" :icon="Plus" @click="handleAdd">{{ t('alarmWebhook.add') }}</el-button>
         </div>
       </div>
-    </el-card>
 
-    <!-- 数据表格 -->
-    <el-card shadow="never">
-      <el-table :data="tableData" v-loading="loading" stripe style="width: 100%" border>
-        <el-table-column type="index" :label="t('common.index')" width="70" align="center" />
-        <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
+      <el-table class="iot-table" :data="tableData" v-loading="loading" style="width: 100%">
+        <el-table-column type="index" :label="t('common.index')" width="68" align="center" />
+
+        <!-- 名称 + 描述两行；图标底座让「一个通知出口」在滚动中可被一眼拾取 -->
+        <el-table-column :label="t('common.name')" min-width="190">
+          <template #default="{ row }">
+            <div class="iot-name-cell">
+              <span class="iot-name-mark" aria-hidden="true">
+                <el-icon><Webhook /></el-icon>
+              </span>
+              <div class="webhook-name-copy">
+                <span class="iot-name-text" :title="row.name">{{ row.name }}</span>
+                <span v-if="row.description" class="webhook-name-desc" :title="row.description">
+                  {{ row.description }}
+                </span>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column :label="t('alarmWebhook.type')" width="170">
           <template #default="{ row }">
-            {{ webhookTypeLabel(row.type, row.typeName, t) }}
+            <span class="iot-chip">{{ webhookTypeLabel(row.type, row.typeName, t) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="url" :label="t('alarmWebhook.url')" min-width="240" show-overflow-tooltip />
+        <el-table-column :label="t('alarmWebhook.url')" min-width="240" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="iot-mono webhook-url">{{ row.url }}</span>
+          </template>
+        </el-table-column>
         <el-table-column :label="t('alarmWebhook.secret')" width="120" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.hasSecret ? 'success' : 'info'" size="small">
+            <span class="iot-pill" :class="row.hasSecret ? 'is-green' : 'is-gray'">
+              <span class="iot-pill-dot" aria-hidden="true" />
               {{ row.hasSecret ? t('alarmWebhook.hasSecret') : t('alarmWebhook.noSecret') }}
-            </el-tag>
+            </span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" :label="t('common.status')" width="100" align="center">
+        <el-table-column :label="t('common.status')" width="110" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
+            <span class="iot-pill" :class="row.status === 1 ? 'is-green' : 'is-gray'">
+              <span class="iot-pill-dot" aria-hidden="true" />
               {{ row.status === 1 ? t('common.enabled') : t('common.disabled') }}
-            </el-tag>
+            </span>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" :label="t('common.createdAt')" width="180" align="center" />
-        <el-table-column :label="t('common.action')" width="170" align="center" fixed="right">
+        <el-table-column
+          prop="createdAt"
+          :label="t('common.createdAt')"
+          width="160"
+          class-name="iot-col-time"
+        />
+        <el-table-column :label="t('common.action')" width="140" align="center" fixed="right">
           <template #default="{ row }">
-            <div class="flex items-center justify-center gap-2">
+            <div class="iot-row-actions">
               <el-tooltip :content="t('alarmWebhook.testSend')" placement="top">
-                <el-button type="success" link size="small" :icon="Promotion" @click="handleTestSendRow(row)" />
+                <el-button
+                  class="iot-row-btn"
+                  type="success"
+                  link
+                  size="small"
+                  :icon="Promotion"
+                  :aria-label="t('alarmWebhook.testSend')"
+                  @click="handleTestSendRow(row)"
+                />
               </el-tooltip>
               <el-tooltip :content="t('common.edit')" placement="top">
-                <el-button type="primary" link size="small" :icon="EditPen" @click="handleEdit(row)" />
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="EditPen"
+                  :aria-label="t('common.edit')"
+                  @click="handleEdit(row)"
+                />
               </el-tooltip>
               <el-tooltip :content="t('common.delete')" placement="top">
-                <el-button type="danger" link size="small" :icon="Delete" @click="handleDelete(row)" />
+                <el-button
+                  class="iot-row-btn"
+                  type="danger"
+                  link
+                  size="small"
+                  :icon="Delete"
+                  :aria-label="t('common.delete')"
+                  @click="handleDelete(row)"
+                />
               </el-tooltip>
             </div>
           </template>
         </el-table-column>
+
+        <template #empty>
+          <div class="iot-empty">
+            <span class="iot-empty-mark" aria-hidden="true">
+              <el-icon><Webhook /></el-icon>
+            </span>
+            <p class="iot-empty-title">
+              {{ queryForm.name
+                ? t('alarmWebhook.emptySearch', { name: queryForm.name })
+                : t('alarmWebhook.emptyTitle') }}
+            </p>
+            <p v-if="!queryForm.name" class="iot-empty-hint">{{ t('alarmWebhook.emptyHint') }}</p>
+            <el-button v-if="queryForm.name" @click="handleReset">{{ t('common.reset') }}</el-button>
+            <el-button v-else type="primary" :icon="Plus" @click="handleAdd">
+              {{ t('alarmWebhook.add') }}
+            </el-button>
+          </div>
+        </template>
       </el-table>
 
-      <!-- 分页 -->
-      <div class="flex justify-end mt-4">
+      <div class="iot-pager">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
@@ -87,11 +170,12 @@
           @current-change="handleCurrentChange"
         />
       </div>
-    </el-card>
+    </section>
 
     <!-- 新增 / 编辑 对话框 -->
     <el-dialog
       v-model="dialogVisible"
+      class="iot-dialog"
       :title="isEdit ? t('alarmWebhook.editTitle') : t('alarmWebhook.addTitle')"
       width="620px"
       :close-on-click-modal="false"
@@ -141,13 +225,20 @@
         </el-form-item>
       </el-form>
 
-      <!-- 动态通知配置表单：按所选类型加载 -->
-      <template v-if="formData.type">
-        <el-divider content-position="left">{{ t('alarmWebhook.notifyConfig') }}</el-divider>
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-sm font-medium text-gray-600">{{ t('alarmWebhook.notifyParams') }}</span>
-          <div class="flex items-center gap-2">
-            <el-select v-model="testAlarmType" size="small" style="width: 120px">
+      <!-- 动态通知配置表单：按所选类型加载。用发丝线接续基本信息，不再用 el-divider -->
+      <div v-if="formData.type" class="webhook-section">
+        <div class="webhook-section-head">
+          <div class="webhook-section-headline">
+            <span class="webhook-section-mark" aria-hidden="true">
+              <el-icon><Webhook /></el-icon>
+            </span>
+            <div>
+              <p class="webhook-section-name">{{ t('alarmWebhook.notifyConfig') }}</p>
+              <p class="webhook-section-sub">{{ t('alarmWebhook.notifyParams') }}</p>
+            </div>
+          </div>
+          <div class="webhook-test-controls">
+            <el-select v-model="testAlarmType" size="small" class="webhook-test-type">
               <el-option :label="t('alarmWebhook.testOffline')" value="offline" />
               <el-option :label="t('alarmWebhook.testRecover')" value="recover" />
             </el-select>
@@ -157,22 +248,22 @@
               :loading="testing"
               @click="handleTestSendForm"
             >
-              <el-icon class="mr-1"><Promotion /></el-icon> {{ t('alarmWebhook.testSend') }}
+              {{ t('alarmWebhook.testSend') }}
             </el-button>
           </div>
         </div>
-        <div v-loading="dynamicFormLoading" class="min-h-[60px] pb-2">
-          <div
+        <div v-loading="dynamicFormLoading" class="dynamic-form-wrapper">
+          <p
             v-if="!dynamicFormLoading && !dynamicFormRule.length"
-            class="text-sm text-gray-400 py-2"
+            class="webhook-empty-config"
           >
             {{ t('alarmWebhook.noNotifyConfig') }}
-          </div>
+          </p>
           <template v-else>
             <!-- 密钥不回显，编辑时留空即保持原值；这条提示否则会被误解为「已清空」 -->
-            <div v-if="isEdit && formData.hasSecret" class="text-xs text-gray-400 mb-2">
+            <p v-if="isEdit && formData.hasSecret" class="webhook-secret-hint">
               {{ t('alarmWebhook.secretKeepHint') }}
-            </div>
+            </p>
             <form-create
               :key="dynamicFormKey"
               :rule="dynamicFormRule"
@@ -183,13 +274,13 @@
             <el-checkbox
               v-if="isEdit && formData.hasSecret && hasSecretField"
               v-model="clearSecret"
-              class="mt-1"
+              class="webhook-clear-secret"
             >
               {{ t('alarmWebhook.clearSecret') }}
             </el-checkbox>
           </template>
         </div>
-      </template>
+      </div>
 
       <template #footer>
         <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
@@ -202,25 +293,38 @@
     <!-- 运行状态对话框 -->
     <el-dialog
       v-model="statusVisible"
+      class="iot-dialog"
       :title="t('alarmWebhook.healthTitle')"
       width="900px"
     >
       <div v-loading="statusLoading">
-        <el-descriptions :column="3" border size="small" class="mb-4">
-          <el-descriptions-item :label="t('alarmWebhook.notifier')">
-            <el-tag :type="status.running ? 'success' : 'info'" size="small">
-              {{ status.running ? t('alarmWebhook.running') : t('alarmWebhook.stopped') }}
-            </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('alarmWebhook.ingressDepth')">
-            {{ status.ingressDepth }}
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('alarmWebhook.ingressDropped')">
-            {{ status.ingressDropped }}
-          </el-descriptions-item>
-        </el-descriptions>
+        <!-- 通知器与入口队列读数：发丝线格栅，与实时数据页的状态条同一套 -->
+        <div class="status-strip">
+          <div class="status-item">
+            <p class="status-label">{{ t('alarmWebhook.notifier') }}</p>
+            <div class="status-value">
+              <span class="iot-pill" :class="status.running ? 'is-green' : 'is-gray'">
+                <span class="iot-pill-dot" aria-hidden="true" />
+                {{ status.running ? t('alarmWebhook.running') : t('alarmWebhook.stopped') }}
+              </span>
+            </div>
+          </div>
+          <div class="status-item">
+            <p class="status-label">{{ t('alarmWebhook.ingressDepth') }}</p>
+            <p class="status-value">{{ status.ingressDepth }}</p>
+          </div>
+          <div class="status-item">
+            <p class="status-label">{{ t('alarmWebhook.ingressDropped') }}</p>
+            <p class="status-value">{{ status.ingressDropped }}</p>
+          </div>
+        </div>
 
-        <el-table :data="status.webhooks" stripe border style="width: 100%">
+        <el-table
+          v-if="status.webhooks.length"
+          class="iot-mini-table health-table"
+          :data="status.webhooks"
+          style="width: 100%"
+        >
           <el-table-column prop="name" :label="t('common.name')" min-width="120" show-overflow-tooltip />
           <el-table-column :label="t('alarmWebhook.type')" width="150">
             <template #default="{ row }">
@@ -231,13 +335,13 @@
           <el-table-column prop="sentCount" :label="t('alarmWebhook.sentCount')" width="90" align="center" />
           <el-table-column prop="failedCount" :label="t('alarmWebhook.failedCount')" width="80" align="center" />
           <el-table-column prop="droppedCount" :label="t('alarmWebhook.droppedCount')" width="80" align="center" />
-          <el-table-column prop="lastSuccessTime" :label="t('alarmWebhook.lastSuccessTime')" width="170" align="center" />
+          <el-table-column prop="lastSuccessTime" :label="t('alarmWebhook.lastSuccessTime')" width="170" class-name="iot-col-time" />
           <el-table-column prop="error" :label="t('alarmWebhook.lastError')" min-width="180" show-overflow-tooltip />
         </el-table>
 
-        <div v-if="!statusLoading && !status.webhooks.length" class="text-sm text-gray-400 py-3 text-center">
+        <p v-if="!statusLoading && !status.webhooks.length" class="webhook-empty">
           {{ t('alarmWebhook.noWebhook') }}
-        </div>
+        </p>
       </div>
 
       <template #footer>
@@ -245,7 +349,6 @@
         <el-button type="primary" @click="statusVisible = false">{{ t('common.close') }}</el-button>
       </template>
     </el-dialog>
-
   </div>
 </template>
 
@@ -255,8 +358,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   IconChartLine as DataLine,
   IconPencil as EditPen,
+  IconPlus as Plus,
+  IconSearch as Search,
   IconSend as Promotion,
   IconTrash as Delete,
+  IconWebhook as Webhook,
 } from '@tabler/icons-vue'
 import {
   getWebhookList,
@@ -290,6 +396,11 @@ const tableData = ref([])
 const currentPage = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
+
+// 首屏还没拿到数时显示占位符而不是 0：0 条通知会被当成"还没配任何推送"
+const displayTotal = computed(() =>
+  loading.value && tableData.value.length === 0 ? '—' : total.value
+)
 
 async function fetchList() {
   loading.value = true
@@ -718,3 +829,179 @@ onMounted(() => {
   fetchList()
 })
 </script>
+
+<style scoped>
+/* 名称两行：主名称 + 描述，描述不抢主名称的视觉重量 */
+.webhook-name-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.45;
+}
+
+.webhook-name-desc {
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--ink-4);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.webhook-url {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--ink-3);
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* 通知配置区：在对话框里用发丝线接续基本信息 */
+.webhook-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.webhook-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.webhook-section-headline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.webhook-section-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
+.webhook-section-mark .el-icon {
+  font-size: 15px;
+}
+
+.webhook-section-name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.webhook-section-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+.webhook-test-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.webhook-test-type {
+  width: 120px;
+}
+
+.dynamic-form-wrapper {
+  min-height: 60px;
+  padding-bottom: 8px;
+}
+
+.webhook-empty-config {
+  margin: 0;
+  padding: 10px 0;
+  font-size: 12.5px;
+  color: var(--ink-4);
+}
+
+.webhook-secret-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-4);
+}
+
+.webhook-clear-secret {
+  margin-top: 4px;
+}
+
+/* 插件声明的通知参数收成一列，与设备对象页的协议参数表单同一写法 */
+.dynamic-form-wrapper :deep(.el-input),
+.dynamic-form-wrapper :deep(.el-input-number),
+.dynamic-form-wrapper :deep(.el-select) {
+  width: 100%;
+  max-width: 280px;
+}
+
+/* ---------- 运行状态对话框 ---------- */
+.status-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  background: var(--line-soft);
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+}
+
+.status-item {
+  min-width: 0;
+  padding: 14px 16px;
+  background: #fff;
+}
+
+.status-label {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-4);
+}
+
+.status-value {
+  margin: 6px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.health-table {
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+}
+
+.webhook-empty {
+  margin: 0;
+  padding: 32px 16px;
+  font-size: 12.5px;
+  color: var(--ink-4);
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .status-strip {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

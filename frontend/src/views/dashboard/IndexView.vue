@@ -126,8 +126,97 @@
       </div>
     </section>
 
-    <!-- 区3 设备构成 + 采集健康 -->
-    <section class="panels enter" style="animation-delay: 180ms">
+    <!-- 区3 采集遥测 + 最近事件：趋势回答「是否在变坏」，事件回答「刚刚发生了什么」 -->
+    <section class="telemetry enter" style="animation-delay: 180ms">
+      <div
+        class="panel trend-panel"
+        v-loading="trendLoading && !trend"
+        :element-loading-text="t('dashboard.trendLoading')"
+      >
+        <div class="panel-head">
+          <div class="head-main">
+            <h2 class="panel-title">{{ t('dashboard.trendTitle') }}</h2>
+            <span v-if="trendSummary" class="panel-meta">{{ trendSummary }}</span>
+          </div>
+          <div class="range-switch" role="group" :aria-label="t('dashboard.trendRange')">
+            <button
+              v-for="option in TREND_RANGES"
+              :key="option.hours"
+              type="button"
+              class="range-btn"
+              :class="{ 'is-active': trendHours === option.hours }"
+              :aria-pressed="trendHours === option.hours"
+              @click="setTrendHours(option.hours)"
+            >
+              {{ t(option.labelKey) }}
+            </button>
+          </div>
+        </div>
+
+        <TrendChart
+          v-if="trendSamples.length > 1"
+          :samples="trendSamples"
+          :interval-sec="trend?.intervalSec || 60"
+        />
+        <div v-else class="trend-empty">
+          <span class="trend-empty-dot" aria-hidden="true" />
+          <p class="trend-empty-title">{{ t('dashboard.trendEmpty') }}</p>
+          <p class="trend-empty-hint">
+            {{ t('dashboard.trendAccumulating', { minutes: trendMinutes }) }}
+          </p>
+        </div>
+
+        <p v-if="trendSamples.length > 1" class="trend-foot">
+          {{ t('dashboard.trendRunningSince', { minutes: trendMinutes }) }}
+          <template v-if="trendStopped">
+            · <span class="is-warn">{{ t('dashboard.trendStopped') }}</span>
+          </template>
+        </p>
+      </div>
+
+      <div class="panel events-panel">
+        <div class="panel-head">
+          <div class="head-main">
+            <h2 class="panel-title">{{ t('dashboard.recentEvents') }}</h2>
+            <span v-if="activeAlarms > 0" class="event-badge">{{ activeAlarms }}</span>
+            <span v-else class="panel-meta">{{ t('dashboard.eventNoActive') }}</span>
+          </div>
+          <!-- 报警按目标类型分页，没有「全部」页；这里不做会漏类型的“查看全部”，
+               行本身可点，跳到该事件对应的报警页。 -->
+        </div>
+
+        <ul v-if="recentEvents.length" class="event-list">
+          <li
+            v-for="event in recentEvents"
+            :key="event.id"
+            class="event-row"
+            role="link"
+            tabindex="0"
+            @click="openEvent(event)"
+            @keydown.enter="openEvent(event)"
+          >
+            <span class="event-time">{{ eventClock(event.firstOccurTime) }}</span>
+            <i class="event-dot" :class="eventTone(event)" aria-hidden="true" />
+            <span class="event-copy">
+              <span class="event-target">{{ event.targetName }}</span>
+              <span class="event-desc">
+                {{ eventTypeLabel(event) }} · {{ eventStatusLabel(event) }}
+              </span>
+            </span>
+            <span class="event-ago">{{ relativeText(event.firstOccurTime) }}</span>
+          </li>
+        </ul>
+        <div v-else class="events-empty">
+          <p class="trend-empty-title">
+            {{ eventsLoading ? t('dashboard.eventsLoading') : t('dashboard.eventsEmpty') }}
+          </p>
+          <p class="trend-empty-hint">{{ t('dashboard.eventsEmptyHint') }}</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 区4 设备构成 + 采集健康 + 数据出口 -->
+    <section class="panels panels--three enter" style="animation-delay: 240ms">
       <div class="panel" v-loading="loading" :element-loading-text="t('dashboard.deviceStatusLoading')">
         <div class="panel-head">
           <h2 class="panel-title">{{ t('dashboard.deviceDetail') }}</h2>
@@ -178,6 +267,77 @@
           </div>
         </div>
       </div>
+
+      <!-- 数据出口：采集到的值最终有没有发出去。队列与断网缓存是网关最该被盯着看的两个数 -->
+      <div class="panel outlet-panel" v-loading="pushLoading && !pushChannels.length">
+        <div class="panel-head">
+          <h2 class="panel-title">{{ t('dashboard.dataOutlet') }}</h2>
+          <span v-if="pushChannels.length" class="panel-meta">
+            {{ t('dashboard.outletChannels', { n: pushChannels.length }) }}
+          </span>
+        </div>
+
+        <template v-if="pushChannels.length">
+          <div class="outlet-summary">
+            <span class="outlet-stat">
+              <i
+                class="dot"
+                :class="outletConnectedCount === pushChannels.length ? 'dot--ok' : 'dot--alarm'"
+                aria-hidden="true"
+              />
+              {{ t('dashboard.outletConnectedCount', {
+                connected: outletConnectedCount,
+                total: pushChannels.length,
+              }) }}
+            </span>
+            <span v-if="outletQueueDepth" class="outlet-stat">
+              {{ t('dashboard.outletQueue', { n: outletQueueDepth }) }}
+            </span>
+            <span v-if="outletSpoolDepth" class="outlet-stat is-warn">
+              {{ t('dashboard.outletSpool', { n: outletSpoolDepth }) }}
+            </span>
+          </div>
+
+          <ul class="outlet-list">
+            <li v-for="channel in visibleChannels" :key="channel.id" class="outlet-row">
+              <i
+                class="dot"
+                :class="channel.running && channel.connected ? 'dot--ok' : channel.running ? 'dot--alarm' : 'dot--idle'"
+                aria-hidden="true"
+              />
+              <div class="outlet-copy">
+                <span class="outlet-name">{{ channel.name }}</span>
+                <span class="outlet-sub">
+                  {{ channel.type }}
+                  <template v-if="channel.queueDepth || channel.spoolDepth">
+                    · {{ t('dashboard.outletQueue', { n: channel.queueDepth }) }}
+                    · {{ t('dashboard.outletSpool', { n: channel.spoolDepth }) }}
+                  </template>
+                  <template v-else-if="channel.lastSuccessTime">
+                    · {{ t('dashboard.outletLastSuccess', {
+                      time: relativeText(channel.lastSuccessTime),
+                    }) }}
+                  </template>
+                </span>
+              </div>
+              <span class="outlet-status" :class="outletStatusTone(channel)">
+                {{ outletStatusText(channel) }}
+              </span>
+            </li>
+          </ul>
+          <p v-if="pushChannels.length > VISIBLE_CHANNELS" class="outlet-more">
+            {{ t('dashboard.outletMore', { n: pushChannels.length - VISIBLE_CHANNELS }) }}
+          </p>
+        </template>
+
+        <div v-else class="outlet-empty">
+          <p class="trend-empty-title">{{ t('dashboard.outletEmpty') }}</p>
+          <p class="trend-empty-hint">{{ t('dashboard.outletEmptyHint') }}</p>
+          <router-link class="head-link" to="/data-push/channel">
+            {{ t('dashboard.outletConfigure') }} →
+          </router-link>
+        </div>
+      </div>
     </section>
   </div>
 </template>
@@ -188,8 +348,11 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getDeviceOverview } from '@/api/modules/deviceObject'
 import { getCollectionStatus } from '@/api/modules/collection'
-import { getActiveAlarmCount } from '@/api/modules/alarm'
-import { secondsSince, formatRelativeTime } from '@/utils/datetime'
+import { getActiveAlarmCount, getAlarmPage } from '@/api/modules/alarm'
+import { getPushStatus } from '@/api/modules/pushChannel'
+import { getDashboardTrend } from '@/api/modules/dashboard'
+import { secondsSince, formatRelativeTime, parseBackendTime } from '@/utils/datetime'
+import TrendChart from './TrendChart.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -204,8 +367,25 @@ const collection = ref(null)
 // 把「取数失败」画成「没有报警」是最危险的一种撒谎
 const activeAlarms = ref(null)
 
+// ---------- 遥测 / 事件 / 数据出口 ----------
+const trend = ref(null)
+const trendHours = ref(6)
+const trendLoading = ref(false)
+const recentEvents = ref([])
+const eventsLoading = ref(false)
+const pushChannels = ref([])
+const pushLoading = ref(false)
+
+const TREND_RANGES = [
+  { hours: 6, labelKey: 'dashboard.trendRange6h' },
+  { hours: 24, labelKey: 'dashboard.trendRange24h' },
+]
+// 出口面板只铺前几个通道，更多时给一行入口；否则多通道会把三栏撑爆
+const VISIBLE_CHANNELS = 3
+
 let pollTimer = null
 let clockTimer = null
+let trendTimer = null
 
 // ---------- 在线率环形 ----------
 // 几何常量在脚本里算一次，模板不做算术
@@ -430,6 +610,169 @@ const healthRows = computed(() => {
   ]
 })
 
+// ---------- 采集遥测 ----------
+const trendSamples = computed(() => trend.value?.samples ?? [])
+
+const lastTrendSample = computed(
+  () => trendSamples.value[trendSamples.value.length - 1] ?? null
+)
+
+// 最后一个「有在线数据」的采样点：尾部可能因取数失败而没有 overview，
+// 用它算摘要，避免把上一分钟的真实在线率显示成「—」
+const lastOverviewSample = computed(() => {
+  const list = trendSamples.value
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i].hasOverview) return list[i]
+  }
+  return null
+})
+
+// 与首页环形图同一口径：有离线设备时压到 99%，避免四舍五入后
+// 「100% 在线」和「离线 1 台」同时出现在一屏上。
+const trendRate = computed(() => {
+  const sample = lastOverviewSample.value
+  if (!sample || !sample.collected) return null
+  const pct = Math.round((sample.online / sample.collected) * 100)
+  return sample.offline > 0 ? Math.min(99, pct) : pct
+})
+
+const trendSummary = computed(() => {
+  if (!lastTrendSample.value) return ''
+  const sample = lastOverviewSample.value
+  return t('dashboard.trendSummary', {
+    rate: trendRate.value === null ? '—' : `${trendRate.value}%`,
+    online: sample ? sample.online : '—',
+    collected: sample ? sample.collected : '—',
+    points: formatCount(lastTrendSample.value.points),
+  })
+})
+
+const trendStopped = computed(
+  () => lastTrendSample.value != null && !lastTrendSample.value.collecting
+)
+
+// 本次运行已积累多少分钟：以第一个采样点为起点，不假设 6h/24h 窗口是满的
+const trendMinutes = computed(() => {
+  const list = trendSamples.value
+  if (!list.length) return 0
+  const first = parseBackendTime(list[0].time)
+  const last = parseBackendTime(list[list.length - 1].time)
+  if (!first || !last) return list.length
+  return Math.max(1, Math.round((last.getTime() - first.getTime()) / 60000) + 1)
+})
+
+async function fetchTrend() {
+  if (!trend.value) trendLoading.value = true
+  try {
+    trend.value = await getDashboardTrend(trendHours.value)
+  } catch (err) {
+    console.error('获取遥测趋势失败', err)
+  } finally {
+    trendLoading.value = false
+  }
+}
+
+function setTrendHours(hours) {
+  if (trendHours.value === hours) return
+  trendHours.value = hours
+  fetchTrend()
+}
+
+// ---------- 最近事件 ----------
+async function fetchRecentEvents() {
+  if (!recentEvents.value.length) eventsLoading.value = true
+  try {
+    const res = await getAlarmPage({ page: 1, size: 6 })
+    recentEvents.value = res?.records ?? []
+  } catch (err) {
+    console.error('获取最近事件失败', err)
+  } finally {
+    eventsLoading.value = false
+  }
+}
+
+function eventClock(raw) {
+  const date = parseBackendTime(raw)
+  if (!date) return '—'
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+const EVENT_TONES = {
+  recover: 'is-ok',
+  offline: 'is-alarm',
+  quality: 'is-warn',
+  threshold: 'is-warn',
+}
+
+function eventTone(event) {
+  return EVENT_TONES[event.alarmType] || ''
+}
+
+const EVENT_TYPE_KEYS = {
+  offline: 'alarm.alarmTypeOffline',
+  quality: 'alarm.alarmTypeQuality',
+  threshold: 'alarm.alarmTypeThreshold',
+  recover: 'alarm.alarmTypeRecover',
+}
+
+// 后端的 alarmTypeName 是中文硬编码（英文界面下也会返回中文），
+// 事件流按 alarmType 在前端翻译；未知类型回退到后端给的文案。
+function eventTypeLabel(event) {
+  const key = EVENT_TYPE_KEYS[event.alarmType]
+  return key ? t(key) : event.alarmTypeName
+}
+
+function eventStatusLabel(event) {
+  return event.status === 'active' ? t('alarm.statusActive') : t('alarm.statusCleared')
+}
+
+// 每一页只展示同一类目标，点击后跳到对应页面即可
+const ALARM_ROUTES = {
+  device: '/alarm/device',
+  channel: '/alarm/channel',
+  point: '/alarm/point',
+  point_threshold: '/alarm/threshold',
+}
+
+function openEvent(event) {
+  router.push(ALARM_ROUTES[event.targetType] || '/alarm/device')
+}
+
+// ---------- 数据出口 ----------
+async function fetchPushStatus() {
+  if (!pushChannels.value.length) pushLoading.value = true
+  try {
+    pushChannels.value = (await getPushStatus()) ?? []
+  } catch (err) {
+    console.error('获取推送通道状态失败', err)
+  } finally {
+    pushLoading.value = false
+  }
+}
+
+const outletConnectedCount = computed(
+  () => pushChannels.value.filter((ch) => ch.running && ch.connected).length
+)
+const outletQueueDepth = computed(() =>
+  pushChannels.value.reduce((sum, ch) => sum + (ch.queueDepth || 0), 0)
+)
+const outletSpoolDepth = computed(() =>
+  pushChannels.value.reduce((sum, ch) => sum + (ch.spoolDepth || 0), 0)
+)
+const visibleChannels = computed(() => pushChannels.value.slice(0, VISIBLE_CHANNELS))
+
+function outletStatusText(channel) {
+  if (!channel.running) return t('dashboard.outletStopped')
+  return channel.connected
+    ? t('dashboard.outletConnected')
+    : t('dashboard.outletDisconnected')
+}
+
+function outletStatusTone(channel) {
+  if (!channel.running) return 'is-idle'
+  return channel.connected ? 'is-ok' : 'is-bad'
+}
+
 // ---------- 获取统计 ----------
 async function fetchOverview() {
   // 只在首次加载时开遮罩：每 30 秒轮询都盖一层会糊住环形
@@ -472,12 +815,19 @@ onMounted(() => {
   fetchOverview()
   fetchCollection()
   fetchActiveAlarms()
-  // 在线情况/采集状态随采集变化，定时刷新
+  fetchRecentEvents()
+  fetchPushStatus()
+  fetchTrend()
+  // 在线情况/采集状态/事件/出口随采集变化，定时刷新
   pollTimer = setInterval(() => {
     fetchOverview()
     fetchCollection()
     fetchActiveAlarms()
+    fetchRecentEvents()
+    fetchPushStatus()
   }, 30000)
+  // 后端每分钟才落一个采样点，趋势单独按分钟拉取，避免 30s 拉一次长数组
+  trendTimer = setInterval(fetchTrend, 60000)
   // 只驱动相对时间文案走字，不发请求
   clockTimer = setInterval(() => {
     now.value = Date.now()
@@ -487,27 +837,13 @@ onMounted(() => {
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
   if (clockTimer) clearInterval(clockTimer)
+  if (trendTimer) clearInterval(trendTimer)
 })
 </script>
 
 <style scoped>
+/* 色板与字体来自 styles/tokens.css，页面只管版式 */
 .dash {
-  /* 页面级设计 token：与登录页同一套浅色语言（白面、雾蓝画布、slate 文字） */
-  --surface: #fff;
-  --line: #e6ebf2;
-  --line-soft: #eef2f7;
-  --ink: #0f172a;
-  --ink-2: #475569;
-  --ink-3: #64748b;
-  --ink-4: #94a3b8;
-  --brand: #2563eb;
-  --success: #059669;
-  --warning: #d97706;
-  --danger: #e11d48;
-  --success-soft: #ecfdf5;
-  --danger-soft: #fff1f2;
-  --radius: 18px;
-
   max-width: 1400px;
   margin: 0 auto;
 }
@@ -929,10 +1265,229 @@ onUnmounted(() => {
   }
 }
 
-/* ---------- 区3 两列面板 ---------- */
+/* ---------- 区3 遥测 + 事件 ---------- */
+.telemetry {
+  display: grid;
+  grid-template-columns: minmax(0, 1.85fr) minmax(300px, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.head-main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.head-link {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--brand);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.head-link:hover {
+  text-decoration: underline;
+}
+
+/* 时间范围切换：两段式分段控件，比两个独立按钮更像一个整体 */
+.range-switch {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  background: #f1f5f9;
+  border-radius: 8px;
+}
+
+.range-btn {
+  min-width: 52px;
+  padding: 4px 9px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink-3);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.range-btn:hover {
+  color: var(--ink-2);
+}
+
+.range-btn.is-active {
+  color: var(--brand);
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.range-btn:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.5);
+  outline-offset: 1px;
+}
+
+.trend-panel,
+.events-panel {
+  min-height: 340px;
+}
+
+/* 空态不画假曲线：网关刚启动时，这里应该明确说「还在积累」 */
+.trend-empty,
+.events-empty,
+.outlet-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 160px;
+  text-align: center;
+}
+
+.trend-empty-dot {
+  width: 8px;
+  height: 8px;
+  margin-bottom: 8px;
+  background: var(--brand);
+  border-radius: 50%;
+  box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.1);
+}
+
+.trend-empty-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.trend-empty-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+.trend-foot {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  font-size: 11.5px;
+  color: var(--ink-4);
+  border-top: 1px solid var(--line-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.event-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+
+.event-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.event-row {
+  display: grid;
+  grid-template-columns: 42px 6px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 4px;
+  border-top: 1px solid var(--line-soft);
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background-color 0.15s ease;
+}
+
+.event-row:first-child {
+  border-top: none;
+}
+
+.event-row:hover,
+.event-row:focus-visible {
+  background: #f8fafc;
+  outline: none;
+}
+
+.event-time {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.event-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--ink-4);
+  border-radius: 50%;
+}
+
+.event-dot.is-alarm {
+  background: var(--danger);
+}
+
+.event-dot.is-warn {
+  background: var(--warning);
+}
+
+.event-dot.is-ok {
+  background: var(--success);
+}
+
+.event-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.event-target {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-desc {
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-ago {
+  font-size: 11.5px;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+
+/* ---------- 区4 三列面板 ---------- */
 .panels {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   margin-top: 16px;
 }
@@ -1122,14 +1677,133 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---------- 数据出口 ---------- */
+.outlet-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.outlet-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.outlet-stat.is-warn {
+  color: var(--warning);
+  font-weight: 500;
+}
+
+.outlet-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.outlet-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.outlet-row:first-child {
+  border-top: none;
+}
+
+.outlet-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.outlet-name {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outlet-sub {
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--ink-4);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.outlet-status {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.outlet-status.is-ok {
+  color: var(--success);
+}
+
+.outlet-status.is-bad {
+  color: var(--danger);
+}
+
+.outlet-status.is-idle {
+  color: var(--ink-4);
+}
+
+.outlet-more {
+  margin: 8px 0 0;
+  padding-top: 8px;
+  font-size: 11.5px;
+  color: var(--ink-4);
+  border-top: 1px solid var(--line-soft);
+}
+
 /* ---------- 窄屏 ---------- */
-@media (max-width: 1024px) {
+@media (max-width: 1280px) {
   .panels {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* 三栏变两栏时，出口占满下一行，避免它被挤成一条窄边 */
+  .outlet-panel {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1100px) {
+  .telemetry {
     grid-template-columns: 1fr;
+  }
+
+  .trend-panel,
+  .events-panel {
+    min-height: 0;
   }
 }
 
 @media (max-width: 900px) {
+  .panels {
+    grid-template-columns: 1fr;
+  }
+
+  .outlet-panel {
+    grid-column: auto;
+  }
+
   .metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

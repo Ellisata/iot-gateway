@@ -245,6 +245,15 @@ var agentApiSurface = map[string]SurfaceEntry{
 		Note: "取的是**内存中的最新值**（秒级轮询用），不是点位定义",
 	},
 
+	// ==================== 大盘聚合 ====================
+	"GET /dashboard/trend": {
+		Access: AccessRead,
+		Params: argQuery(dto.DashboardTrendDTO{}, map[string]string{
+			"hours": "回看小时数，1..24；省略按 6 处理",
+		}),
+		Note: "每分钟一个采样点的内存趋势（最长 24h），网关重启后从空开始",
+	},
+
 	// ==================== 协议 ====================
 	"GET /protocol/pageProtocol":        {Access: AccessRead, Params: argQuery(dto.PageProtocolDTO{}, nil)},
 	"GET /protocol/getProtocolById/:id": {Access: AccessRead, Params: argNone()},

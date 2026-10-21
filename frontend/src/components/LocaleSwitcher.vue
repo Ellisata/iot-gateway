@@ -5,7 +5,7 @@
 
 <template>
   <el-dropdown trigger="click" @command="handleCommand">
-    <span class="flex items-center gap-1 cursor-pointer hover:text-[#409eff] text-sm">
+    <span class="flex items-center gap-1 cursor-pointer hover:text-[#2563eb] text-sm">
       <el-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4">
         <circle cx="12" cy="12" r="10" />
         <path d="M2 12h20" />

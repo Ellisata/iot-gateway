@@ -4,36 +4,97 @@
 -->
 
 <template>
-  <div class="p-6 log-page">
-    <h1 class="text-2xl font-bold text-gray-800 mb-6">{{ t('menu.logFile') }}</h1>
+  <div class="iot-page log-page">
+    <header class="iot-head iot-enter">
+      <div>
+        <p class="iot-eyebrow">
+          <span class="iot-eyebrow-dot" aria-hidden="true" />
+          {{ t('menu.log') }}
+        </p>
+        <h1 class="iot-title">{{ t('menu.logFile') }}</h1>
+        <p class="iot-sub">{{ t('log.subtitle') }}</p>
+      </div>
+      <div class="iot-head-aside">
+        <div class="iot-stat">
+          <span class="iot-stat-num">{{ displayTotal }}</span>
+          <span class="iot-stat-label">{{ t('log.totalUnit') }}</span>
+        </div>
+      </div>
+    </header>
 
-    <!-- 日志文件列表 -->
-    <el-card shadow="never">
-      <div class="flex items-center justify-between mb-4">
-        <span class="text-gray-600">{{ t('log.filesHint') }}</span>
-        <el-button type="primary" :loading="loading" @click="fetchList">
-          <el-icon class="mr-1"><Refresh /></el-icon>{{ t('common.refresh') }}
-        </el-button>
+    <!-- 工作区：文件列表、分页与刷新共用一块表面 -->
+    <section class="iot-panel iot-enter" style="animation-delay: 60ms">
+      <div class="iot-toolbar">
+        <div class="iot-toolbar-lead">
+          <span class="iot-mark" aria-hidden="true">
+            <el-icon><FileText /></el-icon>
+          </span>
+          <div class="iot-toolbar-copy">
+            <p class="iot-toolbar-title">{{ t('log.filesTitle') }}</p>
+            <p class="iot-toolbar-sub">{{ t('log.filesHint') }}</p>
+          </div>
+        </div>
+        <div class="iot-toolbar-actions">
+          <el-button type="primary" :icon="Refresh" :loading="loading" @click="fetchList">
+            {{ t('common.refresh') }}
+          </el-button>
+        </div>
       </div>
 
-      <el-table :data="tableData" v-loading="loading" stripe border style="width: 100%">
-        <el-table-column type="index" :label="t('common.index')" width="70" align="center" />
-        <el-table-column prop="fileName" :label="t('log.fileName')" min-width="220" show-overflow-tooltip />
-        <el-table-column :label="t('log.size')" width="120" align="center">
-          <template #default="{ row }">{{ formatSize(row.size) }}</template>
-        </el-table-column>
-        <el-table-column prop="modifyTime" :label="t('log.modifyTime')" width="180" align="center" />
-        <el-table-column :label="t('common.action')" width="120" align="center" fixed="right">
+      <el-table class="iot-table" :data="tableData" v-loading="loading" style="width: 100%">
+        <el-table-column type="index" :label="t('common.index')" width="68" align="center" />
+        <el-table-column :label="t('log.fileName')" min-width="280" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleView(row)">
-              {{ t('log.viewLog') }}
-            </el-button>
+            <div class="iot-name-cell">
+              <span class="iot-name-mark" aria-hidden="true">
+                <el-icon><FileText /></el-icon>
+              </span>
+              <span class="iot-name-text log-name" :title="row.fileName">{{ row.fileName }}</span>
+            </div>
           </template>
         </el-table-column>
+        <el-table-column :label="t('log.size')" width="120" align="right" class-name="iot-col-num">
+          <template #default="{ row }">{{ formatSize(row.size) }}</template>
+        </el-table-column>
+        <el-table-column
+          prop="modifyTime"
+          :label="t('log.modifyTime')"
+          width="170"
+          class-name="iot-col-time"
+        />
+        <el-table-column :label="t('common.action')" width="90" align="center" fixed="right">
+          <template #default="{ row }">
+            <div class="iot-row-actions">
+              <el-tooltip :content="t('log.viewLog')" placement="top">
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="Eye"
+                  :aria-label="t('log.viewLog')"
+                  @click="handleView(row)"
+                />
+              </el-tooltip>
+            </div>
+          </template>
+        </el-table-column>
+
+        <template #empty>
+          <div class="iot-empty">
+            <span class="iot-empty-mark" aria-hidden="true">
+              <el-icon><FileText /></el-icon>
+            </span>
+            <p class="iot-empty-title">{{ t('log.emptyTitle') }}</p>
+            <p class="iot-empty-hint">{{ t('log.emptyHint') }}</p>
+            <el-button :icon="Refresh" :loading="loading" @click="fetchList">
+              {{ t('common.refresh') }}
+            </el-button>
+          </div>
+        </template>
       </el-table>
 
-      <!-- 分页 -->
-      <div class="flex justify-end mt-4">
+      <div class="iot-pager">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
@@ -45,7 +106,7 @@
           @current-change="handleCurrentChange"
         />
       </div>
-    </el-card>
+    </section>
 
     <!-- 日志内容抽屉 -->
     <el-drawer
@@ -54,30 +115,42 @@
       size="70%"
       destroy-on-close
     >
-      <div class="flex shrink-0 items-center gap-3 bg-white px-5 py-4">
-        <span class="text-sm text-gray-600">{{ t('log.showTail') }}</span>
-        <el-select v-model="tailLines" style="width: 130px" @change="fetchLogContent">
+      <div class="log-toolbar">
+        <span class="log-control-label">{{ t('log.showTail') }}</span>
+        <el-select
+          v-model="tailLines"
+          class="log-lines"
+          @change="fetchLogContent"
+        >
           <el-option :label="t('log.lines', { n: 200 })" :value="200" />
           <el-option :label="t('log.lines', { n: 500 })" :value="500" />
           <el-option :label="t('log.lines', { n: 1000 })" :value="1000" />
           <el-option :label="t('log.lines', { n: 2000 })" :value="2000" />
         </el-select>
-        <span class="text-sm text-gray-500">{{ t('log.totalLines', { total: totalLines }) }}</span>
-        <el-button :loading="contentLoading" @click="scrollToBottom">
-          <el-icon class="mr-1"><Bottom /></el-icon>{{ t('log.scrollToBottom') }}
-        </el-button>
-        <el-button type="primary" :loading="contentLoading" @click="fetchLogContent">
-          <el-icon class="mr-1"><Refresh /></el-icon>{{ t('common.refresh') }}
-        </el-button>
+        <span class="log-total">{{ t('log.totalLines', { total: totalLines }) }}</span>
+        <div class="log-toolbar-actions">
+          <el-button :icon="Bottom" :loading="contentLoading" @click="scrollToBottom">
+            {{ t('log.scrollToBottom') }}
+          </el-button>
+          <el-button
+            type="primary"
+            :icon="Refresh"
+            :loading="contentLoading"
+            @click="fetchLogContent"
+          >
+            {{ t('common.refresh') }}
+          </el-button>
+        </div>
       </div>
 
       <div
         ref="contentRef"
         v-loading="contentLoading"
-        class="flex-1 min-h-0 bg-black text-gray-100 p-5 font-mono text-sm leading-6 whitespace-pre overflow-auto"
+        element-loading-background="rgba(11, 18, 32, 0.65)"
+        class="log-output"
       >
         <template v-if="logLines.length">{{ joinedLines }}</template>
-        <div v-else class="text-gray-400">{{ t('log.noContent') }}</div>
+        <div v-else class="log-empty">{{ t('log.noContent') }}</div>
       </div>
     </el-drawer>
   </div>
@@ -87,7 +160,12 @@
 import { ref, computed, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getLogFilePage, readLogFile } from '@/api/modules/logFile'
-import { IconArrowBarToDown as Bottom, IconRefresh as Refresh } from '@tabler/icons-vue'
+import {
+  IconArrowBarToDown as Bottom,
+  IconEye as Eye,
+  IconFileText as FileText,
+  IconRefresh as Refresh,
+} from '@tabler/icons-vue'
 
 const { t } = useI18n()
 
@@ -97,6 +175,11 @@ const tableData = ref([])
 const currentPage = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
+
+// 首屏还没拿到数时显示占位符而不是 0：0 个文件会被当成"日志目录是空的"
+const displayTotal = computed(() =>
+  loading.value && tableData.value.length === 0 ? '—' : total.value
+)
 
 async function fetchList() {
   loading.value = true
@@ -192,15 +275,112 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* 日志文件名是技术标识，等宽字体让大小写与扩展名对齐 */
+.log-name {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
 /* el-drawer 的根元素由组件内部渲染，拿不到本组件的 scope id，
-   直接写 .el-drawer__body 这样的类选择器不会生效，
    必须挂在页面根节点上用 :deep() 才能命中。
    去掉内容区自带的 20px 内边距并改成纵向弹性布局，
-   让工具条（白底）和日志区（黑底）各自撑满，日志区不留白边。 */
+   让工具条（白底）和日志区（深色）各自撑满，日志区不留白边。 */
+.log-page :deep(.el-drawer) {
+  border-radius: 18px 0 0 18px;
+}
+
+.log-page :deep(.el-drawer__header) {
+  margin-bottom: 0;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.log-page :deep(.el-drawer__title) {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
 .log-page :deep(.el-drawer__body) {
   padding: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.log-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  flex-shrink: 0;
+  padding: 12px 20px;
+  background: #fff;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.log-control-label,
+.log-total {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.log-total {
+  color: var(--ink-4);
+  font-variant-numeric: tabular-nums;
+}
+
+.log-lines {
+  width: 130px;
+}
+
+.log-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.log-toolbar :deep(.el-select__wrapper) {
+  min-height: 34px;
+  border-radius: 9px;
+  box-shadow: 0 0 0 1px var(--line) inset;
+}
+
+.log-toolbar :deep(.el-button) {
+  height: 34px;
+  border-radius: 9px;
+  font-weight: 500;
+}
+
+/* 日志正文保持深色终端观感：它是唯一需要逐行读的长文本区域 */
+.log-output {
+  flex: 1;
+  min-height: 0;
+  padding: 18px 20px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: #dbe4f0;
+  white-space: pre;
+  background: #0b1220;
+}
+
+.log-output::-webkit-scrollbar-thumb {
+  background-color: #334155;
+}
+
+.log-empty {
+  color: #7b8aa3;
+}
+
+@media (max-width: 640px) {
+  .log-toolbar-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
 }
 </style>

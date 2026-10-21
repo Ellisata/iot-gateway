@@ -4,125 +4,170 @@
 -->
 
 <template>
-  <div class="p-6">
-    <div class="mb-6">
-      <h1 class="text-2xl font-bold text-gray-800">{{ t('menu.subscriptionDevicePoint') }}</h1>
-      <p class="text-sm text-gray-500 mt-1">{{ t('subscriptionDevicePoint.subtitle') }}</p>
-    </div>
-
-    <!-- 查询条件 -->
-    <el-card shadow="never" class="mb-4">
-      <div class="flex flex-wrap items-end gap-3">
-        <div class="flex flex-col gap-1">
-          <span class="text-xs text-gray-500">{{ t('subscription.fieldDeviceId') }}</span>
-          <el-input
-            v-model="query.deviceId"
-            clearable
-            style="width: 170px"
-            @keyup.enter="handleSearch"
-          />
-        </div>
-        <div class="flex flex-col gap-1">
-          <span class="text-xs text-gray-500">{{ t('subscription.fieldDeviceName') }}</span>
-          <el-input
-            v-model="query.deviceName"
-            clearable
-            style="width: 170px"
-            @keyup.enter="handleSearch"
-          />
-        </div>
-        <div class="flex flex-col gap-1">
-          <span class="text-xs text-gray-500">{{ t('subscription.fieldDeviceAddressId') }}</span>
-          <el-input
-            v-model="query.deviceAddressId"
-            clearable
-            style="width: 170px"
-            @keyup.enter="handleSearch"
-          />
-        </div>
-        <div class="flex flex-col gap-1">
-          <span class="text-xs text-gray-500">{{ t('subscription.fieldDeviceAddressName') }}</span>
-          <el-input
-            v-model="query.deviceAddressName"
-            clearable
-            style="width: 170px"
-            @keyup.enter="handleSearch"
-          />
-        </div>
-        <div class="flex flex-col gap-1">
-          <span class="text-xs text-gray-500">{{ t('subscription.fieldProtocol') }}</span>
-          <el-input
-            v-model="query.protocol"
-            clearable
-            style="width: 150px"
-            @keyup.enter="handleSearch"
-          />
-        </div>
-        <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
-        <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
+  <div class="iot-page">
+    <header class="iot-head iot-enter">
+      <div>
+        <p class="iot-eyebrow">
+          <span class="iot-eyebrow-dot" aria-hidden="true" />
+          {{ t('menu.subscription') }}
+        </p>
+        <h1 class="iot-title">{{ t('menu.subscriptionDevicePoint') }}</h1>
+        <p class="iot-sub">{{ t('subscriptionDevicePoint.subtitle') }}</p>
       </div>
-    </el-card>
+      <div class="iot-head-aside">
+        <div class="iot-stat">
+          <span class="iot-stat-num">{{ displayTotal }}</span>
+          <span class="iot-stat-label">{{ t('subscriptionDevicePoint.totalUnit') }}</span>
+        </div>
+      </div>
+    </header>
 
-    <!-- 数据表格 -->
-    <el-card shadow="never">
-      <el-table :data="rows" v-loading="loading" stripe border style="width: 100%">
-        <el-table-column type="index" :label="t('common.index')" width="65" align="center" />
+    <!-- 工作区：五个筛选条件、表格与分页共用一块表面 -->
+    <section class="iot-panel iot-enter" style="animation-delay: 60ms">
+      <div class="iot-toolbar">
+        <div class="iot-toolbar-filters point-filters">
+          <div class="filter-field">
+            <span class="filter-label">{{ t('subscription.fieldDeviceId') }}</span>
+            <el-input
+              v-model="query.deviceId"
+              clearable
+              class="filter-input"
+              @keyup.enter="handleSearch"
+            />
+          </div>
+          <div class="filter-field">
+            <span class="filter-label">{{ t('subscription.fieldDeviceName') }}</span>
+            <el-input
+              v-model="query.deviceName"
+              clearable
+              class="filter-input"
+              @keyup.enter="handleSearch"
+            />
+          </div>
+          <div class="filter-field">
+            <span class="filter-label">{{ t('subscription.fieldDeviceAddressId') }}</span>
+            <el-input
+              v-model="query.deviceAddressId"
+              clearable
+              class="filter-input"
+              @keyup.enter="handleSearch"
+            />
+          </div>
+          <div class="filter-field">
+            <span class="filter-label">{{ t('subscription.fieldDeviceAddressName') }}</span>
+            <el-input
+              v-model="query.deviceAddressName"
+              clearable
+              class="filter-input"
+              @keyup.enter="handleSearch"
+            />
+          </div>
+          <div class="filter-field is-short">
+            <span class="filter-label">{{ t('subscription.fieldProtocol') }}</span>
+            <el-input
+              v-model="query.protocol"
+              clearable
+              class="filter-input"
+              @keyup.enter="handleSearch"
+            />
+          </div>
+          <div class="filter-actions">
+            <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
+            <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
+          </div>
+        </div>
+      </div>
+
+      <el-table class="iot-table" :data="rows" v-loading="loading" style="width: 100%">
+        <el-table-column type="index" :label="t('common.index')" width="68" align="center" />
+
         <el-table-column
-          prop="deviceId"
           :label="t('subscription.fieldDeviceId')"
-          min-width="120"
+          min-width="130"
           show-overflow-tooltip
         >
           <template #default="{ row }">
-            <span class="font-mono text-xs">{{ row.deviceId }}</span>
+            <span class="iot-mono">{{ row.deviceId }}</span>
           </template>
         </el-table-column>
         <el-table-column
-          prop="deviceName"
           :label="t('subscription.fieldDeviceName')"
-          min-width="130"
+          min-width="170"
           show-overflow-tooltip
-        />
+        >
+          <template #default="{ row }">
+            <div class="iot-name-cell">
+              <span class="iot-name-mark" aria-hidden="true">
+                <el-icon><DeviceDesktop /></el-icon>
+              </span>
+              <span class="iot-name-text" :title="row.deviceName">{{ row.deviceName || '—' }}</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column
-          prop="deviceAddressId"
           :label="t('subscription.fieldDeviceAddressId')"
           min-width="130"
           show-overflow-tooltip
         >
           <template #default="{ row }">
-            <span class="font-mono text-xs">{{ row.deviceAddressId }}</span>
+            <span class="iot-mono">{{ row.deviceAddressId }}</span>
           </template>
         </el-table-column>
         <el-table-column
-          prop="deviceAddressName"
           :label="t('subscription.fieldDeviceAddressName')"
-          min-width="130"
+          min-width="150"
           show-overflow-tooltip
+          class-name="iot-col-muted"
         />
-        <el-table-column
-          prop="deviceAddressLabel"
-          :label="t('subscription.fieldDeviceAddressLabel')"
-          min-width="120"
-          show-overflow-tooltip
-        />
-        <el-table-column prop="dataType" :label="t('subscription.fieldDataType')" width="110" show-overflow-tooltip />
-        <el-table-column prop="kind" :label="t('subscription.fieldKind')" width="90" />
-        <el-table-column prop="protocol" :label="t('subscription.fieldProtocol')" min-width="120" show-overflow-tooltip />
+        <el-table-column :label="t('subscription.fieldDeviceAddressLabel')" min-width="130" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.deviceAddressLabel" class="iot-chip">{{ row.deviceAddressLabel }}</span>
+            <span v-else class="iot-cell-muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('subscription.fieldDataType')" width="120" align="center">
+          <template #default="{ row }">
+            <span v-if="row.dataType" class="iot-chip">{{ row.dataType }}</span>
+            <span v-else class="iot-cell-muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('subscription.fieldKind')" width="100" align="center">
+          <template #default="{ row }">
+            <span v-if="row.kind" class="iot-chip">{{ row.kind }}</span>
+            <span v-else class="iot-cell-muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('subscription.fieldProtocol')" min-width="130" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.protocol" class="iot-chip">{{ row.protocol }}</span>
+            <span v-else class="iot-cell-muted">—</span>
+          </template>
+        </el-table-column>
         <el-table-column
           prop="firstSeenAt"
           :label="t('subscriptionDevicePoint.firstSeenAt')"
-          width="165"
-          align="center"
+          width="160"
+          class-name="iot-col-time"
         />
         <el-table-column
           prop="lastSeenAt"
           :label="t('subscriptionDevicePoint.lastSeenAt')"
-          width="165"
-          align="center"
+          width="160"
+          class-name="iot-col-time"
         />
+
+        <template #empty>
+          <div class="iot-empty">
+            <span class="iot-empty-mark" aria-hidden="true">
+              <el-icon><Point /></el-icon>
+            </span>
+            <p class="iot-empty-title">{{ t('subscriptionDevicePoint.emptyTitle') }}</p>
+            <p class="iot-empty-hint">{{ t('subscriptionDevicePoint.emptyHint') }}</p>
+          </div>
+        </template>
       </el-table>
 
-      <div class="flex justify-end mt-4">
+      <div class="iot-pager">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
@@ -134,14 +179,18 @@
           @current-change="handleCurrentChange"
         />
       </div>
-    </el-card>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { reactive, ref, onMounted } from 'vue'
+import { reactive, ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
+import {
+  IconDeviceDesktop as DeviceDesktop,
+  IconPoint as Point,
+} from '@tabler/icons-vue'
 import { getSubscriptionDevicePointList } from '@/api/modules/mqttSubscription'
 
 const { t } = useI18n()
@@ -158,6 +207,11 @@ const query = reactive({
   deviceAddressName: '',
   protocol: '',
 })
+
+// 首屏还没拿到数时显示占位符而不是 0：0 个点位会被当成"还没收到任何订阅报文"
+const displayTotal = computed(() =>
+  loading.value && rows.value.length === 0 ? '—' : total.value
+)
 
 async function fetchData() {
   loading.value = true
@@ -201,3 +255,50 @@ function handleCurrentChange() {
 
 onMounted(fetchData)
 </script>
+
+<style scoped>
+/* 五个筛选条件：标签在上、控件在下，工具栏自动换行；按钮组贴底对齐 */
+.point-filters {
+  align-items: flex-end;
+  width: 100%;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filter-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+
+.filter-input {
+  width: 164px;
+}
+
+.filter-field.is-short .filter-input {
+  width: 134px;
+}
+
+.filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 900px) {
+  .filter-input,
+  .filter-field.is-short .filter-input {
+    width: 100%;
+  }
+
+  .filter-field {
+    flex: 1 1 160px;
+  }
+}
+</style>

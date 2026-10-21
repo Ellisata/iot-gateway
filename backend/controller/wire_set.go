@@ -27,4 +27,5 @@ var ControllerProviderSet = wire.NewSet(
 	NewPluginController,
 	NewDeviceScanController,
 	NewSystemConfigController,
+	NewDashboardController,
 )

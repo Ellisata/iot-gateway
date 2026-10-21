@@ -4,89 +4,109 @@
 -->
 
 <template>
-  <div class="p-6">
-    <!-- 面包屑导航 -->
-    <div class="flex items-center gap-2 text-sm text-gray-500 mb-4">
-      <el-button text @click="goBack">
-        <el-icon><ArrowLeft /></el-icon>
-        {{ t('realtime.backToList') }}
-      </el-button>
-    </div>
-
-    <h1 class="text-2xl font-bold text-gray-800 mb-6">
-      {{ t('realtime.title') }} — {{ snapshot?.deviceName || deviceObjectName || '—' }}
-    </h1>
-
-    <!-- 设备与采集状态 -->
-    <el-card class="status-card mb-4" shadow="never" v-loading="loading">
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div class="collect-item">
-          <div class="collect-label">{{ t('realtime.protocol') }}</div>
-          <div class="collect-value">{{ snapshot?.protocolName || '—' }}</div>
-        </div>
-        <div class="collect-item">
-          <div class="collect-label">{{ t('realtime.online') }}</div>
-          <div class="collect-value">
-            <el-tag :type="snapshot?.online ? 'success' : 'danger'" size="small" effect="dark">
-              {{ snapshot?.online ? t('realtime.onlineYes') : t('realtime.onlineNo') }}
-            </el-tag>
-          </div>
-        </div>
-        <div class="collect-item">
-          <div class="collect-label">{{ t('realtime.collectorRunning') }}</div>
-          <div class="collect-value">
-            <el-tag :type="snapshot?.collectorRunning ? 'success' : 'info'" size="small">
-              {{ snapshot?.collectorRunning ? t('realtime.collectorRunningYes') : t('realtime.collectorRunningNo') }}
-            </el-tag>
-          </div>
-        </div>
-        <div class="collect-item">
-          <div class="collect-label">{{ t('realtime.collecting') }}</div>
-          <div class="collect-value">
-            <el-tag :type="snapshot?.collecting ? 'success' : 'warning'" size="small">
-              {{ snapshot?.collecting ? t('realtime.collectingYes') : t('realtime.collectingNo') }}
-            </el-tag>
-          </div>
-        </div>
-        <div class="collect-item">
-          <div class="collect-label">{{ t('realtime.lastSuccess') }}</div>
-          <div class="collect-value">{{ snapshot?.lastSuccessTime || '—' }}</div>
-        </div>
-        <div class="collect-item">
-          <div class="collect-label">{{ t('realtime.serverTime') }}</div>
-          <div class="collect-value">{{ snapshot?.serverTime || '—' }}</div>
+  <div class="iot-page">
+    <header class="iot-head iot-enter">
+      <div>
+        <!-- 返回入口放在标题块里，与设备对象页的层级一致，不再单独占一条面包屑 -->
+        <button type="button" class="iot-back" @click="goBack">
+          <el-icon><ArrowLeft /></el-icon>
+          {{ t('realtime.backToList') }}
+        </button>
+        <p class="iot-eyebrow">
+          <span class="iot-eyebrow-dot" aria-hidden="true" />
+          {{ t('menu.realtime') }}
+        </p>
+        <h1 class="iot-title">
+          {{ t('realtime.title') }} — {{ snapshot?.deviceName || deviceObjectName || '—' }}
+        </h1>
+        <p class="iot-sub">{{ t('realtime.subtitle') }}</p>
+      </div>
+      <div class="iot-head-aside">
+        <div class="iot-stat">
+          <span class="iot-stat-num">{{ total }}</span>
+          <span class="iot-stat-label">{{ t('realtime.pointUnit') }}</span>
         </div>
       </div>
-    </el-card>
+    </header>
+
+    <!-- 设备与采集状态：六项读数排成一张发丝线格栅，不再是一堆灰色小块 -->
+    <section class="iot-panel iot-enter" style="animation-delay: 60ms">
+      <div v-loading="loading" class="status-strip">
+        <div class="status-item">
+          <p class="status-label">{{ t('realtime.protocol') }}</p>
+          <p class="status-value">{{ snapshot?.protocolName || '—' }}</p>
+        </div>
+        <div class="status-item">
+          <p class="status-label">{{ t('realtime.online') }}</p>
+          <div class="status-value">
+            <span class="iot-pill" :class="snapshot?.online ? 'is-green' : 'is-rose'">
+              <span class="iot-pill-dot" aria-hidden="true" />
+              {{ snapshot?.online ? t('realtime.onlineYes') : t('realtime.onlineNo') }}
+            </span>
+          </div>
+        </div>
+        <div class="status-item">
+          <p class="status-label">{{ t('realtime.collectorRunning') }}</p>
+          <div class="status-value">
+            <span class="iot-pill" :class="snapshot?.collectorRunning ? 'is-green' : 'is-gray'">
+              <span class="iot-pill-dot" aria-hidden="true" />
+              {{ snapshot?.collectorRunning ? t('realtime.collectorRunningYes') : t('realtime.collectorRunningNo') }}
+            </span>
+          </div>
+        </div>
+        <div class="status-item">
+          <p class="status-label">{{ t('realtime.collecting') }}</p>
+          <div class="status-value">
+            <span class="iot-pill" :class="snapshot?.collecting ? 'is-green' : 'is-amber'">
+              <span class="iot-pill-dot" aria-hidden="true" />
+              {{ snapshot?.collecting ? t('realtime.collectingYes') : t('realtime.collectingNo') }}
+            </span>
+          </div>
+        </div>
+        <div class="status-item">
+          <p class="status-label">{{ t('realtime.lastSuccess') }}</p>
+          <p class="status-value is-time">{{ snapshot?.lastSuccessTime || '—' }}</p>
+        </div>
+        <div class="status-item">
+          <p class="status-label">{{ t('realtime.serverTime') }}</p>
+          <p class="status-value is-time">{{ snapshot?.serverTime || '—' }}</p>
+        </div>
+      </div>
+    </section>
 
     <!-- 诊断提示：说明「为什么没数据」，正常时不显示 -->
-    <el-alert
-      v-if="diagKey"
-      :title="t(diagKey)"
-      :type="diagType"
-      show-icon
-      :closable="false"
-      class="mb-4"
-    />
+    <div v-if="diagKey" class="iot-notice iot-enter" :class="diagClass">
+      <span class="iot-notice-mark" aria-hidden="true">
+        <el-icon>
+          <InfoCircle v-if="diagClass === 'is-info'" />
+          <AlertTriangle v-else />
+        </el-icon>
+      </span>
+      <p class="iot-notice-text">{{ t(diagKey) }}</p>
+    </div>
 
-    <!-- 工具栏 -->
-    <el-card shadow="never" class="mb-4">
-      <div class="flex items-center justify-between flex-wrap gap-3">
-        <div class="flex items-center gap-3">
+    <!-- 工作区：筛选、刷新控制、表格与分页共用一块表面 -->
+    <section class="iot-panel iot-enter" style="animation-delay: 120ms">
+      <div class="iot-toolbar">
+        <div class="iot-toolbar-filters">
           <el-input
             v-model="queryForm.name"
+            class="iot-search"
             :placeholder="t('realtime.searchPlaceholder')"
             clearable
-            style="width: 240px"
             @keyup.enter="handleSearch"
             @clear="handleSearch"
-          />
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
           <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
           <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
         </div>
-        <div class="flex items-center gap-3">
-          <span class="text-sm text-gray-500">{{ t('realtime.refreshInterval') }}</span>
-          <el-select v-model="interval" style="width: 130px">
+        <div class="iot-toolbar-actions">
+          <span class="refresh-label">{{ t('realtime.refreshInterval') }}</span>
+          <el-select v-model="interval" class="refresh-interval">
             <el-option
               v-for="opt in intervalOptions"
               :key="opt.value"
@@ -102,20 +122,33 @@
           </el-button>
         </div>
       </div>
-    </el-card>
 
-    <!-- 实时数据表格 -->
-    <el-card shadow="never">
       <el-table
+        class="iot-table"
         :data="tableData"
         v-loading="loading"
-        stripe
-        border
         style="width: 100%"
       >
-        <el-table-column type="index" :label="t('common.index')" width="70" align="center" />
-        <el-table-column prop="name" :label="t('realtime.pointName')" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="label" :label="t('realtime.pointLabel')" min-width="140" show-overflow-tooltip />
+        <el-table-column type="index" :label="t('common.index')" width="68" align="center" />
+
+        <!-- 点位名是这一行的身份：与设备对象页一样给一个小图标底座 -->
+        <el-table-column :label="t('realtime.pointName')" min-width="200">
+          <template #default="{ row }">
+            <div class="iot-name-cell">
+              <span class="iot-name-mark" aria-hidden="true">
+                <el-icon><Point /></el-icon>
+              </span>
+              <span class="iot-name-text" :title="row.name">{{ row.name }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="label"
+          :label="t('realtime.pointLabel')"
+          min-width="150"
+          show-overflow-tooltip
+          class-name="iot-col-muted"
+        />
         <el-table-column :label="t('realtime.value')" min-width="160" align="right">
           <template #default="{ row }">
             <!-- :key 带值：值一变即换新节点，令高亮动画重新播放，
@@ -125,44 +158,52 @@
               :key="`${row.addressId}|${row.value}`"
               class="value-flash"
             >{{ row.value }}</span>
-            <span v-else class="text-gray-400">{{ t('realtime.emptyValue') }}</span>
+            <span v-else class="iot-cell-muted">{{ t('realtime.emptyValue') }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="dataType" :label="t('realtime.dataType')" width="130" align="center" show-overflow-tooltip />
+        <el-table-column
+          :label="t('realtime.dataType')"
+          width="130"
+          align="center"
+        >
+          <template #default="{ row }">
+            <span v-if="row.dataType" class="iot-chip">{{ row.dataType }}</span>
+            <span v-else class="iot-cell-muted">—</span>
+          </template>
+        </el-table-column>
         <el-table-column :label="t('realtime.quality')" width="120" align="center">
           <template #default="{ row }">
-            <template v-if="!row.collected">
-              <span class="text-gray-400">—</span>
-            </template>
-            <el-tag v-else-if="row.quality === 192" type="success" size="small">
-              {{ t('realtime.qualityGood') }}
-            </el-tag>
-            <!-- 坏点位显示**为什么坏**而不是一个裸的码：地址无效要改配置、通信失败等
-                 下一轮就好，两者处置完全不同，只给一个数字等于让操作工去猜。
-                 坏的是 quality 的低 6 位（1/2/3），0 是"坏但没归因"（仍显示原码）；
-                 128（ABB 的不确定）值可用，不是坏，走最后那个 span。 -->
-            <el-tag v-else-if="row.quality <= 3" type="danger" size="small">
-              {{ qualityBadText(row) }}
-            </el-tag>
-            <span v-else class="text-gray-500">{{ row.quality }}</span>
+            <span v-if="!row.collected" class="iot-cell-muted">—</span>
+            <span v-else class="iot-pill" :class="qualityClass(row)">
+              {{ qualityText(row) }}
+            </span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('realtime.collectedAt')" width="180" align="center">
+        <el-table-column :label="t('realtime.collectedAt')" width="160" class-name="iot-col-time">
           <template #default="{ row }">
             {{ row.updatedAt || '—' }}
           </template>
         </el-table-column>
         <el-table-column :label="t('realtime.pointStatus')" width="110" align="center">
           <template #default="{ row }">
-            <el-tag :type="pointStatusType(row)" size="small">
+            <span class="iot-pill" :class="pointStatusClass(row)">
               {{ pointStatusText(row) }}
-            </el-tag>
+            </span>
           </template>
         </el-table-column>
+
+        <template #empty>
+          <div class="iot-empty">
+            <span class="iot-empty-mark" aria-hidden="true">
+              <el-icon><ActivityHeartbeat /></el-icon>
+            </span>
+            <p class="iot-empty-title">{{ t('realtime.emptyTitle') }}</p>
+            <p class="iot-empty-hint">{{ t('realtime.emptyHint') }}</p>
+          </div>
+        </template>
       </el-table>
 
-      <!-- 分页 -->
-      <div class="flex justify-end mt-4">
+      <div class="iot-pager">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
@@ -174,14 +215,22 @@
           @current-change="handlePageChange"
         />
       </div>
-    </el-card>
+    </section>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { IconArrowLeft as ArrowLeft, IconRefresh as Refresh } from '@tabler/icons-vue'
+import {
+  IconActivityHeartbeat as ActivityHeartbeat,
+  IconAlertTriangle as AlertTriangle,
+  IconArrowLeft as ArrowLeft,
+  IconInfoCircle as InfoCircle,
+  IconPoint as Point,
+  IconRefresh as Refresh,
+  IconSearch as Search,
+} from '@tabler/icons-vue'
 import { getRealtimeSnapshot } from '@/api/modules/realtime'
 import { useI18n } from 'vue-i18n'
 
@@ -328,21 +377,35 @@ const diagKey = computed(() => {
   return null
 })
 
-const diagType = computed(() => {
+const diagClass = computed(() => {
   const key = diagKey.value
-  if (key === 'realtime.diagWaiting') return 'info'
-  if (key === 'realtime.diagOffline' || key === 'realtime.diagNotCollecting') return 'warning'
-  return 'error'
+  if (key === 'realtime.diagWaiting') return 'is-info'
+  if (key === 'realtime.diagOffline' || key === 'realtime.diagNotCollecting') return 'is-warning'
+  return 'is-error'
 })
 
-function pointStatusType(row) {
-  if (!row.collected) return 'info'
-  return row.stale ? 'warning' : 'success'
+function pointStatusClass(row) {
+  if (!row.collected) return 'is-gray'
+  return row.stale ? 'is-amber' : 'is-green'
 }
 
 function pointStatusText(row) {
   if (!row.collected) return t('realtime.statusPending')
   return row.stale ? t('realtime.statusStale') : t('realtime.statusNormal')
+}
+
+// 质量码 → 胶囊：192 正常、低 6 位 1/2/3 是坏点位的三种成因；
+// 其余（含 128「不确定但可用」与未归因的 0）按中性码显示，不伪装成正常。
+function qualityClass(row) {
+  if (row.quality === 192) return 'is-green'
+  if (row.quality <= 3) return 'is-rose'
+  return 'is-gray'
+}
+
+function qualityText(row) {
+  if (row.quality === 192) return t('realtime.qualityGood')
+  if (row.quality <= 3) return qualityBadText(row)
+  return row.quality
 }
 
 // 坏子码 → i18n key。取值只有后端 driver.QualityBadXxx 这三个（低 6 位的子码），
@@ -376,45 +439,83 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.status-card {
-  --el-card-padding: 20px;
-  border-radius: 12px;
+/* 状态格栅：1px 的 gap 让每个读数成为独立的一格，靠底色当分隔线 */
+.status-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--line-soft);
 }
 
-.collect-item {
-  padding: 12px 16px;
-  background: #f5f7fa;
-  border-radius: 8px;
+.status-item {
+  min-width: 0;
+  padding: 16px 20px;
+  background: #fff;
 }
 
-.collect-label {
-  font-size: 13px;
-  color: #909399;
-  margin-bottom: 4px;
+.status-label {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-4);
 }
 
-.collect-value {
-  font-size: 15px;
-  font-weight: 500;
-  color: #303133;
+.status-value {
+  margin: 6px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--ink);
   word-break: break-all;
+}
+
+.status-value.is-time {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.refresh-label {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.refresh-interval {
+  width: 118px;
 }
 
 /* 值变化时闪烁一次：值是数据的核心，不闪的话用户看不出「数据在动」 */
 .value-flash {
   display: inline-block;
   padding: 0 6px;
-  border-radius: 4px;
+  font-weight: 600;
+  color: var(--ink);
   font-variant-numeric: tabular-nums;
-  animation: value-flash 0.9s ease-out;
+  border-radius: 4px;
+  animation: valueFlash 0.9s ease-out;
 }
 
-@keyframes value-flash {
+@keyframes valueFlash {
   from {
     background-color: var(--el-color-primary-light-7);
   }
   to {
     background-color: transparent;
+  }
+}
+
+@media (max-width: 900px) {
+  .status-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .status-strip {
+    grid-template-columns: 1fr;
   }
 }
 </style>

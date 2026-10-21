@@ -6,6 +6,7 @@
 <template>
   <el-dialog
     v-model="visible"
+    class="iot-dialog"
     :title="t('changePassword.title')"
     width="420px"
     :close-on-click-modal="false"

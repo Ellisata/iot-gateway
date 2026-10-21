@@ -19,6 +19,7 @@ import (
 	"iot-gateway/database"
 	"iot-gateway/devicescan"
 	"iot-gateway/discovery"
+	"iot-gateway/metrics"
 	"iot-gateway/notify"
 	"iot-gateway/pluginhost"
 	"iot-gateway/push"
@@ -53,6 +54,9 @@ type AppDependencies struct {
 	// RuntimeConfig 运行期配置开关（default.yaml 作默认值，system_config 表作覆盖）。
 	// 停机时先 Close 关闭更新入口，再按既有顺序停各组件。
 	RuntimeConfig *runtimecfg.Manager
+	// DashboardSampler 大盘遥测采样器：每分钟把在线率、采集吞吐与推送积压
+	// 合成一个内存采样点，供 /dashboard/trend 查询。
+	DashboardSampler *metrics.Sampler
 }
 
 // InitializeApp 构建完整的应用依赖图
@@ -81,8 +85,16 @@ func InitializeApp() (*AppDependencies, func()) {
 		wire.Bind(new(subscribe.Sink), new(*push.Engine)),
 		// 实时值快照（实现 collector.RecordSink，供前端实时数据页查询）
 		realtime.NewStore,
-		// 采集记录的扇出：快照 + 推送。采集引擎只接受单个 RecordSink，
-		// 两个消费方由 NewRecordSink 组装，各自不必感知对方。
+		// 大盘遥测计数器（实现 collector.RecordSink）+ 每分钟采样器。
+		// 采样器依赖设备/采集/推送三个数据源，必须排在它们之后构造；
+		// 它不依赖采集引擎本身，因此不会与 NewRecordSink 形成环。
+		metrics.NewRecorder,
+		metrics.NewSampler,
+		wire.Bind(new(metrics.OverviewSource), new(*service.DeviceService)),
+		wire.Bind(new(metrics.CollectionSource), new(*service.CollectionService)),
+		wire.Bind(new(metrics.PushSource), new(*push.Engine)),
+		// 采集记录的扇出：快照 + 遥测计数 + 推送。采集引擎只接受单个 RecordSink，
+		// 三个消费方由 NewRecordSink 组装，各自不必感知对方。
 		NewRecordSink,
 		// 断联报警引擎（实现 collector.DeviceStateSink，接收设备在线状态）
 		alarm.NewEngine,
@@ -147,8 +159,10 @@ func InitializeApp() (*AppDependencies, func()) {
 //
 // 顺序：实时值快照在前 —— 它是纯内存写，先落快照再交推送引擎，
 // 下游入队/落盘变慢时快照也不会滞后。
-func NewRecordSink(store *realtime.Store, pushEngine *push.Engine) collector.RecordSink {
-	return collector.MultiSink{store, pushEngine}
+func NewRecordSink(store *realtime.Store, recorder *metrics.Recorder, pushEngine *push.Engine) collector.RecordSink {
+	// 计数器排在推送之前：推送阻塞或丢弃时，采集吞吐仍然准确 ——
+	// 这两个数字回答的是不同的问题（读到了多少 / 发出去多少）。
+	return collector.MultiSink{store, recorder, pushEngine}
 }
 
 // NewWorkerPool 从配置创建 Worker 池
@@ -181,6 +195,7 @@ func ProvideRouteOptions(
 	plc *controller.PluginController,
 	dsc *controller.DeviceScanController,
 	scc *controller.SystemConfigController,
+	dbc *controller.DashboardController,
 ) []router.RouteOption {
 	return []router.RouteOption{
 		router.WithUserRoutes(uc),
@@ -203,9 +218,10 @@ func ProvideRouteOptions(
 		router.WithPluginRoutes(plc),
 		router.WithDeviceScanRoutes(dsc),
 		router.WithSystemConfigRoutes(scc),
+		router.WithDashboardRoutes(dbc),
 		// dsh（AI Agent）调用面：把上述领域路由再挂一遍到 /agentApi（**无鉴权**）。
 		// 刻意放在最后 —— 它复用同一批 controller，与前面各 With* 无顺序依赖。
 		// 风险与暴露清单见 router/agentApiRouter.go。
-		router.WithAgentApiRoutes(uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc),
+		router.WithAgentApiRoutes(uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc),
 	}
 }

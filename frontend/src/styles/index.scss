@@ -10,8 +10,7 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, 'Noto Sans SC', sans-serif;
+  font-family: var(--font-sans);
 }
 
 #app {
@@ -36,4 +35,14 @@ body {
 /* Tabler 图标统一描边，与侧栏菜单保持同一视觉重量（尺寸由 .el-icon svg 的 1em 规则接管） */
 .el-icon .tabler-icon {
   stroke-width: 1.6;
+}
+
+/* 拖动侧栏分割线期间：全局列宽光标并禁止选中文本，指针经过 iframe/输入框也不中断 */
+body.is-resizing-sidebar {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.is-resizing-sidebar * {
+  cursor: col-resize !important;
 }

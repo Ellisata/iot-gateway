@@ -5,8 +5,9 @@
 
 <template>
   <el-aside
-    :width="collapsed ? '64px' : '240px'"
-    class="side-rail flex flex-col transition-all duration-300"
+    :width="collapsed ? '64px' : width + 'px'"
+    class="side-rail flex flex-col"
+    :class="{ 'is-resizing': resizing }"
   >
     <!-- 品牌区：与顶栏同高，保证两侧首行对齐 -->
     <div class="brand" :class="{ 'is-collapsed': collapsed }">
@@ -215,6 +216,16 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  // 展开态宽度由布局层维护（可拖动），折叠态固定 64px
+  width: {
+    type: Number,
+    default: 240,
+  },
+  // 拖动中关闭宽度过渡，避免指针与边线之间出现拖尾
+  resizing: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const route = useRoute()
@@ -244,6 +255,9 @@ function handleMenuSelect(index) {
 */
 .side-rail {
   --rail-line: rgba(255, 255, 255, 0.08);
+
+  flex: none;
+  transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
   --rail-line-soft: rgba(255, 255, 255, 0.06);
   --rail-ink: #cbd5e1;
   --rail-ink-strong: #f8fafc;
@@ -259,6 +273,11 @@ function handleMenuSelect(index) {
     linear-gradient(180deg, #111c30 0%, #0d1626 100%);
   border-right: 1px solid rgba(255, 255, 255, 0.06);
   -webkit-font-smoothing: antialiased;
+}
+
+/* 拖动过程中宽度跟手变化，不能再走 280ms 的过渡 */
+.side-rail.is-resizing {
+  transition: none;
 }
 
 /* ---------- 品牌区 ---------- */

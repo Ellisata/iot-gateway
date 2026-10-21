@@ -109,3 +109,18 @@ export function updateChannelFormJsonById(data) {
     data,
   })
 }
+
+/**
+ * 获取推送通道运行状态。
+ *
+ * 与通道配置列表是两件事：这里返回的是运行中的通道实例（连接状态、
+ * 队列深度、断网缓存积压、发布/丢弃计数），用于大盘「数据出口」面板。
+ *
+ * @returns {Promise<Array>} ChannelStatusVO 数组
+ */
+export function getPushStatus() {
+  return request({
+    url: '/push/status',
+    method: 'get',
+  })
+}

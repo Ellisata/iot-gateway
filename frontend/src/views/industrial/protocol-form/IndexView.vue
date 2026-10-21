@@ -4,39 +4,55 @@
 -->
 
 <template>
-  <div class="protocol-form-page">
-    <!-- 顶部工具栏 -->
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <span class="toolbar-label">{{ t('protocolForm.selectProtocol') }}</span>
-        <ProtocolSelector
-          v-model="selectedProtocol"
-          :button-text="t('protocolForm.selectProtocolBtn')"
-          @select="handleProtocolSelect"
+  <div class="iot-page pf-page">
+    <!-- 页头：与工业物联网其余页面同一套层级；设计器本身占满剩余高度 -->
+    <header class="iot-head iot-enter">
+      <div>
+        <p class="iot-eyebrow">
+          <span class="iot-eyebrow-dot" aria-hidden="true" />
+          {{ t('menu.industrial') }}
+        </p>
+        <h1 class="iot-title">{{ t('menu.protocolForm') }}</h1>
+        <p class="iot-sub">{{ t('protocolForm.subtitle') }}</p>
+      </div>
+    </header>
+
+    <section class="iot-panel designer-panel iot-enter" style="animation-delay: 60ms">
+      <div class="iot-toolbar">
+        <div class="iot-toolbar-filters">
+          <span class="pf-label">{{ t('protocolForm.selectProtocol') }}</span>
+          <ProtocolSelector
+            v-model="selectedProtocol"
+            :button-text="t('protocolForm.selectProtocolBtn')"
+            @select="handleProtocolSelect"
+          />
+        </div>
+        <div class="iot-toolbar-actions">
+          <el-button
+            type="primary"
+            :icon="Check"
+            :loading="saving"
+            @click="handleSave"
+          >
+            {{ t('common.save') }}
+          </el-button>
+        </div>
+      </div>
+
+      <!-- 表单设计器 -->
+      <div class="designer-wrapper">
+        <fc-designer
+          ref="designerRef"
+          height="100%"
+          :config="{ fieldReadonly: false }"
         />
+        <!-- 加载遮罩 -->
+        <div v-if="formLoading" class="loading-mask">
+          <el-icon class="loading-icon" :size="32"><Loading /></el-icon>
+          <span>{{ t('common.loading') }}</span>
+        </div>
       </div>
-      <div class="toolbar-right">
-        <el-button type="primary" :loading="saving" @click="handleSave">
-          <el-icon><Check /></el-icon>
-          {{ t('common.save') }}
-        </el-button>
-      </div>
-    </div>
-
-    <!-- 表单设计器 -->
-    <div class="designer-wrapper">
-      <fc-designer
-        ref="designerRef"
-        height="100%"
-        :config="{ fieldReadonly: false }"
-      />
-      <!-- 加载遮罩 -->
-      <div v-if="formLoading" class="loading-mask">
-        <el-icon class="loading-icon" :size="32"><Loading /></el-icon>
-        <span>{{ t('common.loading') }}</span>
-      </div>
-    </div>
-
+    </section>
   </div>
 </template>
 
@@ -156,47 +172,37 @@ async function handleSave() {
 </script>
 
 <style scoped>
-.protocol-form-page {
+/* 设计器页占满内容区剩余高度：减去顶栏 60px 与 el-main 的上下内边距 48px */
+.pf-page {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--header-height, 60px) - 32px);
-  overflow: hidden;
-  background: #f5f7fa;
+  height: calc(100vh - var(--header-height, 60px) - 48px);
 }
 
-.toolbar {
+.pf-page .iot-head {
+  flex: none;
+}
+
+.designer-panel {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  background: #fff;
-  border-bottom: 1px solid #ebeef5;
-  flex-shrink: 0;
-  z-index: 10;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  margin-bottom: 0;
 }
 
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.toolbar-label {
-  font-size: 14px;
-  color: #606266;
+.pf-label {
+  font-size: 12.5px;
+  color: var(--ink-3);
   white-space: nowrap;
 }
 
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .designer-wrapper {
-  flex: 1;
-  overflow: hidden;
   position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #f8fafc;
 }
 
 /* 让 fc-designer 填满容器 */
@@ -207,15 +213,16 @@ async function handleSave() {
 .loading-mask {
   position: absolute;
   inset: 0;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: rgba(255, 255, 255, 0.75);
-  z-index: 20;
-  color: #409eff;
-  font-size: 14px;
+  font-size: 13px;
+  color: var(--brand);
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(2px);
 }
 
 .loading-icon {

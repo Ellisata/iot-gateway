@@ -1,0 +1,46 @@
+/* SPDX-License-Identifier: AGPL-3.0-only
+   Copyright (c) 2026 Edwin and iot-gateway contributors */
+
+/* ==========================================================================
+   全站设计 token
+   --------------------------------------------------------------------------
+   页面、对话框、侧栏共用同一套颜色与字体。变量挂在 :root 上，因此 teleport
+   到 body 的对话框也能拿到；页面级样式只写布局，不再各自复制一份色板。
+   新增颜色先在这里登记，不要在页面里另起变量名。
+   ========================================================================== */
+
+:root {
+  /* 表面与画布 */
+  --surface: #fff;
+  --canvas: #f6f8fb;
+
+  /* 分隔线 */
+  --line: #e6ebf2;
+  --line-soft: #eef2f7;
+
+  /* 文字层级 */
+  --ink: #0f172a;
+  --ink-2: #475569;
+  --ink-3: #64748b;
+  --ink-4: #94a3b8;
+
+  /* 品牌色：全站唯一的强调色 */
+  --brand: #2563eb;
+  --brand-soft: #eff5ff;
+
+  /* 语义色：只用于状态，不做装饰 */
+  --success: #059669;
+  --success-soft: #ecfdf5;
+  --warning: #d97706;
+  --warning-soft: #fffbeb;
+  --danger: #e11d48;
+  --danger-soft: #fff1f2;
+
+  /* 面板圆角 */
+  --radius: 18px;
+
+  /* 字体：正文走系统字体栈，技术标识走等宽字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, 'Noto Sans SC', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}

@@ -15,6 +15,7 @@
 <template>
   <el-dialog
     :model-value="visible"
+    class="iot-dialog point-dialog"
     :title="spec?.title || t('deviceAddress.pointDiscovery.title')"
     width="1080px"
     :close-on-click-modal="false"
@@ -22,28 +23,35 @@
     @closed="handleClosed"
   >
     <!-- 能力不可用：按钮那边已经会置灰，这里再兜一道（比如开着弹窗时插件被热升级掉） -->
-    <el-alert
+    <div
       v-if="capability && !capability.supported"
-      type="warning"
-      :closable="false"
-      :title="t('deviceAddress.pointDiscovery.unsupported')"
-    />
-    <el-alert
+      class="iot-notice is-warning is-inline"
+    >
+      <span class="iot-notice-mark" aria-hidden="true">
+        <el-icon><AlertTriangle /></el-icon>
+      </span>
+      <p class="iot-notice-text">{{ t('deviceAddress.pointDiscovery.unsupported') }}</p>
+    </div>
+    <div
       v-else-if="capability && !capability.enabled"
-      type="warning"
-      :closable="false"
-      :title="t('deviceAddress.pointDiscovery.disabled')"
-    />
+      class="iot-notice is-warning is-inline"
+    >
+      <span class="iot-notice-mark" aria-hidden="true">
+        <el-icon><AlertTriangle /></el-icon>
+      </span>
+      <p class="iot-notice-text">{{ t('deviceAddress.pointDiscovery.disabled') }}</p>
+    </div>
 
     <template v-else>
       <!-- ========== 参数 ========== -->
-      <el-alert
-        type="info"
-        :closable="false"
-        class="mb-3"
-        :title="spec?.description || t('deviceAddress.pointDiscovery.defaultNotice')"
-        show-icon
-      />
+      <div class="iot-notice is-info is-inline pd-notice">
+        <span class="iot-notice-mark" aria-hidden="true">
+          <el-icon><InfoCircle /></el-icon>
+        </span>
+        <p class="iot-notice-text">
+          {{ spec?.description || t('deviceAddress.pointDiscovery.defaultNotice') }}
+        </p>
+      </div>
 
       <!-- 扫描参数：**不加分组标题、也不套 el-form-item** —— 插件的字段名自己就是
            标签；套进 el-form-item 就是在已经缩进 label-width 的内容区里再缩进一次，
@@ -59,14 +67,14 @@
         />
       </div>
 
-      <div class="flex items-center justify-between">
+      <div class="pd-actions">
         <!-- 用**实际生效**的预算（effectiveBudgetMs），不是插件声明的那个：
              网关会把同步 HTTP 这条链路的预算钳到 9s 以内，而插件可以声明 20s，
              显示声明值会让用户按 20 秒预估、实际 7 秒就停了（还会看到"未扫完"）。 -->
-        <span class="text-xs text-gray-400">
+        <span class="pd-budget">
           {{ t('deviceAddress.pointDiscovery.budgetHint', { s: Math.round((spec?.effectiveBudgetMs || spec?.maxBudgetMs || 0) / 1000), n: spec?.maxPoints ?? 0 }) }}
         </span>
-        <div class="flex items-center gap-2">
+        <div class="pd-actions-buttons">
           <el-button v-if="result" @click="handleReset">{{ t('deviceAddress.pointDiscovery.rescan') }}</el-button>
           <el-button
             type="primary"
@@ -82,77 +90,76 @@
 
       <!-- ========== 结果 ========== -->
       <template v-if="result">
-        <el-divider />
+        <div class="pd-divider" />
 
         <!-- 中途断链：**下面这些点位是有效的**，但清单残缺，必须说在前面。
              与"扫描失败"（拦截器弹错误、这里什么都没有）是两回事 ——
-             文案由服务端拼（根因是动态的），whitespace-pre-line 保住里面的换行。 -->
-        <el-alert
-          v-if="result.warning"
-          type="warning"
-          :closable="false"
-          class="mb-3 whitespace-pre-line"
-          :title="result.warning"
-        />
+             文案由服务端拼（根因是动态的），white-space: pre-line 保住里面的换行。 -->
+        <div v-if="result.warning" class="iot-notice is-warning is-inline pd-notice">
+          <span class="iot-notice-mark" aria-hidden="true">
+            <el-icon><AlertTriangle /></el-icon>
+          </span>
+          <p class="iot-notice-text">{{ result.warning }}</p>
+        </div>
 
         <!-- 统计条固定在结果区顶部：这一屏最容易被误读的就是"扫到多少"。
              sampled 为假（原生枚举协议，不读采样值）时换一套措辞：
              那边没有"读得到/读不到"，只有"列出了/跳过了"，而跳过的原因与地址无关。 -->
-        <div class="flex items-center flex-wrap gap-x-4 gap-y-2 mb-3">
-          <span class="text-sm text-gray-700">
+        <div class="pd-stats">
+          <span class="pd-stat">
             {{ sampled
               ? t('deviceAddress.pointDiscovery.statScanned', { n: result.scanned })
               : t('deviceAddress.pointDiscovery.statScannedNative', { n: result.scanned }) }}
           </span>
-          <span class="text-sm text-gray-700">
+          <span class="pd-stat">
             {{ sampled
               ? t('deviceAddress.pointDiscovery.statReadable', { n: result.readable })
               : t('deviceAddress.pointDiscovery.statReadableNative', { n: result.readable }) }}
           </span>
-          <span class="text-sm text-gray-400">
+          <span class="pd-stat is-muted">
             {{ sampled
               ? t('deviceAddress.pointDiscovery.statUnreadable', { n: result.unreadable })
               : t('deviceAddress.pointDiscovery.statUnreadableNative', { n: result.unreadable }) }}
           </span>
-          <span v-if="sampled" class="text-sm text-gray-400">
+          <span v-if="sampled" class="pd-stat is-muted">
             {{ t('deviceAddress.pointDiscovery.statZero', { n: zeroCount }) }}
           </span>
-          <span class="text-sm text-gray-400">
+          <span class="pd-stat is-muted">
             {{ t('deviceAddress.pointDiscovery.statElapsed', { s: (result.elapsedMs / 1000).toFixed(1) }) }}
           </span>
         </div>
 
         <!-- 两个标志必须分开显示：截断是"结果条数到了上限"，未扫完是"范围还没扫到"，
              它们与"读不到"是三回事，合并成一句会让用户得出错误的结论 -->
-        <el-alert
-          v-if="result.truncated"
-          type="warning"
-          :closable="false"
-          class="mb-2"
-          :title="sampled
-            ? t('deviceAddress.pointDiscovery.truncated', { n: spec?.maxPoints ?? 0 })
-            : t('deviceAddress.pointDiscovery.truncatedNative', { n: spec?.maxPoints ?? 0 })"
-        />
-        <el-alert
-          v-if="result.incomplete"
-          type="warning"
-          :closable="false"
-          class="mb-3"
-          :title="t('deviceAddress.pointDiscovery.incomplete')"
-        />
+        <div v-if="result.truncated" class="iot-notice is-warning is-inline pd-notice">
+          <span class="iot-notice-mark" aria-hidden="true">
+            <el-icon><AlertTriangle /></el-icon>
+          </span>
+          <p class="iot-notice-text">
+            {{ sampled
+              ? t('deviceAddress.pointDiscovery.truncated', { n: spec?.maxPoints ?? 0 })
+              : t('deviceAddress.pointDiscovery.truncatedNative', { n: spec?.maxPoints ?? 0 }) }}
+          </p>
+        </div>
+        <div v-if="result.incomplete" class="iot-notice is-warning is-inline pd-notice">
+          <span class="iot-notice-mark" aria-hidden="true">
+            <el-icon><AlertTriangle /></el-icon>
+          </span>
+          <p class="iot-notice-text">{{ t('deviceAddress.pointDiscovery.incomplete') }}</p>
+        </div>
 
-        <div class="flex items-center flex-wrap justify-between gap-3 mb-2">
+        <div class="pd-controls">
           <!-- 「显示 0 值」只在**本次结果真的带采样值**时才有意义。
                原生枚举协议（Rockwell.CIP）只列标签与类型、不读值，每一行的 value
                都是空的：开关开着时一切正常，一关就整张表清空，而"值为 0"的统计
                还会显示成"全部都是 0" —— 比没有这个开关更容易误导。 -->
-          <div v-if="sampled" class="flex items-center gap-3">
+          <div v-if="sampled" class="pd-zero-toggle">
             <el-switch v-model="showZero" :active-text="t('deviceAddress.pointDiscovery.showZero')" />
-            <span class="text-xs text-gray-400">
+            <span class="pd-zero-hint">
               {{ t('deviceAddress.pointDiscovery.valueHint', { type: result.assumedCommonDataType || '—' }) }}
             </span>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="pd-bulk">
             <el-select
               v-model="bulkType"
               :placeholder="t('deviceAddress.pointDiscovery.bulkTypePlaceholder')"
@@ -174,9 +181,8 @@
 
         <el-table
           ref="tableRef"
+          class="iot-table is-compact pd-table"
           :data="pagedRows"
-          stripe
-          border
           size="small"
           max-height="380"
           row-key="name"
@@ -191,16 +197,16 @@
             <template #default="{ row }">
               <!-- 地址列**只读**：名字非法（该协议解析不出）的后果是这个点位永远没有值
                    （只报「地址无效」，要改配置才恢复），不能让用户顺手改它 -->
-              <span class="font-mono text-xs">{{ row.name }}</span>
+              <span class="iot-mono">{{ row.name }}</span>
             </template>
           </el-table-column>
           <el-table-column :label="t('deviceAddress.pointDiscovery.currentValue')" width="130">
             <template #default="{ row }">
-              <span v-if="row.value" class="font-mono text-xs">{{ row.value }}</span>
+              <span v-if="row.value" class="iot-mono">{{ row.value }}</span>
               <!-- 没有采样值时留 note（如"当前值为 0"），**不能回退成 '0'** ——
                    原生枚举协议压根没读值，写个 0 会被读成"采到的值是 0"。
                    破折号才对：这一格本来就没有内容。 -->
-              <span v-else class="text-xs text-gray-400">
+              <span v-else class="iot-cell-muted">
                 {{ row.note || (sampled ? '0' : '—') }}
               </span>
             </template>
@@ -267,6 +273,22 @@
               <el-input v-model="row.description" size="small" maxlength="200" />
             </template>
           </el-table-column>
+
+          <!-- 空态收进表格的 #empty：否则表格自带的「暂无数据」和下面另起一块空态会同时出现 -->
+          <template #empty>
+            <div class="iot-empty">
+              <span class="iot-empty-mark" aria-hidden="true">
+                <el-icon><Radar /></el-icon>
+              </span>
+              <p class="iot-empty-title">
+                {{ rows.length === 0
+                  ? (sampled
+                    ? t('deviceAddress.pointDiscovery.noResult')
+                    : t('deviceAddress.pointDiscovery.noResultNative'))
+                  : t('deviceAddress.pointDiscovery.allZeroHidden') }}
+              </p>
+            </div>
+          </template>
         </el-table>
 
         <!-- 分页不是"锦上添花"，是这张表能不能活下来的前提：结果最多 maxPoints 条
@@ -278,7 +300,7 @@
              每页的默认值也不能随便定（见 pageSize 的注释）：它既是"一页几百个组件"
              这个量级的来源，也直接决定上面开关的迟滞有多久 —— max-height=380 一屏
              约 9 行，默认挂 20 行已经超出两屏，再多就是白挂。 -->
-        <div v-if="visibleRows.length > 0" class="flex justify-end mt-3">
+        <div v-if="visibleRows.length > 0" class="iot-pager is-flush">
           <el-pagination
             v-model:current-page="currentPage"
             v-model:page-size="pageSize"
@@ -289,14 +311,6 @@
           />
         </div>
 
-        <el-empty
-          v-if="visibleRows.length === 0"
-          :description="rows.length === 0
-            ? (sampled
-              ? t('deviceAddress.pointDiscovery.noResult')
-              : t('deviceAddress.pointDiscovery.noResultNative'))
-            : t('deviceAddress.pointDiscovery.allZeroHidden')"
-        />
       </template>
     </template>
 
@@ -322,7 +336,12 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { IconSearch as Search } from '@tabler/icons-vue'
+import {
+  IconAlertTriangle as AlertTriangle,
+  IconInfoCircle as InfoCircle,
+  IconRadar as Radar,
+  IconSearch as Search,
+} from '@tabler/icons-vue'
 
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
 import { usePagedRows } from '@/composables/usePagedRows'
@@ -712,5 +731,116 @@ function handleClosed() {
 .dynamic-form-wrapper :deep(.el-select) {
   width: 100%;
   max-width: 260px;
+}
+
+/* 说明条与结果区之间的节奏：这里每一条都必须被读到，间距比主页面更紧。
+   选择器带上 .iot-notice 是为了稳定压过全局 .iot-notice.is-inline 的 margin。 */
+.iot-notice.iot-notice.pd-notice {
+  margin: 0 0 14px;
+}
+
+.pd-divider {
+  height: 1px;
+  margin: 18px 0 16px;
+  background: var(--line-soft);
+}
+
+/* 统计条：把所有读数收进一条浅底信息带，而不是散落在四段灰字里 */
+.pd-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: #f8fafc;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pd-stat.is-muted {
+  color: var(--ink-4);
+}
+
+.pd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.pd-budget {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+.pd-actions-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pd-actions-buttons :deep(.el-button) {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-weight: 500;
+}
+
+/* 结果控制条：左边「显示 0 值」，右边批量设置类型 */
+.pd-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.pd-zero-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pd-zero-hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+.pd-bulk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pd-table {
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+}
+
+.pd-table :deep(.el-input__wrapper),
+.pd-table :deep(.el-select__wrapper) {
+  border-radius: 7px;
+  box-shadow: 0 0 0 1px var(--line) inset;
+}
+
+@media (max-width: 640px) {
+  .pd-actions,
+  .pd-controls {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .pd-bulk {
+    width: 100%;
+  }
 }
 </style>
