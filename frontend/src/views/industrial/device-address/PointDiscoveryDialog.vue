@@ -322,7 +322,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { Search } from '@element-plus/icons-vue'
+import { IconSearch as Search } from '@tabler/icons-vue'
 
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
 import { usePagedRows } from '@/composables/usePagedRows'

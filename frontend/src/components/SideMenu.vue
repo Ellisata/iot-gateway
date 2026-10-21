@@ -6,13 +6,25 @@
 <template>
   <el-aside
     :width="collapsed ? '64px' : '240px'"
-    class="flex flex-col transition-all duration-300"
-    style="background-color: #304156"
+    class="side-rail flex flex-col transition-all duration-300"
   >
-    <!-- Logo 区域 -->
-    <div class="flex items-center justify-center h-[60px] text-white text-lg font-bold">
-      <span v-if="!collapsed" class="tracking-wider">IoT Gateway</span>
-      <span v-else class="text-2xl">IoT</span>
+    <!-- 品牌区：与顶栏同高，保证两侧首行对齐 -->
+    <div class="brand" :class="{ 'is-collapsed': collapsed }">
+      <span class="brand-mark" aria-hidden="true">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.7"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M12 3 3 8l9 5 9-5-9-5Z" />
+          <path d="M3 12l9 5 9-5" />
+          <path d="M3 16l9 5 9-5" />
+        </svg>
+      </span>
+      <span v-if="!collapsed" class="brand-name">IoT Gateway</span>
     </div>
 
     <!-- 导航菜单 -->
@@ -20,10 +32,9 @@
       :default-active="route.path"
       :collapse="collapsed"
       :collapse-transition="false"
-      background-color="#304156"
-      text-color="#bfcbd9"
-      active-text-color="#409eff"
-      class="side-menu flex-1 border-r-0"
+      popper-class="side-menu-popper"
+      :popper-offset="8"
+      class="side-menu flex-1"
       @select="handleMenuSelect"
     >
       <el-menu-item index="/dashboard">
@@ -167,7 +178,23 @@
       <!-- 开放接口文档（独立顶级入口，全员可见，新窗口打开） -->
       <el-menu-item index="/open-api/doc">
         <el-icon><MenuIcon name="apiDoc" /></el-icon>
-        <template #title>{{ t('menu.openApiDoc') }}</template>
+        <template #title>
+          {{ t('menu.openApiDoc') }}
+          <!-- 新窗口打开，给一个轻量的外链提示，避免点完才发现跳走 -->
+          <svg
+            v-if="!collapsed"
+            class="ext-mark"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M7 17 17 7M8 7h9v9" />
+          </svg>
+        </template>
       </el-menu-item>
 
     </el-menu>
@@ -210,42 +237,372 @@ function handleMenuSelect(index) {
 </script>
 
 <style scoped>
-/* 统一图标尺寸与透明度，让不同语义的线条图形保持同一视觉重量 */
+/*
+  侧栏材质：深石板底色（slate-900 家族），而不是旧的 #304156 中灰蓝。
+  深色只负责“压住”导航，层次依旧交给字号、留白和一根发丝线；
+  强调色收敛到一种蓝，靠亮度而不是饱和度在暗底上发声。
+*/
+.side-rail {
+  --rail-line: rgba(255, 255, 255, 0.08);
+  --rail-line-soft: rgba(255, 255, 255, 0.06);
+  --rail-ink: #cbd5e1;
+  --rail-ink-strong: #f8fafc;
+  --rail-muted: #8fa2ba;
+  --rail-sub: #94a3b8;
+  --rail-sub-icon: #7c8fa9;
+  --rail-brand: #93c5fd;
+  --rail-brand-rail: #60a5fa;
+  --rail-hover: rgba(255, 255, 255, 0.05);
+
+  background:
+    radial-gradient(120% 42% at 0% 0%, rgba(59, 130, 246, 0.1), transparent 60%),
+    linear-gradient(180deg, #111c30 0%, #0d1626 100%);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- 品牌区 ---------- */
+.brand {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  height: 60px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--rail-line);
+}
+
+.brand.is-collapsed {
+  justify-content: center;
+  padding: 0;
+}
+
+.brand-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: #fff;
+  background: linear-gradient(135deg, #60a5fa 0%, #2563eb 55%, #1d4ed8 100%);
+  border-radius: 9px;
+  box-shadow:
+    0 7px 16px -8px rgba(37, 99, 235, 0.7),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.brand-mark svg {
+  width: 16px;
+  height: 16px;
+}
+
+.brand-name {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: #f8fafc;
+  white-space: nowrap;
+}
+
+/* ---------- 菜单容器 ---------- */
+.side-menu {
+  /* 覆盖 Element 的默认深色/大行高变量，让展开与折叠共用一套节奏 */
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: var(--rail-ink);
+  --el-menu-hover-bg-color: var(--rail-hover);
+  --el-menu-hover-text-color: var(--rail-ink-strong);
+  --el-menu-active-color: var(--rail-brand);
+  --el-menu-item-height: 40px;
+  --el-menu-sub-item-height: 36px;
+  --el-menu-item-font-size: 13.5px;
+  --el-menu-base-level-padding: 12px;
+  --el-menu-level-padding: 0px;
+  --el-menu-icon-width: 18px;
+
+  flex: 1;
+  min-height: 0;
+  padding: 12px 10px 18px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: transparent;
+  border-right: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+.side-menu::-webkit-scrollbar {
+  width: 4px;
+}
+
+.side-menu::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+}
+
+.side-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- 一级菜单 ---------- */
+.side-menu :deep(.el-menu-item),
+.side-menu :deep(.el-sub-menu__title) {
+  height: 40px;
+  margin: 2px 0;
+  padding: 0 12px !important;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 40px;
+  letter-spacing: 0.01em;
+  color: var(--rail-ink);
+  border-radius: 10px;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
 .side-menu :deep(.el-menu-item .el-icon),
 .side-menu :deep(.el-sub-menu__title .el-icon) {
+  width: 18px;
+  margin-right: 10px;
   font-size: 18px;
-  opacity: 0.85;
-  transition: opacity 0.2s ease, color 0.2s ease;
-}
-
-.side-menu :deep(.el-menu-item.is-active),
-.side-menu :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
-  color: #409eff;
-}
-
-.side-menu :deep(.el-menu-item.is-active .el-icon),
-.side-menu :deep(.el-sub-menu.is-active > .el-sub-menu__title .el-icon) {
+  color: var(--rail-muted);
   opacity: 1;
+  transition: color 0.18s ease;
 }
 
-/* 当前项：极轻的蓝色渐变 + 左侧短竖条，避免整块高饱和底色 */
-.side-menu :deep(.el-menu-item) {
-  position: relative;
+.side-menu :deep(.el-menu-item:not(.is-disabled):hover),
+.side-menu :deep(.el-sub-menu__title:hover) {
+  color: var(--rail-ink-strong);
+  background-color: var(--rail-hover);
 }
 
+.side-menu :deep(.el-menu-item:not(.is-disabled):hover .el-icon),
+.side-menu :deep(.el-sub-menu__title:hover .el-icon) {
+  color: #cbd5e1;
+}
+
+/* 当前项：左侧短轨 + 极浅蓝底，只加一个信号，不刷整块高饱和色 */
 .side-menu :deep(.el-menu-item.is-active) {
-  background: linear-gradient(90deg, rgba(64, 158, 255, 0.16), rgba(64, 158, 255, 0.03));
+  font-weight: 600;
+  color: var(--rail-brand);
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.055));
+}
+
+.side-menu :deep(.el-menu-item.is-active .el-icon) {
+  color: var(--rail-brand);
 }
 
 .side-menu :deep(.el-menu-item.is-active)::before {
   content: '';
   position: absolute;
-  left: 0;
   top: 50%;
+  left: -10px;
   width: 3px;
-  height: 20px;
+  height: 18px;
+  background: var(--rail-brand-rail);
   border-radius: 0 3px 3px 0;
-  background: #409eff;
   transform: translateY(-50%);
+}
+
+/* 分组内有当前页时，父级只染字色，不抢子项的选中底色 */
+.side-menu :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
+  color: var(--rail-brand);
+}
+
+.side-menu :deep(.el-sub-menu.is-active > .el-sub-menu__title .el-icon) {
+  color: var(--rail-brand);
+}
+
+/* 展开箭头放轻：它只是操作提示，不该和图标争视觉重量 */
+.side-menu :deep(.el-sub-menu__icon-arrow) {
+  right: 12px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.side-menu :deep(.el-sub-menu__title:hover .el-sub-menu__icon-arrow) {
+  color: #94a3b8;
+}
+
+/* ---------- 二级菜单 ---------- */
+.side-menu :deep(.el-menu--inline) {
+  position: relative;
+  padding: 0;
+  margin: 2px 0 6px;
+  background: transparent;
+}
+
+/* 一条浅色导引线把子项串在父级图标下方，层级靠结构而不是靠缩进猜 */
+.side-menu :deep(.el-menu--inline)::before {
+  content: '';
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 32px;
+  width: 1px;
+  background: var(--rail-line-soft);
+}
+
+.side-menu :deep(.el-menu--inline .el-menu-item) {
+  height: 36px;
+  margin: 1px 0;
+  padding: 0 12px 0 42px !important;
+  font-size: 13px;
+  line-height: 36px;
+  color: var(--rail-sub);
+  border-radius: 9px;
+  background: transparent;
+}
+
+.side-menu :deep(.el-menu--inline .el-menu-item .el-icon) {
+  width: 16px;
+  margin-right: 9px;
+  font-size: 16px;
+  color: var(--rail-sub-icon);
+}
+
+.side-menu :deep(.el-menu--inline .el-menu-item:hover) {
+  color: var(--rail-ink-strong);
+  background-color: var(--rail-hover);
+}
+
+.side-menu :deep(.el-menu--inline .el-menu-item.is-active) {
+  color: #bfdbfe;
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.18), rgba(59, 130, 246, 0.045));
+}
+
+.side-menu :deep(.el-menu--inline .el-menu-item.is-active .el-icon) {
+  color: var(--rail-brand);
+}
+
+/* ---------- 外链提示 ---------- */
+.ext-mark {
+  width: 13px;
+  height: 13px;
+  margin-left: auto;
+  color: #64748b;
+  transition: color 0.18s ease;
+}
+
+.side-menu :deep(.el-menu-item:hover) .ext-mark {
+  color: #cbd5e1;
+}
+
+/* ---------- 折叠态 ---------- */
+.side-menu.el-menu--collapse {
+  width: 100%;
+  padding: 12px 8px 18px;
+}
+
+.side-menu.el-menu--collapse :deep(.el-menu-item),
+.side-menu.el-menu--collapse :deep(.el-sub-menu__title) {
+  justify-content: center;
+  padding: 0 !important;
+}
+
+.side-menu.el-menu--collapse :deep(.el-menu-tooltip__trigger) {
+  justify-content: center;
+  padding: 0;
+}
+
+.side-menu.el-menu--collapse :deep(.el-menu-item .el-icon),
+.side-menu.el-menu--collapse :deep(.el-sub-menu__title .el-icon) {
+  width: 18px;
+  margin-right: 0;
+}
+
+.side-menu.el-menu--collapse :deep(.el-sub-menu__icon-arrow) {
+  display: none;
+}
+
+.side-menu.el-menu--collapse :deep(.el-menu-item.is-active)::before {
+  left: -8px;
+}
+
+.side-menu.el-menu--collapse :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
+  color: #bfdbfe;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.22), rgba(59, 130, 246, 0.06));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .side-menu :deep(.el-menu-item),
+  .side-menu :deep(.el-sub-menu__title),
+  .side-menu :deep(.el-icon),
+  .ext-mark {
+    transition: none;
+  }
+}
+</style>
+
+<!-- 折叠态的子菜单通过 teleport 挂到 body，scoped 管不到，单独给 popper 一套深色样式 -->
+<style>
+.side-menu-popper {
+  --el-menu-bg-color: #152135;
+  --el-menu-text-color: #cbd5e1;
+  --el-menu-active-color: #bfdbfe;
+  --el-menu-hover-bg-color: rgba(255, 255, 255, 0.06);
+  --el-menu-base-level-padding: 10px;
+  --el-menu-item-height: 36px;
+  --el-menu-icon-width: 16px;
+}
+
+/* popper-class 也会被折叠态的文字 tooltip 继承，用 :has 只给真正含菜单的浮层加卡片边 */
+.side-menu-popper.el-popper:has(.el-menu--popup) {
+  overflow: hidden;
+  background: #152135;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  box-shadow:
+    0 20px 44px -20px rgba(2, 6, 23, 0.7),
+    0 4px 14px rgba(2, 6, 23, 0.35);
+}
+
+/* 折叠态的图标 tooltip：比侧栏亮一档，浮在浅色内容上也清晰 */
+.side-menu-popper.el-popper.is-dark {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #f8fafc;
+  background: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px -12px rgba(2, 6, 23, 0.7);
+}
+
+.side-menu-popper .el-menu--popup {
+  min-width: 190px;
+  padding: 8px;
+  background: #152135;
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.side-menu-popper .el-menu-item {
+  height: 36px;
+  margin: 1px 0;
+  padding: 0 10px;
+  font-size: 13px;
+  line-height: 36px;
+  color: #cbd5e1;
+  border-radius: 8px;
+}
+
+.side-menu-popper .el-menu-item .el-icon {
+  width: 16px;
+  margin-right: 9px;
+  font-size: 16px;
+  color: #7c8fa9;
+}
+
+.side-menu-popper .el-menu-item:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.side-menu-popper .el-menu-item.is-active {
+  font-weight: 600;
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.side-menu-popper .el-menu-item.is-active .el-icon {
+  color: #93c5fd;
 }
 </style>

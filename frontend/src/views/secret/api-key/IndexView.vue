@@ -118,7 +118,11 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CopyDocument, Delete, EditPen } from '@element-plus/icons-vue'
+import {
+  IconCopy as CopyDocument,
+  IconPencil as EditPen,
+  IconTrash as Delete,
+} from '@tabler/icons-vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()

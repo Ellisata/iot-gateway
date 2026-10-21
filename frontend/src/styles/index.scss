@@ -32,3 +32,8 @@ body {
 ::-webkit-scrollbar-track {
   background-color: transparent;
 }
+
+/* Tabler 图标统一描边，与侧栏菜单保持同一视觉重量（尺寸由 .el-icon svg 的 1em 规则接管） */
+.el-icon .tabler-icon {
+  stroke-width: 1.6;
+}

@@ -163,7 +163,11 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Connection, Delete, EditPen } from '@element-plus/icons-vue'
+import {
+  IconAffiliate as Connection,
+  IconPencil as EditPen,
+  IconTrash as Delete,
+} from '@tabler/icons-vue'
 import {
   getChannelList,
   addChannel,

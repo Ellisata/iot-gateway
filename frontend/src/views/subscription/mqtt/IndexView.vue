@@ -501,7 +501,14 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Connection, Delete, EditPen, Plus, Refresh } from '@element-plus/icons-vue'
+import {
+  IconAffiliate as Connection,
+  IconChevronRight as Right,
+  IconPencil as EditPen,
+  IconPlus as Plus,
+  IconRefresh as Refresh,
+  IconTrash as Delete,
+} from '@tabler/icons-vue'
 import { useI18n } from 'vue-i18n'
 import {
   getSubscriptionList,

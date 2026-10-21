@@ -75,6 +75,11 @@ import { ref, nextTick, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getOpenApiDoc } from '@/api/modules/openApiSecret'
+import {
+  IconArrowLeft as Back,
+  IconChevronDown as ArrowDown,
+  IconFileText as Document,
+} from '@tabler/icons-vue'
 
 const { t } = useI18n()
 

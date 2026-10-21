@@ -366,7 +366,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { Document, Search } from '@element-plus/icons-vue'
+import { IconFileText as Document, IconSearch as Search } from '@tabler/icons-vue'
 
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
 import { usePagedRows } from '@/composables/usePagedRows'

@@ -33,6 +33,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { SUPPORTED_LOCALES, setLocale } from '@/i18n'
+import { IconChevronDown as ArrowDown } from '@tabler/icons-vue'
 
 const { locale } = useI18n()
 

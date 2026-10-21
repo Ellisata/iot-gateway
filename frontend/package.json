@@ -13,9 +13,9 @@
     "npm": ">=9.0.0"
   },
   "dependencies": {
-    "@element-plus/icons-vue": "^2.3.2",
     "@form-create/designer": "^3.5.0",
     "@form-create/element-ui": "^3.3.1",
+    "@tabler/icons-vue": "^3.49.0",
     "@tailwindcss/vite": "^4.3.2",
     "@vitejs/plugin-vue": "^6.0.7",
     "axios": "^1.18.1",

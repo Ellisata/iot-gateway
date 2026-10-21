@@ -68,7 +68,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CopyDocument } from '@element-plus/icons-vue'
+import { IconCopy as CopyDocument } from '@tabler/icons-vue'
 import { useI18n } from 'vue-i18n'
 
 import { getGateway, updateGateway } from '@/api/modules/gateway'

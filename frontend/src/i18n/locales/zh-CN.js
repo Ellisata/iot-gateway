@@ -137,6 +137,9 @@ export default {
 
   // ---------- 首页 ----------
   dashboard: {
+    eyebrow: '运行总览',
+    title: '设备状态总览',
+    autoRefresh: '每 30 秒自动刷新',
     deviceStatusLoading: '统计加载中...',
     collectionLoading: '采集状态加载中...',
     deviceOnline: '设备在线情况',
@@ -144,10 +147,19 @@ export default {
     online: '在线',
     offline: '离线',
     onlineRate: '在线率',
-    onlineOfCollected: '{online} / {collected} 台在线',
+    onlineUnit: '台在线',
     onlineRateTooltip: '在线率 = 在线设备数 / 已接入采集设备数。分母不含禁用和未接入采集的设备',
+    fleetTotalHint: '启用 {enabled} · 禁用 {disabled}',
+    fleetOnlineHint: '在线率 {rate}',
+    fleetOfflineHint: '占已接入 {rate}',
+    alarmsHintActive: '{count} 条待处理',
+    alarmsHintNone: '无活动报警',
     activeAlarms: '活动报警',
     deviceDetail: '设备构成',
+    totalDevices: '共 {total} 台',
+    groupEnabled: '启用状态',
+    groupCollected: '采集接入',
+    compositionNote: '启用状态以全部设备为分母，采集接入以启用设备为分母',
     detailEnabled: '启用',
     detailDisabled: '禁用',
     collected: '已接入采集',
@@ -157,13 +169,21 @@ export default {
     stopped: '已停止',
     lastPoll: '最近轮询',
     lastSuccess: '最近成功采集',
+    collectDevices: '采集设备',
     addressCount: '采集地址数',
     totalErrors: '累计错误',
+    viewDevices: '查看设备',
   },
 
   // ---------- 设备对象管理 ----------
   deviceObject: {
     searchPlaceholder: '请输入设备对象名称搜索',
+    // 页头副标题与空表文案：说清这页「管什么」，以及没有数据时下一步做什么
+    subtitle: '统一管理接入网关的设备、协议与连接参数。',
+    totalUnit: '台设备',
+    emptyTitle: '还没有设备对象',
+    emptyHint: '接入第一台现场设备，从选择协议开始。',
+    emptySearch: '没有找到匹配「{name}」的设备对象',
     add: '新增设备对象',
     editTitle: '编辑设备对象',
     addTitle: '新增设备对象',

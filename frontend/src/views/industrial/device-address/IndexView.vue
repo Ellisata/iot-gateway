@@ -403,7 +403,16 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, CopyDocument, Delete, Download, EditPen, QuestionFilled, Search, Upload } from '@element-plus/icons-vue'
+import {
+  IconArrowLeft as ArrowLeft,
+  IconCopy as CopyDocument,
+  IconDownload as Download,
+  IconHelpCircleFilled as QuestionFilled,
+  IconPencil as EditPen,
+  IconSearch as Search,
+  IconTrash as Delete,
+  IconUpload as Upload,
+} from '@tabler/icons-vue'
 import {
   getDeviceAddressList,
   addDeviceAddress,

@@ -87,6 +87,7 @@
 import { ref, computed, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getLogFilePage, readLogFile } from '@/api/modules/logFile'
+import { IconArrowBarToDown as Bottom, IconRefresh as Refresh } from '@tabler/icons-vue'
 
 const { t } = useI18n()
 

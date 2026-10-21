@@ -4,26 +4,44 @@
 -->
 
 <template>
-  <div class="p-6">
-    <h1 class="text-2xl font-bold text-gray-800 mb-6">
-      {{ t('menu.deviceObject') }}
-    </h1>
+  <div class="device-page">
+    <!-- 页头：沿用首页那套字号/留白层级，深浅两色由 token 控制，不另起一套视觉语言 -->
+    <header class="page-head enter">
+      <div>
+        <p class="eyebrow">
+          <span class="eyebrow-dot" aria-hidden="true" />
+          {{ t('menu.industrial') }}
+        </p>
+        <h1 class="page-title">{{ t('menu.deviceObject') }}</h1>
+        <p class="page-sub">{{ t('deviceObject.subtitle') }}</p>
+      </div>
+      <div class="page-stat">
+        <span class="page-stat-num">{{ displayTotal }}</span>
+        <span class="page-stat-label">{{ t('deviceObject.totalUnit') }}</span>
+      </div>
+    </header>
 
-    <!-- 工具栏 -->
-    <el-card shadow="never" class="mb-4">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
+    <!-- 工作区：筛选、表格、分页共用一块表面。
+         原来「一条工具栏 + 一张表」是两张独立卡片，之间的 16px 空隙把同一件事切成了两半；
+         合成一块后，工具条退化成表头的一部分，视线从筛选直接落到数据上。 -->
+    <section ref="panelRef" class="panel enter" style="animation-delay: 60ms">
+      <div class="toolbar">
+        <div class="toolbar-filters">
           <el-input
             v-model="queryForm.name"
+            class="filter-search"
             :placeholder="t('deviceObject.searchPlaceholder')"
             clearable
-            style="width: 240px"
             @keyup.enter="handleSearch"
-          />
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
           <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
           <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="toolbar-actions">
           <!-- 批量删除放在这一组的最左边，且未勾选时置灰不移除：它是**破坏性**动作，
                和右边的下载/导入/新增不是一类；常驻在固定位置能让人形成固定预期，
                按勾选数变长的文案则让「删几台」在按下确认之前就可见。 -->
@@ -36,81 +54,174 @@
           >
             {{ batchDeleteLabel }}
           </el-button>
+          <span class="toolbar-sep" aria-hidden="true" />
           <el-button :icon="Download" @click="handleDownloadTemplate">{{ t('common.downloadTemplate') }}</el-button>
-          <el-button type="primary" :icon="Upload" :loading="importing" @click="handleImport">{{ t('common.import') }}</el-button>
-          <el-button type="primary" @click="handleAdd">{{ t('deviceObject.add') }}</el-button>
+          <el-button :icon="Upload" :loading="importing" @click="handleImport">{{ t('common.import') }}</el-button>
+          <el-button type="primary" :icon="Plus" @click="handleAdd">{{ t('deviceObject.add') }}</el-button>
           <input ref="fileInputRef" type="file" accept=".xlsx" class="hidden" @change="handleFileChange" />
         </div>
       </div>
-    </el-card>
 
-    <!-- 数据表格 -->
-    <el-card shadow="never">
+      <!-- 数据表格 -->
       <el-table
         ref="tableRef"
+        class="device-table"
         :data="tableData"
         v-loading="loading"
         row-key="id"
-        stripe
         style="width: 100%"
-        border
         @selection-change="handleSelectionChange"
       >
         <!-- 项目里没用 reserve-selection：跨页保留勾选会让「已勾选 N 台」与实际
              能删到的集合不一致（翻页后看不见的行还在里面），批量删除宁可让人重勾。 -->
-        <el-table-column type="selection" width="46" align="center" />
-        <el-table-column type="index" :label="t('common.index')" width="70" align="center" />
-        <el-table-column label="ID" width="190" align="center">
+        <el-table-column type="selection" width="44" align="center" />
+        <!-- 窄屏（含侧栏展开的 1280/1366）藏起序号与描述：九列挤进 1000px 会把
+             创建时间推到固定操作列底下，反而让人以为数据丢了。序号只是行号，
+             描述是次要信息；两者都在宽屏回归。 -->
+        <el-table-column v-if="!compact" type="index" :label="t('common.index')" width="68" align="center" />
+
+        <!-- ID 是 UUID，用等宽字体压低存在感；复制按钮常驻但低对比，悬停整行才完全显形 -->
+        <el-table-column label="ID" width="150">
           <template #default="{ row }">
-            <div class="flex items-center justify-center gap-1">
+            <div class="id-cell">
               <el-tooltip :content="String(row.id)" placement="top">
-                <span class="text-gray-600 truncate max-w-[120px] inline-block align-middle">
-                  {{ row.id }}
-                </span>
+                <span class="id-text">{{ row.id }}</span>
               </el-tooltip>
-              <el-button
-                type="primary"
-                link
-                size="small"
-                :icon="CopyDocument"
-                @click="copyId(row.id)"
-              />
+              <el-tooltip :content="t('common.copy')" placement="top">
+                <button
+                  type="button"
+                  class="copy-btn"
+                  :aria-label="t('common.copy')"
+                  @click="copyId(row.id)"
+                >
+                  <el-icon><CopyDocument /></el-icon>
+                </button>
+              </el-tooltip>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="name" :label="t('common.name')" min-width="140" />
-        <el-table-column prop="protocolName" :label="t('deviceObject.protocol')" width="120" />
-        <el-table-column prop="description" :label="t('common.description')" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="status" :label="t('common.status')" width="100" align="center">
+
+        <!-- 名称是这一行的身份：给一个小图标底座，让「一台设备」在滚动中可被一眼拾取 -->
+        <el-table-column :label="t('common.name')" min-width="220">
           <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">
-              {{ row.status === 1 ? t('common.enabled') : t('common.enableDisable.off') }}
-            </el-tag>
+            <div class="name-cell">
+              <span class="name-mark" aria-hidden="true">
+                <el-icon><DeviceChip /></el-icon>
+              </span>
+              <span class="name-text" :title="row.name">{{ row.name }}</span>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" :label="t('common.createdAt')" width="180" align="center" />
-        <el-table-column :label="t('common.action')" width="165" align="center" fixed="right">
+        <el-table-column :label="t('deviceObject.protocol')" width="152">
           <template #default="{ row }">
-            <div class="flex items-center justify-center gap-2">
+            <!-- 协议名可以很长（Omron.FINS.HostLinkTCP 22 个字符），放不下时让省略号
+                 落在 chip **内部**，再用 tooltip 给出全名；被单元格截在胶囊外面会像渲染故障 -->
+            <el-tooltip
+              v-if="row.protocolName"
+              :content="row.protocolName"
+              placement="top"
+              :persistent="false"
+            >
+              <span class="proto-chip">{{ row.protocolName }}</span>
+            </el-tooltip>
+            <span v-else class="cell-muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          v-if="!compact"
+          prop="description"
+          :label="t('common.description')"
+          min-width="98"
+          show-overflow-tooltip
+          class-name="col-muted"
+        />
+        <el-table-column :label="t('common.status')" width="112" class-name="col-status">
+          <template #default="{ row }">
+            <span class="status-pill" :class="row.status === 1 ? 'is-on' : 'is-off'">
+              <span class="status-dot" aria-hidden="true" />
+              {{ row.status === 1 ? t('common.enabled') : t('common.enableDisable.off') }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="createdAt"
+          :label="t('common.createdAt')"
+          width="160"
+          class-name="col-time"
+        />
+        <el-table-column :label="t('common.action')" width="148" align="center" fixed="right">
+          <template #default="{ row }">
+            <div class="row-actions">
               <el-tooltip :content="t('deviceObject.addressManage')" placement="top">
-                <el-button type="primary" link size="small" :icon="Position" @click="handleViewAddresses(row)" />
+                <el-button
+                  class="row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="Position"
+                  :aria-label="t('deviceObject.addressManage')"
+                  @click="handleViewAddresses(row)"
+                />
               </el-tooltip>
               <el-tooltip :content="t('realtime.title')" placement="top">
-                <el-button type="primary" link size="small" :icon="Monitor" @click="handleViewRealtime(row)" />
+                <el-button
+                  class="row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="Monitor"
+                  :aria-label="t('realtime.title')"
+                  @click="handleViewRealtime(row)"
+                />
               </el-tooltip>
               <el-tooltip :content="t('common.edit')" placement="top">
-                <el-button type="primary" link size="small" :icon="EditPen" @click="handleEdit(row)" />
+                <el-button
+                  class="row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="EditPen"
+                  :aria-label="t('common.edit')"
+                  @click="handleEdit(row)"
+                />
               </el-tooltip>
               <el-tooltip :content="t('common.delete')" placement="top">
-                <el-button type="danger" link size="small" :icon="Delete" @click="handleDelete(row)" />
+                <el-button
+                  class="row-btn"
+                  type="danger"
+                  link
+                  size="small"
+                  :icon="Delete"
+                  :aria-label="t('common.delete')"
+                  @click="handleDelete(row)"
+                />
               </el-tooltip>
             </div>
           </template>
         </el-table-column>
+
+        <!-- 空表：说清「是还没有数据，还是这次搜索没命中」，并给出下一步动作 -->
+        <template #empty>
+          <div class="empty">
+            <span class="empty-mark" aria-hidden="true">
+              <el-icon><DeviceChip /></el-icon>
+            </span>
+            <p class="empty-title">
+              {{ queryForm.name
+                ? t('deviceObject.emptySearch', { name: queryForm.name })
+                : t('deviceObject.emptyTitle') }}
+            </p>
+            <p v-if="!queryForm.name" class="empty-hint">{{ t('deviceObject.emptyHint') }}</p>
+            <el-button v-if="queryForm.name" @click="handleReset">{{ t('common.reset') }}</el-button>
+            <el-button v-else type="primary" :icon="Plus" @click="handleAdd">
+              {{ t('deviceObject.add') }}
+            </el-button>
+          </div>
+        </template>
       </el-table>
 
-      <!-- 分页 -->
-      <div class="flex justify-end mt-4">
+      <!-- 分页：与表格同处一块表面，用一条发丝线收尾 -->
+      <div class="pager">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
@@ -122,56 +233,30 @@
           @current-change="fetchList"
         />
       </div>
-    </el-card>
+    </section>
 
     <!-- ========== 新增 / 编辑 两步向导对话框 ========== -->
     <el-dialog
       v-model="dialogVisible"
+      class="device-dialog"
       :title="isEdit ? t('deviceObject.editTitle') : t('deviceObject.addTitle')"
       width="620px"
       :close-on-click-modal="false"
       @close="handleDialogClose"
     >
-      <!-- 步骤指示器 -->
-      <div class="flex items-center justify-center mb-8 mt-2">
-        <div class="flex items-center">
-          <div
-            class="flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold"
-            :class="currentStep === 1
-              ? 'bg-blue-600 text-white ring-4 ring-blue-100'
-              : stepPassed(1)
-                ? 'bg-green-500 text-white'
-                : 'bg-gray-200 text-gray-500'"
-          >
-            <el-icon v-if="stepPassed(1)" size="16"><Check /></el-icon>
+      <!-- 步骤指示器：细一号的圆点 + 一条会走完的连接线，避免两个大色块抢走表单的注意力 -->
+      <div class="stepper">
+        <div class="step" :class="{ 'is-active': currentStep === 1, 'is-done': stepPassed(1) }">
+          <span class="step-dot">
+            <el-icon v-if="stepPassed(1)"><Check /></el-icon>
             <span v-else>1</span>
-          </div>
-          <span
-            class="ml-2 text-sm whitespace-nowrap"
-            :class="currentStep === 1 ? 'text-blue-600 font-medium' : 'text-gray-500'"
-          >
-            {{ t('deviceObject.stepBasicInfo') }}
           </span>
+          <span class="step-label">{{ t('deviceObject.stepBasicInfo') }}</span>
         </div>
-        <div
-          class="w-20 h-px mx-3"
-          :class="stepPassed(1) ? 'bg-green-500' : 'bg-gray-200'"
-        />
-        <div class="flex items-center">
-          <div
-            class="flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold"
-            :class="currentStep === 2
-              ? 'bg-blue-600 text-white ring-4 ring-blue-100'
-              : 'bg-gray-200 text-gray-500'"
-          >
-            2
-          </div>
-          <span
-            class="ml-2 text-sm whitespace-nowrap"
-            :class="currentStep === 2 ? 'text-blue-600 font-medium' : 'text-gray-500'"
-          >
-            {{ t('deviceObject.stepProtocolConfig') }}
-          </span>
+        <span class="step-line" :class="{ 'is-done': stepPassed(1) }" aria-hidden="true" />
+        <div class="step" :class="{ 'is-active': currentStep === 2 }">
+          <span class="step-dot">2</span>
+          <span class="step-label">{{ t('deviceObject.stepProtocolConfig') }}</span>
         </div>
       </div>
 
@@ -231,10 +316,12 @@
             />
           </el-form-item>
 
-          <!-- 分隔线 & 动态表单标题 -->
-          <template v-if="protocolSelected">
-            <div class="flex items-center justify-between mb-4">
-              <span class="text-sm font-medium text-gray-600">{{ t('deviceObject.protocolParams') }}</span>
+          <!-- 协议参数与上面的选择器同属第二步，用一条发丝线接续而不是再套一层卡片。
+               **不套 el-form-item、也不加左右内边距**：动态表单要与上面的 label 列严格对齐，
+               多一层缩进就会让同一屏出现两条不同的左边缘（同 device-scan 页的说明）。 -->
+          <div v-if="protocolSelected" class="param-section">
+            <div class="param-head">
+              <span class="param-title">{{ t('deviceObject.protocolParams') }}</span>
               <el-button
                 type="primary"
                 link
@@ -255,7 +342,7 @@
                 @mounted="handleFcReady"
               />
             </div>
-          </template>
+          </div>
         </el-form>
       </div>
 
@@ -299,10 +386,25 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, nextTick, onMounted } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, ArrowRight, Check, Connection, CopyDocument, Delete, Download, EditPen, Monitor, Position, Upload } from '@element-plus/icons-vue'
+import {
+  IconAffiliate as Connection,
+  IconArrowLeft as ArrowLeft,
+  IconArrowRight as ArrowRight,
+  IconCheck as Check,
+  IconCopy as CopyDocument,
+  IconCpu as DeviceChip,
+  IconDeviceDesktop as Monitor,
+  IconDownload as Download,
+  IconMapPin as Position,
+  IconPencil as EditPen,
+  IconPlus as Plus,
+  IconSearch as Search,
+  IconTrash as Delete,
+  IconUpload as Upload,
+} from '@tabler/icons-vue'
 import {
   getDeviceObjectList,
   getDeviceObjectById,
@@ -368,6 +470,18 @@ const total = ref(0)
 // ---------- 表格数据 ----------
 const loading = ref(false)
 const tableData = ref([])
+
+// 首屏还没拿到数时显示占位符而不是 0：「0 台设备」是一个会被信以为真的假事实
+const displayTotal = computed(() =>
+  loading.value && tableData.value.length === 0 ? '—' : total.value,
+)
+
+// ---------- 窄屏列裁剪 ----------
+// 判据取**工作区的真实宽度**而不是窗口宽度：侧栏折叠后同一窗口会多出 176px，
+// 按 window.innerWidth 判断会在折叠后仍少显示两列。
+const panelRef = ref(null)
+const compact = ref(false)
+let panelObserver = null
 
 // ---------- 勾选（批量删除） ----------
 const tableRef = ref(null)
@@ -478,6 +592,10 @@ const fcOption = ref({
     labelWidth: '100px',
     labelPosition: 'right',
   },
+  // 提交/重置由对话框底部唯一负责：插件声明的 formJson 若自带按钮，
+  // 会在参数区里多出一个和页脚重复的「提交」，两处提交语义还不同
+  submitBtn: false,
+  resetBtn: false,
 })
 
 /** form-create 渲染完成后获取 API 实例 */
@@ -551,6 +669,9 @@ async function handleProtocolChange(protocolId) {
         fcOption.value = {
           ...fcOption.value,
           ...opts,
+          // 合并插件选项后仍强制关掉内置按钮（见 fcOption 的声明）
+          submitBtn: false,
+          resetBtn: false,
           form: {
             ...fcOption.value.form,
             ...(opts.form || {}),
@@ -834,6 +955,680 @@ async function handleSubmit() {
 
 // ---------- 初始化 ----------
 onMounted(() => {
+  // 九列的固定宽度合计 1152，低于这个值就切到紧凑列 —— 差几个像素时表格
+  // 会横向滚动，固定操作列又会盖住创建时间，不如少两列让关键字段完整可见
+  if (typeof ResizeObserver !== 'undefined' && panelRef.value) {
+    panelObserver = new ResizeObserver(([entry]) => {
+      compact.value = entry.contentRect.width < 1155
+    })
+    panelObserver.observe(panelRef.value)
+  }
   fetchList()
 })
+
+onBeforeUnmount(() => {
+  panelObserver?.disconnect()
+})
 </script>
+
+<style scoped>
+/* 页面级 token 与首页/登录页同一套：白面、雾蓝画布、slate 文字，强调色只有一种蓝 */
+.device-page {
+  --surface: #fff;
+  --line: #e6ebf2;
+  --line-soft: #eef2f7;
+  --ink: #0f172a;
+  --ink-2: #475569;
+  --ink-3: #64748b;
+  --ink-4: #94a3b8;
+  --brand: #2563eb;
+  --brand-soft: #eff5ff;
+  --danger: #e11d48;
+
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* 页头与工作区错峰落位；动画挂在区级包裹层，不挂表格行，避免影响 hover 重绘 */
+.enter {
+  animation: pageEnter 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------- 页头 ---------- */
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #7c8ca3;
+}
+
+.eyebrow-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+}
+
+.page-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.page-sub {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+.page-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-bottom: 4px;
+  white-space: nowrap;
+}
+
+.page-stat-num {
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.page-stat-label {
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+/* ---------- 工作区 ---------- */
+.panel {
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  padding: 16px 20px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.toolbar-filters,
+.toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.filter-search {
+  width: 272px;
+}
+
+/* 输入框与按钮统一 34px 高、9px 圆角：原来两者都是各自的默认高度，并排时总有 1px 的错位 */
+.toolbar :deep(.el-input__wrapper) {
+  height: 34px;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line) inset;
+  transition: box-shadow 0.18s ease;
+}
+
+.toolbar :deep(.el-input__wrapper:hover) {
+  box-shadow: 0 0 0 1px #cbd8e6 inset;
+}
+
+.toolbar :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px var(--brand) inset, 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.toolbar :deep(.el-input__prefix) {
+  color: var(--ink-4);
+}
+
+.toolbar :deep(.el-button) {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-weight: 500;
+}
+
+/* 破坏性动作与其余按钮之间的短分隔：不画横线，只用一根 20px 的竖线分组 */
+.toolbar-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: var(--line);
+}
+
+/* ---------- 表格 ---------- */
+.device-table {
+  --el-table-border-color: transparent;
+  /* 单元格必须是**实底**：固定列靠自己的背景遮住横向滚动时从下面穿过的内容，
+     设成 transparent 会让创建时间等文字透到操作列底下（窄屏时尤其明显） */
+  --el-table-bg-color: #fff;
+  --el-table-tr-bg-color: #fff;
+  --el-table-header-bg-color: #f8fafc;
+  --el-table-row-hover-bg-color: #f8fbff;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.device-table :deep(td.el-table__cell) {
+  background-color: #fff;
+}
+
+.device-table :deep(.el-table__body tr:hover > td.el-table__cell) {
+  background-color: #f8fbff;
+}
+
+/* Element 默认在表体底部画一条贯穿线，与卡片圆角相撞时会在两角露头 */
+.device-table :deep(.el-table__inner-wrapper::before) {
+  display: none;
+}
+
+.device-table :deep(th.el-table__cell) {
+  height: 42px;
+  padding: 0;
+  background: #f8fafc;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--line);
+}
+
+/* 表头宁可截断也不折行：两行表头会把行高顶开，整张表的基线随之跳动 */
+.device-table :deep(th .cell) {
+  white-space: nowrap;
+}
+
+.device-table :deep(tr.el-table__row td.el-table__cell) {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.device-table :deep(.el-table__body tr:last-child td.el-table__cell) {
+  border-bottom: none;
+}
+
+.device-table :deep(.cell) {
+  padding: 0 16px;
+}
+
+.device-table :deep(.el-checkbox__inner) {
+  border-radius: 4px;
+}
+
+.device-table :deep(.col-time .cell) {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 英文的 Enabled / Disabled 比中文长，收窄内边距给状态胶囊留出整词宽度 */
+.device-table :deep(.col-status .cell) {
+  padding: 0 12px;
+}
+
+.device-table :deep(.col-muted .cell) {
+  color: var(--ink-3);
+}
+
+.cell-muted {
+  color: var(--ink-4);
+}
+
+/* ID：等宽字体压低存在感，复制按钮常驻但低对比，悬停整行才完全显形 */
+.id-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.id-text {
+  overflow: hidden;
+  max-width: 96px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--ink-4);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-btn {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--ink-4);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.copy-btn .el-icon {
+  font-size: 14px;
+}
+
+.device-table :deep(.el-table__row:hover) .copy-btn {
+  opacity: 1;
+}
+
+.copy-btn:hover {
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.copy-btn:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.5);
+  outline-offset: 1px;
+  opacity: 1;
+}
+
+/* 名称：一行一个身份，小图标底座让它在滚动中可被一眼拾取 */
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.name-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
+.name-mark .el-icon {
+  font-size: 15px;
+}
+
+.name-text {
+  overflow: hidden;
+  font-weight: 600;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 协议名是技术标识，用中性 chip 而不是彩色标签，避免和状态色抢语义 */
+.proto-chip {
+  display: inline-block;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 2px 8px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--ink-2);
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+  background: #f1f5f9;
+  border: 1px solid #e8edf4;
+  border-radius: 6px;
+}
+
+/* 状态：软底色 + 圆点，比实心 el-tag 安静，红绿只留给真正需要区分的两态 */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  border-radius: 999px;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-pill.is-on {
+  color: #047857;
+  background: #ecfdf5;
+}
+
+.status-pill.is-off {
+  color: #be123c;
+  background: #fff1f2;
+}
+
+/* 行内操作：默认中性灰，悬停才染蓝/红，四个图标不再每行都喊一次 */
+.row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.device-table :deep(.row-btn.el-button) {
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  color: var(--ink-4);
+  border-radius: 8px;
+}
+
+.device-table :deep(.row-btn.el-button .el-icon) {
+  font-size: 16px;
+}
+
+.device-table :deep(.row-btn.el-button:hover) {
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.device-table :deep(.row-btn.el-button.el-button--danger:hover) {
+  color: var(--danger);
+  background: #fff1f2;
+}
+
+/* ---------- 空表 ---------- */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 44px 16px 48px;
+}
+
+.empty-mark {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 14px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
+.empty-mark .el-icon {
+  font-size: 26px;
+}
+
+.empty-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.empty-hint {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-4);
+}
+
+.empty .el-button {
+  margin-top: 16px;
+}
+
+/* ---------- 分页 ---------- */
+.pager {
+  display: flex;
+  justify-content: flex-end;
+  padding: 14px 20px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.pager :deep(.el-pagination) {
+  --el-pagination-button-bg-color: #f4f6fa;
+  --el-pagination-hover-color: var(--brand);
+}
+
+.pager :deep(.el-pager li),
+.pager :deep(.btn-prev),
+.pager :deep(.btn-next) {
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+/* ---------- 对话框 ----------
+   el-dialog 会被 teleport 到 body，scoped 的 :deep 够不到，用唯一类名做全局作用域 */
+:global(.device-dialog) {
+  border-radius: 18px;
+  box-shadow: 0 24px 60px -24px rgba(15, 23, 42, 0.35);
+}
+
+:global(.device-dialog .el-dialog__header) {
+  margin: 0;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+:global(.device-dialog .el-dialog__title) {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: #0f172a;
+}
+
+:global(.device-dialog .el-dialog__headerbtn) {
+  top: 12px;
+  right: 12px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+:global(.device-dialog .el-dialog__headerbtn:hover) {
+  background: #f4f6fa;
+}
+
+:global(.device-dialog .el-dialog__body) {
+  padding: 20px 24px 8px;
+}
+
+:global(.device-dialog .el-dialog__footer) {
+  padding: 14px 24px 18px;
+  border-top: 1px solid #eef2f7;
+}
+
+:global(.device-dialog .el-form-item__label) {
+  font-size: 13px;
+  color: #475569;
+}
+
+/* 步骤条：圆点细一号，完成态用品牌蓝而不是绿色 —— 「走过了」是流程信息，不是健康信号 */
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 2px 0 24px;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.step-dot {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-4);
+  background: #f1f5f9;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.step-dot .el-icon {
+  font-size: 14px;
+}
+
+.step-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-4);
+  white-space: nowrap;
+  transition: color 0.2s ease;
+}
+
+.step.is-done .step-dot {
+  color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: inset 0 0 0 1px #c7d9f7;
+}
+
+.step.is-done .step-label {
+  color: var(--ink-2);
+}
+
+.step.is-active .step-dot {
+  color: #fff;
+  background: linear-gradient(135deg, #3b82f6, var(--brand));
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+}
+
+.step.is-active .step-label {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.step-line {
+  width: 56px;
+  height: 1px;
+  background: var(--line);
+  transition: background-color 0.2s ease;
+}
+
+.step-line.is-done {
+  background: linear-gradient(90deg, #bfdbfe, var(--brand));
+}
+
+/* 协议参数区：一条发丝线接续，不左右缩进，保住与上方 label 列的严格对齐 */
+.param-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.param-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.param-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+/* 插件声明的参数控件收成一列，避免通栏输入框压着一个小步进器（同 device-scan 页） */
+.dynamic-form-wrapper :deep(.el-input),
+.dynamic-form-wrapper :deep(.el-input-number),
+.dynamic-form-wrapper :deep(.el-select) {
+  width: 100%;
+  max-width: 280px;
+}
+
+/* ---------- 窄屏 ---------- */
+@media (max-width: 900px) {
+  .page-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .page-stat {
+    padding-bottom: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .toolbar-filters,
+  .toolbar-actions {
+    width: 100%;
+  }
+
+  .filter-search {
+    width: 100%;
+  }
+
+  .toolbar-actions {
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enter {
+    animation: none;
+  }
+
+  .device-page *,
+  .device-page *::before,
+  .device-page *::after {
+    transition: none !important;
+  }
+}
+</style>

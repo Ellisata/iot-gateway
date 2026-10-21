@@ -275,7 +275,13 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { EditPen, Loading, RefreshLeft, UploadFilled, View } from '@element-plus/icons-vue'
+import {
+  IconCloudUpload as UploadFilled,
+  IconEye as View,
+  IconLoader2 as Loading,
+  IconPencil as EditPen,
+  IconRotate as RefreshLeft,
+} from '@tabler/icons-vue'
 import { useUserStore } from '@/store'
 import { useI18n } from 'vue-i18n'
 

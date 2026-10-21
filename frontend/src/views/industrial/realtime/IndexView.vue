@@ -181,7 +181,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Refresh } from '@element-plus/icons-vue'
+import { IconArrowLeft as ArrowLeft, IconRefresh as Refresh } from '@tabler/icons-vue'
 import { getRealtimeSnapshot } from '@/api/modules/realtime'
 import { useI18n } from 'vue-i18n'
 

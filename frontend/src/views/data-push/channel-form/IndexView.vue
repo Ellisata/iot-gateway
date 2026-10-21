@@ -42,7 +42,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { Check, Loading } from '@element-plus/icons-vue'
+import { IconCheck as Check, IconLoader2 as Loading } from '@tabler/icons-vue'
 import { ElMessage } from 'element-plus'
 import {
   getPushChannelFormByName,

@@ -137,6 +137,9 @@ export default {
 
   // ---------- Dashboard ----------
   dashboard: {
+    eyebrow: 'Operations',
+    title: 'Device status at a glance',
+    autoRefresh: 'Auto-refreshes every 30 seconds',
     deviceStatusLoading: 'Loading statistics...',
     collectionLoading: 'Loading collection status...',
     deviceOnline: 'Device Online Status',
@@ -144,10 +147,19 @@ export default {
     online: 'Online',
     offline: 'Offline',
     onlineRate: 'Online Rate',
-    onlineOfCollected: '{online} / {collected} online',
+    onlineUnit: 'devices online',
     onlineRateTooltip: 'Online rate = online devices / devices in collection. Disabled and not-collected devices are excluded from the denominator',
+    fleetTotalHint: '{enabled} enabled · {disabled} disabled',
+    fleetOnlineHint: 'Online rate {rate}',
+    fleetOfflineHint: '{rate} of collected',
+    alarmsHintActive: '{count} awaiting action',
+    alarmsHintNone: 'No active alarms',
     activeAlarms: 'Active Alarms',
     deviceDetail: 'Device Composition',
+    totalDevices: '{total} total',
+    groupEnabled: 'Enabled status',
+    groupCollected: 'Collection',
+    compositionNote: 'Enabled share is of all devices; collection share is of enabled devices',
     detailEnabled: 'Enabled',
     detailDisabled: 'Disabled',
     collected: 'Collecting',
@@ -157,13 +169,21 @@ export default {
     stopped: 'Stopped',
     lastPoll: 'Last Poll',
     lastSuccess: 'Last Success',
+    collectDevices: 'Collecting devices',
     addressCount: 'Address Count',
     totalErrors: 'Total Errors',
+    viewDevices: 'View devices',
   },
 
   // ---------- Device objects ----------
   deviceObject: {
     searchPlaceholder: 'Search by device object name',
+    // Page subtitle and empty-state copy: what this page owns, and what to do when it is empty
+    subtitle: 'Manage field devices, protocols and connection settings in one place.',
+    totalUnit: 'devices',
+    emptyTitle: 'No device objects yet',
+    emptyHint: 'Connect your first field device — start by choosing a protocol.',
+    emptySearch: 'No device object matches “{name}”',
     add: 'Add Device Object',
     editTitle: 'Edit Device Object',
     addTitle: 'Add Device Object',

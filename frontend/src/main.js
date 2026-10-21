@@ -5,7 +5,6 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
-import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
 
 import App from './App.vue'
@@ -17,11 +16,6 @@ import './styles/index.scss'
 import FcDesigner from '@form-create/designer'
 
 const app = createApp(App)
-
-// 注册所有 Element Plus 图标
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-  app.component(key, component)
-}
 
 // 将 axios 挂载到 window 上（VForm3 依赖）
 import axios from 'axios'

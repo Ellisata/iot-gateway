@@ -252,7 +252,12 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { DataLine, Delete, EditPen, Promotion } from '@element-plus/icons-vue'
+import {
+  IconChartLine as DataLine,
+  IconPencil as EditPen,
+  IconSend as Promotion,
+  IconTrash as Delete,
+} from '@tabler/icons-vue'
 import {
   getWebhookList,
   getWebhookById,

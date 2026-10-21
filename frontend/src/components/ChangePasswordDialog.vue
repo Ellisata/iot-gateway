@@ -66,7 +66,7 @@
 import { computed, nextTick, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { Lock } from '@element-plus/icons-vue'
+import { IconLock as Lock } from '@tabler/icons-vue'
 import { changePasswordApi } from '@/api/modules/user'
 import { rsaEncrypt } from '@/utils/rsa'
 
