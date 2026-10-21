@@ -84,7 +84,17 @@ export default {
 
   // ---------- Login ----------
   login: {
-    subtitle: 'Device Management Console · Please sign in',
+    title: 'Sign in to console',
+    subtitle: 'Access your gateway with an administrator account',
+    brandEyebrow: 'Industrial IoT Gateway',
+    brandTitle: 'Connect field devices.\nUnify industrial data.',
+    brandDesc: 'From PLCs and meters to sensors — collect, normalize and forward at the edge, so field data flows on a single pipeline.',
+    featureProtocols: 'Multi-protocol',
+    featureEdge: 'Edge collection',
+    featureStorage: 'Time-series storage',
+    usernameLabel: 'Username',
+    passwordLabel: 'Password',
+    secureNote: 'Credentials are RSA-encrypted in transit',
     usernamePlaceholder: 'Enter username',
     passwordPlaceholder: 'Enter password',
     capsLock: 'Caps Lock is on — check your password case',

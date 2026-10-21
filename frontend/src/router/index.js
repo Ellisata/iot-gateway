@@ -185,7 +185,7 @@ const router = createRouter({
 
 // 路由守卫：登录校验 + 页面级权限
 router.beforeEach((to, from, next) => {
-  document.title = `${to.meta.titleKey ? translate(to.meta.titleKey) : 'IoT Admin'} - IoT Admin`
+  document.title = `${to.meta.titleKey ? translate(to.meta.titleKey) : 'IoT Gateway'} - IoT Gateway`
 
   const userStore = useUserStore()
 

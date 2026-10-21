@@ -84,7 +84,17 @@ export default {
 
   // ---------- 登录页 ----------
   login: {
-    subtitle: '设备管理后台 · 请登录您的账号',
+    title: '登录控制台',
+    subtitle: '使用管理员账号访问您的网关',
+    brandEyebrow: '工业物联网网关',
+    brandTitle: '连接现场设备\n汇聚工业数据',
+    brandDesc: '从 PLC、仪表到传感器，在边缘统一采集、转换与转发，让现场数据在一条链路上流动。',
+    featureProtocols: '多协议接入',
+    featureEdge: '边缘采集',
+    featureStorage: '时序存储',
+    usernameLabel: '用户名',
+    passwordLabel: '密码',
+    secureNote: '凭据经 RSA 加密后传输',
     usernamePlaceholder: '请输入用户名',
     passwordPlaceholder: '请输入密码',
     capsLock: '大写锁定已开启 — 请注意密码大小写',
