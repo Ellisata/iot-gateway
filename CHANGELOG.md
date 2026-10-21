@@ -4,7 +4,7 @@
 
 All notable changes to this project are documented in this file (Keep a Changelog format, SemVer versioning).
 
-## [Unreleased]
+## [0.1.2] - 2026-10-21
 
 ### Added
 
