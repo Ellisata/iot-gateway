@@ -14,6 +14,7 @@ import (
 	"iot-gateway/configFile"
 	"iot-gateway/logger"
 	"iot-gateway/model/vo"
+	"iot-gateway/runtimecfg"
 )
 
 const (
@@ -67,9 +68,12 @@ type ApiKeySource interface {
 // 失败时 Stop 保持无操作。main.go 对 Start 的错误只记日志不 Fatal，
 // 那条路径上 `defer Stop()` 仍然要安全，这一点靠的就是这个顺序。
 type Announcer struct {
-	cfg  *configFile.Config
-	src  IdentitySource
-	keys ApiKeySource
+	cfg *configFile.Config
+	src IdentitySource
+	// policy 运行期配置来源。非 nil 时 enabled 以它为准（页面可动态启停）；
+	// nil 时退回 cfg，测试与最小装配路径不需要额外的依赖。
+	policy runtimecfg.Runtime
+	keys   ApiKeySource
 
 	// port / interval 由 Start 从配置解析（含默认值），启动后只读。
 	port     int
@@ -104,14 +108,52 @@ type Announcer struct {
 // 构造刻意不读配置也不失败：配置解析与端口绑定都在 Start 里做，
 // 与 pluginhost.NewManager 的取舍一致。
 func NewAnnouncer(cfg *configFile.Config, src IdentitySource, keys ApiKeySource) *Announcer {
-	return &Announcer{
+	return NewAnnouncerWithPolicy(cfg, src, keys, nil)
+}
+
+// NewAnnouncerWithPolicy 同 NewAnnouncer，但 enabled 从运行期配置读取，
+// 并注册启停回调供「运行开关」页动态切换。
+func NewAnnouncerWithPolicy(cfg *configFile.Config, src IdentitySource, keys ApiKeySource,
+	policy runtimecfg.Runtime) *Announcer {
+	a := &Announcer{
 		cfg:       cfg,
 		src:       src,
 		keys:      keys,
+		policy:    policy,
 		listen:    net.ListenPacket,
 		targets:   lanTargets,
 		lastProbe: make(map[string]time.Time),
 	}
+	if policy != nil {
+		policy.RegisterApplier(runtimecfg.KeyDiscoveryEnabled, func(_, new any) error {
+			enabled, ok := new.(bool)
+			if !ok {
+				return fmt.Errorf("discovery: enabled 期望 bool，得到 %T", new)
+			}
+			return a.ApplyEnabled(enabled)
+		})
+	}
+	return a
+}
+
+// enabled 读当前生效的开关：运行期配置优先，否则用启动期配置。
+func (a *Announcer) enabled() bool {
+	if a.policy != nil {
+		return a.policy.Bool(runtimecfg.KeyDiscoveryEnabled)
+	}
+	return a.cfg != nil && a.cfg.Discovery.Enabled
+}
+
+// ApplyEnabled 热启停广播器。Start / Stop 本身都是幂等的，因此重复调用安全。
+//
+// 只用于运行期切换：端口 / 间隔不在动态管理范围内 —— 它们决定套接字的绑定，
+// 改了就得重新 Start，而页面上的「开关」不应该悄悄换掉发现端口。
+func (a *Announcer) ApplyEnabled(enabled bool) error {
+	if enabled {
+		return a.Start()
+	}
+	a.Stop()
+	return nil
 }
 
 // Start 绑定发现端口并开始广播与应答。
@@ -122,7 +164,7 @@ func NewAnnouncer(cfg *configFile.Config, src IdentitySource, keys ApiKeySource)
 // discovery.enabled 为 false 时完全静默：不绑定、不起协程、不打日志 ——
 // 与 plugin.enabled=false 时 DriverManager.Start 的静默无操作一致。
 func (a *Announcer) Start() error {
-	if a.cfg == nil || !a.cfg.Discovery.Enabled {
+	if !a.enabled() {
 		return nil
 	}
 

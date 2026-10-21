@@ -17,6 +17,7 @@ import (
 	"iot-gateway/driver"
 	"iot-gateway/driversdk"
 	"iot-gateway/logger"
+	"iot-gateway/runtimecfg"
 )
 
 // 规划期的错误。服务层逐一映射成业务错误码 —— 分开是为了让用户看到
@@ -106,6 +107,10 @@ type Engine struct {
 	maxTargets    int
 	ttl           time.Duration
 
+	// policy 非 nil 时，enabled 走运行期配置（可在「运行开关」页动态切换）。
+	// 其余三个数值仍来自启动期配置 —— 它们不是开关，改动需重启。
+	policy runtimecfg.Reader
+
 	specs  SpecSource
 	prober Prober
 
@@ -124,6 +129,13 @@ type Engine struct {
 
 // NewEngine 创建扫描引擎。cfg 为 nil 时全部走默认值（测试与最小装配用）。
 func NewEngine(cfg *configFile.Config, specs SpecSource, prober Prober) *Engine {
+	return NewEngineWithPolicy(cfg, specs, prober, nil)
+}
+
+// NewEngineWithPolicy 同 NewEngine，但 enabled 从运行期配置读取。
+// policy 为 nil 时行为与 NewEngine 完全一致（读 cfg 快照）。
+func NewEngineWithPolicy(cfg *configFile.Config, specs SpecSource, prober Prober,
+	policy runtimecfg.Reader) *Engine {
 	e := &Engine{
 		enabled:       true,
 		maxConcurrent: defaultMaxConcurrentProbes,
@@ -131,6 +143,7 @@ func NewEngine(cfg *configFile.Config, specs SpecSource, prober Prober) *Engine 
 		ttl:           defaultJobTTL,
 		specs:         specs,
 		prober:        prober,
+		policy:        policy,
 		subnets:       localSubnets,
 		now:           time.Now,
 	}
@@ -180,7 +193,15 @@ func (e *Engine) WithSubnetSource(fn func() []SubnetInfo) *Engine {
 }
 
 // Enabled 报告扫描功能是否启用。
-func (e *Engine) Enabled() bool { return e.enabled }
+//
+// 每次现读运行期配置：关闭只拦**新**扫描，正在跑的任务不受影响（它已经
+// 规划好了目标，半途取消会让用户看到一份不完整的结果却不知道为什么）。
+func (e *Engine) Enabled() bool {
+	if e.policy != nil {
+		return e.policy.Bool(runtimecfg.KeyDeviceScanEnabled)
+	}
+	return e.enabled
+}
 
 // Subnets 返回本机可扫描的网段（供前端网段多选）。
 func (e *Engine) Subnets() []SubnetInfo { return e.subnets() }
@@ -207,7 +228,7 @@ func (e *Engine) MaxTargets() int { return e.maxTargets }
 // 已有终态任务时会被直接替换 —— 用户主动点了"开始扫描"，就是不要上一轮的结果了。
 // 仍在运行的任务则返回 ErrBusy（见该错误的说明）。
 func (e *Engine) Submit(req SubmitRequest) (*Snapshot, error) {
-	if !e.enabled {
+	if !e.Enabled() {
 		return nil, ErrDisabled
 	}
 

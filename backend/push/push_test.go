@@ -51,7 +51,7 @@ func (s *stubChannel) drain() []PushBatch {
 func TestPushRecordsFanOut(t *testing.T) {
 	ch1 := &stubChannel{id: "c1"}
 	ch2 := &stubChannel{id: "c2"}
-	e := NewEngine(nil)
+	e := NewEngine(nil, nil)
 	e.mu.Lock()
 	e.channels["c1"] = ch1
 	e.channels["c2"] = ch2
@@ -80,7 +80,7 @@ func TestPushRecordsFanOut(t *testing.T) {
 
 func TestPushRecordsChunksLargeDevice(t *testing.T) {
 	ch := &stubChannel{id: "c1"}
-	e := NewEngine(nil)
+	e := NewEngine(nil, nil)
 	e.mu.Lock()
 	e.channels["c1"] = ch
 	e.mu.Unlock()
@@ -127,7 +127,7 @@ func TestPushRecordsChunksLargeDevice(t *testing.T) {
 
 func TestPushRecordsKeepsSmallBatch(t *testing.T) {
 	ch := &stubChannel{id: "c1"}
-	e := NewEngine(nil)
+	e := NewEngine(nil, nil)
 	e.mu.Lock()
 	e.channels["c1"] = ch
 	e.mu.Unlock()
@@ -194,7 +194,7 @@ func TestRefreshKeepsUnchangedChannel(t *testing.T) {
 		t.Fatalf("insert failed: %v", err)
 	}
 
-	e := NewEngine(db)
+	e := NewEngine(db, nil)
 	e.refresh()
 
 	e.mu.RLock()
@@ -237,7 +237,7 @@ func TestLoadChecksum(t *testing.T) {
 		t.Fatalf("migrate failed: %v", err)
 	}
 
-	e := NewEngine(db)
+	e := NewEngine(db, nil)
 	empty := e.loadChecksum()
 
 	// 新增通道 → 校验和变化

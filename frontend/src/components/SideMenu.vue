@@ -147,11 +147,22 @@
         </el-menu-item>
       </el-sub-menu>
 
-      <!-- 系统设置 -->
-      <el-menu-item v-if="userStore.isAdmin" index="/settings">
-        <el-icon><MenuIcon name="settings" /></el-icon>
-        <template #title>{{ t('menu.systemSettings') }}</template>
-      </el-menu-item>
+      <!-- 系统设置：网关身份与运行开关同为管理员项，归入一个一级菜单 -->
+      <el-sub-menu v-if="userStore.isAdmin" index="/system">
+        <template #title>
+          <el-icon><MenuIcon name="settings" /></el-icon>
+          <span>{{ t('menu.systemSettings') }}</span>
+        </template>
+        <el-menu-item index="/settings">
+          <el-icon><MenuIcon name="gateway" /></el-icon>
+          <template #title>{{ t('menu.gatewaySettings') }}</template>
+        </el-menu-item>
+        <!-- default.yaml 作默认值，可在页面覆盖 -->
+        <el-menu-item index="/runtime-config">
+          <el-icon><MenuIcon name="runtimeSwitch" /></el-icon>
+          <template #title>{{ t('menu.runtimeConfig') }}</template>
+        </el-menu-item>
+      </el-sub-menu>
 
       <!-- 开放接口文档（独立顶级入口，全员可见，新窗口打开） -->
       <el-menu-item index="/open-api/doc">

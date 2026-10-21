@@ -79,6 +79,8 @@ export default {
     logFile: '日志文件查看',
     secret: '密钥管理',
     systemSettings: '系统设置',
+    gatewaySettings: '网关设置',
+    runtimeConfig: '运行开关',
     openApiDoc: '开放接口文档',
   },
 
@@ -939,6 +941,57 @@ export default {
     descriptionLength: '描述最长 500 个字符',
     fetchFailed: '获取网关信息失败',
     saveSuccess: '保存成功',
+  },
+
+  // ---------- 运行开关 ----------
+  runtimeConfig: {
+    title: '运行开关',
+    subtitle: '这些开关决定网关的运行时行为。默认值来自 default.yaml；在此修改会写入数据库并长期覆盖默认值，重启后仍然有效。',
+    introTitle: '默认值与覆盖值',
+    intro: '没有改过的项使用 default.yaml 的值。页面修改会保存为覆盖值，并优先于 default.yaml；「恢复默认」删除覆盖值，回到 default.yaml 的设置。标注「重启后生效」的项需要重启网关。',
+    hotBadge: '立即生效',
+    restartBadge: '重启后生效',
+    pendingRestart: '已保存，重启后生效',
+    sourceDefault: '来源：default.yaml',
+    sourceOverride: '来源：页面覆盖',
+    defaultValue: '默认值',
+    resetDefault: '恢复默认',
+    savedHot: '已生效',
+    savedRestart: '已保存，重启网关后生效',
+    resetDone: '已恢复默认值',
+    empty: '没有可动态管理的开关',
+    groups: {
+      discovery: '局域网自动发现',
+      deviceScan: '局域网设备扫描',
+      push: '数据推送',
+      plugin: '协议插件',
+    },
+    fields: {
+      discoveryEnabled: {
+        label: '自动发现',
+        hint: '周期性向局域网广播本网关身份，并应答管理平台的探询。关闭后管理平台可能无法自动发现本网关，采集与上报不受影响。',
+      },
+      deviceScanEnabled: {
+        label: '设备扫描',
+        hint: '允许从页面主动扫描本机网段寻找 PLC。关闭后只拦截新的扫描任务，正在运行的任务不受影响。',
+      },
+      pushChangeOnly: {
+        label: '变化才推送',
+        hint: '点位值与质量码都没变化时，本轮不再交给推送通道。需要周期心跳数据的场景请关闭。',
+      },
+      pluginEnabled: {
+        label: '协议插件',
+        hint: '网关的全部协议驱动都来自插件目录。关闭后重启网关将不再加载任何协议，所有设备都会被跳过。',
+      },
+    },
+    confirm: {
+      discoveryTitle: '关闭自动发现？',
+      discoveryMessage: '关闭后本网关将停止局域网广播与探询应答，管理平台可能无法自动发现它。采集与上报不受影响。',
+      pluginTitle: '关闭协议插件？',
+      pluginMessage: '关闭后网关将不再加载任何协议插件。该设置重启网关后生效，届时所有设备都会被跳过。',
+      resetTitle: '恢复默认值？',
+      resetMessage: '将删除页面保存的覆盖值，回到 default.yaml 的设置。',
+    },
   },
 
   // ---------- 请求层 ----------

@@ -24,6 +24,7 @@ import (
 	"iot-gateway/push"
 	"iot-gateway/realtime"
 	"iot-gateway/router"
+	"iot-gateway/runtimecfg"
 	"iot-gateway/service"
 	"iot-gateway/subscribe"
 	"iot-gateway/workerPool"
@@ -49,6 +50,9 @@ type AppDependencies struct {
 	// Subscription 外部 MQTT 订阅管理器：把订阅报文转换为采集记录后
 	// 定向投递到时序数据库类推送通道
 	Subscription *subscribe.Manager
+	// RuntimeConfig 运行期配置开关（default.yaml 作默认值，system_config 表作覆盖）。
+	// 停机时先 Close 关闭更新入口，再按既有顺序停各组件。
+	RuntimeConfig *runtimecfg.Manager
 }
 
 // InitializeApp 构建完整的应用依赖图
@@ -63,8 +67,14 @@ func InitializeApp() (*AppDependencies, func()) {
 		NewWorkerPool,
 		// 采集引擎
 		collector.NewEngine,
+		// 运行期配置：default.yaml 的默认值 + system_config 表的覆盖值。
+		// 所有需要动态开关的组件都依赖它，Wire 因此把它排在这些组件之前构造。
+		runtimecfg.NewManager,
+		wire.Bind(new(runtimecfg.Reader), new(*runtimecfg.Manager)),
+		wire.Bind(new(runtimecfg.Runtime), new(*runtimecfg.Manager)),
+
 		// 推送引擎（实现 collector.RecordSink，接收采集数据）
-		push.NewEngine,
+		push.NewEngineWithPolicy,
 		// 外部 MQTT 订阅管理器：订阅数据经映射转换后只投递到时序数据库通道。
 		// Sink 绑定到推送引擎的 PushRecordsToTimeSeries（见 push/engine.go）。
 		subscribe.NewManager,
@@ -100,7 +110,7 @@ func InitializeApp() (*AppDependencies, func()) {
 
 		// 外部协议驱动（进程外插件）管理器。驱动集变化时调用采集引擎的
 		// Refresh 热加载，因此把 *collector.Engine 绑定为 Reloader。
-		pluginhost.NewManager,
+		pluginhost.NewManagerWithPolicy,
 		wire.Bind(new(pluginhost.Reloader), new(*collector.Engine)),
 		// 协议服务经此接口读取「插件声明的表单」（恢复默认表单用）
 		wire.Bind(new(service.ProtocolFormSource), new(*pluginhost.Manager)),
@@ -109,13 +119,13 @@ func InitializeApp() (*AppDependencies, func()) {
 		// 身份来自 GatewayService.GetGateway，默认密钥来自
 		// OpenApiSecretService.DefaultOpenApiKey（随广播一起发布，供管理平台
 		// 免人工录入直接调开放接口）。各自绑定到广播器声明的两个并列接口上。
-		discovery.NewAnnouncer,
+		discovery.NewAnnouncerWithPolicy,
 		wire.Bind(new(discovery.IdentitySource), new(*service.GatewayService)),
 		wire.Bind(new(discovery.ApiKeySource), new(*service.OpenApiSecretService)),
 
 		// 局域网 PLC 扫描发现引擎。两个依赖都落在插件管理器上：
 		// 协议的能力声明（DiscoverySpecs）与目标的实际探测（ProbeTargets）。
-		devicescan.NewEngine,
+		devicescan.NewEngineWithPolicy,
 		wire.Bind(new(devicescan.SpecSource), new(*pluginhost.Manager)),
 		wire.Bind(new(devicescan.Prober), new(*pluginhost.Manager)),
 
@@ -170,6 +180,7 @@ func ProvideRouteOptions(
 	gc *controller.GatewayController,
 	plc *controller.PluginController,
 	dsc *controller.DeviceScanController,
+	scc *controller.SystemConfigController,
 ) []router.RouteOption {
 	return []router.RouteOption{
 		router.WithUserRoutes(uc),
@@ -191,9 +202,10 @@ func ProvideRouteOptions(
 		router.WithGatewayRoutes(gc),
 		router.WithPluginRoutes(plc),
 		router.WithDeviceScanRoutes(dsc),
+		router.WithSystemConfigRoutes(scc),
 		// dsh（AI Agent）调用面：把上述领域路由再挂一遍到 /agentApi（**无鉴权**）。
 		// 刻意放在最后 —— 它复用同一批 controller，与前面各 With* 无顺序依赖。
 		// 风险与暴露清单见 router/agentApiRouter.go。
-		router.WithAgentApiRoutes(uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc),
+		router.WithAgentApiRoutes(uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc),
 	}
 }

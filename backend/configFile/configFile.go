@@ -46,8 +46,35 @@ type Config struct {
 	// DeviceScan 局域网 PLC 扫描发现配置（网关主动扫本机网段找设备）
 	DeviceScan DeviceScanConfig `mapstructure:"deviceScan"`
 
+	// Push 推送引擎配置（采集数据投递到 MQTT / 时序库时的行为）
+	Push PushConfig `mapstructure:"push"`
+
 	// Plugin 外部协议插件（进程外驱动）配置
 	Plugin PluginConfig `mapstructure:"plugin"`
+}
+
+// PushConfig 推送引擎配置。
+//
+// 只管「投递行为」，通道自身的连接参数与缓存策略仍由 push_channel 表逐条维护
+// —— 那些是运维在页面上改的，放进配置文件会让两处配置长期不一致。
+type PushConfig struct {
+	// ChangeOnly 变化才推送：点位值或质量码（quality）与上次**真正投递**的值相同
+	// 时不再交给任何推送通道（MQTT / TDengine / InfluxDB）。
+	//
+	// 判断在 push.Engine 里做，不在采集侧：同一批采集记录还要喂给实时值快照，
+	// 快照必须看到每一轮的值（否则页面上"最后更新时间"会停在值不变的那一刻），
+	// 也避免把「下游去重」误做成「采集去重」。
+	//
+	// 没有「上次值」可比的点位总是投递：网关启动后首轮、以及新增/改配推送通道后
+	// 的首轮都是如此 —— 否则稳定不变的点位会在新增通道上永远没有初值。
+	// 只作用于本地点位采集；MQTT 订阅映射产生的记录不受影响（见 PushRecordsToTimeSeries）。
+	//
+	// 代价：值不变期间时序库里是空档而不是等间隔重复点，需要阶梯/前值填充的查询
+	// 应由查询语句承担；依赖周期心跳数据的统计场景应关掉本项。
+	//
+	// **本项只是默认值**：运行期经过 runtimecfg.Manager 读取，可在「运行开关」页
+	// 动态切换（下一批采集起生效，false -> true 时清空已投递记录再全量下发一次）。
+	ChangeOnly bool `mapstructure:"changeOnly"`
 }
 
 // DeviceScanConfig 局域网 PLC 扫描发现配置。
@@ -66,6 +93,9 @@ type DeviceScanConfig struct {
 	//
 	// 需要关掉的理由主要是合规：扫描会主动向整个网段发起连接，某些生产网络
 	// 对此有明确的禁止条款。关闭后 /deviceScan/* 全部返回"功能未启用"。
+	//
+	// **本项只是默认值**：运行期经过 runtimecfg.Manager 读取，可在「运行开关」页
+	// 动态切换。关闭只拦截新扫描，运行中的任务照常结束或由用户取消。
 	Enabled bool `mapstructure:"enabled"`
 
 	// MaxConcurrentProbes 同时在飞的目标探测数（默认 8，上限 32）。
@@ -121,6 +151,9 @@ type DiscoveryConfig struct {
 	// Enabled 总开关。出厂默认 true（嵌入的 default.yaml 显式提供该键，
 	// 见 InitConfig 的逐键合并 —— 磁盘配置省略整段时不会把它抹成 false）。
 	// 关闭后网关对局域网完全静默，不影响采集与上报。
+	//
+	// **本项只是默认值**：运行期经过 runtimecfg.Manager 读取，可在「运行开关」页
+	// 动态启停（Start / Stop UDP 套接字）。Port / IntervalMs 不在动态管理范围内。
 	Enabled bool `mapstructure:"enabled"`
 
 	// Port UDP 端口，默认 9083。广播与监听共用同一个端口。
@@ -150,6 +183,9 @@ type AuthConfig struct {
 // 该目录必须只对管理员可写，运行网关的账户不得对其有写权限。
 type PluginConfig struct {
 	// Enabled 总开关。默认 false —— 随发行版附带 plugins/ 目录不等于启用加载。
+	//
+	// **本项只是默认值**：可在「运行开关」页修改，但**重启网关后才生效**。
+	// 插件管理器的 Stop 是终态的，运行期启停需要重写进程监管生命周期。
 	Enabled bool `mapstructure:"enabled"`
 
 	// Dir 插件目录。空或相对路径时相对**可执行文件所在目录**解析（不是 cwd）：

@@ -79,6 +79,8 @@ export default {
     logFile: 'Log Files',
     secret: 'Secrets',
     systemSettings: 'System Settings',
+    gatewaySettings: 'Gateway Settings',
+    runtimeConfig: 'Runtime Switches',
     openApiDoc: 'Open API Docs',
   },
 
@@ -950,6 +952,57 @@ export default {
     descriptionLength: 'Description must be at most 500 characters',
     fetchFailed: 'Failed to load gateway info',
     saveSuccess: 'Saved successfully',
+  },
+
+  // ---------- Runtime switches ----------
+  runtimeConfig: {
+    title: 'Runtime Switches',
+    subtitle: 'These switches control gateway runtime behavior. Defaults come from default.yaml; changes here are stored in the database and override the defaults across restarts.',
+    introTitle: 'Defaults and overrides',
+    intro: 'Unchanged items use the value from default.yaml. Changes made here are saved as overrides and take precedence; Restore default removes the override. Items marked restart required take effect after the gateway restarts.',
+    hotBadge: 'Applies immediately',
+    restartBadge: 'Restart required',
+    pendingRestart: 'Saved, applies after restart',
+    sourceDefault: 'Source: default.yaml',
+    sourceOverride: 'Source: page override',
+    defaultValue: 'Default',
+    resetDefault: 'Restore default',
+    savedHot: 'Applied',
+    savedRestart: 'Saved; takes effect after the gateway restarts',
+    resetDone: 'Restored to default',
+    empty: 'No runtime switches are available',
+    groups: {
+      discovery: 'LAN discovery',
+      deviceScan: 'LAN device scan',
+      push: 'Data push',
+      plugin: 'Protocol plugins',
+    },
+    fields: {
+      discoveryEnabled: {
+        label: 'Discovery',
+        hint: 'Periodically broadcasts this gateway on the LAN and answers management platform probes. When disabled, the platform may not discover this gateway automatically; collection and reporting are unaffected.',
+      },
+      deviceScanEnabled: {
+        label: 'Device scan',
+        hint: 'Allows the page to scan local subnets for PLCs. Disabling blocks new scan jobs only; a scan already running is not interrupted.',
+      },
+      pushChangeOnly: {
+        label: 'Push only on change',
+        hint: 'When neither the point value nor its quality changed, the record is not handed to push channels this round. Disable it if downstream needs periodic heartbeat data.',
+      },
+      pluginEnabled: {
+        label: 'Protocol plugins',
+        hint: 'All protocol drivers come from the plugin directory. If disabled, the gateway loads no protocols after restart and every device is skipped.',
+      },
+    },
+    confirm: {
+      discoveryTitle: 'Disable discovery?',
+      discoveryMessage: 'The gateway will stop LAN broadcasts and probe replies, so the management platform may no longer discover it automatically. Collection and reporting are unaffected.',
+      pluginTitle: 'Disable protocol plugins?',
+      pluginMessage: 'The gateway will load no protocol plugins after restart, and every device will be skipped. This takes effect only after a restart.',
+      resetTitle: 'Restore default?',
+      resetMessage: 'The saved override will be deleted and the value from default.yaml will apply.',
+    },
   },
 
   // ---------- Request layer ----------

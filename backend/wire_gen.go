@@ -20,6 +20,7 @@ import (
 	"iot-gateway/push"
 	"iot-gateway/realtime"
 	"iot-gateway/router"
+	"iot-gateway/runtimecfg"
 	"iot-gateway/service"
 	"iot-gateway/subscribe"
 	"iot-gateway/workerPool"
@@ -43,7 +44,8 @@ func InitializeApp() (*AppDependencies, func()) {
 	userController := controller.NewUserController(userService)
 	workerPool := NewWorkerPool(config)
 	store := realtime.NewStore()
-	engine := push.NewEngine(db)
+	manager := runtimecfg.NewManager(db, config)
+	engine := push.NewEngineWithPolicy(db, config, manager)
 	recordSink := NewRecordSink(store, engine)
 	dispatcher := notify.NewDispatcher(db)
 	alarmEngine := alarm.NewEngine(db, dispatcher)
@@ -59,8 +61,8 @@ func InitializeApp() (*AppDependencies, func()) {
 	collectionController := controller.NewCollectionController(collectionService)
 	realtimeService := service.NewRealtimeService(db, store, collectorEngine, deviceService)
 	realtimeController := controller.NewRealtimeController(realtimeService)
-	manager := pluginhost.NewManager(db, config, collectorEngine)
-	protocolService := service.NewProtocolService(db, manager)
+	pluginhostManager := pluginhost.NewManagerWithPolicy(db, config, collectorEngine, manager)
+	protocolService := service.NewProtocolService(db, pluginhostManager)
 	protocolController := controller.NewProtocolController(protocolService)
 	pushChannelService := service.NewPushChannelService(db, alarmService)
 	pushChannelController := controller.NewPushChannelController(pushChannelService)
@@ -83,25 +85,28 @@ func InitializeApp() (*AppDependencies, func()) {
 	openApiController := controller.NewOpenApiController(openApiService)
 	serviceGatewayService := service.NewGatewayService(db)
 	gatewayController := controller.NewGatewayController(serviceGatewayService)
-	pluginService := service.NewPluginService(manager)
+	pluginService := service.NewPluginService(pluginhostManager)
 	pluginController := controller.NewPluginController(pluginService)
-	devicescanEngine := devicescan.NewEngine(config, manager, manager)
-	deviceScanService := service.NewDeviceScanService(db, devicescanEngine, manager, collectorEngine)
+	devicescanEngine := devicescan.NewEngineWithPolicy(config, pluginhostManager, pluginhostManager, manager)
+	deviceScanService := service.NewDeviceScanService(db, devicescanEngine, pluginhostManager, collectorEngine)
 	deviceScanController := controller.NewDeviceScanController(deviceScanService)
-	v := ProvideRouteOptions(userController, deviceController, deviceAddressController, collectionController, realtimeController, protocolController, pushChannelController, pushChannelFormController, mqttSubscriptionController, pushController, alarmController, alarmWebhookController, alarmWebhookFormController, logFileController, openApiSecretController, openApiSecretService, openApiController, gatewayController, pluginController, deviceScanController)
+	systemConfigService := service.NewSystemConfigService(manager)
+	systemConfigController := controller.NewSystemConfigController(systemConfigService)
+	v := ProvideRouteOptions(userController, deviceController, deviceAddressController, collectionController, realtimeController, protocolController, pushChannelController, pushChannelFormController, mqttSubscriptionController, pushController, alarmController, alarmWebhookController, alarmWebhookFormController, logFileController, openApiSecretController, openApiSecretService, openApiController, gatewayController, pluginController, deviceScanController, systemConfigController)
 	ginEngine := router.SetupRouter(v)
 	channelMonitor := alarm.NewChannelMonitor(db, engine, dispatcher)
-	announcer := discovery.NewAnnouncer(config, serviceGatewayService, openApiSecretService)
+	announcer := discovery.NewAnnouncerWithPolicy(config, serviceGatewayService, openApiSecretService, manager)
 	appDependencies := &AppDependencies{
 		Engine:          ginEngine,
 		CollectorEngine: collectorEngine,
 		PushEngine:      engine,
 		AlarmMonitor:    channelMonitor,
 		AlarmNotifier:   dispatcher,
-		DriverManager:   manager,
+		DriverManager:   pluginhostManager,
 		Discovery:       announcer,
 		DeviceScan:      devicescanEngine,
 		Subscription:    subscribeManager,
+		RuntimeConfig:   manager,
 	}
 	return appDependencies, func() {
 	}
@@ -129,6 +134,9 @@ type AppDependencies struct {
 	// Subscription 外部 MQTT 订阅管理器：把订阅报文转换为采集记录后
 	// 定向投递到时序数据库类推送通道
 	Subscription *subscribe.Manager
+	// RuntimeConfig 运行期配置开关（default.yaml 作默认值，system_config 表作覆盖）。
+	// 停机时先 Close 关闭更新入口，再按既有顺序停各组件。
+	RuntimeConfig *runtimecfg.Manager
 }
 
 // NewRecordSink 组装采集记录的扇出接收者。
@@ -168,6 +176,7 @@ func ProvideRouteOptions(
 	gc *controller.GatewayController,
 	plc *controller.PluginController,
 	dsc *controller.DeviceScanController,
+	scc *controller.SystemConfigController,
 ) []router.RouteOption {
-	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectionRoutes(cc), router.WithRealtimeRoutes(rc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithMqttSubscriptionRoutes(msc), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithAlarmWebhookRoutes(awc), router.WithAlarmWebhookFormRoutes(awfc), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac), router.WithGatewayRoutes(gc), router.WithPluginRoutes(plc), router.WithDeviceScanRoutes(dsc), router.WithAgentApiRoutes(uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc)}
+	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectionRoutes(cc), router.WithRealtimeRoutes(rc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithMqttSubscriptionRoutes(msc), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithAlarmWebhookRoutes(awc), router.WithAlarmWebhookFormRoutes(awfc), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac), router.WithGatewayRoutes(gc), router.WithPluginRoutes(plc), router.WithDeviceScanRoutes(dsc), router.WithSystemConfigRoutes(scc), router.WithAgentApiRoutes(uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc)}
 }

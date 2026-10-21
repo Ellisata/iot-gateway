@@ -602,6 +602,32 @@ var agentApiSurface = map[string]SurfaceEntry{
 		Note: "与 createDevices 相反：**采信客户端的全部 items 字段**，唯一的服务端权威是 deviceId",
 	},
 
+	// ==================== 运行期配置开关 ====================
+	"GET /systemConfig/list": {
+		Access: AccessRead,
+		Params: argNone(),
+		Note: "返回每个开关的生效值、default.yaml 默认值、来源（default / override）、" +
+			"是否立即生效以及是否需要重启",
+	},
+	"POST /systemConfig/update": {
+		Access: AccessWrite,
+		Params: argBody(dto.UpdateSystemConfigDTO{}, map[string]string{
+			"key": "开关标识；只能取 /systemConfig/list 里的 key",
+			"value": "JSON 标量，当前只接受 true / false。" +
+				"不要传字符串 \"true\" 或数字 1 —— 类型不符会被拒",
+		}),
+		Note: "修改会写入数据库并覆盖 default.yaml。discovery.enabled / deviceScan.enabled / " +
+			"push.changeOnly 立即生效；plugin.enabled 需**重启网关**后才生效（响应里 requiresRestart=true）。" +
+			"应用失败会回滚数据库与运行状态并返回错误",
+	},
+	"POST /systemConfig/reset": {
+		Access: AccessWrite,
+		Params: argBody(dto.ResetSystemConfigDTO{}, map[string]string{
+			"key": "开关标识；只能取 /systemConfig/list 里的 key",
+		}),
+		Note: "删除覆盖值，回到 default.yaml 的默认值；没有覆盖值时是幂等的无操作",
+	},
+
 	// ==================== 清单自身 ====================
 	"GET " + surfacePath: {
 		Access: AccessRead,

@@ -163,6 +163,9 @@ func runGateway(stop <-chan struct{}) error {
 	defer deps.PushEngine.Stop()
 	defer deps.AlarmMonitor.Stop()
 	defer deps.Discovery.Stop()
+	// RuntimeConfig 注册在最末，因此**最先**执行：先关掉「运行开关」的更新入口，
+	// 避免停机过程中还有请求把刚停掉的 discovery 重新拉起来。
+	defer deps.RuntimeConfig.Close()
 
 	// 10. 启动 HTTP 服务器。使用 http.Server 而非 gin 的 Run，以便服务模式下优雅停机。
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

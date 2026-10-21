@@ -27,6 +27,15 @@ The MQTT channel pushes grouped **per device**; the payload is a JSON array wher
 ]
 ```
 
+> **Delivery cadence (change-only push)**: `push.changeOnly` ships as true. When both
+> `value` and `quality` of a point are unchanged since its last **actual delivery**, the
+> point is omitted from this round — downstream must not treat "a record arrived" as a
+> device heartbeat (use device-disconnection alarms for liveness). The first round after
+> gateway startup, or after a push channel is added/reconfigured, is always a full
+> snapshot; a quality transition (e.g. 192 → 2) counts as a change too. Set the switch to
+> false when evenly spaced samples are required (switchable on the Runtime Switches page;
+> it applies from the next collection batch).
+
 ## 2. Field semantics
 
 | Field | Type | Description |

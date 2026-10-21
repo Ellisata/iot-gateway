@@ -16,8 +16,10 @@ import (
 	"gorm.io/gorm"
 
 	"iot-gateway/collector"
+	"iot-gateway/configFile"
 	"iot-gateway/logger"
 	"iot-gateway/model/po"
+	"iot-gateway/runtimecfg"
 )
 
 // maxRecordsPerBatch 单个 PushBatch 的最大记录数上限。
@@ -39,18 +41,65 @@ type Engine struct {
 	channels map[string]Channel
 	running  bool
 
+	// changeOnly 变化才推送（configFile push.changeOnly）的启动期快照。
+	// policy 非 nil 时以运行期配置为准（可在页面动态切换）；本字段只在
+	// 无 policy 的测试 / 最小装配路径上使用。
+	changeOnly bool
+	// policy 运行期配置来源，nil 时退回 changeOnly 字段。
+	policy runtimecfg.Runtime
+	// changes 上次真正投递出去的点位值与质量码（见 changeTracker）。
+	// 常驻 Engine：采集侧热加载会重建任务，但"上次投给下游的是什么"不该随之重置。
+	changes *changeTracker
+
 	// 自动热加载
 	watchCtx    context.Context
 	watchCancel context.CancelFunc
 	watchOnce   sync.Once
 }
 
-// NewEngine 创建数据推送引擎
-func NewEngine(db *gorm.DB) *Engine {
-	return &Engine{
+// NewEngine 创建数据推送引擎。
+//
+// cfg 为 nil 时按零值处理（关闭变化才推送）：仅便于测试与手工构造；
+// 正常启动路径由 Wire 注入 configFile.InitConfig() 的结果。
+func NewEngine(db *gorm.DB, cfg *configFile.Config) *Engine {
+	return NewEngineWithPolicy(db, cfg, nil)
+}
+
+// NewEngineWithPolicy 同 NewEngine，但 changeOnly 从运行期配置读取。
+//
+// policy 为 nil 时行为与 NewEngine 完全一致。注册的 applier 只做一件事：
+// 从「不变化才推送」切回「变化才推送」时清空已投递记录，让下一批全量下发。
+// 否则 tracker 里留着的旧值会把当前稳定的点位静默过滤掉，而通道在这段
+// 时间内已经收到过它们（或新增通道从未见过初值）。
+func NewEngineWithPolicy(db *gorm.DB, cfg *configFile.Config, policy runtimecfg.Runtime) *Engine {
+	e := &Engine{
 		db:       db,
 		channels: make(map[string]Channel),
+		changes:  newChangeTracker(),
+		policy:   policy,
 	}
+	if cfg != nil {
+		e.changeOnly = cfg.Push.ChangeOnly
+	}
+	if policy != nil {
+		policy.RegisterApplier(runtimecfg.KeyPushChangeOnly, func(old, new any) error {
+			was, _ := old.(bool)
+			now, _ := new.(bool)
+			if !was && now {
+				e.changes.reset()
+			}
+			return nil
+		})
+	}
+	return e
+}
+
+// changeOnlyEnabled 读当前生效值：运行期配置优先，否则用启动期快照。
+func (e *Engine) changeOnlyEnabled() bool {
+	if e.policy != nil {
+		return e.policy.Bool(runtimecfg.KeyPushChangeOnly)
+	}
+	return e.changeOnly
 }
 
 // Start 启动推送引擎：加载活跃通道并开始监控配置变化
@@ -71,7 +120,7 @@ func (e *Engine) Start() error {
 	e.startWatcherLocked()
 	e.mu.Unlock()
 
-	logger.Info("push engine started")
+	logger.Info("push engine started (changeOnly=%v)", e.changeOnlyEnabled())
 	return nil
 }
 
@@ -113,8 +162,12 @@ func (e *Engine) Refresh() error {
 
 // PushRecords 实现 collector.RecordSink：按设备分组后分发给各通道。
 // 非阻塞：通道 outbox 满时丢弃最旧，绝不阻塞采集线程。
+//
+// 开启 push.changeOnly 时，这里还会滤掉自上次投递以来值/质量码未变的点位
+// （见 changeTracker）；过滤发生在实时值快照之后（MultiSink 的顺序见 wire.go），
+// 快照因此每轮都能更新。
 func (e *Engine) PushRecords(records []collector.CollectedRecord) {
-	e.pushRecords(records, nil)
+	e.pushRecords(records, nil, true)
 }
 
 // PushRecordsToTimeSeries 将外部来源（MQTT 订阅）的记录定向投递给时序数据库通道。
@@ -122,17 +175,46 @@ func (e *Engine) PushRecords(records []collector.CollectedRecord) {
 // 与 PushRecords 的唯一差异是通道过滤：只投给实现了 TimeSeriesChannel 且
 // IsTimeSeries 为真的通道，不投 MQTT 等其它通道。记录结构与采集记录完全一致，
 // 因此下游的攒批/缓存/补发逻辑原样复用。
+//
+// **不参与变化才推送**：订阅报文是外部系统的一次明确上报，即便值与上一条相同，
+// 也是下游应当看到的事实；同一条报文丢弃与否由订阅侧自己决定。
 func (e *Engine) PushRecordsToTimeSeries(records []collector.CollectedRecord) {
 	e.pushRecords(records, func(ch Channel) bool {
 		tsc, ok := ch.(TimeSeriesChannel)
 		return ok && tsc.IsTimeSeries()
-	})
+	}, false)
 }
 
 // pushRecords 按设备分组并分片后分发给满足 include 的通道（include 为 nil 表示全部）。
-func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(Channel) bool) {
+// filterChanges 为真且开启了 changeOnly 时，先滤掉值/质量码未变的记录。
+func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(Channel) bool, filterChanges bool) {
 	if len(records) == 0 {
 		return
+	}
+
+	// 快照当前活跃通道。
+	// 必须**先于**变化过滤：没有任何通道时这批数据无处可去，不能把点位记成
+	// "已投递"—— 否则通道恢复/新增后，稳定不变的点位会永远等不到下一次变化。
+	e.mu.RLock()
+	chans := make([]Channel, 0, len(e.channels))
+	for _, ch := range e.channels {
+		if include != nil && !include(ch) {
+			continue
+		}
+		chans = append(chans, ch)
+	}
+	e.mu.RUnlock()
+	if len(chans) == 0 {
+		return
+	}
+
+	// 变化才推送：只保留值或质量码发生变化（或首次出现）的记录。
+	// 走到这里说明至少有一个通道会收到它们，更新"已投递"状态才是安全的。
+	if filterChanges && e.changeOnlyEnabled() {
+		records = e.changes.filter(records)
+		if len(records) == 0 {
+			return
+		}
 	}
 
 	// 毫秒精度:TDengine 主键含时间戳(亚秒级轮次同秒会覆盖),秒级格式会静默丢数据
@@ -146,20 +228,6 @@ func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(C
 			deviceIDs = append(deviceIDs, r.DeviceID)
 		}
 		groups[r.DeviceID] = append(groups[r.DeviceID], r)
-	}
-
-	// 快照当前活跃通道
-	e.mu.RLock()
-	chans := make([]Channel, 0, len(e.channels))
-	for _, ch := range e.channels {
-		if include != nil && !include(ch) {
-			continue
-		}
-		chans = append(chans, ch)
-	}
-	e.mu.RUnlock()
-	if len(chans) == 0 {
-		return
 	}
 
 	// 按设备分组后分片入队：每台设备拆成 ≤maxRecordsPerBatch 的小批次，
@@ -217,6 +285,10 @@ func (e *Engine) refresh() {
 
 	e.mu.Lock()
 	var toStop []Channel
+	// newChannel 标记本轮是否出现了"没见过任何历史值"的通道实例（新增或配置变更
+	// 后重建）。变化才推送的状态必须随之清空，否则稳定不变的点位会在新通道上
+	// 永远没有初值（见 changeTracker.reset）。
+	newChannel := false
 	newMap := make(map[string]Channel, len(newChans))
 	for _, nc := range newChans {
 		if old, ok := e.channels[nc.ChannelID()]; ok && old.ConfigSig() == nc.ConfigSig() {
@@ -225,6 +297,7 @@ func (e *Engine) refresh() {
 		}
 		nc.Start() // 新通道或配置变化：启动新实例
 		newMap[nc.ChannelID()] = nc
+		newChannel = true
 		if old, ok := e.channels[nc.ChannelID()]; ok {
 			toStop = append(toStop, old)
 		}
@@ -236,6 +309,11 @@ func (e *Engine) refresh() {
 	}
 	e.channels = newMap
 	e.mu.Unlock()
+
+	// 仅删除通道不需要重置：剩下的通道都已收到过既有值，重置只会让它们白收一轮全量。
+	if newChannel && e.changeOnlyEnabled() {
+		e.changes.reset()
+	}
 
 	// 解锁后再停止旧通道：Stop 会阻塞等待发布排空，不能占用锁（否则 PushRecords 会卡住）
 	for _, old := range toStop {

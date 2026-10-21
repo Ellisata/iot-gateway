@@ -161,11 +161,20 @@ const routes = [
         meta: { titleKey: 'menu.secret', icon: 'Key', roles: ['admin'] },
       },
       // ---- 系统设置路由 ----
+      // 网关身份（settings）与运行开关同属「系统设置」一级菜单。
       {
         path: 'settings',
         name: 'SystemSettings',
-        component: () => import('@/views/settings/IndexView.vue'),
-        meta: { titleKey: 'menu.systemSettings', icon: 'Setting', roles: ['admin'] },
+        component: () => import('@/views/settings/gateway/IndexView.vue'),
+        meta: { titleKey: 'menu.gatewaySettings', icon: 'Setting', roles: ['admin'] },
+      },
+      // default.yaml 作默认值、system_config 表作覆盖；与网关身份（settings）分开，
+      // 因为这里的修改可能立即启停局域网套接字 / 改变采集推送行为。
+      {
+        path: 'runtime-config',
+        name: 'RuntimeConfig',
+        component: () => import('@/views/settings/runtime-config/IndexView.vue'),
+        meta: { titleKey: 'menu.runtimeConfig', icon: 'Setting', roles: ['admin'] },
       },
     ],
   },

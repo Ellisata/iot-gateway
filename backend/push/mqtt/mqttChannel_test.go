@@ -271,7 +271,7 @@ func TestEngineBuildsMqttChannel(t *testing.T) {
 	}
 
 	// 通过公开 API 验证本包 init() 注册的 mqtt 工厂被 Engine 自动发现并启动
-	e := push.NewEngine(db)
+	e := push.NewEngine(db, nil)
 	if err := e.Start(); err != nil {
 		t.Fatalf("engine start failed: %v", err)
 	}

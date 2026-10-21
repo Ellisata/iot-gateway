@@ -24,7 +24,7 @@ func TestPushRecordsToTimeSeriesOnlyTargetsTimeSeriesChannels(t *testing.T) {
 	ts := &tsStub{stubChannel: stubChannel{id: "td"}, timeSeries: true}
 	notTS := &tsStub{stubChannel: stubChannel{id: "other"}, timeSeries: false}
 
-	e := NewEngine(nil)
+	e := NewEngine(nil, nil)
 	e.mu.Lock()
 	e.channels["mqtt"] = plain
 	e.channels["td"] = ts

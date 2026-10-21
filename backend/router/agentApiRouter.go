@@ -21,6 +21,8 @@ const AgentApiPrefix = "/agentApi"
 //   - GET  /agentApi/device/pageDevice —— 返回的 DeviceVO **带 protocolJson**（PLC 连接配置）
 //   - GET  /agentApi/pushChannel/* —— PushChannelVO.configJson 含 MQTT 口令等凭据
 //   - POST /agentApi/user/createUser、PUT /agentApi/user/password
+//   - POST /agentApi/systemConfig/update —— 改全局运行开关（可关闭局域网发现、
+//     设备扫描、变化才推送，或让插件在下次重启后全部失效）
 //
 // 这是**刻意的设计选择**，不是遗漏：前提是网关部署在隔离的工业内网，
 // 或 dsh 与网关同机。**若网关会暴露到不可信网络，这个分组必须先加回鉴权**
@@ -59,6 +61,7 @@ func AgentApiRoutes(
 	gc *controller.GatewayController,
 	plc *controller.PluginController,
 	dsc *controller.DeviceScanController,
+	scc *controller.SystemConfigController,
 ) {
 	g := r.Group(AgentApiPrefix)
 	{
@@ -98,6 +101,9 @@ func AgentApiRoutes(
 
 		// 局域网设备扫描 + 点位扫描
 		DeviceScanRoutes(g, dsc)
+
+		// 运行期配置开关（update / reset 是 write，见 agentApiSurface.go）
+		SystemConfigRoutes(g, scc)
 
 		// 刻意不挂 OpenApiRoutes：它自带 X-Api-Key 鉴权中间件，挂进来会得到
 		// /agentApi/openApi/* 这样一条既多一层前缀、又仍要密钥的路径 —— 对 dsh

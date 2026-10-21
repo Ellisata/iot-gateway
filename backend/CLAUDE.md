@@ -312,6 +312,21 @@
   [specs/point-discovery.md](specs/point-discovery.md)):它们共同依赖三条道理
   (不建能力缓存表 / RPC 超时按插件声明推导 / 串口独占与会话复用),只改一篇必然漂移。
 
+### 运行期配置开关([runtimecfg/](runtimecfg/))
+- `default.yaml` 是**默认值**的唯一真源;[runtimecfg/](runtimecfg/) 在它之上叠加
+  SQLite `system_config` 表里的覆盖值(页面 / `/systemConfig/*` 写入),优先级更高、
+  重启后保留。「恢复默认」= 删除覆盖行,不是把默认值写进表。
+- 首批登记 4 个开关:`discovery.enabled`、`deviceScan.enabled`、`push.changeOnly`
+  (立即生效,组件从 `runtimecfg.Reader` 现读),`plugin.enabled`(重启生效,插件管理器
+  在构造时冻结 —— `Stop` 是终态的)。
+- 更新顺序固定为**校验 → 落库 → 发布快照 → apply**;applier 失败时恢复旧快照并
+  补偿写回旧行。**不要在 apply 期间持有 SQLite 事务**:单写连接会被 `discovery.Stop()`
+  这类等待协程退出的操作占住,拖垮采集与 outbox 落盘。
+- 新增开关的四步清单见 [specs/runtime-config.md](specs/runtime-config.md);注册表完整性
+  由 `runtimecfg/registry_test.go` 反射 `configFile.Config` 的布尔叶子守住。
+- `configFile.ReloadConfig` 仍无调用方,**不要**用它做第二套覆盖机制。手工改
+  `default.yaml` 不会被监听,动态修改只走页面 / API。
+
 ### 前端
 - `web/` 只含构建产物 `web/dist/`,经 `go:embed` 嵌入二进制,由 [web/embed.go](web/embed.go) 的 `ServeStatic` 在 `/admin/*` 路径分发(SPA 回退 index.html)。
 - 前端源码在本仓库根部的 `frontend/`(Vue 3 + Vite + Element Plus + form-create)。

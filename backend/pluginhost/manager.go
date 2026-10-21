@@ -22,6 +22,7 @@ import (
 	"iot-gateway/driver"
 	"iot-gateway/driversdk"
 	"iot-gateway/logger"
+	"iot-gateway/runtimecfg"
 )
 
 // Reloader 触发采集配置热刷新。*collector.Engine 满足此接口
@@ -130,7 +131,20 @@ func (f fileFingerprint) equal(o fileFingerprint) bool {
 
 // NewManager 创建外部协议驱动管理器（未启动）。
 func NewManager(db *gorm.DB, cfg *configFile.Config, reload Reloader) *Manager {
+	return NewManagerWithPolicy(db, cfg, reload, nil)
+}
+
+// NewManagerWithPolicy 同 NewManager，但 plugin.enabled 从运行期配置读取。
+//
+// **只在构造时读一次**：Manager.Stop 是终态的（stopOnce），运行期启停插件
+// 需要重写进程监管生命周期，风险远大于收益。因此页面上的修改只落库，
+// 重启网关后才在这里被读进 dc.Enabled；接口会返回 requiresRestart=true。
+func NewManagerWithPolicy(db *gorm.DB, cfg *configFile.Config, reload Reloader,
+	policy runtimecfg.Reader) *Manager {
 	dc := cfg.Plugin
+	if policy != nil {
+		dc.Enabled = policy.Bool(runtimecfg.KeyPluginEnabled)
+	}
 	m := &Manager{
 		db:      db,
 		cfg:     dc,

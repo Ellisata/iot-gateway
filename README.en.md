@@ -272,6 +272,14 @@ plugin:
                       # writable only by administrators.
   dir: plugins        # Plugin directory; an empty or relative path resolves relative to the
                       # executable's directory, not the working directory
+push:
+  changeOnly: true    # Push only on change: skip points whose value and quality code are
+                      # unchanged since the last delivery, cutting MQTT traffic and TSDB
+                      # writes. The first round after startup, or after a push channel is
+                      # added/reconfigured, is always a full snapshot (otherwise stable
+                      # points would never get an initial value on the new channel).
+                      # Set false when downstream expects periodic heartbeats. Switchable on
+                      # the Runtime Switches page; applies from the next collection batch.
 ```
 
 ## Project Layout

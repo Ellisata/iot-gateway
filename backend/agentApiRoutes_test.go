@@ -47,6 +47,7 @@ func newTestEngine() *gin.Engine {
 		(*controller.GatewayController)(nil),
 		(*controller.PluginController)(nil),
 		(*controller.DeviceScanController)(nil),
+		(*controller.SystemConfigController)(nil),
 	))
 }
 
