@@ -4,6 +4,18 @@
 
 All notable changes to this project are documented in this file (Keep a Changelog format, SemVer versioning).
 
+## [0.1.3] - 2026-10-22
+
+### Added
+
+- **运行大盘**：新增每分钟一次的内存采样器，记录在线率、采集吞吐、坏点及推送队列/积压，保留最近 24 小时，提供 `GET /dashboard/trend?hours=1..24`（只读，镜像到 `/agentApi`）。趋势不落库，重启后从空开始积累。大盘首页重做：在线率环形、KPI 指标条、采集趋势图、最近事件与数据出口面板；趋势图按分钟网格合并成约 96 个桶，并用最小/最大值包络保留短暂掉线。
+  **Live dashboard**: an in-memory sampler records online rate, throughput, bad points and push queue/spool depth once a minute, keeping 24 hours, exposed as `GET /dashboard/trend?hours=1..24` (read-only, mirrored to `/agentApi`). Trends are not persisted and start empty after a restart. The dashboard is rebuilt with an online-rate ring, a KPI strip, a telemetry trend, recent events and a data-outlet panel; the chart buckets samples into ~96 minute-aligned bars and keeps brief dropouts visible with a min/max envelope.
+
+### Changed
+
+- **管理端界面重构**：统一各管理页的页头、表格、空状态与弹窗；侧栏改为深色导轨，支持拖动调宽并记住宽度；设备列表与扫描页改版；图标迁移到 Tabler；补充 favicon 并重录 README 演示。
+  **Unified admin UI**: page headers, tables, empty states and dialogs are standardized; the sidebar becomes a dark rail that can be resized and remembers its width; the device list and scan pages are redesigned; icons move to Tabler; favicon assets are added and the README demos re-recorded.
+
 ## [0.1.2] - 2026-10-21
 
 ### Added
