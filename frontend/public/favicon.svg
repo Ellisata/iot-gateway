@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="IoT Gateway">
+  <defs>
+    <!-- 底板：品牌蓝的斜向渐变，右下压深以形成体积 -->
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f8df9" />
+      <stop offset="0.52" stop-color="#2563eb" />
+      <stop offset="1" stop-color="#1740b5" />
+    </linearGradient>
+    <!-- 左上高光：模拟玻璃面板的受光 -->
+    <radialGradient id="sheen" cx="0.22" cy="0.1" r="0.9">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.30" />
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.07" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+    </radialGradient>
+    <!-- 底部内阴影：让底板沉下去 -->
+    <linearGradient id="base" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0.45" stop-color="#0b1e57" stop-opacity="0" />
+      <stop offset="1" stop-color="#0b1e57" stop-opacity="0.30" />
+    </linearGradient>
+    <!-- 顶层钻石的右受光面，比左面略冷 -->
+    <linearGradient id="facet" x1="0" y1="0" x2="0.2" y2="1">
+      <stop offset="0" stop-color="#f4f8ff" />
+      <stop offset="1" stop-color="#cfe0fb" />
+    </linearGradient>
+    <clipPath id="tileClip">
+      <rect width="64" height="64" rx="15" />
+    </clipPath>
+    <filter id="lift" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="1.4" stdDeviation="1.8" flood-color="#081d5c" flood-opacity="0.38" />
+    </filter>
+  </defs>
+
+  <!-- 底板 -->
+  <rect width="64" height="64" rx="15" fill="url(#tile)" />
+  <g clip-path="url(#tileClip)">
+    <rect width="64" height="64" fill="url(#sheen)" />
+    <rect width="64" height="64" fill="url(#base)" />
+  </g>
+  <!-- 内圈亮边：一圈极细的玻璃倒角 -->
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="14.3" fill="none"
+        stroke="#ffffff" stroke-opacity="0.24" stroke-width="1.5" />
+
+  <!-- 品牌符号：三层堆叠的等轴测菱形（与界面 logo 同构） -->
+  <g filter="url(#lift)">
+    <path d="M32 8.5 14 20.5 32 32.5Z" fill="#ffffff" />
+    <path d="M32 8.5 50 20.5 32 32.5Z" fill="url(#facet)" />
+    <path d="M14 31 32 43 50 31" fill="none" stroke="#ffffff" stroke-opacity="0.72"
+          stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M14 41.5 32 53.5 50 41.5" fill="none" stroke="#ffffff" stroke-opacity="0.38"
+          stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>

@@ -84,7 +84,7 @@
             <span class="iot-mono">{{ row.topic }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="QoS" width="78" align="center">
+        <el-table-column label="QoS" width="96" align="center">
           <template #default="{ row }">
             <span class="iot-chip">QoS {{ row.qos }}</span>
           </template>

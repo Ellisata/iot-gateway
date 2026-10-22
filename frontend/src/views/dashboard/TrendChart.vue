@@ -72,6 +72,13 @@
           :d="seg"
         />
         <path
+          v-for="(seg, i) in bandSegments"
+          :key="`r${i}`"
+          class="band"
+          :class="rateClass"
+          :d="seg"
+        />
+        <path
           v-for="(seg, i) in lineSegments"
           :key="`l${i}`"
           class="line"
@@ -113,7 +120,7 @@
         <g class="bars">
           <rect
             v-for="bar in bars"
-            :key="`b${bar.ts}`"
+            :key="`b${bar.order}`"
             class="bar"
             :x="bar.x"
             :y="bar.y"
@@ -123,7 +130,7 @@
           />
           <rect
             v-for="bar in badBars"
-            :key="`bb${bar.ts}`"
+            :key="`bb${bar.order}`"
             class="bar-bad"
             :x="bar.x"
             :y="bar.y"
@@ -139,7 +146,7 @@
           :key="`x${tick.label}`"
           class="axis"
           :x="tick.x"
-          :y="H - 8"
+          :y="AXIS_Y"
           :text-anchor="tick.anchor"
         >
           {{ tick.label }}
@@ -177,7 +184,14 @@
         <div class="tip-row">
           <i class="tip-dot is-online" aria-hidden="true" />
           {{ t('dashboard.trendOnlineRate') }}
-          <b>
+          <!-- 合并过的桶显示平均率与桶内范围；单点仍显示原始的 在线/采集 -->
+          <b v-if="hover.samples > 1">
+            {{ hover.rate == null ? '—' : `${hover.rate}%` }}
+            <span v-if="hover.rateMin !== hover.rateMax" class="tip-range">
+              ({{ hover.rateMin }}–{{ hover.rateMax }}%)
+            </span>
+          </b>
+          <b v-else>
             {{ hover.collected ? `${hover.online}/${hover.collected}` : '—' }}
             · {{ hover.rate == null ? '—' : `${hover.rate}%` }}
           </b>
@@ -220,13 +234,15 @@ const { t } = useI18n()
 
 // ---------- 几何常量 ----------
 const W = 720
-const H = 236
-const PAD = { left: 44, right: 12 }
+const PAD = { left: 44, right: 28 }
 const ONLINE_TOP = 14
 const ONLINE_H = 86
 const THROUGH_TOP = 142
 const THROUGH_H = 62
 const THROUGH_BOTTOM = THROUGH_TOP + THROUGH_H
+// 时间刻度紧贴吞吐柱图下方：它属于柱图的坐标轴，不该飘在底部空白里
+const AXIS_Y = THROUGH_BOTTOM + 14
+const H = AXIS_Y + 8
 const innerW = W - PAD.left - PAD.right
 
 const onlineTicks = [100, 50, 0]
@@ -269,6 +285,8 @@ const endTs = computed(() => {
   return Math.max(last, list[0].ts + props.intervalSec * 1000)
 })
 const lastTs = computed(() => parsed.value[parsed.value.length - 1]?.ts ?? 0)
+const spanMs = computed(() => endTs.value - startTs.value)
+const withDate = computed(() => spanMs.value > 12 * 3600 * 1000)
 
 const lastRate = computed(() => {
   for (let i = parsed.value.length - 1; i >= 0; i--) {
@@ -287,47 +305,144 @@ const rateClass = computed(() => {
   return 'is-bad'
 })
 
-const gapMs = computed(() => props.intervalSec * 1000 * 1.6)
+// ---------- 降采样 ----------
+// 24 小时窗口是 1440 个分钟点，摊在 ~660px 宽的图里每根柱子不到半个像素，
+// 叠在一起只剩一片噪点；6 小时的 360 个点也同样密。按时间合并成 ~100 个桶：
+// 曲线取桶内平均值（上下沿画桶内最小/最大值），柱子取桶内平均吞吐
+// （仍是图例里的「点/分」口径），每个桶的时间范围与明细在悬停里给出。
+const MAX_BUCKETS = 96
+// 桶宽取整分钟，边界落在整分钟上：6h → 5 分钟，24h → 15 分钟
+const BUCKET_STEPS = [1, 2, 3, 5, 10, 15, 30, 60]
 
-function buildSegments(valueOf) {
+const bucketMs = computed(() => {
+  const intervalMs = Math.max(1, props.intervalSec) * 1000
+  const span = Math.max(spanMs.value, intervalMs)
+  const neededMs = Math.ceil(span / MAX_BUCKETS)
+  const step = BUCKET_STEPS.find((m) => m * 60000 >= neededMs) ?? 60
+  return Math.max(intervalMs, step * 60000)
+})
+
+const buckets = computed(() => {
+  const intervalMs = Math.max(1, props.intervalSec) * 1000
+  const gapMs = intervalMs * 1.6
+  const width = bucketMs.value
+  const list = []
+
+  let current = null
+  let prevTs = null
+  for (const point of parsed.value) {
+    // 以 epoch 对齐桶边界，桶的范围在悬停里读起来是整分钟
+    const index = Math.floor(point.ts / width)
+    // 跨桶，或与前一个采样点之间出现断档（网关重启 / 采集停止）就另起一桶：
+    // 曲线在 gapBefore 处断开，而不是拉一条直线跨过空窗
+    const gap = prevTs != null && point.ts - prevTs > gapMs
+    if (!current || index !== current.index || gap) {
+      current = {
+        index,
+        gapBefore: gap,
+        tsSum: 0,
+        samples: 0,
+        firstTs: point.ts,
+        lastTs: point.ts,
+        rateSum: 0,
+        rateCount: 0,
+        rateMin: null,
+        rateMax: null,
+        pointsSum: 0,
+        badSum: 0,
+        last: point,
+      }
+      list.push(current)
+    }
+    current.samples += 1
+    current.tsSum += point.ts
+    current.lastTs = point.ts
+    current.last = point
+    current.pointsSum += point.points || 0
+    current.badSum += point.badPoints || 0
+    if (point.rate != null) {
+      current.rateSum += point.rate
+      current.rateCount += 1
+      current.rateMin =
+        current.rateMin == null ? point.rate : Math.min(current.rateMin, point.rate)
+      current.rateMax =
+        current.rateMax == null ? point.rate : Math.max(current.rateMax, point.rate)
+    }
+    prevTs = point.ts
+  }
+
+  return list.map((b, order) => ({
+    order,
+    gapBefore: b.gapBefore,
+    ts: b.tsSum / b.samples,
+    fromTs: b.firstTs,
+    toTs: b.lastTs + intervalMs,
+    samples: b.samples,
+    rate: b.rateCount ? Math.round(b.rateSum / b.rateCount) : null,
+    rateMin: b.rateMin,
+    rateMax: b.rateMax,
+    // 平均每分钟点数：桶宽变了，纵轴口径仍是「点/分」
+    points: b.pointsSum / b.samples,
+    badPoints: b.badSum / b.samples,
+    badTotal: b.badSum,
+    // 悬停展示用桶内最后一个点的瞬时状态（队列/积压本来就是仪表值）
+    online: b.last.online,
+    collected: b.last.collected,
+    queueDepth: b.last.queueDepth,
+    spoolDepth: b.last.spoolDepth,
+  }))
+})
+
+const rateSegments = computed(() => {
   const segments = []
   let current = []
-  let prevTs = null
   const flush = () => {
     if (current.length) {
       segments.push(current)
       current = []
     }
   }
-  for (const point of parsed.value) {
-    const value = valueOf(point)
-    if (value == null) {
+  for (const bucket of buckets.value) {
+    if (bucket.rate == null) {
       flush()
-      prevTs = null
       continue
     }
-    if (prevTs != null && point.ts - prevTs > gapMs.value) flush()
-    current.push(point)
-    prevTs = point.ts
+    if (bucket.gapBefore) flush()
+    current.push(bucket)
   }
   flush()
   return segments
-}
+})
 
 const lineSegments = computed(() =>
-  buildSegments((p) => p.rate).map(
-    (seg) => `M ${seg.map((p) => `${x(p.ts)} ${onlineY(p.rate)}`).join(' L ')}`
+  rateSegments.value.map(
+    (seg) => `M ${seg.map((b) => `${x(b.ts)} ${onlineY(b.rate)}`).join(' L ')}`
   )
 )
 
 const areaSegments = computed(() =>
-  buildSegments((p) => p.rate).map((seg) => {
+  rateSegments.value.map((seg) => {
     const baseline = ONLINE_TOP + ONLINE_H
-    const points = seg.map((p) => `${x(p.ts)} ${onlineY(p.rate)}`).join(' L ')
+    const points = seg.map((b) => `${x(b.ts)} ${onlineY(b.rate)}`).join(' L ')
     const first = seg[0]
     const last = seg[seg.length - 1]
     return `M ${x(first.ts)} ${baseline} L ${points} L ${x(last.ts)} ${baseline} Z`
   })
+)
+
+// 平均线会抹平短时掉线（24h 下 15 分钟的桶里掉 1 分钟，
+// 平均只降 1 个点出头），所以再画一条桶内最小/最大值的包络
+const bandSegments = computed(() =>
+  rateSegments.value
+    .filter((seg) => seg.some((b) => b.rateMin !== b.rateMax))
+    .map((seg) => {
+      const top = seg.map((b) => `${x(b.ts)} ${onlineY(b.rateMax)}`).join(' L ')
+      const bottom = [...seg]
+        .reverse()
+        .map((b) => `${x(b.ts)} ${onlineY(b.rateMin)}`)
+        .join(' L ')
+      return `M ${top} L ${bottom} Z`
+    })
 )
 
 // 纵轴取一个整齐的上限，避免出现 137 这种刻度
@@ -339,23 +454,23 @@ function niceMax(value) {
   return step * mag
 }
 
-const pointsMax = computed(() => niceMax(Math.max(0, ...parsed.value.map((p) => p.points))))
+const pointsMax = computed(() => niceMax(Math.max(0, ...buckets.value.map((b) => b.points))))
 
 const barW = computed(() =>
-  Math.max(0.8, Math.min(7, (innerW / Math.max(1, parsed.value.length)) * 0.62))
+  Math.max(0.8, Math.min(7, (innerW / Math.max(1, buckets.value.length)) * 0.62))
 )
 
 const bars = computed(() =>
-  parsed.value.map((p) => {
-    const h = p.points > 0 ? Math.max(1, (p.points / pointsMax.value) * THROUGH_H) : 0
+  buckets.value.map((b) => {
+    const h = b.points > 0 ? Math.max(1, (b.points / pointsMax.value) * THROUGH_H) : 0
     return {
-      ts: p.ts,
-      x: x(p.ts) - barW.value / 2,
+      order: b.order,
+      x: x(b.ts) - barW.value / 2,
       y: THROUGH_BOTTOM - h,
       h,
       badH:
-        p.badPoints > 0
-          ? Math.max(1, Math.min(h, (p.badPoints / pointsMax.value) * THROUGH_H))
+        b.badPoints > 0
+          ? Math.max(1, Math.min(h, (b.badPoints / pointsMax.value) * THROUGH_H))
           : 0,
     }
   })
@@ -368,9 +483,6 @@ const totalBad = computed(() =>
 )
 
 // ---------- 时间轴 ----------
-const spanMs = computed(() => endTs.value - startTs.value)
-const withDate = computed(() => spanMs.value > 12 * 3600 * 1000)
-
 function axisLabel(date) {
   const hh = String(date.getHours()).padStart(2, '0')
   const mm = String(date.getMinutes()).padStart(2, '0')
@@ -378,19 +490,71 @@ function axisLabel(date) {
   return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${hh}:${mm}`
 }
 
+// 桶的起止时间：同一天时后半段只留时分，避免「10-22 04:00–10-22 04:15」的重复
+function rangeLabel(fromTs, toTs) {
+  const from = new Date(fromTs)
+  const to = new Date(toTs)
+  const sameDay =
+    from.getFullYear() === to.getFullYear() &&
+    from.getMonth() === to.getMonth() &&
+    from.getDate() === to.getDate()
+  const tail =
+    withDate.value && sameDay
+      ? `${String(to.getHours()).padStart(2, '0')}:${String(to.getMinutes()).padStart(2, '0')}`
+      : axisLabel(to)
+  return `${axisLabel(from)}–${tail}`
+}
+
+// 刻度步长（秒）：一屏最多 5 段，24h 不会只剩一根线，几分钟的窗口也不会挤满文字
+const TICK_STEPS = [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400]
+
+// 按本地时钟对齐刻度：标签写的时间必须正好落在它画的位置上。
+// 旧实现按比例取点再截断到分钟，数据只有几分钟时「10:01」会画在 10:01:30 处。
+function alignedTick(ts, stepMs) {
+  const offset = new Date(ts).getTimezoneOffset() * 60000
+  return Math.ceil((ts - offset) / stepMs) * stepMs + offset
+}
+
 const xTicks = computed(() => {
+  const start = startTs.value
+  const end = endTs.value
+  const span = end - start
+  if (span <= 0) return []
+
+  const stepSec =
+    TICK_STEPS.find((s) => span / (s * 1000) <= 5) ?? TICK_STEPS[TICK_STEPS.length - 1]
+  const stepMs = stepSec * 1000
+  const pxPerMs = innerW / span
+
+  const times = []
+  for (let t = alignedTick(start, stepMs); t <= end; t += stepMs) times.push(t)
+
+  // 端点刻度只在窗口足够长时补：标签只到分钟，短窗口里「15:03」会被画在
+  // 15:03:37 的位置上。宁可少标两端，也不让标签和它所在的位置对不上。
+  if (span >= 2 * 3600 * 1000) {
+    const minGap = (withDate.value ? 96 : 52) / pxPerMs
+    const inner = times.filter((t) => t - start >= minGap && end - t >= minGap)
+    times.length = 0
+    times.push(start, ...inner, end)
+  }
+
+  // 标签精度到分钟：相邻刻度可能同名，保留靠前（更准确）的那个
   const ticks = []
   const seen = new Set()
-  for (let i = 0; i <= 4; i++) {
-    const fraction = i / 4
-    const date = new Date(startTs.value + spanMs.value * fraction)
-    const label = axisLabel(date)
+  const edgePx = 26
+  for (const t of times) {
+    const label = axisLabel(new Date(t))
     if (seen.has(label)) continue
     seen.add(label)
     ticks.push({
-      x: PAD.left + innerW * fraction,
+      x: x(t),
       label,
-      anchor: i === 0 ? 'start' : i === 4 ? 'end' : 'middle',
+      anchor:
+        (t - start) * pxPerMs < edgePx
+          ? 'start'
+          : (end - t) * pxPerMs < edgePx
+            ? 'end'
+            : 'middle',
     })
   }
   return ticks
@@ -404,43 +568,43 @@ const ariaLabel = computed(
 const hover = ref(null)
 
 function handleMove(event) {
-  if (!parsed.value.length) return
+  if (!buckets.value.length) return
   const rect = event.currentTarget.getBoundingClientRect()
   if (!rect.width) return
   const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
   const targetTs = startTs.value + spanMs.value * ratio
 
-  let nearest = parsed.value[0]
-  for (const point of parsed.value) {
-    if (Math.abs(point.ts - targetTs) < Math.abs(nearest.ts - targetTs)) nearest = point
+  let nearest = buckets.value[0]
+  for (const bucket of buckets.value) {
+    if (Math.abs(bucket.ts - targetTs) < Math.abs(nearest.ts - targetTs)) nearest = bucket
   }
 
   const xx = x(nearest.ts)
   const barH =
     nearest.points > 0 ? Math.max(1, (nearest.points / pointsMax.value) * THROUGH_H) : 0
-  const hh = String(nearest.date.getHours()).padStart(2, '0')
-  const mm = String(nearest.date.getMinutes()).padStart(2, '0')
+  // 合并过的桶显示时间段，单点仍显示到分钟
+  const timeLabel =
+    nearest.samples > 1
+      ? rangeLabel(nearest.fromTs, nearest.toTs)
+      : axisLabel(new Date(nearest.fromTs))
 
   hover.value = {
     x: xx,
+    samples: nearest.samples,
     rate: nearest.rate,
+    rateMin: nearest.rateMin,
+    rateMax: nearest.rateMax,
     online: nearest.online,
     collected: nearest.collected,
-    points: nearest.points,
-    badPoints: nearest.badPoints,
+    points: Math.round(nearest.points),
+    badPoints: Math.round(nearest.badTotal),
     queueDepth: nearest.queueDepth,
     spoolDepth: nearest.spoolDepth,
     barY: THROUGH_BOTTOM - barH,
     barH,
     leftPct: Math.min(88, Math.max(12, (xx / W) * 100)),
-    timeLabel: withDate.value
-      ? `${pad(nearest.date.getMonth() + 1)}-${pad(nearest.date.getDate())} ${hh}:${mm}`
-      : `${hh}:${mm}`,
+    timeLabel,
   }
-}
-
-function pad(n) {
-  return String(n).padStart(2, '0')
 }
 </script>
 
@@ -541,6 +705,23 @@ function pad(n) {
 
 .area.is-unknown {
   fill: rgba(148, 163, 184, 0.08);
+}
+
+/* 桶内最小/最大值包络：平均线抹平的短时掉线在这里仍然看得见 */
+.band {
+  fill: rgba(5, 150, 105, 0.16);
+}
+
+.band.is-warn {
+  fill: rgba(217, 119, 6, 0.16);
+}
+
+.band.is-bad {
+  fill: rgba(225, 29, 72, 0.16);
+}
+
+.band.is-unknown {
+  fill: rgba(148, 163, 184, 0.16);
 }
 
 .line {
@@ -667,5 +848,10 @@ function pad(n) {
 
 .tip-warn {
   color: var(--danger);
+}
+
+.tip-range {
+  font-weight: 400;
+  color: var(--ink-4);
 }
 </style>

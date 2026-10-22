@@ -87,15 +87,21 @@ func (s *Sampler) loop(stop <-chan struct{}, done chan<- struct{}) {
 
 	// 立即落一个点：前端首次打开时不必空等一整分钟才看到基线。
 	s.collect()
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
+
+	// 其后对齐到采样间隔的整点再采。采样时间戳就是前端时间轴的横坐标：
+	// 若从进程启动时刻（如 :27）起逐分钟推进，样本会永远落在刻度之间 ——
+	// 大盘刚启动、窗口只有几分钟时，柱状图会明显偏离「10:04」这样的刻度，
+	// 要等窗口拉长到小时级、这点偏差被稀释掉才「对上」。
 	for {
+		next := time.Now().Truncate(s.interval).Add(s.interval)
+		timer := time.NewTimer(time.Until(next))
 		select {
 		case <-stop:
+			timer.Stop()
 			return
-		case now := <-ticker.C:
-			s.collectAt(now)
+		case <-timer.C:
 		}
+		s.collectAt(next)
 	}
 }
 
@@ -106,6 +112,10 @@ func (s *Sampler) collect() {
 // collectAt 采集一次快照。overview 取数失败时仍写入采样点（Points 等数据有效），
 // 但把 HasOverview 置为 false，由前端把这一段画成断点而不是 0%。
 func (s *Sampler) collectAt(now time.Time) {
+	// 时间戳截到采样间隔的整点上，与前端按整分钟对齐的时间轴同一口径；
+	// 启动瞬间那个点也一并截齐，不让它悬在两个刻度之间。
+	now = now.Truncate(s.interval)
+
 	points, badPoints := s.rec.takePoints()
 	sample := Sample{
 		Time:      now.Format("2006-01-02 15:04:05"),

@@ -164,3 +164,20 @@ func TestSamplerKeepsPointsWhenOverviewFails(t *testing.T) {
 		t.Errorf("points = %d, want 1 (throughput is independent of overview)", got[0].Points)
 	}
 }
+
+// 采样时间戳必须落在整分钟上：前端时间轴按整分钟对齐刻度，
+// 点落在 :37 这类任意秒上时，启动初期窗口只有几分钟的柱状图会明显偏离刻度。
+func TestSamplerAlignsSampleTimeToInterval(t *testing.T) {
+	rec := NewRecorder()
+	sampler := NewSampler(rec, fakeOverview{}, fakeCollection{}, fakePush{})
+
+	sampler.collectAt(time.Date(2026, 10, 21, 22, 0, 37, 0, time.Local))
+
+	got := rec.Trend(1)
+	if len(got) != 1 {
+		t.Fatalf("samples = %d, want 1", len(got))
+	}
+	if got[0].Time != "2026-10-21 22:00:00" {
+		t.Errorf("time = %q, want 2026-10-21 22:00:00", got[0].Time)
+	}
+}
