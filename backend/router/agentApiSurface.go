@@ -517,6 +517,13 @@ var agentApiSurface = map[string]SurfaceEntry{
 			"tail":     "取末尾 N 行；默认 200，上限 5000",
 		}),
 	},
+	"GET /log/downloadFile": {
+		Access: AccessRead,
+		Params: argQuery(dto.DownloadLogDTO{}, map[string]string{
+			"fileName": "要下载的日志文件名（取自 /agentApi/log/listFiles）",
+		}),
+		Note: "响应是**原始日志文件**（Content-Disposition: attachment），不是 JSON 信封；支持 Range 断点续传",
+	},
 	"GET /gateway/get": {Access: AccessRead, Params: argNone()},
 	"POST /gateway/update": {
 		Access: AccessWrite,

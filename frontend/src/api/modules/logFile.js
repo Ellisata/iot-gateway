@@ -38,3 +38,20 @@ export function readLogFile(params = {}) {
     },
   })
 }
+
+/**
+ * 下载日志文件（整份原始文件）
+ * @param {Object} params - 查询参数
+ * @param {string} params.fileName - 日志文件名（必填）
+ * @returns {Promise<Blob>} 文件内容
+ */
+export function downloadLogFile(params = {}) {
+  return request({
+    url: '/log/downloadFile',
+    method: 'get',
+    params: {
+      fileName: params.fileName,
+    },
+    responseType: 'blob',
+  })
+}

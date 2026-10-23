@@ -130,6 +130,21 @@ func (s *LogFileService) ReadFile(fileName string, tail int) (*vo.LogReadVO, err
 	}, nil
 }
 
+// DownloadPath 校验并返回日志文件路径，供下载接口流式下发。
+// 与 ReadFile 共用 safePath，但**不读内容**：整份文件交给 http.ServeContent
+// 分块发送（支持 Range 断点续传），避免把大文件整个载入内存。
+func (s *LogFileService) DownloadPath(fileName string) (string, error) {
+	path, err := s.safePath(fileName)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", appError.NewAppError(errLogFile, "日志文件不存在")
+	}
+	return path, nil
+}
+
 // safePath 防目录穿越：只允许纯文件名（不含 /、\、..），
 // 且解析后的绝对路径必须仍位于日志目录内。
 func (s *LogFileService) safePath(name string) (string, error) {

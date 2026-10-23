@@ -179,3 +179,27 @@ func TestLogFileService_ReadFileNotExists(t *testing.T) {
 		t.Fatalf("err = %v, want 不存在", err)
 	}
 }
+
+func TestLogFileService_DownloadPath(t *testing.T) {
+	svc := newLogDirSvc(t)
+	writeLogFile(t, svc, "app.log", "content\n")
+
+	path, err := svc.DownloadPath("app.log")
+	if err != nil {
+		t.Fatalf("DownloadPath error: %v", err)
+	}
+	if path != filepath.Join(svc.logDir, "app.log") {
+		t.Fatalf("path = %q", path)
+	}
+
+	// 与 ReadFile 同一套文件名校验：穿越、目录、空名一律拒绝；
+	// 目录本身（即使名为 xxx.log）不是普通文件，也须拒绝。
+	if err := os.Mkdir(filepath.Join(svc.logDir, "dir.log"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"../app.log", "sub/app.log", "dir.log", "", "missing.log"} {
+		if _, err := svc.DownloadPath(name); err == nil {
+			t.Errorf("DownloadPath(%q) 应报错", name)
+		}
+	}
+}

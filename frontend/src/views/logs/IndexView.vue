@@ -62,7 +62,7 @@
           width="170"
           class-name="iot-col-time"
         />
-        <el-table-column :label="t('common.action')" width="90" align="center" fixed="right">
+        <el-table-column :label="t('common.action')" width="120" align="center" fixed="right">
           <template #default="{ row }">
             <div class="iot-row-actions">
               <el-tooltip :content="t('log.viewLog')" placement="top">
@@ -74,6 +74,18 @@
                   :icon="Eye"
                   :aria-label="t('log.viewLog')"
                   @click="handleView(row)"
+                />
+              </el-tooltip>
+              <el-tooltip :content="t('log.downloadLog')" placement="top">
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="Download"
+                  :loading="downloadingFile === row.fileName"
+                  :aria-label="t('log.downloadLog')"
+                  @click="handleDownload(row)"
                 />
               </el-tooltip>
             </div>
@@ -129,6 +141,13 @@
         </el-select>
         <span class="log-total">{{ t('log.totalLines', { total: totalLines }) }}</span>
         <div class="log-toolbar-actions">
+          <el-button
+            :icon="Download"
+            :loading="downloadingFile === currentFile"
+            @click="handleDownload({ fileName: currentFile })"
+          >
+            {{ t('log.downloadLog') }}
+          </el-button>
           <el-button :icon="Bottom" :loading="contentLoading" @click="scrollToBottom">
             {{ t('log.scrollToBottom') }}
           </el-button>
@@ -159,9 +178,11 @@
 <script setup>
 import { ref, computed, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getLogFilePage, readLogFile } from '@/api/modules/logFile'
+import { ElMessage } from 'element-plus'
+import { downloadLogFile, getLogFilePage, readLogFile } from '@/api/modules/logFile'
 import {
   IconArrowBarToDown as Bottom,
+  IconDownload as Download,
   IconEye as Eye,
   IconFileText as FileText,
   IconRefresh as Refresh,
@@ -253,6 +274,45 @@ async function fetchLogContent() {
     totalLines.value = 0
   } finally {
     contentLoading.value = false
+  }
+}
+
+// ---------- 下载 ----------
+// 记录正在下载的文件名，行内按钮与抽屉按钮共用（同一文件时都会转圈）
+const downloadingFile = ref('')
+
+async function handleDownload(row) {
+  const fileName = row?.fileName
+  if (!fileName || downloadingFile.value) return
+  downloadingFile.value = fileName
+  try {
+    const blob = await downloadLogFile({ fileName })
+    // 文件刚被轮转删除等业务错误仍走 JSON 信封（HTTP 200），blob 类型可据此识别；
+    // 不拦的话用户会下到一个内容是 JSON 的 .log 文件
+    if (blob.type?.includes('application/json')) {
+      let msg = ''
+      try {
+        msg = JSON.parse(await blob.text())?.msg
+      } catch {
+        // 解析失败走兜底文案
+      }
+      ElMessage.error(msg || t('log.downloadFailed'))
+      return
+    }
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    ElMessage.success(t('log.downloadSuccess'))
+  } catch (err) {
+    // 网络/HTTP 层的错误提示已由 axios 拦截器统一处理
+    console.error('下载日志失败', err)
+  } finally {
+    downloadingFile.value = ''
   }
 }
 

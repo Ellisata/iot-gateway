@@ -16,6 +16,7 @@ func LogFileRoutes(r gin.IRouter, lc *controller.LogFileController) {
 	{
 		log.GET("/listFiles", lc.ListFiles)
 		log.GET("/readFile", lc.ReadFile)
+		log.GET("/downloadFile", lc.DownloadFile)
 	}
 
 }

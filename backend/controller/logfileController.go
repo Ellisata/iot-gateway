@@ -53,3 +53,21 @@ func (ctr *LogFileController) ReadFile(c *gin.Context) {
 	}
 	c.JSON(200, response.Success(data))
 }
+
+// DownloadFile 下载日志文件（整份原始文件）。
+// 成功响应是文件本身而不是 JSON 信封：FileAttachment 走 http.ServeContent，
+// 自带 Content-Disposition / Content-Length 并支持 Range 断点续传。
+func (ctr *LogFileController) DownloadFile(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.DownloadLogDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	path, err := ctr.logFileService.DownloadPath(req.FileName)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.FileAttachment(path, req.FileName)
+}

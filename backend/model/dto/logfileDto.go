@@ -17,3 +17,8 @@ type ReadLogDTO struct {
 	FileName string `form:"fileName" binding:"required"`
 	Tail     int    `form:"tail"` // 末尾 N 行，默认 200，上限 5000（service 内钳制）
 }
+
+// DownloadLogDTO 日志文件下载（整份原始文件）
+type DownloadLogDTO struct {
+	FileName string `form:"fileName" binding:"required"`
+}
