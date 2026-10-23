@@ -36,6 +36,8 @@
     "err.mqtt_subscription_exists": "MQTT subscription name already exists",
     "err.mqtt_subscription_not_found": "MQTT subscription not found",
     "err.mqtt_subscription_connect_fail": "MQTT subscription connectivity test failed",
+    "err.mqtt_subscription_device_point_exists": "Subscription device point already exists",
+    "err.mqtt_subscription_device_point_not_found": "Subscription device point not found",
     "err.device_address_data_type": "Data type not supported by protocol",
     "err.device_scan_disabled": "LAN device scan is disabled (deviceScan.enabled=false)",
     "err.device_scan_busy": "A scan job is already running; wait for it to finish or cancel it first",

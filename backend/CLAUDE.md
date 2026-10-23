@@ -143,15 +143,18 @@
   必须配置整数默认值,避免把外部质量码原样当成网关质量码。
 - **设备/点位元信息落 SQLite**([subscribe/devicePointStore.go](subscribe/devicePointStore.go)):
   转换成功的记录在投递时序库的同时,把 `deviceId / deviceName / deviceAddressId /
-  deviceAddressName / deviceAddressLabel / dataType / kind / protocol` 异步 upsert 进
+  deviceAddressLabel / kind` 异步 upsert 进
   `mqtt_subscription_device_point`,自然键 `(device_id, device_address_id)`(与时序库身份口径一致)。
   时序库只存 ID 与数值,名称/说明在查询侧无处可查,这张表供后续统计分析按名称关联;它**不存采样值**。
   收包协程只做内存查重 + 非阻塞入队(队列满则丢弃、下一条报文重试),写库由独立协程攒批完成
-  ——SQLite 只有一条写连接,不能在 paho 收包协程里直接写。元信息变化立即更新,
-  未变化时 `last_seen_at` 按分钟级节流刷新;空值不覆盖已有非空值(兼容未配置名称字段的历史订阅)。
+  ——SQLite 只有一条写连接,不能在 paho 收包协程里直接写。首次出现与元信息变化时立即更新;
+  空值不覆盖已有非空值(兼容未配置名称字段的历史订阅)。
   管理器 `Start/Stop` 与落库器同生命周期,停机前排空队列。
-  对外查询走 `GET /mqttSubscription/pageMqttSubscriptionDevicePoint`(分页 + 设备/点位 ID、名称、协议模糊过滤;
+  对外查询走 `GET /mqttSubscription/pageMqttSubscriptionDevicePoint`(分页 + 设备/点位 ID、名称模糊过滤;
   `/agentApi` 镜像归为 read),前端页面在「订阅管理 → 订阅设备与点位」。
+  该页还支持**手工新增 / 编辑 / Excel 导入**(`source=manual`):手工行是运维的最终确认,
+  自动上报只更新 `source=auto` 的行,upsert 语义见 `subscribe/devicePointUpsert.go`;
+  导入按自然键 upsert(已存在则覆盖元信息),自然键创建后不可修改。
 - 订阅配置每 10s 比对校验和热加载;服务层增删改后也会立即 `Refresh()`。
   未变化的订阅保留原连接,变化的断开重连。
 

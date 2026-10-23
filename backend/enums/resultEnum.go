@@ -122,6 +122,10 @@ var (
 	MqttSubscriptionNotExistsEnum   = NewBusinessEnum("60022", "MQTT 订阅不存在", "err.mqtt_subscription_not_found")
 	MqttSubscriptionConnectFailEnum = NewBusinessEnum("60023", "MQTT 订阅连通性测试失败", "err.mqtt_subscription_connect_fail")
 
+	// 订阅设备/点位索引（手工维护）错误码
+	MqttSubscriptionDevicePointExistsEnum    = NewBusinessEnum("60024", "订阅设备点位已存在", "err.mqtt_subscription_device_point_exists")
+	MqttSubscriptionDevicePointNotExistsEnum = NewBusinessEnum("60025", "订阅设备点位不存在", "err.mqtt_subscription_device_point_not_found")
+
 	// 开放接口密钥相关错误码
 	OpenApiSecretExistsEnum    = NewBusinessEnum("70001", "开放接口密钥名称已存在", "err.open_api_secret_exists")
 	OpenApiSecretNotExistsEnum = NewBusinessEnum("70002", "开放接口密钥不存在", "err.open_api_secret_not_found")

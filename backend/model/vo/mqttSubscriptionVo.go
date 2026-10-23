@@ -51,15 +51,12 @@ type MqttSubscriptionDevicePointVO struct {
 	DeviceID           string `json:"deviceId"`
 	DeviceAddressID    string `json:"deviceAddressId"`
 	DeviceName         string `json:"deviceName"`
-	DeviceAddressName  string `json:"deviceAddressName"`
 	DeviceAddressLabel string `json:"deviceAddressLabel"`
-	DataType           string `json:"dataType"`
 	Kind               string `json:"kind"`
-	Protocol           string `json:"protocol"`
-	FirstSeenAt        string `json:"firstSeenAt"`
-	LastSeenAt         string `json:"lastSeenAt"`
-	CreatedAt          string `json:"createdAt"`
-	UpdatedAt          string `json:"updatedAt"`
+	// Source auto=订阅报文自动发现，manual=手工新增/编辑/导入。
+	Source    string `json:"source"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
 }
 
 // MqttSubscriptionPreviewVO 映射预览结果。

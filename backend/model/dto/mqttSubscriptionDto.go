@@ -53,13 +53,34 @@ type PageMqttSubscriptionDTO struct {
 // 数据来自订阅报文转换后的元信息索引（mqtt_subscription_device_point），
 // 不含采样值；名称/ID 均按模糊匹配。
 type PageMqttSubscriptionDevicePointDTO struct {
-	Page              int    `form:"page"              binding:"required,min=1"`
-	Size              int    `form:"size"              binding:"required,min=1,max=100"`
-	DeviceID          string `form:"deviceId"`
-	DeviceName        string `form:"deviceName"`
-	DeviceAddressID   string `form:"deviceAddressId"`
-	DeviceAddressName string `form:"deviceAddressName"`
-	Protocol          string `form:"protocol"`
+	Page            int    `form:"page"              binding:"required,min=1"`
+	Size            int    `form:"size"              binding:"required,min=1,max=100"`
+	DeviceID        string `form:"deviceId"`
+	DeviceName      string `form:"deviceName"`
+	DeviceAddressID string `form:"deviceAddressId"`
+}
+
+// CreateMqttSubscriptionDevicePointDTO 手工新增订阅设备/点位。
+//
+// deviceId + deviceAddressId 是自然键（与时序库身份口径一致），创建后不可修改。
+type CreateMqttSubscriptionDevicePointDTO struct {
+	DeviceID           string `json:"deviceId"           binding:"required,min=1,max=128"`
+	DeviceAddressID    string `json:"deviceAddressId"    binding:"required,min=1,max=128"`
+	DeviceName         string `json:"deviceName"         binding:"max=100"`
+	DeviceAddressLabel string `json:"deviceAddressLabel" binding:"max=100"`
+	Kind               string `json:"kind"`
+}
+
+// UpdateMqttSubscriptionDevicePointDTO 编辑订阅设备/点位。
+//
+// deviceId / deviceAddressId 只用于定位，不是可修改字段；元信息按提交值覆盖，
+// 空串表示清空。
+type UpdateMqttSubscriptionDevicePointDTO struct {
+	DeviceID           string `json:"deviceId"           binding:"required,min=1,max=128"`
+	DeviceAddressID    string `json:"deviceAddressId"    binding:"required,min=1,max=128"`
+	DeviceName         string `json:"deviceName"         binding:"max=100"`
+	DeviceAddressLabel string `json:"deviceAddressLabel" binding:"max=100"`
+	Kind               string `json:"kind"`
 }
 
 // TestMqttSubscriptionDTO 订阅连通性测试请求（不落库）

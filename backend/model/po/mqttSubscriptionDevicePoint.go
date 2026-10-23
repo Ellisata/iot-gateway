@@ -3,6 +3,15 @@
 
 package po
 
+// 订阅设备/点位行的维护来源。
+const (
+	// MqttSubscriptionDevicePointSourceAuto 由订阅报文自动 upsert。
+	MqttSubscriptionDevicePointSourceAuto = "auto"
+	// MqttSubscriptionDevicePointSourceManual 手工新增 / 编辑 / Excel 导入；
+	// 自动上报不得再覆盖该行的元信息。
+	MqttSubscriptionDevicePointSourceManual = "manual"
+)
+
 // MqttSubscriptionDevicePoint MQTT 订阅设备/点位信息索引。
 //
 // 一行 = 订阅报文里出现过的一个点位，连同它的设备与点位元信息。
@@ -14,16 +23,12 @@ type MqttSubscriptionDevicePoint struct {
 	DeviceID           string `gorm:"column:device_id;primaryKey" json:"deviceId"`
 	DeviceAddressID    string `gorm:"column:device_address_id;primaryKey" json:"deviceAddressId"`
 	DeviceName         string `gorm:"column:device_name;not null;default:''" json:"deviceName"`
-	DeviceAddressName  string `gorm:"column:device_address_name;not null;default:''" json:"deviceAddressName"`
 	DeviceAddressLabel string `gorm:"column:device_address_label;not null;default:''" json:"deviceAddressLabel"`
-	DataType           string `gorm:"column:data_type;not null;default:''" json:"dataType"`
 	Kind               string `gorm:"column:kind;not null;default:''" json:"kind"`
-	Protocol           string `gorm:"column:protocol;not null;default:''" json:"protocol"`
-	// FirstSeenAt / LastSeenAt 首次/最近一次在订阅报文中出现的时间。
-	FirstSeenAt string `gorm:"column:first_seen_at;not null" json:"firstSeenAt"`
-	LastSeenAt  string `gorm:"column:last_seen_at;not null" json:"lastSeenAt"`
-	CreatedAt   string `gorm:"column:created_at" json:"createdAt"`
-	UpdatedAt   string `gorm:"column:updated_at" json:"updatedAt"`
+	// Source 维护来源：auto（订阅报文自动上报）/ manual（手工维护）。
+	Source    string `gorm:"column:source;not null;default:'auto'" json:"source"`
+	CreatedAt string `gorm:"column:created_at" json:"createdAt"`
+	UpdatedAt string `gorm:"column:updated_at" json:"updatedAt"`
 }
 
 // TableName 表名

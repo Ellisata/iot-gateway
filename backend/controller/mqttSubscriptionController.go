@@ -105,6 +105,65 @@ func (ctr *MqttSubscriptionController) PageMqttSubscriptionDevicePoint(c *gin.Co
 	c.JSON(200, response.Success(data))
 }
 
+// CreateMqttSubscriptionDevicePoint 手工新增订阅设备/点位
+func (ctr *MqttSubscriptionController) CreateMqttSubscriptionDevicePoint(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.CreateMqttSubscriptionDevicePointDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	if err := ctr.service.CreateMqttSubscriptionDevicePoint(ctx, &req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(nil))
+}
+
+// UpdateMqttSubscriptionDevicePoint 编辑订阅设备/点位元信息
+func (ctr *MqttSubscriptionController) UpdateMqttSubscriptionDevicePoint(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.UpdateMqttSubscriptionDevicePointDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	if err := ctr.service.UpdateMqttSubscriptionDevicePoint(ctx, &req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(nil))
+}
+
+// ImportMqttSubscriptionDevicePoint 批量导入订阅设备/点位（Excel .xlsx，上传字段名 file）
+func (ctr *MqttSubscriptionController) ImportMqttSubscriptionDevicePoint(c *gin.Context) {
+	ctx := c.Request.Context()
+	data, err := readXlsxUpload(c, "file")
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	result, err := ctr.service.ImportMqttSubscriptionDevicePoints(ctx, data)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(result))
+}
+
+// ImportMqttSubscriptionDevicePointTemplate 下载订阅设备/点位导入模板（.xlsx）
+func (ctr *MqttSubscriptionController) ImportMqttSubscriptionDevicePointTemplate(c *gin.Context) {
+	ctx := c.Request.Context()
+	buf, err := ctr.service.GenerateMqttSubscriptionDevicePointImportTemplate()
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", `attachment; filename="mqtt-subscription-device-point-import-template.xlsx"`)
+	c.Data(200, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
+}
+
 // TestMqttSubscription 连通性测试（不保存配置）
 func (ctr *MqttSubscriptionController) TestMqttSubscription(c *gin.Context) {
 	ctx := c.Request.Context()

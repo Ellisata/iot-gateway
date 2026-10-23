@@ -17,13 +17,64 @@ export function getSubscriptionList(params) {
 
 /**
  * 分页查询订阅报文里出现过的设备与点位信息
- * @param {Object} params - { page, size, deviceId?, deviceName?, deviceAddressId?, deviceAddressName?, protocol? }
+ * @param {Object} params - { page, size, deviceId?, deviceName?, deviceAddressId? }
  */
 export function getSubscriptionDevicePointList(params) {
   return request({
     url: '/mqttSubscription/pageMqttSubscriptionDevicePoint',
     method: 'get',
     params,
+  })
+}
+
+/**
+ * 手工新增订阅设备/点位
+ * @param {Object} data - { deviceId, deviceAddressId, deviceName?, deviceAddressLabel?, kind? }
+ */
+export function createSubscriptionDevicePoint(data) {
+  return request({
+    url: '/mqttSubscription/createMqttSubscriptionDevicePoint',
+    method: 'post',
+    data,
+  })
+}
+
+/**
+ * 编辑订阅设备/点位元信息（自然键只用于定位）
+ * @param {Object} data - { deviceId, deviceAddressId, deviceName?, deviceAddressLabel?, kind? }
+ */
+export function updateSubscriptionDevicePoint(data) {
+  return request({
+    url: '/mqttSubscription/updateMqttSubscriptionDevicePoint',
+    method: 'post',
+    data,
+  })
+}
+
+/**
+ * 批量导入订阅设备/点位（Excel .xlsx，按设备ID+点位ID upsert）
+ * @param {File} file
+ * @returns {Promise<{total:number, success:number, failed:number, errors:Array<{row:number,name:string,reason:string}>}>}
+ */
+export function importSubscriptionDevicePoints(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request({
+    url: '/mqttSubscription/importMqttSubscriptionDevicePoint',
+    method: 'post',
+    data: formData,
+  })
+}
+
+/**
+ * 下载订阅设备/点位导入模板（.xlsx）
+ * @returns {Promise<Blob>}
+ */
+export function downloadSubscriptionDevicePointTemplate() {
+  return request({
+    url: '/mqttSubscription/importMqttSubscriptionDevicePointTemplate',
+    method: 'get',
+    responseType: 'blob',
   })
 }
 

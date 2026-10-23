@@ -22,7 +22,7 @@
       </div>
     </header>
 
-    <!-- 工作区：五个筛选条件、表格与分页共用一块表面 -->
+    <!-- 工作区：筛选在左、动作在右，表格与分页共用一块表面 -->
     <section class="iot-panel iot-enter" style="animation-delay: 60ms">
       <div class="iot-toolbar">
         <div class="iot-toolbar-filters point-filters">
@@ -53,28 +53,23 @@
               @keyup.enter="handleSearch"
             />
           </div>
-          <div class="filter-field">
-            <span class="filter-label">{{ t('subscription.fieldDeviceAddressName') }}</span>
-            <el-input
-              v-model="query.deviceAddressName"
-              clearable
-              class="filter-input"
-              @keyup.enter="handleSearch"
-            />
-          </div>
-          <div class="filter-field is-short">
-            <span class="filter-label">{{ t('subscription.fieldProtocol') }}</span>
-            <el-input
-              v-model="query.protocol"
-              clearable
-              class="filter-input"
-              @keyup.enter="handleSearch"
-            />
-          </div>
           <div class="filter-actions">
             <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
             <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
           </div>
+        </div>
+
+        <div class="iot-toolbar-actions">
+          <el-button :icon="Download" @click="handleDownloadTemplate">
+            {{ t('common.downloadTemplate') }}
+          </el-button>
+          <el-button :icon="Upload" :loading="importing" @click="handleImport">
+            {{ t('common.import') }}
+          </el-button>
+          <el-button type="primary" :icon="Plus" @click="handleAdd">
+            {{ t('subscriptionDevicePoint.add') }}
+          </el-button>
+          <input ref="fileInputRef" type="file" accept=".xlsx" class="hidden" @change="handleFileChange" />
         </div>
       </div>
 
@@ -113,21 +108,9 @@
             <span class="iot-mono">{{ row.deviceAddressId }}</span>
           </template>
         </el-table-column>
-        <el-table-column
-          :label="t('subscription.fieldDeviceAddressName')"
-          min-width="150"
-          show-overflow-tooltip
-          class-name="iot-col-muted"
-        />
         <el-table-column :label="t('subscription.fieldDeviceAddressLabel')" min-width="130" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.deviceAddressLabel" class="iot-chip">{{ row.deviceAddressLabel }}</span>
-            <span v-else class="iot-cell-muted">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('subscription.fieldDataType')" width="120" align="center">
-          <template #default="{ row }">
-            <span v-if="row.dataType" class="iot-chip">{{ row.dataType }}</span>
             <span v-else class="iot-cell-muted">—</span>
           </template>
         </el-table-column>
@@ -137,24 +120,27 @@
             <span v-else class="iot-cell-muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('subscription.fieldProtocol')" min-width="130" show-overflow-tooltip>
+        <el-table-column :label="t('subscriptionDevicePoint.fieldSource')" width="90" align="center">
           <template #default="{ row }">
-            <span v-if="row.protocol" class="iot-chip">{{ row.protocol }}</span>
-            <span v-else class="iot-cell-muted">—</span>
+            <!-- 手工行不会被订阅报文覆盖，来源标签让这件事在列表里可见 -->
+            <span v-if="row.source === 'manual'" class="iot-chip is-manual">
+              {{ t('subscriptionDevicePoint.sourceManual') }}
+            </span>
+            <span v-else class="iot-chip">{{ t('subscriptionDevicePoint.sourceAuto') }}</span>
           </template>
         </el-table-column>
         <el-table-column
-          prop="firstSeenAt"
-          :label="t('subscriptionDevicePoint.firstSeenAt')"
-          width="160"
-          class-name="iot-col-time"
-        />
-        <el-table-column
-          prop="lastSeenAt"
-          :label="t('subscriptionDevicePoint.lastSeenAt')"
-          width="160"
-          class-name="iot-col-time"
-        />
+          :label="t('common.action')"
+          width="88"
+          align="center"
+          fixed="right"
+        >
+          <template #default="{ row }">
+            <el-button link type="primary" :icon="EditPen" @click="handleEdit(row)">
+              {{ t('common.edit') }}
+            </el-button>
+          </template>
+        </el-table-column>
 
         <template #empty>
           <div class="iot-empty">
@@ -180,18 +166,86 @@
         />
       </div>
     </section>
+
+    <!-- 新增 / 编辑：自然键创建后不可改，其余元信息按提交值覆盖 -->
+    <el-dialog
+      v-model="dialogVisible"
+      class="iot-dialog"
+      :title="isEdit ? t('subscriptionDevicePoint.editTitle') : t('subscriptionDevicePoint.addTitle')"
+      width="560px"
+      :close-on-click-modal="false"
+    >
+      <el-form
+        ref="formRef"
+        :model="formData"
+        :rules="formRules"
+        label-width="96px"
+        label-position="right"
+        status-icon
+      >
+        <el-form-item :label="t('subscription.fieldDeviceId')" prop="deviceId">
+          <el-input v-model="formData.deviceId" :disabled="isEdit" maxlength="128" />
+          <p v-if="isEdit" class="form-hint">{{ t('subscriptionDevicePoint.naturalKeyImmutable') }}</p>
+        </el-form-item>
+        <el-form-item :label="t('subscription.fieldDeviceAddressId')" prop="deviceAddressId">
+          <el-input v-model="formData.deviceAddressId" :disabled="isEdit" maxlength="128" />
+        </el-form-item>
+        <el-form-item :label="t('subscription.fieldDeviceName')" prop="deviceName">
+          <el-input v-model="formData.deviceName" maxlength="100" show-word-limit />
+        </el-form-item>
+        <el-form-item :label="t('subscription.fieldDeviceAddressLabel')" prop="deviceAddressLabel">
+          <el-input v-model="formData.deviceAddressLabel" maxlength="100" show-word-limit />
+        </el-form-item>
+        <el-form-item :label="t('subscription.fieldKind')" prop="kind">
+          <el-select
+            v-model="formData.kind"
+            class="kind-select"
+            clearable
+            :placeholder="t('subscriptionDevicePoint.kindPlaceholder')"
+          >
+            <el-option
+              v-for="opt in kindOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="submitting" @click="handleSubmit">
+          {{ t('common.save') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <ImportResultDialog v-model:visible="importResultVisible" :result="importResult" />
   </div>
 </template>
 
 <script setup>
-import { reactive, ref, computed, onMounted } from 'vue'
+import { reactive, ref, computed, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import {
   IconDeviceDesktop as DeviceDesktop,
+  IconDownload as Download,
+  IconPencil as EditPen,
+  IconPlus as Plus,
   IconPoint as Point,
+  IconUpload as Upload,
 } from '@tabler/icons-vue'
-import { getSubscriptionDevicePointList } from '@/api/modules/mqttSubscription'
+import {
+  getSubscriptionDevicePointList,
+  createSubscriptionDevicePoint,
+  updateSubscriptionDevicePoint,
+  importSubscriptionDevicePoints,
+  downloadSubscriptionDevicePointTemplate,
+} from '@/api/modules/mqttSubscription'
+import ImportResultDialog from '@/components/ImportResultDialog.vue'
+import { useExcelImport } from '@/composables/useExcelImport'
 
 const { t } = useI18n()
 
@@ -204,8 +258,6 @@ const query = reactive({
   deviceId: '',
   deviceName: '',
   deviceAddressId: '',
-  deviceAddressName: '',
-  protocol: '',
 })
 
 // 首屏还没拿到数时显示占位符而不是 0：0 个点位会被当成"还没收到任何订阅报文"
@@ -253,14 +305,142 @@ function handleCurrentChange() {
   fetchData()
 }
 
+// ---------- 新增 / 编辑 ----------
+const dialogVisible = ref(false)
+const isEdit = ref(false)
+const submitting = ref(false)
+const formRef = ref(null)
+const formData = reactive({
+  deviceId: '',
+  deviceAddressId: '',
+  deviceName: '',
+  deviceAddressLabel: '',
+  kind: '',
+})
+
+const KIND_LABEL_KEYS = {
+  bool: 'kindBool',
+  int: 'kindInt',
+  uint: 'kindUint',
+  float: 'kindFloat',
+  string: 'kindString',
+  time: 'kindTime',
+}
+
+// 自动上报可能带来非标准的类型字符串：编辑时把它作为一项追加进去，
+// 避免下拉框里找不到当前值而被静默改成空。
+const kindOptions = computed(() => {
+  const options = Object.keys(KIND_LABEL_KEYS).map((value) => ({
+    value,
+    label: t(`subscriptionDevicePoint.${KIND_LABEL_KEYS[value]}`),
+  }))
+  const current = String(formData.kind || '').trim()
+  if (current && !KIND_LABEL_KEYS[current.toLowerCase()]) {
+    options.push({ value: formData.kind, label: current })
+  }
+  return options
+})
+
+const formRules = {
+  deviceId: [
+    { required: true, message: () => t('subscriptionDevicePoint.deviceIdRequired'), trigger: 'blur' },
+    { max: 128, message: () => t('subscriptionDevicePoint.idLength'), trigger: 'blur' },
+  ],
+  deviceAddressId: [
+    { required: true, message: () => t('subscriptionDevicePoint.addressIdRequired'), trigger: 'blur' },
+    { max: 128, message: () => t('subscriptionDevicePoint.idLength'), trigger: 'blur' },
+  ],
+  deviceName: [{ max: 100, message: () => t('subscriptionDevicePoint.textLength'), trigger: 'blur' }],
+  deviceAddressLabel: [{ max: 100, message: () => t('subscriptionDevicePoint.textLength'), trigger: 'blur' }],
+}
+
+function handleAdd() {
+  isEdit.value = false
+  Object.assign(formData, {
+    deviceId: '',
+    deviceAddressId: '',
+    deviceName: '',
+    deviceAddressLabel: '',
+    kind: '',
+  })
+  dialogVisible.value = true
+  nextTick(() => formRef.value?.clearValidate())
+}
+
+function handleEdit(row) {
+  isEdit.value = true
+  Object.assign(formData, {
+    deviceId: row.deviceId,
+    deviceAddressId: row.deviceAddressId,
+    deviceName: row.deviceName || '',
+    deviceAddressLabel: row.deviceAddressLabel || '',
+    kind: row.kind || '',
+  })
+  dialogVisible.value = true
+  nextTick(() => formRef.value?.clearValidate())
+}
+
+async function handleSubmit() {
+  if (!formRef.value) return
+  try {
+    await formRef.value.validate()
+  } catch {
+    return
+  }
+
+  submitting.value = true
+  const payload = {
+    deviceId: formData.deviceId.trim(),
+    deviceAddressId: formData.deviceAddressId.trim(),
+    deviceName: formData.deviceName.trim(),
+    deviceAddressLabel: formData.deviceAddressLabel.trim(),
+    kind: String(formData.kind || '').trim(),
+  }
+  try {
+    if (isEdit.value) {
+      await updateSubscriptionDevicePoint(payload)
+      ElMessage.success(t('subscriptionDevicePoint.editSuccess'))
+      dialogVisible.value = false
+      fetchData()
+    } else {
+      await createSubscriptionDevicePoint(payload)
+      ElMessage.success(t('subscriptionDevicePoint.addSuccess'))
+      dialogVisible.value = false
+      // 列表按自然键排序，新行不一定落在当前页；回第一页让它可见。
+      currentPage.value = 1
+      fetchData()
+    }
+  } catch {
+    // 错误提示已由 axios 拦截器统一处理
+  } finally {
+    submitting.value = false
+  }
+}
+
+// ---------- Excel 导入 / 模板下载 ----------
+const {
+  fileInputRef,
+  importing,
+  importResultVisible,
+  importResult,
+  handleImport,
+  handleFileChange,
+  handleDownloadTemplate,
+} = useExcelImport({
+  importFn: importSubscriptionDevicePoints,
+  downloadFn: downloadSubscriptionDevicePointTemplate,
+  templateName: () => t('subscriptionDevicePoint.importTemplateName'),
+  refresh: fetchData,
+})
+
 onMounted(fetchData)
 </script>
 
 <style scoped>
-/* 五个筛选条件：标签在上、控件在下，工具栏自动换行；按钮组贴底对齐 */
+/* 筛选区在左、动作区在右；空间不足时各自换行 */
 .point-filters {
+  flex: 1 1 auto;
   align-items: flex-end;
-  width: 100%;
 }
 
 .filter-field {
@@ -281,24 +461,49 @@ onMounted(fetchData)
   width: 164px;
 }
 
-.filter-field.is-short .filter-input {
-  width: 134px;
-}
-
 .filter-actions {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
+.iot-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 手工维护的行：品牌色轻轻点一下，不抢状态色 */
+.iot-chip.is-manual {
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-color: #dbe6ff;
+}
+
+.form-hint {
+  width: 100%;
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-4);
+}
+
+.kind-select {
+  width: 100%;
+}
+
 @media (max-width: 900px) {
-  .filter-input,
-  .filter-field.is-short .filter-input {
+  .filter-input {
     width: 100%;
   }
 
   .filter-field {
     flex: 1 1 160px;
+  }
+
+  .iot-toolbar-actions {
+    width: 100%;
   }
 }
 </style>

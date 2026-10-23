@@ -229,8 +229,7 @@ func (s *MqttSubscriptionService) PageMqttSubscription(ctx context.Context, req 
 
 // PageMqttSubscriptionDevicePoint 分页查询订阅报文里出现过的设备/点位信息。
 //
-// 该表是身份索引，不含采样值；按设备 ID + 点位 ID 自然键稳定排序，
-// 避免 last_seen_at 每分钟刷新导致列表行来回跳动。
+// 该表是身份索引，不含采样值；按设备 ID + 点位 ID 自然键稳定排序。
 func (s *MqttSubscriptionService) PageMqttSubscriptionDevicePoint(ctx context.Context, req *dto.PageMqttSubscriptionDevicePointDTO) (*response.PageVo[vo.MqttSubscriptionDevicePointVO], error) {
 	db := s.sqliteDB.WithContext(ctx).Model(&po.MqttSubscriptionDevicePoint{})
 	if req.DeviceID != "" {
@@ -241,12 +240,6 @@ func (s *MqttSubscriptionService) PageMqttSubscriptionDevicePoint(ctx context.Co
 	}
 	if req.DeviceAddressID != "" {
 		db = db.Where("device_address_id LIKE ?", "%"+req.DeviceAddressID+"%")
-	}
-	if req.DeviceAddressName != "" {
-		db = db.Where("device_address_name LIKE ?", "%"+req.DeviceAddressName+"%")
-	}
-	if req.Protocol != "" {
-		db = db.Where("protocol LIKE ?", "%"+req.Protocol+"%")
 	}
 
 	var total int64
@@ -268,13 +261,9 @@ func (s *MqttSubscriptionService) PageMqttSubscriptionDevicePoint(ctx context.Co
 			DeviceID:           r.DeviceID,
 			DeviceAddressID:    r.DeviceAddressID,
 			DeviceName:         r.DeviceName,
-			DeviceAddressName:  r.DeviceAddressName,
 			DeviceAddressLabel: r.DeviceAddressLabel,
-			DataType:           r.DataType,
 			Kind:               r.Kind,
-			Protocol:           r.Protocol,
-			FirstSeenAt:        r.FirstSeenAt,
-			LastSeenAt:         r.LastSeenAt,
+			Source:             r.Source,
 			CreatedAt:          r.CreatedAt,
 			UpdatedAt:          r.UpdatedAt,
 		}

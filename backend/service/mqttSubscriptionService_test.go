@@ -188,9 +188,9 @@ func TestMqttSubscriptionDevicePointPage(t *testing.T) {
 	ctx := context.Background()
 
 	rows := []po.MqttSubscriptionDevicePoint{
-		{DeviceID: "d1", DeviceAddressID: "a2", DeviceName: "电表1", DeviceAddressName: "电压", Protocol: "MQTT", FirstSeenAt: "2026-10-19 10:00:00", LastSeenAt: "2026-10-19 10:05:00"},
-		{DeviceID: "d1", DeviceAddressID: "a1", DeviceName: "电表1", DeviceAddressName: "电流", Protocol: "MQTT", FirstSeenAt: "2026-10-19 10:00:00", LastSeenAt: "2026-10-19 10:05:00"},
-		{DeviceID: "d2", DeviceAddressID: "a1", DeviceName: "电表2", DeviceAddressName: "功率", Protocol: "ModBus.TCP", FirstSeenAt: "2026-10-19 10:00:00", LastSeenAt: "2026-10-19 10:05:00"},
+		{DeviceID: "d1", DeviceAddressID: "a2", DeviceName: "电表1", DeviceAddressLabel: "电压", Kind: "float"},
+		{DeviceID: "d1", DeviceAddressID: "a1", DeviceName: "电表1", DeviceAddressLabel: "电流", Kind: "float"},
+		{DeviceID: "d2", DeviceAddressID: "a1", DeviceName: "电表2", DeviceAddressLabel: "功率", Kind: "float"},
 	}
 	if err := db.Create(&rows).Error; err != nil {
 		t.Fatalf("seed device points: %v", err)

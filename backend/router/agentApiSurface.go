@@ -339,6 +339,37 @@ var agentApiSurface = map[string]SurfaceEntry{
 		Params: argQuery(dto.PageMqttSubscriptionDevicePointDTO{}, nil),
 		Note:   "订阅报文里出现过的设备/点位元信息索引，不含采样值",
 	},
+	"GET /mqttSubscription/importMqttSubscriptionDevicePointTemplate": {
+		Access: AccessRead,
+		Params: argNone(),
+		Note:   "返回 .xlsx 文件流，不是 JSON 信封",
+	},
+	"POST /mqttSubscription/importMqttSubscriptionDevicePoint": {
+		Access: AccessWrite,
+		Params: args(argFile("file", ".xlsx 文件")),
+		Note:   "multipart 上传，**没有 JSON 请求体**。按设备ID+点位ID upsert：已存在则覆盖元信息，导入行标记为 manual，后续订阅报文不再覆盖",
+	},
+	"POST /mqttSubscription/createMqttSubscriptionDevicePoint": {
+		Access: AccessWrite,
+		Params: argBody(dto.CreateMqttSubscriptionDevicePointDTO{}, map[string]string{
+			"deviceId":           "设备 ID（自然键，创建后不可修改）",
+			"deviceAddressId":    "点位 ID（自然键，创建后不可修改）",
+			"deviceAddressLabel": "点位标签/说明",
+			"kind":               "bool/int/uint/float/string/time；留空表示未知",
+		}),
+		Note: "自然键重复返回 60024；创建后该行标记为 manual，订阅报文不再覆盖其元信息",
+	},
+	"POST /mqttSubscription/updateMqttSubscriptionDevicePoint": {
+		Access: AccessWrite,
+		Params: argBody(dto.UpdateMqttSubscriptionDevicePointDTO{}, map[string]string{
+			"deviceId":           "仅用于定位，不是可改字段",
+			"deviceAddressId":    "仅用于定位，不是可改字段",
+			"deviceName":         "**无条件覆盖**：空串会清空",
+			"deviceAddressLabel": "**无条件覆盖**：空串会清空",
+			"kind":               "改值须为 bool/int/uint/float/string/time；留空 = 清空；与库中现值相同时允许保留",
+		}),
+		Note: "成功后 source 置为 manual，订阅报文不再覆盖该行元信息",
+	},
 	"GET /mqttSubscription/getMqttSubscriptionById/:id": {
 		Access: AccessRead,
 		Params: argNone(),

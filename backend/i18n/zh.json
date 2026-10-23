@@ -36,6 +36,8 @@
     "err.mqtt_subscription_exists": "MQTT 订阅名称已存在",
     "err.mqtt_subscription_not_found": "MQTT 订阅不存在",
     "err.mqtt_subscription_connect_fail": "MQTT 订阅连通性测试失败",
+    "err.mqtt_subscription_device_point_exists": "订阅设备点位已存在",
+    "err.mqtt_subscription_device_point_not_found": "订阅设备点位不存在",
     "err.device_address_data_type": "协议不支持该数据类型",
     "err.device_scan_disabled": "局域网扫描功能未启用（deviceScan.enabled=false）",
     "err.device_scan_busy": "已有扫描任务在运行，请等待它结束或先取消",

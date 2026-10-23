@@ -45,11 +45,8 @@ func TestDevicePointStoreUpsertsMetadata(t *testing.T) {
 		DeviceID:           "d1",
 		DeviceName:         "电表1",
 		DeviceAddressID:    "a1",
-		DeviceAddressName:  "电流",
 		DeviceAddressLabel: "A相电流",
-		DataType:           "float32",
 		Kind:               "float",
-		Protocol:           "ModBus.TCP",
 		Value:              "10.2",
 		Quality:            192,
 	}})
@@ -66,13 +63,61 @@ func TestDevicePointStoreUpsertsMetadata(t *testing.T) {
 	if got.DeviceID != "d1" || got.DeviceAddressID != "a1" {
 		t.Errorf("natural key = %s/%s, want d1/a1", got.DeviceID, got.DeviceAddressID)
 	}
-	if got.DeviceName != "电表1" || got.DeviceAddressName != "电流" ||
-		got.DeviceAddressLabel != "A相电流" || got.DataType != "float32" ||
-		got.Kind != "float" || got.Protocol != "ModBus.TCP" {
+	if got.DeviceName != "电表1" || got.DeviceAddressLabel != "A相电流" || got.Kind != "float" {
 		t.Errorf("metadata not persisted: %+v", got)
 	}
-	if got.FirstSeenAt == "" || got.LastSeenAt == "" {
-		t.Error("first_seen_at / last_seen_at should be set")
+	if got.CreatedAt == "" || got.UpdatedAt == "" {
+		t.Error("created_at / updated_at should be set")
+	}
+	if got.Source != po.MqttSubscriptionDevicePointSourceAuto {
+		t.Errorf("source = %q, want auto", got.Source)
+	}
+}
+
+// TestDevicePointStoreProtectsManualRows 手工维护的行是运维的最终确认：
+// 后续订阅报文不得覆盖元信息与 updated_at。
+func TestDevicePointStoreProtectsManualRows(t *testing.T) {
+	store, db := newDevicePointTestStore(t)
+	manual := po.MqttSubscriptionDevicePoint{
+		DeviceID:           "d1",
+		DeviceAddressID:    "a1",
+		DeviceName:         "手工名",
+		DeviceAddressLabel: "手工标签",
+		Kind:               "int",
+		Source:             po.MqttSubscriptionDevicePointSourceManual,
+		CreatedAt:          "2020-01-01 00:00:00",
+		UpdatedAt:          "2020-01-01 00:00:00",
+	}
+	if err := db.Create(&manual).Error; err != nil {
+		t.Fatalf("seed manual row: %v", err)
+	}
+
+	store.Start()
+	store.Record([]collector.CollectedRecord{{
+		DeviceID:           "d1",
+		DeviceAddressID:    "a1",
+		DeviceName:         "报文名",
+		DeviceAddressLabel: "报文标签",
+		Kind:               "float",
+	}})
+	store.Stop()
+
+	var rows []po.MqttSubscriptionDevicePoint
+	if err := db.Find(&rows).Error; err != nil {
+		t.Fatalf("find rows: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	got := rows[0]
+	if got.DeviceName != "手工名" || got.DeviceAddressLabel != "手工标签" || got.Kind != "int" {
+		t.Errorf("manual metadata must not be overwritten: %+v", got)
+	}
+	if got.Source != po.MqttSubscriptionDevicePointSourceManual {
+		t.Errorf("source = %q, want manual", got.Source)
+	}
+	if got.UpdatedAt != "2020-01-01 00:00:00" {
+		t.Errorf("updated_at = %q, want untouched", got.UpdatedAt)
 	}
 }
 
@@ -86,7 +131,6 @@ func TestDevicePointStoreKeepsNonEmptyMetadata(t *testing.T) {
 		DeviceID:           "d1",
 		DeviceName:         "电表1",
 		DeviceAddressID:    "a1",
-		DeviceAddressName:  "电流",
 		DeviceAddressLabel: "A相电流",
 		Kind:               "float",
 	}
@@ -95,7 +139,6 @@ func TestDevicePointStoreKeepsNonEmptyMetadata(t *testing.T) {
 
 	empty := base
 	empty.DeviceName = ""
-	empty.DeviceAddressName = ""
 	empty.DeviceAddressLabel = ""
 	empty.Kind = "int" // 触发一次元信息变化
 	store = newDevicePointStore(db)
@@ -111,7 +154,7 @@ func TestDevicePointStoreKeepsNonEmptyMetadata(t *testing.T) {
 		t.Fatalf("rows = %d, want 1", len(rows))
 	}
 	got := rows[0]
-	if got.DeviceName != "电表1" || got.DeviceAddressName != "电流" || got.DeviceAddressLabel != "A相电流" {
+	if got.DeviceName != "电表1" || got.DeviceAddressLabel != "A相电流" {
 		t.Errorf("empty metadata must not overwrite existing names: %+v", got)
 	}
 	if got.Kind != "int" {
