@@ -4,6 +4,22 @@
 
 All notable changes to this project are documented in this file (Keep a Changelog format, SemVer versioning).
 
+## [0.1.4] - 2026-10-23
+
+### Added
+
+- **可插拔 MQTT 订阅解析器**：订阅可选用内置 DSL 或 goja JS 脚本解析，支持逗号分隔多主题、`topicPattern` / `fanout` / `transform` 算子与跳过 / 丢弃计数；仅改解析配置时原地热更新，不重连 MQTT。迁移 `019_mqtt_subscription_parser.sql`，控制台提供解析器编辑器。契约见 [parser-plugins.md](backend/specs/parser-plugins.md)。
+  **Pluggable MQTT subscription parsers**: a subscription can parse with the built-in DSL or a goja JS script; adds comma-separated topics, `topicPattern` / `fanout` / `transform` operators and skipped / dropped counters. Parser-only edits hot-reload in place without reconnecting MQTT. Migration `019_mqtt_subscription_parser.sql`; the console gains a parser editor. Contract: [parser-plugins.md](backend/specs/parser-plugins.md).
+- **订阅设备与点位手工维护**：新增来源列（自动 / 手工）与新增、编辑、Excel 导入 / 模板下载；手工行不会被自动收录覆盖，支持批量删除（≤200）并恢复为自动。
+  **Manual maintenance of subscription device points**: adds a source column (auto / manual), create/edit, Excel import and template download; manual rows survive automatic upserts, and can be deleted in batches (≤200) and restored to auto.
+- **日志文件下载**：`GET /log/downloadFile` 以附件流式下载原始日志（支持 Range），镜像到 `/agentApi`；日志列表与查看器均可下载。
+  **Log file downloads**: `GET /log/downloadFile` streams the raw log as an attachment (Range-capable) and is mirrored in `/agentApi`; available from both the log list and the viewer.
+
+### Changed
+
+- **大盘趋势修正**：采样时间戳对齐整分钟，查询按墙钟裁剪窗口（长时间休眠不再把 6 小时窗口拉成更长的历史），累计时长取自环形缓冲的最旧样本。
+  **Dashboard trend fixes**: sample timestamps snap to the minute grid, windows are trimmed by wall clock (a long suspend can no longer stretch a 6-hour window into more history), and accumulated duration is reported from the oldest ring-buffer sample.
+
 ## [0.1.3] - 2026-10-22
 
 ### Added
