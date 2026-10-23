@@ -25,8 +25,9 @@ type DashboardTrendSampleVO struct {
 
 // DashboardTrendVO 大盘趋势响应。
 //
-// StartedAt 是**第一个采样点**的时间，不是网关启动时间：前端据此显示
-// 「已积累 N 分钟」，而不是假装已经有一整个窗口的历史。
+// StartedAt 是环形窗口里**最早的采样点**时间（最多回看 24 小时），不是网关
+// 进程启动时间：前端据此显示「本次运行已积累 N 分钟」。它独立于查询窗口 ——
+// 休眠断开后 Trend 的 6h 窗口可能只剩十几分钟，起点仍应是整段历史的开头。
 type DashboardTrendVO struct {
 	IntervalSec int                      `json:"intervalSec"`
 	StartedAt   string                   `json:"startedAt"`

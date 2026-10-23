@@ -651,11 +651,12 @@ const trendStopped = computed(
   () => lastTrendSample.value != null && !lastTrendSample.value.collecting
 )
 
-// 本次运行已积累多少分钟：以第一个采样点为起点，不假设 6h/24h 窗口是满的
+// 本次运行已积累多少分钟：起点用后端给的 startedAt（环形窗口最早的点），
+// 不能用 samples[0] —— 休眠断开后 6h 窗口里可能只剩十几分钟，那样会把它说小
 const trendMinutes = computed(() => {
   const list = trendSamples.value
   if (!list.length) return 0
-  const first = parseBackendTime(list[0].time)
+  const first = parseBackendTime(trend.value?.startedAt)
   const last = parseBackendTime(list[list.length - 1].time)
   if (!first || !last) return list.length
   return Math.max(1, Math.round((last.getTime() - first.getTime()) / 60000) + 1)

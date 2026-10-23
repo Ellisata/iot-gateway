@@ -60,15 +60,9 @@
       </div>
 
       <el-table class="iot-table" :data="tableData" v-loading="loading" style="width: 100%">
-        <!-- 窄屏藏起序号与目标类型：报警页已经按类型分页展示，同一页里每行的
-             目标类型都相同，这一列是重复信息；序号只是行号。两者都在宽屏回归。 -->
-        <el-table-column
-          v-if="!compact"
-          type="index"
-          :label="t('common.index')"
-          width="60"
-          align="center"
-        />
+        <!-- 序号始终保留：窄屏只藏目标类型（报警页已按类型分页展示，同一页里每行的
+             目标类型都相同，是重复信息）；序号是行号，窄屏同样需要。 -->
+        <el-table-column type="index" :label="t('common.index')" width="60" align="center" />
 
         <!-- 目标名称是这一行的身份：小图标底座让报警对象在滚动中可被一眼拾取 -->
         <el-table-column :label="t('alarm.targetName')" :min-width="compact ? 155 : 170">

@@ -118,7 +118,7 @@ func (s *Sampler) collectAt(now time.Time) {
 
 	points, badPoints := s.rec.takePoints()
 	sample := Sample{
-		Time:      now.Format("2006-01-02 15:04:05"),
+		Time:      now.Format(SampleTimeLayout),
 		Points:    points,
 		BadPoints: badPoints,
 	}

@@ -45,14 +45,11 @@ func (s *DashboardService) GetTrend(hours int) *vo.DashboardTrendVO {
 		})
 	}
 
-	startedAt := ""
-	if len(out) > 0 {
-		startedAt = out[0].Time
-	}
-
 	return &vo.DashboardTrendVO{
 		IntervalSec: int(metrics.Interval / time.Second),
-		StartedAt:   startedAt,
-		Samples:     out,
+		// 起点取环形窗口里最旧的点，而不是本次查询窗口的第一个点：
+		// 休眠断开后 6h 窗口里可能只剩十几分钟，那样会把「已积累」说小。
+		StartedAt: s.recorder.Oldest(),
+		Samples:   out,
 	}
 }

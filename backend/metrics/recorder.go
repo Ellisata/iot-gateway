@@ -25,6 +25,8 @@ const (
 	Interval = time.Minute
 	// MaxSamples 环形窗口长度：24h ÷ 1min。
 	MaxSamples = 24 * 60
+	// SampleTimeLayout 采样点时间戳格式。定宽，因此可直接按字符串比较先后。
+	SampleTimeLayout = "2006-01-02 15:04:05"
 )
 
 // Sample 一个分钟的遥测快照。
@@ -102,9 +104,31 @@ func (r *Recorder) append(s Sample) {
 	r.samples = append(r.samples, s)
 }
 
+// Oldest 返回环形窗口里最旧采样点的时间（本次运行已积累历史的起点）。
+// 与 Trend 的窗口裁剪无关：查询窗口可以只覆盖最近几分钟，
+// 「本次运行从什么时候开始」不应跟着一起被裁短。
+func (r *Recorder) Oldest() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.samples) == 0 {
+		return ""
+	}
+	return r.samples[0].Time
+}
+
 // Trend 返回最近 hours 小时内的采样点副本（时间正序）。
 // hours 会被收敛到 1..24；样本不足时返回现有的全部。
 func (r *Recorder) Trend(hours int) []Sample {
+	return r.trendAt(hours, time.Now())
+}
+
+// trendAt 是 Trend 的可注入时钟版本，窗口按墙钟裁，测试需要固定 now。
+//
+// 只按点数截断是不够的：进程挂起期间（宿主休眠时 WSL / 笔记本会暂停整台
+// 虚拟机，定时器不触发）采样点之间会留下数小时的空档，360 个点于是能横跨
+// 远超 6 小时的实际时间 —— 横轴画出来是 17 小时，按钮上却写着「6 小时」。
+// 因此在上限个数的窗口之外，再按时间戳裁掉窗口起点之前的点。
+func (r *Recorder) trendAt(hours int, now time.Time) []Sample {
 	if hours < 1 {
 		hours = 1
 	}
@@ -112,6 +136,8 @@ func (r *Recorder) Trend(hours int) []Sample {
 		hours = 24
 	}
 	limit := hours * int(time.Hour/Interval)
+	// 采样点按 SampleTimeLayout 定宽格式化，可直接做字符串比较
+	cutoff := now.Add(-time.Duration(hours) * time.Hour).Format(SampleTimeLayout)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -119,6 +145,10 @@ func (r *Recorder) Trend(hours int) []Sample {
 	start := 0
 	if len(r.samples) > limit {
 		start = len(r.samples) - limit
+	}
+	// 样本按时间正序追加，从数量上限的位置继续往后找到窗口起点即可
+	for start < len(r.samples) && r.samples[start].Time < cutoff {
+		start++
 	}
 	out := make([]Sample, len(r.samples)-start)
 	copy(out, r.samples[start:])
