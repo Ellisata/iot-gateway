@@ -12,6 +12,7 @@
 - **ORM / 存储**: GORM + SQLite(纯 Go 实现 `glebarez/sqlite`,免 CGO;配置存储,路径见 `default.yaml`)
 - **协议驱动**: 全部为进程外插件(见 `driversrc/`)。`goburrow/modbus`(Modbus RTU/TCP)、`robinson/gos7`(Siemens S7)、`gopcua/opcua`(OPC UA)等第三方库只被插件二进制链接,**主二进制里不含任何协议实现**
 - **推送**: `eclipse/paho.mqtt.golang`(MQTT)
+- **订阅解析**: `dop251/goja`(纯 Go、无 CGO)执行自定义解析脚本;契约见 [specs/parser-plugins.md](specs/parser-plugins.md)
 - **依赖注入**: Google Wire(编译期 DI,`wire.go` / `wire_gen.go`)
 - **其他**: Viper(配置)、golang-jwt(认证)、go-redis(缓存)、自定义 i18n(JSON)
 
@@ -58,6 +59,11 @@
 │   ├── parity/          # 行为等价黄金基线的读写格式(pluginhost/testdata/parity/)
 │   ├── drivertest/      # 网关侧测试的合成协议(EnsureSyntheticProtocol)与桩驱动
 │   └── fake/            # 各协议的假 PLC(parity 比对与集成测试用)
+├── parser/              # 外部报文解析契约与实现(**与报文来源解耦**,见 specs/parser-plugins.md)
+│   ├── parser.go        # Parser/Factory 契约、注册表、CollectedRecord 白名单与限制
+│   ├── path.go          # JSON 路径取值(映射与脚本共用)
+│   ├── mapping/         # builtin 声明式 DSL(topicPattern / fanout / transform)
+│   └── script/          # goja 脚本解析(沙箱、逐报文超时、超时后重建 VM)
 ├── push/                # 推送引擎: 接收采集数据,分发到各推送通道
 │   ├── outbox.go        # **通道共用的队列 + 断网缓存骨架**(Outbox):入队路由/落盘/补发唤醒/状态/生命周期/重连
 │   ├── drain.go         # **补发策略**:DrainLoop(毒批次/窄化)+ GroupedDrainer(聚合回放算法)+ Aggregator 契约
@@ -124,17 +130,45 @@
   `Wait`(等落盘协程排空)。**worker 停服前还会把 outbox 中写失败的批次转投缓存**,提前收尾会丢数据。
 
 ### MQTT 订阅([subscribe/](subscribe/))
-- 管理外部 broker 上的多条订阅:每行 `mqtt_subscription` = 一个独立 paho 客户端 + 一套
-  「JSON 报文 → `collector.CollectedRecord`」映射规则。收包后按规则转换,再经
+- 管理外部 broker 上的多条订阅:每行 `mqtt_subscription` = 一个独立 paho 客户端 +
+  一个解析器实例。收包后解析成 `collector.CollectedRecord`,再经
   `push.Engine.PushRecordsToTimeSeries` **只投递到时序数据库类通道**(TDengine / InfluxDB)。
+- `topic` 列支持**英文逗号分隔多个过滤器**(与推送通道 `buildTopics` 同口径:逐段 trim、
+  丢弃空段、去重保序),一次 `SubscribeMultiple` 全部订阅,共用该行的 QoS 与解析器;
+  单个 topic 的原配置行为不变。通配符 `+` / `#` 照常可用,`topicPattern` 匹配的是
+  实际到达的 `msg.Topic()`,与配置里写了几段无关。`connSig` 用拆分后的过滤器拼签名,
+  只改空白/重复项不会触发重连。
 - **不投 MQTT 等非时序通道是刻意的**:订阅主题与发布主题相同时会形成自激。判据是可选接口
   `push.TimeSeriesChannel`(新增通道若写时序库需实现 `IsTimeSeries() bool`)。
-- 映射 DSL 参考 iot-data-persistence:`root`(`$` 默认;整篇报文是数组时自动逐条拆条,
-  `$[*]` / `$.data[*]` 仍可显式指定)、`fields`(`path` / `const` /
-  `template` / `map`)、`filter`(隐式 AND);目标字段是 CollectedRecord 的 11 个字段白名单,
+- **解析与连接解耦**([parser/](parser/),完整规范见 [specs/parser-plugins.md](specs/parser-plugins.md)):
+  外部报文结构不可预知,解析器按 `parser_type` 注册(`builtin` / `script` / 将来的
+  `plugin:<name>`)。输出固定为 CollectedRecord 白名单,**一条记录一个 value**;
+  插件不得自定义 measurement/tags/fields。实现写作指南见
+  [docs/parser-scripts.md](docs/parser-scripts.md)。
+- **配置真源按类型分列**:`builtin` 读 `mapping_json`(历史列,零迁移);
+  其它类型读 `parser_config`。同一类型绝不能有两份配置。`sample_topic` 只供预览
+  `topicPattern`,运行期不参与解析(迁移 `019_mqtt_subscription_parser.sql`)。
+- **builtin DSL**(实现在 [parser/mapping/](parser/mapping/)):`root`(`$` 默认;整篇报文是数组时
+  自动逐条拆条,`$[*]` / `$.data[*]` 仍可显式指定)、`fields`(`path` / `const` /
+  `template` / `map` / `topic`)、`filter`(隐式 AND);另有
+  `topicPattern`(如 `factory/{deviceId}/telemetry`,身份可直接来自主题)、
+  `fanout`(一条报文多个测点 → 每项一条记录)、`transform`(scale/round/trim/default/
+  hexDecode/base64Decode/bitfield/regex 白名单算子)。目标字段是 CollectedRecord 的 11 个字段白名单,
   未知字段在保存时直接拒绝。身份字段的目标名是 `deviceId` / `deviceAddressId`
   (早期配置里的 `deviceID` / `deviceAddressID` 在解析时自动归一,老订阅仍可加载;
   CollectedRecord 的 JSON tag 保持原样,不影响断网缓存里已有批次)。数字统一 `UseNumber` 解码,大整数不丢精度。
+- **script 层**([parser/script/](parser/script/)):脚本必须定义 `function parse(msg, ctx)`;
+  只注入 `msg`/`ctx`,不提供文件、网络、`require`、Go 对象。逐报文超时
+  (1–500ms,默认 50),超时后**重建 VM 并清空 `ctx.state`**;未捕获异常只失败该条报文。
+  `ctx.get` 返回字符串(大整数不丢精度),`ctx.emit` 走同一个字段白名单与记录上限。
+  goja 非并发安全:每个订阅一个 VM,只在解析 worker 中调用。
+- **收包管线**:paho 回调只做大小检查与入队(有界 8192,满时丢最旧并计 `dropped`,
+  绝不阻塞回调);独立 worker 串行消费,批 ≤256,解析后投递。
+  `SetOrderMatters(true)` 保证脚本的跨报文状态按到达顺序。`Stop()` 顺序:
+  断开 → 关队列 → 等 worker 排空 → 关闭解析器 → 停止点位落库器。
+- **签名拆分**:`connSig`(broker/port/clientId/账号/topic/qos)变化才重建 paho;
+  `parserSig`(类型 + 配置原文)变化只**原地替换解析器**,不断开 MQTT。
+  未变化的订阅不构造解析器(脚本编译不便宜)。状态计数含 `messages/records/errors/skipped/dropped`。
 - `collectedAt` 是可选目标字段:报文自带时间时映射进来(epoch 秒/毫秒/微秒/纳秒、
   `YYYY-MM-DD HH:mm:ss[.SSS]`、`YYYY/MM/DD`、RFC3339 均可识别),归一成毫秒精度本地时间;
   未配置或无法识别时留空,时序通道逐条回落到批次落地时间。本地点位采集不使用该字段。
@@ -156,7 +190,7 @@
   自动上报只更新 `source=auto` 的行,upsert 语义见 `subscribe/devicePointUpsert.go`;
   导入按自然键 upsert(已存在则覆盖元信息),自然键创建后不可修改。
 - 订阅配置每 10s 比对校验和热加载;服务层增删改后也会立即 `Refresh()`。
-  未变化的订阅保留原连接,变化的断开重连。
+  连接未变时只换解析器;只有连接参数变化才断开重连。
 
 ### 协议驱动注册表([driver/driver.go](driver/driver.go))
 - **`driver/` 下没有任何协议实现**,只有协议无关的契约与注册表。全部协议由进程外插件在运行期经 `pluginhost` 调用 `driver.RegisterExternal("协议名", NewFunc)` 注册(内置协议已全部移除),`collector` 用 `driver.Create(protocol)` 创建实例。
@@ -415,6 +449,22 @@
    沿用来源项目的原值,使两侧的 `device.protocol_id`、点位地址与类型名可以直接互相迁移。
 
 网关侧实现见 [pluginhost/](pluginhost/)(进程监管、RPC 代理、运行时注册表注入、热升级)。
+
+### 新增 / 扩展报文解析器
+
+**默认先扩展 builtin DSL,不要一上来写脚本或插件。** 契约、分层与限制见
+[specs/parser-plugins.md](specs/parser-plugins.md)。
+
+- **builtin**:在 [parser/mapping/](parser/mapping/) 增加取值方式 / 算子 / 夹具;
+  同步 `Rule.Validate`、前端映射编辑器与测试。新增算子必须进白名单并在保存时校验参数。
+- **script**:脚本存于 `mqtt_subscription.parser_config`,无需重编网关;改 API 时同时更新
+  [docs/parser-scripts.md](docs/parser-scripts.md) 与沙箱测试(超时、异常、精度、产出上限)。
+- **进程外插件(未实现,仅在二进制/厂商 SDK/崩溃隔离时启用)**:套件 `parsersdk/` +
+  源码 `parsersrc/` + 产物 `iot-parser-<name>` + 适配器 `pluginhost/adapter_parser.go`;
+  线协议复用 [pluginwire/](pluginwire/),必须按批 `parse` RPC,禁止每报文一次调用;
+  **不要复制** `process.go` / `upgrade.go`。宿主当前只扫描 `iot-driver-*`,接入时按前缀分流。
+- 任何解析器都必须输出 CollectedRecord 白名单(**一条记录一个 value**),走
+  `parser.RecordFromMap` 或等价校验;不得自定义 measurement/tags/fields。
 
 ### 新增推送通道
 通道是**进程内**的插件(注册表 + 接口),不像协议驱动那样有独立的进程外运行时 —— 断网缓存

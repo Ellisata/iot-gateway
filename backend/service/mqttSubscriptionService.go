@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -19,10 +20,19 @@ import (
 	"iot-gateway/model/dto"
 	"iot-gateway/model/po"
 	"iot-gateway/model/vo"
+	"iot-gateway/parser"
 	"iot-gateway/response"
 	"iot-gateway/subscribe"
-	"iot-gateway/subscribe/mapping"
 )
+
+// normalizeParserType 空类型按 builtin（历史配置兼容）。
+func normalizeParserType(t string) string {
+	t = strings.TrimSpace(t)
+	if t == "" {
+		return parser.TypeBuiltin
+	}
+	return t
+}
 
 // MqttSubscriptionService MQTT 订阅管理服务
 type MqttSubscriptionService struct {
@@ -41,20 +51,39 @@ func (s *MqttSubscriptionService) CreateMqttSubscription(ctx context.Context, re
 	if req.Status != nil {
 		status = *req.Status
 	}
+	parserType := normalizeParserType(req.ParserType)
+	mappingJSON := string(req.MappingJSON)
+	parserConfig := string(req.ParserConfig)
+	if parserType == parser.TypeBuiltin {
+		if strings.TrimSpace(mappingJSON) == "" {
+			return appError.NewAppError(enums.ParamValidEnum.GetCode(), "映射规则不能为空")
+		}
+		parserConfig = ""
+	} else {
+		if strings.TrimSpace(parserConfig) == "" {
+			return appError.NewAppError(enums.ParamValidEnum.GetCode(), "解析配置不能为空")
+		}
+		if strings.TrimSpace(mappingJSON) == "" {
+			mappingJSON = "{}"
+		}
+	}
 	row := &po.MqttSubscription{
-		Name:        req.Name,
-		Description: req.Description,
-		Broker:      req.Broker,
-		Port:        req.Port,
-		ClientID:    req.ClientID,
-		Username:    req.Username,
-		Password:    req.Password,
-		Topic:       req.Topic,
-		QoS:         req.QoS,
-		MappingJSON: string(req.MappingJSON),
-		SampleJSON:  string(req.SampleJSON),
-		Sort:        req.Sort,
-		Status:      status,
+		Name:         req.Name,
+		Description:  req.Description,
+		Broker:       req.Broker,
+		Port:         req.Port,
+		ClientID:     req.ClientID,
+		Username:     req.Username,
+		Password:     req.Password,
+		Topic:        req.Topic,
+		QoS:          req.QoS,
+		ParserType:   parserType,
+		ParserConfig: parserConfig,
+		MappingJSON:  mappingJSON,
+		SampleJSON:   string(req.SampleJSON),
+		SampleTopic:  req.SampleTopic,
+		Sort:         req.Sort,
+		Status:       status,
 	}
 	if err := subscribe.ValidateConfig(row); err != nil {
 		return appError.NewAppError(enums.ParamValidEnum.GetCode(), err.Error())
@@ -106,21 +135,45 @@ func (s *MqttSubscriptionService) UpdateMqttSubscription(ctx context.Context, re
 		return err
 	}
 
-	// mappingJson 为空表示沿用原规则（列表页只改启停时不必回传整份规则）。
+	// 解析配置为空表示沿用原值（列表页只改启停时不必回传整份规则）。
+	parserType := normalizeParserType(req.ParserType)
+	if strings.TrimSpace(req.ParserType) == "" {
+		parserType = normalizeParserType(existing.ParserType)
+	}
 	mappingJSON := string(req.MappingJSON)
-	if mappingJSON == "" {
-		mappingJSON = existing.MappingJSON
+	parserConfig := string(req.ParserConfig)
+	if parserType == parser.TypeBuiltin {
+		if strings.TrimSpace(mappingJSON) == "" {
+			mappingJSON = existing.MappingJSON
+		}
+		// 从脚本切回内置映射时清掉旧脚本，避免库里留下无意义的配置。
+		parserConfig = ""
+	} else {
+		if strings.TrimSpace(parserConfig) == "" {
+			parserConfig = existing.ParserConfig
+		}
+		if strings.TrimSpace(parserConfig) == "" {
+			return appError.NewAppError(enums.ParamValidEnum.GetCode(), "解析配置不能为空")
+		}
+		if strings.TrimSpace(mappingJSON) == "" {
+			mappingJSON = existing.MappingJSON
+			if strings.TrimSpace(mappingJSON) == "" {
+				mappingJSON = "{}"
+			}
+		}
 	}
 	candidate := po.MqttSubscription{
-		Name:        req.Name,
-		Broker:      req.Broker,
-		Port:        req.Port,
-		ClientID:    req.ClientID,
-		Username:    req.Username,
-		Password:    req.Password,
-		Topic:       req.Topic,
-		QoS:         req.QoS,
-		MappingJSON: mappingJSON,
+		Name:         req.Name,
+		Broker:       req.Broker,
+		Port:         req.Port,
+		ClientID:     req.ClientID,
+		Username:     req.Username,
+		Password:     req.Password,
+		Topic:        req.Topic,
+		QoS:          req.QoS,
+		ParserType:   parserType,
+		ParserConfig: parserConfig,
+		MappingJSON:  mappingJSON,
 	}
 	if err := subscribe.ValidateConfig(&candidate); err != nil {
 		return appError.NewAppError(enums.ParamValidEnum.GetCode(), err.Error())
@@ -140,20 +193,33 @@ func (s *MqttSubscriptionService) UpdateMqttSubscription(ctx context.Context, re
 			}
 		}
 
+		// 样例只服务于预览：本次没传就沿用原值，避免列表页只改启停时清空样例。
+		sampleJSON := string(req.SampleJSON)
+		if strings.TrimSpace(sampleJSON) == "" {
+			sampleJSON = existing.SampleJSON
+		}
+		sampleTopic := req.SampleTopic
+		if strings.TrimSpace(sampleTopic) == "" {
+			sampleTopic = existing.SampleTopic
+		}
+
 		updates := map[string]any{
-			"name":         req.Name,
-			"description":  req.Description,
-			"broker":       req.Broker,
-			"port":         req.Port,
-			"client_id":    req.ClientID,
-			"username":     req.Username,
-			"password":     req.Password,
-			"topic":        req.Topic,
-			"qos":          req.QoS,
-			"mapping_json": mappingJSON,
-			"sample_json":  string(req.SampleJSON),
-			"sort":         req.Sort,
-			"updated_at":   time.Now().Format("2006-01-02 15:04:05"),
+			"name":          req.Name,
+			"description":   req.Description,
+			"broker":        req.Broker,
+			"port":          req.Port,
+			"client_id":     req.ClientID,
+			"username":      req.Username,
+			"password":      req.Password,
+			"topic":         req.Topic,
+			"qos":           req.QoS,
+			"parser_type":   parserType,
+			"parser_config": parserConfig,
+			"mapping_json":  mappingJSON,
+			"sample_json":   sampleJSON,
+			"sample_topic":  sampleTopic,
+			"sort":          req.Sort,
+			"updated_at":    time.Now().Format("2006-01-02 15:04:05"),
 		}
 		if req.Status != nil {
 			updates["status"] = *req.Status
@@ -276,18 +342,37 @@ func (s *MqttSubscriptionService) PageMqttSubscriptionDevicePoint(ctx context.Co
 	}, nil
 }
 
-// PreviewMqttSubscription 用尚未保存的映射规则 + 样例报文试跑转换。
+// PreviewMqttSubscription 用尚未保存的解析配置 + 样例报文试跑转换。
 //
-// 转换失败不是 AppError：配置写错是编辑过程中的正常反馈，由前端直接展示。
+// 与运行期走同一条 parser.New → Parse 路径；转换失败不是 AppError：
+// 配置写错是编辑过程中的正常反馈，由前端直接展示。
 func (s *MqttSubscriptionService) PreviewMqttSubscription(req *dto.PreviewMqttSubscriptionDTO) *vo.MqttSubscriptionPreviewVO {
 	result := &vo.MqttSubscriptionPreviewVO{Records: []collector.CollectedRecord{}}
 
-	rule, err := mapping.Parse(req.MappingJSON)
+	parserType := normalizeParserType(req.ParserType)
+	cfg := req.ParserConfig
+	if parserType == parser.TypeBuiltin {
+		cfg = req.MappingJSON
+	}
+	if strings.TrimSpace(string(cfg)) == "" {
+		result.Error = "解析配置为空"
+		return result
+	}
+
+	p, err := parser.New(parser.Config{Type: parserType, Config: cfg})
 	if err != nil {
 		result.Error = err.Error()
 		return result
 	}
-	res, err := rule.Convert(req.SampleJSON)
+	defer p.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := p.Parse(ctx, []parser.Message{{
+		Topic:      req.SampleTopic,
+		Payload:    req.SampleJSON,
+		ReceivedAt: time.Now(),
+	}})
 	if err != nil {
 		result.Error = err.Error()
 		result.Skipped = res.Skipped
@@ -296,8 +381,8 @@ func (s *MqttSubscriptionService) PreviewMqttSubscription(req *dto.PreviewMqttSu
 	result.Records = res.Records
 	result.Count = len(res.Records)
 	result.Skipped = res.Skipped
-	if res.FirstError != nil {
-		result.Error = res.FirstError.Error()
+	if len(res.Errors) > 0 {
+		result.Error = res.Errors[0].Reason
 	}
 	return result
 }
@@ -329,6 +414,8 @@ func (s *MqttSubscriptionService) MqttSubscriptionStatus() []vo.MqttSubscription
 			Messages:    st.Messages,
 			Records:     st.Records,
 			Errors:      st.Errors,
+			Skipped:     st.Skipped,
+			Dropped:     st.Dropped,
 			LastMessage: st.LastMessage,
 			Error:       st.Error,
 		}
@@ -337,22 +424,42 @@ func (s *MqttSubscriptionService) MqttSubscriptionStatus() []vo.MqttSubscription
 }
 
 func toMqttSubscriptionVO(row *po.MqttSubscription) *vo.MqttSubscriptionVO {
-	return &vo.MqttSubscriptionVO{
-		ID:          row.ID,
-		Name:        row.Name,
-		Description: row.Description,
-		Broker:      row.Broker,
-		Port:        row.Port,
-		ClientID:    row.ClientID,
-		Username:    row.Username,
-		Password:    row.Password,
-		Topic:       row.Topic,
-		QoS:         row.QoS,
-		MappingJSON: json.RawMessage(row.MappingJSON),
-		SampleJSON:  json.RawMessage(row.SampleJSON),
-		Sort:        row.Sort,
-		Status:      row.Status,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
+	parserType := normalizeParserType(row.ParserType)
+	var parserConfig json.RawMessage
+	if parserType != parser.TypeBuiltin {
+		parserConfig = safeRawJSON(row.ParserConfig)
 	}
+	return &vo.MqttSubscriptionVO{
+		ID:           row.ID,
+		Name:         row.Name,
+		Description:  row.Description,
+		Broker:       row.Broker,
+		Port:         row.Port,
+		ClientID:     row.ClientID,
+		Username:     row.Username,
+		Password:     row.Password,
+		Topic:        row.Topic,
+		QoS:          row.QoS,
+		ParserType:   parserType,
+		ParserConfig: parserConfig,
+		MappingJSON:  safeRawJSON(row.MappingJSON),
+		SampleJSON:   safeRawJSON(row.SampleJSON),
+		SampleTopic:  row.SampleTopic,
+		Sort:         row.Sort,
+		Status:       row.Status,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
+	}
+}
+
+// safeRawJSON 把库里的文本转成合法 RawMessage。
+//
+// 空串/损坏的 JSON 直接返回 nil（序列化为 null），否则 encoding/json 会在
+// 整个响应序列化时失败并返回空 body —— 一条坏配置不该让详情/列表接口失效。
+func safeRawJSON(s string) json.RawMessage {
+	s = strings.TrimSpace(s)
+	if s == "" || !json.Valid([]byte(s)) {
+		return nil
+	}
+	return json.RawMessage(s)
 }

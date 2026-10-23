@@ -101,6 +101,14 @@
               <span v-if="statusOf(row)" class="runtime-counts">
                 {{ t('subscription.counts', { messages: statusOf(row).messages, records: statusOf(row).records }) }}
               </span>
+              <span v-if="statusOf(row)?.dropped || statusOf(row)?.skipped" class="runtime-counts is-warn">
+                {{
+                  t('subscription.skippedDropped', {
+                    skipped: statusOf(row).skipped || 0,
+                    dropped: statusOf(row).dropped || 0,
+                  })
+                }}
+              </span>
             </div>
           </template>
         </el-table-column>
@@ -274,15 +282,46 @@
             </div>
           </section>
 
-          <!-- ========== 映射规则 ========== -->
+          <!-- ========== 解析方式 ========== -->
           <section class="sub-section">
-            <p class="sub-section-title">{{ t('subscription.mapping') }}</p>
-            <p class="sub-section-hint">{{ t('subscription.mappingHint') }}</p>
+            <p class="sub-section-title">{{ t('subscription.parser') }}</p>
+            <p class="sub-section-hint">{{ t('subscription.parserHint') }}</p>
+            <el-form-item :label="t('subscription.parserType')">
+              <div class="sub-parser-type">
+                <el-radio-group v-model="parserType">
+                  <el-radio-button value="builtin">{{ t('subscription.parserBuiltin') }}</el-radio-button>
+                  <el-radio-button value="script">{{ t('subscription.parserScript') }}</el-radio-button>
+                </el-radio-group>
+                <span class="sub-inline-hint">{{ t('subscription.parserTypeHint') }}</span>
+              </div>
+            </el-form-item>
+          </section>
 
+          <!-- ========== 映射规则 / 脚本 ========== -->
+          <section class="sub-section">
+            <p class="sub-section-title">
+              {{ parserType === 'builtin' ? t('subscription.mapping') : t('subscription.script') }}
+            </p>
+            <p class="sub-section-hint">
+              {{ parserType === 'builtin' ? t('subscription.mappingHint') : t('subscription.scriptHint') }}
+            </p>
+
+            <template v-if="parserType === 'builtin'">
             <el-form-item :label="t('subscription.root')">
               <div class="sub-root-row">
                 <el-input v-model="rootPath" style="width: 220px" placeholder="$" />
                 <span class="sub-inline-hint">{{ t('subscription.rootHint') }}</span>
+              </div>
+            </el-form-item>
+
+            <el-form-item :label="t('subscription.topicPattern')">
+              <div class="sub-root-row">
+                <el-input
+                  v-model="topicPattern"
+                  style="width: 320px"
+                  placeholder="factory/{deviceId}/telemetry"
+                />
+                <span class="sub-inline-hint">{{ t('subscription.topicPatternHint') }}</span>
               </div>
             </el-form-item>
 
@@ -325,6 +364,7 @@
                     <el-option :label="t('subscription.sourcePath')" value="path" />
                     <el-option :label="t('subscription.sourceConst')" value="const" />
                     <el-option :label="t('subscription.sourceTemplate')" value="template" />
+                    <el-option :label="t('subscription.sourceTopic')" value="topic" />
                     <el-option
                       v-if="def.key === 'kind' || def.key === 'quality'"
                       :label="t('subscription.sourceMap')"
@@ -449,9 +489,94 @@
                     </el-select>
                   </div>
                 </div>
+
+                <!-- value 的值变换流水线（缩放/取整/解码/位域/正则） -->
+                <div v-if="def.key === 'value'" class="transform-editor">
+                  <div class="sub-inline-row">
+                    <span class="sub-inline-hint">{{ t('subscription.transformsHint') }}</span>
+                    <el-button type="primary" link size="small" @click="addTransform">
+                      <el-icon class="mr-1"><Plus /></el-icon>{{ t('subscription.addTransform') }}
+                    </el-button>
+                  </div>
+                  <div v-for="(tr, ti) in fieldMap.value?.transforms || []" :key="ti" class="transform-row">
+                    <el-select v-model="tr.op" size="small" style="width: 132px">
+                      <el-option
+                        v-for="op in TRANSFORM_OPS"
+                        :key="op.value"
+                        :label="t(op.labelKey)"
+                        :value="op.value"
+                      />
+                    </el-select>
+                    <template v-if="tr.op === 'scale'">
+                      <el-input v-model="tr.factor" size="small" :placeholder="t('subscription.transformFactor')" />
+                      <el-input v-model="tr.offset" size="small" :placeholder="t('subscription.transformOffset')" />
+                    </template>
+                    <template v-else-if="tr.op === 'round'">
+                      <el-input v-model="tr.digits" size="small" :placeholder="t('subscription.transformDigits')" />
+                    </template>
+                    <template v-else-if="tr.op === 'default'">
+                      <el-input v-model="tr.value" size="small" :placeholder="t('subscription.transformDefaultValue')" />
+                    </template>
+                    <template v-else-if="tr.op === 'bitfield'">
+                      <el-input v-model="tr.offset" size="small" :placeholder="t('subscription.transformOffset')" />
+                      <el-input v-model="tr.length" size="small" :placeholder="t('subscription.transformLength')" />
+                    </template>
+                    <template v-else-if="tr.op === 'regex'">
+                      <el-input v-model="tr.pattern" size="small" :placeholder="t('subscription.transformPattern')" />
+                      <el-input v-model="tr.group" size="small" :placeholder="t('subscription.transformGroup')" />
+                    </template>
+                    <span v-else class="sub-inline-hint">{{ t('subscription.transformNoParams') }}</span>
+                    <el-button
+                      type="danger"
+                      link
+                      size="small"
+                      :icon="Delete"
+                      @click="fieldMap.value?.transforms.splice(ti, 1)"
+                    />
+                  </div>
+                </div>
               </template>
             </div>
             <p class="sub-hint">{{ t('subscription.kindHint') }}</p>
+
+            <!-- 多测点扇出：一条报文多个指标 → 每个扇出项一条记录 -->
+            <div class="sub-inline-row is-filter-head">
+              <div>
+                <p class="sub-group-title">{{ t('subscription.fanout') }}</p>
+                <p class="sub-section-hint is-tight">{{ t('subscription.fanoutHint') }}</p>
+              </div>
+              <el-switch v-model="fanoutEnabled" />
+            </div>
+            <template v-if="fanoutEnabled">
+              <p v-if="fanoutRows.length === 0" class="sub-empty">{{ t('subscription.fanoutEmpty') }}</p>
+              <div v-for="(row, idx) in fanoutRows" :key="idx" class="fanout-row">
+                <el-input
+                  v-model="row.deviceAddressId"
+                  size="small"
+                  :placeholder="t('subscription.fanoutAddressId')"
+                />
+                <el-input
+                  v-model="row.deviceAddressLabel"
+                  size="small"
+                  :placeholder="t('subscription.fanoutAddressLabel')"
+                />
+                <el-input
+                  v-model="row.valuePath"
+                  size="small"
+                  :placeholder="t('subscription.fanoutValuePath')"
+                />
+                <el-button
+                  type="danger"
+                  link
+                  size="small"
+                  :icon="Delete"
+                  @click="fanoutRows.splice(idx, 1)"
+                />
+              </div>
+              <el-button type="primary" link size="small" @click="addFanoutRow">
+                <el-icon class="mr-1"><Plus /></el-icon>{{ t('subscription.addFanout') }}
+              </el-button>
+            </template>
 
             <div class="sub-inline-row is-filter-head">
               <div>
@@ -483,6 +608,33 @@
               <span v-else class="text-xs text-gray-400">{{ t('subscription.filterNoValue') }}</span>
               <el-button type="danger" link size="small" :icon="Delete" @click="filterRows.splice(idx, 1)" />
             </div>
+            </template>
+
+            <!-- ========== 脚本解析 ========== -->
+            <template v-else>
+              <el-form-item :label="t('subscription.scriptCode')">
+                <el-input
+                  v-model="scriptText"
+                  type="textarea"
+                  :rows="16"
+                  spellcheck="false"
+                  class="script-editor"
+                  :placeholder="SCRIPT_PLACEHOLDER"
+                />
+              </el-form-item>
+              <div class="script-limits">
+                <el-form-item :label="t('subscription.scriptTimeout')">
+                  <el-input-number v-model="scriptTimeoutMs" :min="1" :max="500" size="small" />
+                </el-form-item>
+                <el-form-item :label="t('subscription.scriptMaxRecords')">
+                  <el-input-number v-model="scriptMaxRecords" :min="1" :max="1000" size="small" />
+                </el-form-item>
+                <el-button type="primary" link size="small" @click="fillScriptSample">
+                  {{ t('subscription.scriptSample') }}
+                </el-button>
+              </div>
+              <p class="sub-hint">{{ t('subscription.scriptApiHint') }}</p>
+            </template>
           </section>
 
           <!-- ========== 预览 ========== -->
@@ -499,6 +651,12 @@
                     {{ t('subscription.sampleAdvanced') }}
                   </el-button>
                 </div>
+                <el-input
+                  v-model="sampleTopic"
+                  size="small"
+                  class="sample-topic-input"
+                  :placeholder="t('subscription.sampleTopicPlaceholder')"
+                />
                 <el-input
                   v-model="sampleText"
                   type="textarea"
@@ -878,9 +1036,57 @@ const rootPath = ref('$')
 // 样例报文只是预览辅助，不预填：避免把演示数据保存进配置、也避免
 // 操作人员把演示结果误当成自己的真实报文验证通过。
 const sampleText = ref('')
+const sampleTopic = ref('')
 const previewResult = ref(null)
 const previewResultRef = ref(null)
 const filterRows = ref([])
+
+// ---------- 解析方式 ----------
+const parserType = ref('builtin') // builtin | script
+const topicPattern = ref('') // 如 factory/{deviceId}/telemetry
+const fanoutEnabled = ref(false)
+const fanoutRows = ref([]) // { deviceAddressId, deviceAddressLabel, valuePath }
+
+// 脚本配置：与后端 parser/script 的 config 一一对应。
+const scriptText = ref('')
+const scriptTimeoutMs = ref(50)
+const scriptMaxRecords = ref(200)
+
+const TRANSFORM_OPS = [
+  { value: 'scale', labelKey: 'subscription.transformScale' },
+  { value: 'round', labelKey: 'subscription.transformRound' },
+  { value: 'trim', labelKey: 'subscription.transformTrim' },
+  { value: 'default', labelKey: 'subscription.transformDefault' },
+  { value: 'hexDecode', labelKey: 'subscription.transformHexDecode' },
+  { value: 'base64Decode', labelKey: 'subscription.transformBase64Decode' },
+  { value: 'bitfield', labelKey: 'subscription.transformBitfield' },
+  { value: 'regex', labelKey: 'subscription.transformRegex' },
+]
+
+const SCRIPT_PLACEHOLDER = `function parse(msg, ctx) {
+  var d = ctx.json();
+  ctx.emit({
+    deviceId: ctx.get("deviceId"),
+    deviceAddressId: "temp",
+    value: d.data.temp,
+    kind: "float"
+  });
+}`
+
+const SCRIPT_SAMPLE = `// msg.topic / msg.payload / msg.receivedAt / msg.qos / msg.retained
+// ctx.json() 安全解析报文；ctx.get(path) 取标量（数字按字符串返回，不丢精度）
+// ctx.emit(record) 产出一条记录；ctx.state 可跨报文保存状态
+function parse(msg, ctx) {
+  var d = ctx.json();
+  ctx.emit({
+    deviceId: ctx.get("deviceId") || msg.topic.split("/")[1],
+    deviceAddressId: "temp",
+    deviceAddressLabel: "温度",
+    value: d.data.temp,
+    kind: "float",
+    quality: 192
+  });
+}`
 
 const formData = reactive({
   id: '',
@@ -925,7 +1131,7 @@ function resetFieldMap() {
     protocol: { source: 'const', value: '' },
   }
   FIELD_DEFS.forEach((def) => {
-    const entry = { mappingRows: [], default: '', path: '', ...defaults[def.key] }
+    const entry = { mappingRows: [], default: '', path: '', transforms: [], ...defaults[def.key] }
     // 记录切换前的取值方式，用于把已填的路径/取值带到新方式上。
     entry._lastSource = entry.source
     fieldMap[def.key] = entry
@@ -948,11 +1154,28 @@ function setFieldMapFromRule(rule) {
             ? Object.entries(src.mapping || {}).map(([from, to]) => ({ from, to }))
             : [],
         default: src.default ?? '',
+        transforms: (src.transform || []).map((tr) => ({
+          op: tr.op || 'scale',
+          factor: tr.factor ?? '',
+          offset: tr.offset ?? '',
+          digits: tr.digits ?? '',
+          value: tr.value ?? '',
+          pattern: tr.pattern ?? '',
+          group: tr.group ?? '',
+          length: tr.length ?? '',
+        })),
         _lastSource: src.source || 'path',
       }
     }
   })
   rootPath.value = rule?.root || '$'
+  topicPattern.value = rule?.topicPattern || ''
+  fanoutEnabled.value = Array.isArray(rule?.fanout) && rule.fanout.length > 0
+  fanoutRows.value = (rule?.fanout || []).map((ov) => ({
+    deviceAddressId: ov?.deviceAddressId?.value || '',
+    deviceAddressLabel: ov?.deviceAddressLabel?.value || '',
+    valuePath: ov?.value?.value || '',
+  }))
   // 透传字段始终默认收起；已配置的数量由 advancedConfiguredCount 角标提示。
   showAdvancedFields.value = false
   filterRows.value = (rule?.filter || []).map((f) => ({
@@ -980,9 +1203,17 @@ function resetForm() {
   })
   rootPath.value = '$'
   sampleText.value = ''
+  sampleTopic.value = ''
   previewResult.value = null
   filterRows.value = []
   showAdvancedFields.value = false
+  parserType.value = 'builtin'
+  topicPattern.value = ''
+  fanoutEnabled.value = false
+  fanoutRows.value = []
+  scriptText.value = ''
+  scriptTimeoutMs.value = 50
+  scriptMaxRecords.value = 200
   resetFieldMap()
   nextTick(() => formRef.value?.clearValidate())
 }
@@ -1012,11 +1243,20 @@ async function handleEdit(row) {
       sort: data.sort ?? 0,
       status: data.status ?? 1,
     })
+    parserType.value = data.parserType || 'builtin'
     const rule = typeof data.mappingJson === 'string' ? safeParse(data.mappingJson) : data.mappingJson
     setFieldMapFromRule(rule)
     if (data.sampleJson) {
       sampleText.value =
         typeof data.sampleJson === 'string' ? data.sampleJson : JSON.stringify(data.sampleJson, null, 2)
+    }
+    sampleTopic.value = data.sampleTopic || ''
+    if (parserType.value === 'script') {
+      const cfg =
+        typeof data.parserConfig === 'string' ? safeParse(data.parserConfig) : data.parserConfig
+      scriptText.value = cfg?.script || ''
+      scriptTimeoutMs.value = cfg?.timeoutMs ?? 50
+      scriptMaxRecords.value = cfg?.maxRecordsPerMessage ?? 200
     }
     dialogVisible.value = true
   } catch (err) {
@@ -1041,8 +1281,65 @@ function addFilter() {
   filterRows.value.push({ path: '', op: 'eq', value: '', valuesText: '' })
 }
 
+function addTransform() {
+  if (!fieldMap.value) fieldMap.value = { transforms: [] }
+  if (!Array.isArray(fieldMap.value.transforms)) fieldMap.value.transforms = []
+  fieldMap.value.transforms.push({
+    op: 'scale',
+    factor: '',
+    offset: '',
+    digits: '',
+    value: '',
+    pattern: '',
+    group: '',
+    length: '',
+  })
+}
+
+function buildTransform(tr) {
+  const out = { op: tr.op }
+  if (tr.op === 'scale') {
+    if (String(tr.factor ?? '').trim() !== '') out.factor = Number(tr.factor)
+    if (String(tr.offset ?? '').trim() !== '') out.offset = Number(tr.offset)
+  } else if (tr.op === 'round') {
+    out.digits = Number(tr.digits || 0)
+  } else if (tr.op === 'default') {
+    out.value = String(tr.value ?? '')
+  } else if (tr.op === 'bitfield') {
+    out.offset = Number(tr.offset || 0)
+    out.length = Number(tr.length || 0)
+  } else if (tr.op === 'regex') {
+    out.pattern = String(tr.pattern ?? '')
+    out.group = Number(tr.group || 0)
+  }
+  return out
+}
+
+function addFanoutRow() {
+  fanoutRows.value.push({ deviceAddressId: '', deviceAddressLabel: '', valuePath: '' })
+}
+
+function fillScriptSample() {
+  scriptText.value = SCRIPT_SAMPLE
+}
+
+function buildScriptConfig() {
+  return {
+    script: scriptText.value,
+    timeoutMs: Number(scriptTimeoutMs.value) || 50,
+    maxRecordsPerMessage: Number(scriptMaxRecords.value) || 200,
+  }
+}
+
+function validateScript() {
+  if (!String(scriptText.value || '').trim()) return t('subscription.scriptRequired')
+  if (!/function\s+parse\s*\(/.test(scriptText.value)) return t('subscription.scriptNeedParse')
+  return ''
+}
+
 // 非 map 取值方式的占位符；map 时填的是“外部字段的路径”，在模板里单独渲染。
 function valuePlaceholder(def) {
+  if (fieldMap[def.key]?.source === 'topic') return t('subscription.topicVarPlaceholder')
   if (def.key === 'kind') return 'bool / int / uint / float / string / time'
   return def.placeholder
 }
@@ -1094,12 +1391,16 @@ function buildMapping() {
       if (path && Object.keys(mapping).length) {
         fields[def.key] = { source: 'map', value: path, mapping }
         if (m.default) fields[def.key].default = m.default
+        const transforms = (m.transforms || []).map(buildTransform)
+        if (transforms.length) fields[def.key].transform = transforms
       }
       return
     }
     const value = m?.value == null ? '' : String(m.value).trim()
     if (value === '') return
     fields[def.key] = { source: m.source || 'path', value }
+    const transforms = (m.transforms || []).map(buildTransform)
+    if (transforms.length) fields[def.key].transform = transforms
   })
 
   const filter = filterRows.value
@@ -1117,12 +1418,33 @@ function buildMapping() {
       return item
     })
 
-  return {
+  const mapping = {
     version: 1,
     root: rootPath.value.trim() || '$',
     fields,
     filter,
   }
+  const pattern = String(topicPattern.value || '').trim()
+  if (pattern) mapping.topicPattern = pattern
+
+  if (fanoutEnabled.value) {
+    const fanout = fanoutRows.value
+      .map((row) => {
+        const addressId = String(row.deviceAddressId || '').trim()
+        const valuePath = String(row.valuePath || '').trim()
+        if (!addressId || !valuePath) return null
+        const overlay = {
+          deviceAddressId: { source: 'const', value: addressId },
+          value: { source: 'path', value: valuePath },
+        }
+        const label = String(row.deviceAddressLabel || '').trim()
+        if (label) overlay.deviceAddressLabel = { source: 'const', value: label }
+        return overlay
+      })
+      .filter(Boolean)
+    if (fanout.length) mapping.fanout = fanout
+  }
+  return mapping
 }
 
 function validateMapping() {
@@ -1159,8 +1481,40 @@ function validateMapping() {
     }
   }
 
+  // 值变换的必填参数在保存前拦住，避免后端拒绝时用户只看到一句宽泛的错误。
+  for (const def of FIELD_DEFS) {
+    for (const tr of fieldMap[def.key]?.transforms || []) {
+      if (tr.op === 'default' && String(tr.value ?? '') === '') {
+        return t('subscription.transformDefaultRequired')
+      }
+      if (tr.op === 'regex' && !String(tr.pattern ?? '').trim()) {
+        return t('subscription.transformPatternRequired')
+      }
+      if (tr.op === 'bitfield' && !String(tr.length ?? '').trim()) {
+        return t('subscription.transformLengthRequired')
+      }
+    }
+  }
+
+  if (
+    FIELD_DEFS.some((def) => fieldMap[def.key]?.source === 'topic') &&
+    !String(topicPattern.value || '').trim()
+  ) {
+    return t('subscription.topicPatternRequired')
+  }
+
+  if (fanoutEnabled.value) {
+    if (!fanoutRows.value.length) return t('subscription.fanoutRequired')
+    for (const row of fanoutRows.value) {
+      if (!String(row.deviceAddressId ?? '').trim()) return t('subscription.fanoutAddressRequired')
+      if (!String(row.valuePath ?? '').trim()) return t('subscription.fanoutValueRequired')
+    }
+  }
+
+  const fanoutCovers = fanoutEnabled.value ? ['deviceAddressId', 'value'] : []
   const missing = FIELD_DEFS.filter((def) => {
     if (!def.required) return false
+    if (fanoutCovers.includes(def.key)) return false
     const m = fieldMap[def.key]
     // 值映射的“路径”存在 path 字段里，不能只看 value。
     const v = m?.source === 'map' ? m.path : m?.value
@@ -1212,9 +1566,9 @@ async function handleTestConnectivity() {
 
 // ---------- 预览 ----------
 async function handlePreview() {
-  const mappingErr = validateMapping()
-  if (mappingErr) {
-    ElMessage.warning(mappingErr)
+  const configErr = parserType.value === 'builtin' ? validateMapping() : validateScript()
+  if (configErr) {
+    ElMessage.warning(configErr)
     return
   }
   const sample = parseSampleJSON()
@@ -1222,12 +1576,19 @@ async function handlePreview() {
     ElMessage.warning(sample.error)
     return
   }
+  const request = {
+    parserType: parserType.value,
+    sampleJson: sample.value,
+    sampleTopic: String(sampleTopic.value || '').trim(),
+  }
+  if (parserType.value === 'builtin') {
+    request.mappingJson = buildMapping()
+  } else {
+    request.parserConfig = buildScriptConfig()
+  }
   previewing.value = true
   try {
-    previewResult.value = await previewSubscriptionMapping({
-      mappingJson: buildMapping(),
-      sampleJson: sample.value,
-    })
+    previewResult.value = await previewSubscriptionMapping(request)
     // 结果表格生成在对话框下方，可能落在可视区外；主动滚过去让操作人员看到产出。
     // 等 el-table 完成首次渲染再算位置，否则滚动目标会因表格高度后到而偏差。
     await nextTick()
@@ -1250,9 +1611,9 @@ async function handleSubmit() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
 
-  const mappingErr = validateMapping()
-  if (mappingErr) {
-    ElMessage.warning(mappingErr)
+  const configErr = parserType.value === 'builtin' ? validateMapping() : validateScript()
+  if (configErr) {
+    ElMessage.warning(configErr)
     return
   }
   // 样例报文可选：填了就必须是合法 JSON；留空不影响保存。
@@ -1278,9 +1639,15 @@ async function handleSubmit() {
       password: formData.password,
       topic: formData.topic,
       qos: formData.qos,
-      mappingJson: buildMapping(),
+      parserType: parserType.value,
+      sampleTopic: String(sampleTopic.value || '').trim(),
       sort: formData.sort,
       status: formData.status,
+    }
+    if (parserType.value === 'builtin') {
+      payload.mappingJson = buildMapping()
+    } else {
+      payload.parserConfig = buildScriptConfig()
     }
     if (sampleJson !== null) {
       payload.sampleJson = sampleJson
@@ -1537,6 +1904,65 @@ onBeforeUnmount(() => {
 }
 
 /* 过滤条件：一行一条，底部用发丝线分隔 */
+.sub-parser-type {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.transform-editor {
+  margin: 2px 0 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--surface-sunken, #fafafa);
+}
+
+.transform-row,
+.fanout-row {
+  display: grid;
+  grid-template-columns: 132px 1fr 1fr 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.fanout-row {
+  grid-template-columns: 1fr 1fr 1.4fr 36px;
+}
+
+.transform-row:last-child,
+.fanout-row:last-child {
+  border-bottom: none;
+}
+
+.script-editor :deep(textarea) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.script-limits {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.script-limits :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.sample-topic-input {
+  margin-bottom: 8px;
+}
+
+.runtime-counts.is-warn {
+  color: var(--amber-6, #d97706);
+}
+
 .filter-row {
   display: grid;
   grid-template-columns: 1fr 128px 1fr 36px;

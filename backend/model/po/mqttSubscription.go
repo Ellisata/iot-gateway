@@ -24,17 +24,25 @@ type MqttSubscription struct {
 	ClientID string `gorm:"column:client_id" json:"clientId"`
 	Username string `gorm:"column:username" json:"username"`
 	Password string `gorm:"column:password" json:"password"`
-	// Topic 订阅主题，支持 MQTT 通配符 + / #
+	// Topic 订阅主题，支持 MQTT 通配符 + / #；
+	// 多个过滤器用英文逗号分隔，共用本行的 QoS 与解析器。
 	Topic string `gorm:"column:topic;not null" json:"topic"`
 	QoS   int    `gorm:"column:qos;default:1" json:"qos"`
-	// MappingJSON 报文映射规则（见 subscribe/mapping）
+	// MappingJSON 内置映射（parser_type=builtin）的规则（见 parser/mapping）。
+	// builtin 类型沿用本列，保证历史数据与 API 零迁移；其它类型读 ParserConfig。
 	MappingJSON string `gorm:"column:mapping_json;not null" json:"mappingJson"`
+	// ParserType 解析方式：builtin（默认）/ script / 将来的 plugin:<name>
+	ParserType string `gorm:"column:parser_type;default:builtin" json:"parserType"`
+	// ParserConfig 非 builtin 解析方式的配置（script 为脚本 + 限制参数）
+	ParserConfig string `gorm:"column:parser_config" json:"parserConfig"`
 	// SampleJSON 样例报文，仅供管理界面预览，运行期不参与转换
 	SampleJSON string `gorm:"column:sample_json" json:"sampleJson"`
-	Sort       int    `gorm:"column:sort;default:1" json:"sort"`
-	Status     int    `gorm:"column:status;default:1" json:"status"`
-	CreatedAt  string `gorm:"column:created_at" json:"createdAt"`
-	UpdatedAt  string `gorm:"column:updated_at" json:"updatedAt"`
+	// SampleTopic 样例主题，供 topicPattern 预览；运行期不参与转换
+	SampleTopic string `gorm:"column:sample_topic" json:"sampleTopic"`
+	Sort        int    `gorm:"column:sort;default:1" json:"sort"`
+	Status      int    `gorm:"column:status;default:1" json:"status"`
+	CreatedAt   string `gorm:"column:created_at" json:"createdAt"`
+	UpdatedAt   string `gorm:"column:updated_at" json:"updatedAt"`
 }
 
 // TableName 表名

@@ -6,9 +6,11 @@ package subscribe
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"iot-gateway/collector"
 	"iot-gateway/model/po"
+	"iot-gateway/parser"
 )
 
 // fakeMessage 最小 mqtt.Message 实现，用于在没有 broker 的情况下驱动 onMessage。
@@ -76,7 +78,18 @@ func newTestSubscriber(t *testing.T, mappingJSON string) (*subscriber, *fakeSink
 	}
 	sink := &fakeSink{}
 	info := &fakeInfoSink{}
-	return newSubscriber(cfg, sink, info), sink, info
+	sub := newSubscriber(cfg, sink, info)
+	t.Cleanup(sub.stop)
+	return sub, sink, info
+}
+
+// feed 投递一条报文并等待 worker 处理完（测试里用确定性等待替代 sleep）。
+func feed(t *testing.T, sub *subscriber, msg fakeMessage) {
+	t.Helper()
+	sub.onMessage(nil, msg)
+	if !sub.waitIdle(2 * time.Second) {
+		t.Fatal("解析 worker 未在 2s 内排空队列")
+	}
 }
 
 func TestSubscriberConvertsAndDelivers(t *testing.T) {
@@ -90,7 +103,7 @@ func TestSubscriberConvertsAndDelivers(t *testing.T) {
 		}
 	}`)
 
-	sub.onMessage(nil, fakeMessage{
+	feed(t, sub, fakeMessage{
 		topic:   "factory/line1/telemetry",
 		payload: []byte(`[{"deviceId":"d1","tagId":"a1","value":1,"kind":"int"},{"deviceId":"d1","tagId":"a2","value":"x","kind":"string"}]`),
 	})
@@ -123,7 +136,7 @@ func TestSubscriberCountsConversionErrors(t *testing.T) {
 		}
 	}`)
 
-	sub.onMessage(nil, fakeMessage{topic: "t", payload: []byte(`{not json`)})
+	feed(t, sub, fakeMessage{topic: "t", payload: []byte(`{not json`)})
 
 	if len(sink.snapshot()) != 0 {
 		t.Error("invalid payload must not be delivered")
@@ -136,6 +149,62 @@ func TestSubscriberCountsConversionErrors(t *testing.T) {
 	}
 	if sub.lastError() == "" {
 		t.Error("lastError should be set")
+	}
+}
+
+func TestSubscriberSwapParserWithoutReconnect(t *testing.T) {
+	sub, sink, _ := newTestSubscriber(t, `{
+		"fields": {
+			"deviceId":        {"source": "path", "value": "deviceId"},
+			"deviceAddressId": {"source": "path", "value": "tagId"},
+			"value":           {"source": "path", "value": "value"}
+		}
+	}`)
+
+	feed(t, sub, fakeMessage{topic: "t", payload: []byte(`{"deviceId":"d1","tagId":"a1","value":"v1"}`)})
+	if got := sink.snapshot(); len(got) != 1 || got[0].Value != "v1" {
+		t.Fatalf("before swap records = %+v", got)
+	}
+
+	next, err := parseSubscription(&po.MqttSubscription{
+		ID:          "sub-1",
+		Name:        "test",
+		Broker:      "127.0.0.1",
+		Port:        "1883",
+		Topic:       "factory/+/telemetry",
+		QoS:         1,
+		MappingJSON: `{"fields":{"deviceId":{"source":"path","value":"deviceId"},"deviceAddressId":{"source":"path","value":"tagId"},"value":{"source":"template","value":"v2-{value}"}}}`,
+	})
+	if err != nil {
+		t.Fatalf("parseSubscription(next): %v", err)
+	}
+	if next.parserSig == sub.ParserSig() {
+		t.Fatal("解析配置变化后签名应不同")
+	}
+	if err := sub.swapParser(next.prs, next.parserSig); err != nil {
+		t.Fatalf("swapParser: %v", err)
+	}
+
+	feed(t, sub, fakeMessage{topic: "t", payload: []byte(`{"deviceId":"d1","tagId":"a1","value":"x"}`)})
+	got := sink.snapshot()
+	if len(got) != 2 || got[1].Value != "v2-x" {
+		t.Fatalf("after swap records = %+v", got)
+	}
+}
+
+func TestEnqueueDropsOldestWhenFull(t *testing.T) {
+	sub := &subscriber{queue: make(chan parser.Message, 1)}
+	sub.enqueue(parser.Message{Topic: "old"})
+	sub.enqueue(parser.Message{Topic: "new"})
+
+	if got := (<-sub.queue).Topic; got != "new" {
+		t.Errorf("remaining message = %q, want newest", got)
+	}
+	if sub.dropped.Load() != 1 {
+		t.Errorf("dropped = %d, want 1", sub.dropped.Load())
+	}
+	if sub.pending.Load() != 1 {
+		t.Errorf("pending = %d, want 1 (dropped message must be subtracted)", sub.pending.Load())
 	}
 }
 

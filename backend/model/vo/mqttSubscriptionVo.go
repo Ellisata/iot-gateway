@@ -11,22 +11,25 @@ import (
 
 // MqttSubscriptionVO MQTT 订阅响应
 type MqttSubscriptionVO struct {
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Broker      string          `json:"broker"`
-	Port        string          `json:"port"`
-	ClientID    string          `json:"clientId"`
-	Username    string          `json:"username"`
-	Password    string          `json:"password"`
-	Topic       string          `json:"topic"`
-	QoS         int             `json:"qos"`
-	MappingJSON json.RawMessage `json:"mappingJson"`
-	SampleJSON  json.RawMessage `json:"sampleJson"`
-	Sort        int             `json:"sort"`
-	Status      int             `json:"status"`
-	CreatedAt   string          `json:"createdAt"`
-	UpdatedAt   string          `json:"updatedAt"`
+	ID           string          `json:"id"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description"`
+	Broker       string          `json:"broker"`
+	Port         string          `json:"port"`
+	ClientID     string          `json:"clientId"`
+	Username     string          `json:"username"`
+	Password     string          `json:"password"`
+	Topic        string          `json:"topic"`
+	QoS          int             `json:"qos"`
+	ParserType   string          `json:"parserType"`
+	ParserConfig json.RawMessage `json:"parserConfig"`
+	MappingJSON  json.RawMessage `json:"mappingJson"`
+	SampleJSON   json.RawMessage `json:"sampleJson"`
+	SampleTopic  string          `json:"sampleTopic"`
+	Sort         int             `json:"sort"`
+	Status       int             `json:"status"`
+	CreatedAt    string          `json:"createdAt"`
+	UpdatedAt    string          `json:"updatedAt"`
 }
 
 // MqttSubscriptionStatusVO MQTT 订阅运行状态
@@ -40,6 +43,8 @@ type MqttSubscriptionStatusVO struct {
 	Messages    uint64 `json:"messages"` // 收到的报文数
 	Records     uint64 `json:"records"`  // 成功转换并投递的记录数
 	Errors      uint64 `json:"errors"`   // 转换/投递失败次数
+	Skipped     uint64 `json:"skipped"`  // 报文内被跳过的记录数
+	Dropped     uint64 `json:"dropped"`  // 队列满时丢弃的报文数
 	LastMessage string `json:"lastMessageTime"`
 	Error       string `json:"error"`
 }

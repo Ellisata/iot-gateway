@@ -220,6 +220,139 @@ func TestMqttSubscriptionDevicePointPage(t *testing.T) {
 	}
 }
 
+func TestMqttSubscriptionScriptCRUDAndPreview(t *testing.T) {
+	svc := newTestSubscriptionService(t)
+	ctx := context.Background()
+
+	scriptCfg := json.RawMessage(`{
+		"script": "function parse(msg, ctx) { ctx.emit({deviceId: ctx.get(\"id\"), deviceAddressId: \"temp\", value: ctx.get(\"v\"), kind: \"float\"}); }",
+		"timeoutMs": 30
+	}`)
+	create := &dto.CreateMqttSubscriptionDTO{
+		Name:         "scripted",
+		Broker:       "127.0.0.1",
+		Port:         "1883",
+		Topic:        "factory/+/telemetry",
+		QoS:          1,
+		ParserType:   "script",
+		ParserConfig: scriptCfg,
+		SampleJSON:   json.RawMessage(`{"id":"d1","v":1.5}`),
+		SampleTopic:  "factory/line1/telemetry",
+	}
+	if err := svc.CreateMqttSubscription(ctx, create); err != nil {
+		t.Fatalf("Create(script): %v", err)
+	}
+
+	page, err := svc.PageMqttSubscription(ctx, &dto.PageMqttSubscriptionDTO{Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("Page: %v", err)
+	}
+	if page.Total != 1 {
+		t.Fatalf("total = %d, want 1", page.Total)
+	}
+	id := page.Records[0].ID
+	got, err := svc.GetMqttSubscriptionById(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.ParserType != "script" || len(got.ParserConfig) == 0 || got.SampleTopic != "factory/line1/telemetry" {
+		t.Fatalf("script fields = type:%q config:%q topic:%q", got.ParserType, got.ParserConfig, got.SampleTopic)
+	}
+
+	// 列表页只改启停：不传解析配置时必须沿用原脚本。
+	status := 0
+	if err := svc.UpdateMqttSubscription(ctx, &dto.UpdateMqttSubscriptionDTO{
+		ID:     id,
+		Name:   "scripted",
+		Broker: "127.0.0.1",
+		Port:   "1883",
+		Topic:  "factory/+/telemetry",
+		QoS:    1,
+		Sort:   1,
+		Status: &status,
+	}); err != nil {
+		t.Fatalf("Update(status only): %v", err)
+	}
+	got, err = svc.GetMqttSubscriptionById(ctx, id)
+	if err != nil {
+		t.Fatalf("Get after update: %v", err)
+	}
+	if got.ParserType != "script" || !strings.Contains(string(got.ParserConfig), "function parse") {
+		t.Fatalf("script config lost on status update: %+v", got)
+	}
+	// 只改状态不应清空样例（空 RawMessage 会让详情接口序列化失败）。
+	if len(got.SampleJSON) == 0 || got.SampleTopic != "factory/line1/telemetry" {
+		t.Errorf("sample lost on status update: json=%q topic=%q", got.SampleJSON, got.SampleTopic)
+	}
+	if _, err := json.Marshal(got); err != nil {
+		t.Fatalf("detail VO must be JSON-serializable: %v", err)
+	}
+
+	preview := svc.PreviewMqttSubscription(&dto.PreviewMqttSubscriptionDTO{
+		ParserType:   "script",
+		ParserConfig: scriptCfg,
+		SampleJSON:   json.RawMessage(`{"id":"d1","v":1.5}`),
+		SampleTopic:  "factory/line1/telemetry",
+	})
+	if preview.Error != "" || preview.Count != 1 {
+		t.Fatalf("script preview count=%d error=%q", preview.Count, preview.Error)
+	}
+	if rec := preview.Records[0]; rec.DeviceID != "d1" || rec.DeviceAddressID != "temp" || rec.Value != "1.5" {
+		t.Errorf("script preview record = %+v", rec)
+	}
+}
+
+func TestMqttSubscriptionCreateRejectsBadScript(t *testing.T) {
+	svc := newTestSubscriptionService(t)
+	err := svc.CreateMqttSubscription(context.Background(), &dto.CreateMqttSubscriptionDTO{
+		Name:         "bad-script",
+		Broker:       "127.0.0.1",
+		Topic:        "a/b",
+		ParserType:   "script",
+		ParserConfig: json.RawMessage(`{"script":"function parse( {"}`),
+	})
+	if code := appErrorCode(t, err); code != enums.ParamValidEnum.GetCode() {
+		t.Fatalf("bad script code = %s, want %s", code, enums.ParamValidEnum.GetCode())
+	}
+}
+
+func TestMqttSubscriptionPreviewTopicPattern(t *testing.T) {
+	svc := newTestSubscriptionService(t)
+
+	got := svc.PreviewMqttSubscription(&dto.PreviewMqttSubscriptionDTO{
+		ParserType: "builtin",
+		MappingJSON: json.RawMessage(`{
+			"topicPattern": "factory/{deviceId}/telemetry/{tag}",
+			"fields": {
+				"deviceId":          {"source": "topic", "value": "deviceId"},
+				"deviceAddressId":   {"source": "topic", "value": "tag"},
+				"value":             {"source": "path", "value": "v"},
+				"deviceName":        {"source": "const", "value": "line"},
+				"deviceAddressLabel":{"source": "const", "value": "温度"},
+				"kind":              {"source": "const", "value": "float"},
+				"quality":           {"source": "const", "value": "192"}
+			}
+		}`),
+		SampleJSON:  json.RawMessage(`{"v":21.5}`),
+		SampleTopic: "factory/line1/telemetry/temp",
+	})
+	if got.Error != "" || got.Count != 1 {
+		t.Fatalf("topic preview count=%d error=%q", got.Count, got.Error)
+	}
+	if rec := got.Records[0]; rec.DeviceID != "line1" || rec.DeviceAddressID != "temp" {
+		t.Errorf("topic-derived identity = %q/%q", rec.DeviceID, rec.DeviceAddressID)
+	}
+
+	missingTopic := svc.PreviewMqttSubscription(&dto.PreviewMqttSubscriptionDTO{
+		ParserType:  "builtin",
+		MappingJSON: json.RawMessage(`{"topicPattern":"factory/{deviceId}","fields":{"deviceId":{"source":"topic","value":"deviceId"},"deviceAddressId":{"source":"const","value":"a"},"value":{"source":"path","value":"v"}}}`),
+		SampleJSON:  json.RawMessage(`{"v":1}`),
+	})
+	if missingTopic.Error == "" {
+		t.Fatal("缺少样例主题时应返回预览错误")
+	}
+}
+
 func TestMqttSubscriptionPreview(t *testing.T) {
 	svc := newTestSubscriptionService(t)
 

@@ -41,6 +41,8 @@ type Status struct {
 	Messages    uint64 `json:"messages"`
 	Records     uint64 `json:"records"`
 	Errors      uint64 `json:"errors"`
+	Skipped     uint64 `json:"skipped"` // 报文内被跳过的记录数
+	Dropped     uint64 `json:"dropped"` // 队列满时丢弃的报文数
 	LastMessage string `json:"lastMessageTime"`
 	Error       string `json:"error"`
 }
@@ -151,6 +153,8 @@ func (m *Manager) Status() []Status {
 			Messages:    s.messages.Load(),
 			Records:     s.records.Load(),
 			Errors:      s.errors.Load(),
+			Skipped:     s.skipped.Load(),
+			Dropped:     s.dropped.Load(),
 			LastMessage: s.lastMessageTime(),
 			Error:       s.lastError(),
 		})
@@ -167,30 +171,46 @@ func (m *Manager) refresh() {
 		return
 	}
 
-	type built struct {
-		cfg *subscription
-	}
-	next := make([]built, 0, len(rows))
+	next := make([]*subscription, 0, len(rows))
 	for i := range rows {
-		cfg, err := parseSubscription(&rows[i])
+		cfg, err := parseSubscriptionWith(&rows[i], false)
 		if err != nil {
 			logger.Error("subscribe: subscription %q (id=%s) config invalid, skip: %v",
 				rows[i].Name, rows[i].ID, err)
 			continue
 		}
-		next = append(next, built{cfg: cfg})
+		next = append(next, cfg)
 	}
 
 	m.mu.Lock()
 	newMap := make(map[string]*subscriber, len(next))
 	var toStop []*subscriber
-	for _, b := range next {
-		id := b.cfg.id
-		if old, ok := m.subs[id]; ok && old.Sig() == b.cfg.sig {
-			newMap[id] = old // 配置未变化，保留运行中的连接
+	for _, cfg := range next {
+		id := cfg.id
+		if old, ok := m.subs[id]; ok && old.ConnSig() == cfg.connSig {
+			// 连接参数未变：只在解析配置变化时替换解析器，不重连 broker。
+			// 未变化的订阅不构造解析器（脚本编译不便宜），直接沿用运行实例。
+			if old.ParserSig() != cfg.parserSig {
+				if err := cfg.buildParser(); err != nil {
+					logger.Error("subscribe: subscription %q (id=%s) parser invalid, keep running parser: %v",
+						cfg.name, cfg.id, err)
+					newMap[id] = old
+					continue
+				}
+				if err := old.swapParser(cfg.prs, cfg.parserSig); err != nil {
+					logger.Error("subscribe: subscription %q (id=%s) swap parser: %v", cfg.name, cfg.id, err)
+				}
+			}
+			newMap[id] = old
 			continue
 		}
-		s := newSubscriber(b.cfg, m.sink, m.points)
+
+		if err := cfg.buildParser(); err != nil {
+			logger.Error("subscribe: subscription %q (id=%s) parser invalid, skip: %v",
+				cfg.name, cfg.id, err)
+			continue
+		}
+		s := newSubscriber(cfg, m.sink, m.points)
 		newMap[id] = s
 		go s.start() // 建连可能阻塞（broker 不可达时更明显），不阻塞管理器
 		if old, ok := m.subs[id]; ok {
@@ -272,19 +292,21 @@ func (m *Manager) loadChecksum() uint64 {
 		return 0
 	}
 	type row struct {
-		ID          string
-		Broker      string
-		Port        string
-		ClientID    string
-		Username    string
-		Password    string
-		Topic       string
-		QoS         int
-		MappingJSON string
+		ID           string
+		Broker       string
+		Port         string
+		ClientID     string
+		Username     string
+		Password     string
+		Topic        string
+		QoS          int
+		MappingJSON  string
+		ParserType   string
+		ParserConfig string
 	}
 	var rows []row
 	if err := m.db.Model(&po.MqttSubscription{}).
-		Select("id, broker, port, client_id, username, password, topic, qos, mapping_json").
+		Select("id, broker, port, client_id, username, password, topic, qos, mapping_json, parser_type, parser_config").
 		Where("status = 1").
 		Order("id").
 		Find(&rows).Error; err != nil {
@@ -311,6 +333,10 @@ func (m *Manager) loadChecksum() uint64 {
 		fmt.Fprintf(h, "%d", r.QoS)
 		io.WriteString(h, "|")
 		io.WriteString(h, r.MappingJSON)
+		io.WriteString(h, "|")
+		io.WriteString(h, r.ParserType)
+		io.WriteString(h, "|")
+		io.WriteString(h, r.ParserConfig)
 		io.WriteString(h, "\n")
 	}
 	return h.Sum64()
