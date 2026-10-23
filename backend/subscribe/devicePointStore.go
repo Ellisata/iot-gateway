@@ -36,6 +36,15 @@ type devicePointKey struct {
 	addressID string
 }
 
+// DevicePointKey 订阅设备/点位的自然键，用于从外部作废落库器的元信息指纹。
+//
+// 与 devicePointKey 是同一个键，导出这一份是为了让 service 层能指名作废
+// （恢复自动收录 / 删除手工行后），而不必把内部 map 的形状暴露出去。
+type DevicePointKey struct {
+	DeviceID        string
+	DeviceAddressID string
+}
+
 // devicePointStore 把订阅报文中的设备/点位元信息异步 upsert 到 SQLite。
 //
 // 收包协程只做内存查重与非阻塞入队；真正的写库由一个独立协程攒批完成。
@@ -158,6 +167,25 @@ func (s *devicePointStore) Record(records []collector.CollectedRecord) {
 	if dropped > 0 {
 		logger.Warn("subscribe: device point queue full, dropped %d entries", dropped)
 	}
+}
+
+// Forget 作废这些点位的元信息指纹。
+//
+// 下一次 Record 会把它们当作首次出现重新入队，即使报文元信息没有变化。
+// 恢复自动收录 / 删除手工行之后必须调用：否则 Record 比对指纹后一直跳过，
+// 要等报文元信息变化或网关重启才会重新写库 —— 表现为"点了恢复，值却没变"。
+//
+// 只操作内存 map，不写库；未 Start 的 store 调用它也是安全的。
+func (s *devicePointStore) Forget(keys []DevicePointKey) {
+	if s == nil || len(keys) == 0 {
+		return
+	}
+
+	s.mu.Lock()
+	for _, k := range keys {
+		delete(s.entries, devicePointKey{deviceID: k.DeviceID, addressID: k.DeviceAddressID})
+	}
+	s.mu.Unlock()
 }
 
 // run 消费队列并攒批写库。

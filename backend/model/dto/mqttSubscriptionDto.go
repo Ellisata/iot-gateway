@@ -69,6 +69,8 @@ type PageMqttSubscriptionDevicePointDTO struct {
 	DeviceID        string `form:"deviceId"`
 	DeviceName      string `form:"deviceName"`
 	DeviceAddressID string `form:"deviceAddressId"`
+	// Source 维护来源：manual 手工维护 / auto 订阅报文自动收录；空 = 全部。
+	Source string `form:"source" binding:"omitempty,oneof=manual auto"`
 }
 
 // CreateMqttSubscriptionDevicePointDTO 手工新增订阅设备/点位。
@@ -92,6 +94,32 @@ type UpdateMqttSubscriptionDevicePointDTO struct {
 	DeviceName         string `json:"deviceName"         binding:"max=100"`
 	DeviceAddressLabel string `json:"deviceAddressLabel" binding:"max=100"`
 	Kind               string `json:"kind"`
+}
+
+// DeleteMqttSubscriptionDevicePointDTO 删除订阅设备/点位。
+//
+// 用查询参数而不是路径参数：自然键是两个可能含特殊字符的字符串，
+// 放进 URL 路径需要额外转义，查询参数没有这个问题。
+type DeleteMqttSubscriptionDevicePointDTO struct {
+	DeviceID        string `json:"deviceId"        form:"deviceId"        binding:"required,min=1,max=128"`
+	DeviceAddressID string `json:"deviceAddressId" form:"deviceAddressId" binding:"required,min=1,max=128"`
+}
+
+// BatchDeleteMqttSubscriptionDevicePointDTO 批量删除订阅设备/点位请求。
+//
+// 每项是自然键对（该表主键就是 device_id + device_address_id）。上限 200
+// 与设备 / 设备地址批量删除一致：再多的勾选不是正常操作，挡住的是误传
+// 超大列表把一次请求变成一长串删除条件。
+type BatchDeleteMqttSubscriptionDevicePointDTO struct {
+	Items []DeleteMqttSubscriptionDevicePointDTO `json:"items" binding:"required,min=1,max=200,dive"`
+}
+
+// RestoreMqttSubscriptionDevicePointAutoDTO 把手工艺维护的行交还给自动收录。
+//
+// 只带自然键：操作不改任何元信息，只改维护方式。
+type RestoreMqttSubscriptionDevicePointAutoDTO struct {
+	DeviceID        string `json:"deviceId"        binding:"required,min=1,max=128"`
+	DeviceAddressID string `json:"deviceAddressId" binding:"required,min=1,max=128"`
 }
 
 // TestMqttSubscriptionDTO 订阅连通性测试请求（不落库）

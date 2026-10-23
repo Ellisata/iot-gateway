@@ -118,6 +118,146 @@ func TestMqttSubscriptionDevicePointCreateUpdate(t *testing.T) {
 	}
 }
 
+// TestMqttSubscriptionDevicePointDelete 只允许删手工行：自动行删了会被下一条报文
+// 重新收录，因此拒绝并给出可据以行动的错误码，而不是假装删除成功。
+func TestMqttSubscriptionDevicePointDelete(t *testing.T) {
+	svc := newTestSubscriptionService(t)
+	ctx := context.Background()
+
+	seed := []po.MqttSubscriptionDevicePoint{
+		{DeviceID: "d1", DeviceAddressID: "a1", DeviceName: "手工行",
+			Source: po.MqttSubscriptionDevicePointSourceManual},
+		{DeviceID: "d2", DeviceAddressID: "a2", DeviceName: "自动行",
+			Source: po.MqttSubscriptionDevicePointSourceAuto},
+	}
+	if err := svc.sqliteDB.Create(&seed).Error; err != nil {
+		t.Fatalf("seed rows: %v", err)
+	}
+
+	// 自然键两侧空白按输入归一处理。
+	if err := svc.DeleteMqttSubscriptionDevicePoint(ctx, &dto.DeleteMqttSubscriptionDevicePointDTO{
+		DeviceID: " d1 ", DeviceAddressID: "a1 ",
+	}); err != nil {
+		t.Fatalf("Delete manual: %v", err)
+	}
+	var count int64
+	if err := svc.sqliteDB.Model(&po.MqttSubscriptionDevicePoint{}).
+		Where("device_id = ? AND device_address_id = ?", "d1", "a1").Count(&count).Error; err != nil {
+		t.Fatalf("count manual: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("manual row still present after delete")
+	}
+
+	if err := svc.DeleteMqttSubscriptionDevicePoint(ctx, &dto.DeleteMqttSubscriptionDevicePointDTO{
+		DeviceID: "d2", DeviceAddressID: "a2",
+	}); appErrorCode(t, err) != enums.MqttSubscriptionDevicePointAutoNotDeletableEnum.GetCode() {
+		t.Fatalf("auto delete code = %s", appErrorCode(t, err))
+	}
+	if err := svc.sqliteDB.Model(&po.MqttSubscriptionDevicePoint{}).
+		Where("device_id = ? AND device_address_id = ?", "d2", "a2").Count(&count).Error; err != nil {
+		t.Fatalf("count auto: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("auto row should be kept, count = %d", count)
+	}
+
+	if err := svc.DeleteMqttSubscriptionDevicePoint(ctx, &dto.DeleteMqttSubscriptionDevicePointDTO{
+		DeviceID: "d1", DeviceAddressID: "a1",
+	}); appErrorCode(t, err) != enums.MqttSubscriptionDevicePointNotExistsEnum.GetCode() {
+		t.Fatalf("missing delete code = %s", appErrorCode(t, err))
+	}
+}
+
+// TestMqttSubscriptionDevicePointBatchDelete 批量删除只跳过删不掉的行：
+// 自动行与不存在的行不计入删除数，但也不让整批失败。
+func TestMqttSubscriptionDevicePointBatchDelete(t *testing.T) {
+	svc := newTestSubscriptionService(t)
+	ctx := context.Background()
+
+	seed := []po.MqttSubscriptionDevicePoint{
+		{DeviceID: "d1", DeviceAddressID: "a1", Source: po.MqttSubscriptionDevicePointSourceManual},
+		{DeviceID: "d2", DeviceAddressID: "a2", Source: po.MqttSubscriptionDevicePointSourceManual},
+		{DeviceID: "d3", DeviceAddressID: "a3", Source: po.MqttSubscriptionDevicePointSourceAuto},
+	}
+	if err := svc.sqliteDB.Create(&seed).Error; err != nil {
+		t.Fatalf("seed rows: %v", err)
+	}
+
+	items := []dto.DeleteMqttSubscriptionDevicePointDTO{
+		{DeviceID: "d1", DeviceAddressID: "a1"},
+		{DeviceID: " d2 ", DeviceAddressID: "a2 "}, // 空白按输入归一
+		{DeviceID: "d3", DeviceAddressID: "a3"},    // 自动行：拒删
+		{DeviceID: "d9", DeviceAddressID: "a9"},    // 不存在：忽略
+	}
+	deleted, err := svc.BatchDeleteMqttSubscriptionDevicePoint(ctx, items)
+	if err != nil {
+		t.Fatalf("BatchDelete: %v", err)
+	}
+	if deleted != 2 {
+		t.Errorf("deleted = %d, want 2", deleted)
+	}
+
+	var rows []po.MqttSubscriptionDevicePoint
+	if err := svc.sqliteDB.Order("device_id ASC").Find(&rows).Error; err != nil {
+		t.Fatalf("find rows: %v", err)
+	}
+	if len(rows) != 1 || rows[0].DeviceID != "d3" || rows[0].Source != po.MqttSubscriptionDevicePointSourceAuto {
+		t.Errorf("remaining rows = %+v, want only d3/auto", rows)
+	}
+
+	if deleted, err := svc.BatchDeleteMqttSubscriptionDevicePoint(ctx, nil); err != nil || deleted != 0 {
+		t.Errorf("empty batch = (%d, %v), want (0, nil)", deleted, err)
+	}
+}
+
+// TestMqttSubscriptionDevicePointRestoreAuto 恢复自动收录只改维护方式：
+// 元信息保持当前值，已恢复的行幂等成功，不存在的行返回 60025。
+func TestMqttSubscriptionDevicePointRestoreAuto(t *testing.T) {
+	svc := newTestSubscriptionService(t)
+	ctx := context.Background()
+
+	seed := []po.MqttSubscriptionDevicePoint{
+		{DeviceID: "d1", DeviceAddressID: "a1", DeviceName: "手工名", Kind: "int",
+			Source: po.MqttSubscriptionDevicePointSourceManual},
+		{DeviceID: "d2", DeviceAddressID: "a2", DeviceName: "自动名",
+			Source: po.MqttSubscriptionDevicePointSourceAuto},
+	}
+	if err := svc.sqliteDB.Create(&seed).Error; err != nil {
+		t.Fatalf("seed rows: %v", err)
+	}
+
+	if err := svc.RestoreMqttSubscriptionDevicePointAuto(ctx, &dto.RestoreMqttSubscriptionDevicePointAutoDTO{
+		DeviceID: " d1 ", DeviceAddressID: "a1",
+	}); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	var row po.MqttSubscriptionDevicePoint
+	if err := svc.sqliteDB.Where("device_id = ? AND device_address_id = ?", "d1", "a1").First(&row).Error; err != nil {
+		t.Fatalf("reload row: %v", err)
+	}
+	if row.Source != po.MqttSubscriptionDevicePointSourceAuto {
+		t.Errorf("source = %q, want auto", row.Source)
+	}
+	// 元信息不受恢复操作影响，等报文元信息变化后才由自动 upsert 覆盖。
+	if row.DeviceName != "手工名" || row.Kind != "int" {
+		t.Errorf("metadata changed: %+v", row)
+	}
+
+	// 已是 auto 的行幂等成功。
+	if err := svc.RestoreMqttSubscriptionDevicePointAuto(ctx, &dto.RestoreMqttSubscriptionDevicePointAutoDTO{
+		DeviceID: "d2", DeviceAddressID: "a2",
+	}); err != nil {
+		t.Fatalf("Restore auto row: %v", err)
+	}
+
+	if err := svc.RestoreMqttSubscriptionDevicePointAuto(ctx, &dto.RestoreMqttSubscriptionDevicePointAutoDTO{
+		DeviceID: "d9", DeviceAddressID: "a9",
+	}); appErrorCode(t, err) != enums.MqttSubscriptionDevicePointNotExistsEnum.GetCode() {
+		t.Fatalf("missing restore code = %s", appErrorCode(t, err))
+	}
+}
+
 // TestMqttSubscriptionDevicePointUpdateKeepsUnknownKind 自动上报可能留下非标准的
 // 类型字符串；编辑其他字段时不应对它报错，也不应静默改值。
 func TestMqttSubscriptionDevicePointUpdateKeepsUnknownKind(t *testing.T) {

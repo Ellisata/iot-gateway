@@ -38,6 +38,7 @@
     "err.mqtt_subscription_connect_fail": "MQTT subscription connectivity test failed",
     "err.mqtt_subscription_device_point_exists": "Subscription device point already exists",
     "err.mqtt_subscription_device_point_not_found": "Subscription device point not found",
+    "err.mqtt_subscription_device_point_auto_not_deletable": "This point is auto-indexed from subscription payloads and would reappear on the next message; use Edit to maintain its metadata instead",
     "err.device_address_data_type": "Data type not supported by protocol",
     "err.device_scan_disabled": "LAN device scan is disabled (deviceScan.enabled=false)",
     "err.device_scan_busy": "A scan job is already running; wait for it to finish or cancel it first",

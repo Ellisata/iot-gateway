@@ -642,7 +642,8 @@
             <p class="sub-section-title">{{ t('subscription.preview') }}</p>
             <div class="sub-preview">
               <div class="sub-preview-main">
-                <div class="sub-sample-presets">
+                <!-- 字段数预设只对内置映射有意义；脚本模式下默认示例在切换解析方式时自动填入 -->
+                <div v-if="parserType === 'builtin'" class="sub-sample-presets">
                   <span class="sub-inline-hint">{{ t('subscription.samplePreset') }}</span>
                   <el-button type="primary" link size="small" @click="useSample('minimal')">
                     {{ t('subscription.sampleMinimal') }}
@@ -655,14 +656,22 @@
                   v-model="sampleTopic"
                   size="small"
                   class="sample-topic-input"
-                  :placeholder="t('subscription.sampleTopicPlaceholder')"
+                  :placeholder="
+                    parserType === 'builtin'
+                      ? t('subscription.sampleTopicPlaceholder')
+                      : t('subscription.sampleTopicPlaceholderScript')
+                  "
                 />
                 <el-input
                   v-model="sampleText"
                   type="textarea"
                   :rows="9"
                   spellcheck="false"
-                  :placeholder="t('subscription.samplePlaceholder')"
+                  :placeholder="
+                    parserType === 'builtin'
+                      ? t('subscription.samplePlaceholder')
+                      : t('subscription.samplePlaceholderScript')
+                  "
                 />
               </div>
               <div class="sub-preview-side">
@@ -729,7 +738,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   IconAffiliate as Connection,
@@ -886,16 +895,17 @@ const previewShowsCollectedAt = computed(
 )
 
 // 预览是否展示透传列：展开透传字段，或结果里确实带出了 dataType / protocol。
+// 脚本模式没有映射表的收起概念，只看记录里是否真有值，避免残留的展开状态带出空列。
 const previewShowsAdvanced = computed(
   () =>
-    showAdvancedFields.value ||
+    (parserType.value === 'builtin' && showAdvancedFields.value) ||
     (previewResult.value?.records || []).some((r) =>
       ['deviceAddressName', 'dataType', 'protocol'].some((key) => String(r[key] ?? '') !== '')
     )
 )
 
 /**
- * 填入示例报文。
+ * 填入内置映射的示例报文。
  * - minimal：收起透传字段，只演示 5 个主字段。
  * - advanced：展开透传字段，并把仍为空的透传映射补成示例路径。
  */
@@ -1087,6 +1097,37 @@ function parse(msg, ctx) {
     quality: 192
   });
 }`
+
+// 与 SCRIPT_SAMPLE 的取值路径一一对应：deviceId + data.temp + 主题里的设备段。
+const SCRIPT_SAMPLE_TOPIC = 'factory/meter-01/telemetry'
+const SCRIPT_SAMPLE_PAYLOAD = JSON.stringify(
+  {
+    deviceId: 'meter-01',
+    data: { temp: 23.5 },
+  },
+  null,
+  2
+)
+
+// 脚本模式没有字段映射：进入时自动填入与 SCRIPT_SAMPLE 对应的默认示例。
+// 已有内容不覆盖（可能是用户输入或已保存的样例）。
+function fillScriptSamplePayload() {
+  if (String(sampleText.value || '').trim() === '') sampleText.value = SCRIPT_SAMPLE_PAYLOAD
+  if (String(sampleTopic.value || '').trim() === '') sampleTopic.value = SCRIPT_SAMPLE_TOPIC
+}
+
+watch(parserType, (type, prev) => {
+  previewResult.value = null
+  if (type === 'script') {
+    fillScriptSamplePayload()
+    return
+  }
+  // 切回内置映射：清掉自动填入且用户未改动的示例，避免拿脚本报文去跑映射预览。
+  if (prev === 'script') {
+    if (sampleText.value === SCRIPT_SAMPLE_PAYLOAD) sampleText.value = ''
+    if (sampleTopic.value === SCRIPT_SAMPLE_TOPIC) sampleTopic.value = ''
+  }
+})
 
 const formData = reactive({
   id: '',

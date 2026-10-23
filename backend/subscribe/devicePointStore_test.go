@@ -196,6 +196,63 @@ func TestDevicePointStoreDedupesBatch(t *testing.T) {
 	}
 }
 
+// TestDevicePointStoreForgetReRecords 作废指纹后，即使报文元信息没变，下一次
+// Record 也会重新入队 —— 恢复自动收录 / 删除手工行后的即时生效依赖这一点。
+func TestDevicePointStoreForgetReRecords(t *testing.T) {
+	store, db := newDevicePointTestStore(t)
+	rec := collector.CollectedRecord{
+		DeviceID:        "d1",
+		DeviceAddressID: "a1",
+		DeviceName:      "报文名",
+		Kind:            "float",
+	}
+
+	store.Start()
+	store.Record([]collector.CollectedRecord{rec})
+	store.Stop()
+
+	// 模拟运维接管：改成手工维护并改了名称。指纹不变时 Record 必须跳过。
+	if err := db.Model(&po.MqttSubscriptionDevicePoint{}).
+		Where("device_id = ? AND device_address_id = ?", "d1", "a1").
+		Updates(map[string]interface{}{
+			"device_name": "手工名",
+			"source":      po.MqttSubscriptionDevicePointSourceManual,
+		}).Error; err != nil {
+		t.Fatalf("simulate manual takeover: %v", err)
+	}
+	store.Start()
+	store.Record([]collector.CollectedRecord{rec})
+	store.Stop()
+
+	var got po.MqttSubscriptionDevicePoint
+	load := func() po.MqttSubscriptionDevicePoint {
+		t.Helper()
+		var row po.MqttSubscriptionDevicePoint
+		if err := db.Where("device_id = ? AND device_address_id = ?", "d1", "a1").First(&row).Error; err != nil {
+			t.Fatalf("reload row: %v", err)
+		}
+		return row
+	}
+	if got = load(); got.DeviceName != "手工名" {
+		t.Fatalf("unchanged signature must not overwrite manual name, got %q", got.DeviceName)
+	}
+
+	// 模拟恢复自动收录：source 置回 auto 并作废指纹，报文值应重新覆盖。
+	if err := db.Model(&po.MqttSubscriptionDevicePoint{}).
+		Where("device_id = ? AND device_address_id = ?", "d1", "a1").
+		Update("source", po.MqttSubscriptionDevicePointSourceAuto).Error; err != nil {
+		t.Fatalf("simulate restore: %v", err)
+	}
+	store.Start()
+	store.Forget([]DevicePointKey{{DeviceID: "d1", DeviceAddressID: "a1"}})
+	store.Record([]collector.CollectedRecord{rec})
+	store.Stop()
+
+	if got = load(); got.DeviceName != "报文名" || got.Source != po.MqttSubscriptionDevicePointSourceAuto {
+		t.Errorf("after Forget row = %+v, want name=报文名 source=auto", got)
+	}
+}
+
 // TestDevicePointStoreSkipsIncompleteRecords 缺少设备/点位身份的记录不能建索引。
 func TestDevicePointStoreSkipsIncompleteRecords(t *testing.T) {
 	store, db := newDevicePointTestStore(t)

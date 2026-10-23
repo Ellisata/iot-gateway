@@ -336,8 +336,10 @@ var agentApiSurface = map[string]SurfaceEntry{
 	},
 	"GET /mqttSubscription/pageMqttSubscriptionDevicePoint": {
 		Access: AccessRead,
-		Params: argQuery(dto.PageMqttSubscriptionDevicePointDTO{}, nil),
-		Note:   "订阅报文里出现过的设备/点位元信息索引，不含采样值",
+		Params: argQuery(dto.PageMqttSubscriptionDevicePointDTO{}, map[string]string{
+			"source": "manual 手工维护 | auto 订阅报文自动收录；空 = 全部",
+		}),
+		Note: "订阅报文里出现过的设备/点位元信息索引，不含采样值",
 	},
 	"GET /mqttSubscription/importMqttSubscriptionDevicePointTemplate": {
 		Access: AccessRead,
@@ -369,6 +371,34 @@ var agentApiSurface = map[string]SurfaceEntry{
 			"kind":               "改值须为 bool/int/uint/float/string/time；留空 = 清空；与库中现值相同时允许保留",
 		}),
 		Note: "成功后 source 置为 manual，订阅报文不再覆盖该行元信息",
+	},
+	"GET /mqttSubscription/deleteMqttSubscriptionDevicePoint": {
+		Access: AccessWrite,
+		Params: argQuery(dto.DeleteMqttSubscriptionDevicePointDTO{}, map[string]string{
+			"deviceId":        "设备 ID（自然键之一）",
+			"deviceAddressId": "点位 ID（自然键之一）",
+		}),
+		Note: "**用 GET 实现**，自然键走查询参数。只删手工维护（source=manual）的行：" +
+			"自动收录的行删了会被下一条报文重新收录，故返回 60026 拒绝；" +
+			"行不存在返回 60025",
+	},
+	"POST /mqttSubscription/restoreMqttSubscriptionDevicePointAuto": {
+		Access: AccessWrite,
+		Params: argBody(dto.RestoreMqttSubscriptionDevicePointAutoDTO{}, map[string]string{
+			"deviceId":        "设备 ID（自然键之一）",
+			"deviceAddressId": "点位 ID（自然键之一）",
+		}),
+		Note: "把手工维护的行交还给自动收录（source 置回 auto），并作废落库器的元信息指纹：" +
+			"下一条报文到达时会重新 upsert，按报文值覆盖元信息。已是 auto 的行幂等成功；" +
+			"行不存在返回 60025。",
+	},
+	"POST /mqttSubscription/batchDeleteMqttSubscriptionDevicePoint": {
+		Access: AccessWrite,
+		Params: argBody(dto.BatchDeleteMqttSubscriptionDevicePointDTO{}, map[string]string{
+			"items": "要删除的自然键对，最多 200 条；每项 {deviceId, deviceAddressId}",
+		}),
+		Note: "单条删除的批量版。只删 source=manual 的行；自动行与不存在的行不视为错误，" +
+			"返回值 deleted 可能小于 requested，前端据此提示少删了几条。",
 	},
 	"GET /mqttSubscription/getMqttSubscriptionById/:id": {
 		Access: AccessRead,

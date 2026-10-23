@@ -52,6 +52,45 @@ export function updateSubscriptionDevicePoint(data) {
 }
 
 /**
+ * 删除手工维护的订阅设备/点位（自然键走查询参数）
+ * @param {string} deviceId
+ * @param {string} deviceAddressId
+ */
+export function deleteSubscriptionDevicePoint(deviceId, deviceAddressId) {
+  return request({
+    url: '/mqttSubscription/deleteMqttSubscriptionDevicePoint',
+    method: 'get',
+    params: { deviceId, deviceAddressId },
+  })
+}
+
+/**
+ * 把手工艺维护的订阅设备/点位交还给自动收录（元信息保留，待报文变化后同步）
+ * @param {string} deviceId
+ * @param {string} deviceAddressId
+ */
+export function restoreSubscriptionDevicePointAuto(deviceId, deviceAddressId) {
+  return request({
+    url: '/mqttSubscription/restoreMqttSubscriptionDevicePointAuto',
+    method: 'post',
+    data: { deviceId, deviceAddressId },
+  })
+}
+
+/**
+ * 批量删除手工维护的订阅设备/点位
+ * @param {Array<{deviceId:string, deviceAddressId:string}>} items
+ * @returns {Promise<{requested:number, deleted:number}>}
+ */
+export function batchDeleteSubscriptionDevicePoints(items) {
+  return request({
+    url: '/mqttSubscription/batchDeleteMqttSubscriptionDevicePoint',
+    method: 'post',
+    data: { items },
+  })
+}
+
+/**
  * 批量导入订阅设备/点位（Excel .xlsx，按设备ID+点位ID upsert）
  * @param {File} file
  * @returns {Promise<{total:number, success:number, failed:number, errors:Array<{row:number,name:string,reason:string}>}>}

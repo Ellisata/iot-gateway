@@ -8,6 +8,7 @@ import (
 
 	"iot-gateway/appError"
 	"iot-gateway/model/dto"
+	"iot-gateway/model/vo"
 	"iot-gateway/response"
 	"iot-gateway/service"
 )
@@ -133,6 +134,55 @@ func (ctr *MqttSubscriptionController) UpdateMqttSubscriptionDevicePoint(c *gin.
 		return
 	}
 	c.JSON(200, response.Success(nil))
+}
+
+// DeleteMqttSubscriptionDevicePoint 删除手工维护的订阅设备/点位
+func (ctr *MqttSubscriptionController) DeleteMqttSubscriptionDevicePoint(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.DeleteMqttSubscriptionDevicePointDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	if err := ctr.service.DeleteMqttSubscriptionDevicePoint(ctx, &req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(nil))
+}
+
+// RestoreMqttSubscriptionDevicePointAuto 把手工艺维护的订阅设备/点位交还给自动收录
+func (ctr *MqttSubscriptionController) RestoreMqttSubscriptionDevicePointAuto(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.RestoreMqttSubscriptionDevicePointAutoDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	if err := ctr.service.RestoreMqttSubscriptionDevicePointAuto(ctx, &req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(nil))
+}
+
+// BatchDeleteMqttSubscriptionDevicePoint 批量删除手工维护的订阅设备/点位
+func (ctr *MqttSubscriptionController) BatchDeleteMqttSubscriptionDevicePoint(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.BatchDeleteMqttSubscriptionDevicePointDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	deleted, err := ctr.service.BatchDeleteMqttSubscriptionDevicePoint(ctx, req.Items)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(vo.BatchDeleteMqttSubscriptionDevicePointResultVO{
+		Requested: len(req.Items),
+		Deleted:   deleted,
+	}))
 }
 
 // ImportMqttSubscriptionDevicePoint 批量导入订阅设备/点位（Excel .xlsx，上传字段名 file）

@@ -76,6 +76,17 @@ func NewManager(db *gorm.DB, sink Sink) *Manager {
 	}
 }
 
+// InvalidateDevicePoints 作废这些点位的元信息指纹，使下一条报文重新收录 / 同步它们。
+//
+// 管理页面恢复自动收录、删除手工行后调用。manager 为 nil（单元测试）时是空操作；
+// 未 Start 时也只清内存 map，不影响落库协程。
+func (m *Manager) InvalidateDevicePoints(keys []DevicePointKey) {
+	if m == nil || m.points == nil {
+		return
+	}
+	m.points.Forget(keys)
+}
+
 // Start 加载活跃订阅并启动配置热加载监视器。
 func (m *Manager) Start() error {
 	m.mu.Lock()

@@ -64,6 +64,16 @@ type MqttSubscriptionDevicePointVO struct {
 	UpdatedAt string `json:"updatedAt"`
 }
 
+// BatchDeleteMqttSubscriptionDevicePointResultVO 批量删除订阅设备/点位的结果。
+//
+// Deleted 是实际删除的行数，可能小于 Requested：勾选后又被别人删掉、或该行
+// 在这期间变回自动收录（source=auto 不在删除集里）都是正常情况，
+// 前端据此提示"少删了几条"，而不是把它当成整批失败。
+type BatchDeleteMqttSubscriptionDevicePointResultVO struct {
+	Requested int   `json:"requested"`
+	Deleted   int64 `json:"deleted"`
+}
+
 // MqttSubscriptionPreviewVO 映射预览结果。
 //
 // 转换失败不是业务错误：配置写错是编辑过程中的正常反馈，前端直接展示在预览面板里。

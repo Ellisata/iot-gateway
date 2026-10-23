@@ -125,6 +125,9 @@ var (
 	// 订阅设备/点位索引（手工维护）错误码
 	MqttSubscriptionDevicePointExistsEnum    = NewBusinessEnum("60024", "订阅设备点位已存在", "err.mqtt_subscription_device_point_exists")
 	MqttSubscriptionDevicePointNotExistsEnum = NewBusinessEnum("60025", "订阅设备点位不存在", "err.mqtt_subscription_device_point_not_found")
+	// 自动行由订阅报文推导，删掉也会被下一条报文重新收录 —— 拒绝是为了不让用户
+	// 得到一个"删了又回来"的假象。
+	MqttSubscriptionDevicePointAutoNotDeletableEnum = NewBusinessEnum("60026", "自动收录的订阅设备点位不可删除", "err.mqtt_subscription_device_point_auto_not_deletable")
 
 	// 开放接口密钥相关错误码
 	OpenApiSecretExistsEnum    = NewBusinessEnum("70001", "开放接口密钥名称已存在", "err.open_api_secret_exists")

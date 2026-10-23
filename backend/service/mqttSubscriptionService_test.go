@@ -188,9 +188,12 @@ func TestMqttSubscriptionDevicePointPage(t *testing.T) {
 	ctx := context.Background()
 
 	rows := []po.MqttSubscriptionDevicePoint{
-		{DeviceID: "d1", DeviceAddressID: "a2", DeviceName: "电表1", DeviceAddressLabel: "电压", Kind: "float"},
-		{DeviceID: "d1", DeviceAddressID: "a1", DeviceName: "电表1", DeviceAddressLabel: "电流", Kind: "float"},
-		{DeviceID: "d2", DeviceAddressID: "a1", DeviceName: "电表2", DeviceAddressLabel: "功率", Kind: "float"},
+		{DeviceID: "d1", DeviceAddressID: "a2", DeviceName: "电表1", DeviceAddressLabel: "电压", Kind: "float",
+			Source: po.MqttSubscriptionDevicePointSourceManual},
+		{DeviceID: "d1", DeviceAddressID: "a1", DeviceName: "电表1", DeviceAddressLabel: "电流", Kind: "float",
+			Source: po.MqttSubscriptionDevicePointSourceAuto},
+		{DeviceID: "d2", DeviceAddressID: "a1", DeviceName: "电表2", DeviceAddressLabel: "功率", Kind: "float",
+			Source: po.MqttSubscriptionDevicePointSourceManual},
 	}
 	if err := db.Create(&rows).Error; err != nil {
 		t.Fatalf("seed device points: %v", err)
@@ -217,6 +220,31 @@ func TestMqttSubscriptionDevicePointPage(t *testing.T) {
 	}
 	if filtered.Total != 1 || len(filtered.Records) != 1 || filtered.Records[0].DeviceName != "电表2" {
 		t.Errorf("filtered result = %+v", filtered.Records)
+	}
+
+	// 来源过滤：手工 / 自动分开检索，空值表示全部。
+	for _, tc := range []struct {
+		source string
+		want   int64
+	}{
+		{po.MqttSubscriptionDevicePointSourceManual, 2},
+		{po.MqttSubscriptionDevicePointSourceAuto, 1},
+		{"", 3},
+	} {
+		bySource, err := svc.PageMqttSubscriptionDevicePoint(ctx, &dto.PageMqttSubscriptionDevicePointDTO{
+			Page: 1, Size: 10, Source: tc.source,
+		})
+		if err != nil {
+			t.Fatalf("source filter %q: %v", tc.source, err)
+		}
+		if bySource.Total != tc.want {
+			t.Errorf("source filter %q total = %d, want %d", tc.source, bySource.Total, tc.want)
+		}
+		for _, r := range bySource.Records {
+			if tc.source != "" && r.Source != tc.source {
+				t.Errorf("source filter %q returned %+v", tc.source, r)
+			}
+		}
 	}
 }
 

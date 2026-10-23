@@ -307,6 +307,9 @@ func (s *MqttSubscriptionService) PageMqttSubscriptionDevicePoint(ctx context.Co
 	if req.DeviceAddressID != "" {
 		db = db.Where("device_address_id LIKE ?", "%"+req.DeviceAddressID+"%")
 	}
+	if req.Source != "" {
+		db = db.Where("source = ?", req.Source)
+	}
 
 	var total int64
 	if err := db.Count(&total).Error; err != nil {

@@ -184,11 +184,28 @@
   ——SQLite 只有一条写连接,不能在 paho 收包协程里直接写。首次出现与元信息变化时立即更新;
   空值不覆盖已有非空值(兼容未配置名称字段的历史订阅)。
   管理器 `Start/Stop` 与落库器同生命周期,停机前排空队列。
-  对外查询走 `GET /mqttSubscription/pageMqttSubscriptionDevicePoint`(分页 + 设备/点位 ID、名称模糊过滤;
+  对外查询走 `GET /mqttSubscription/pageMqttSubscriptionDevicePoint`(分页 + 设备/点位 ID、名称模糊过滤
+  与来源 `source` 过滤 —— `manual` / `auto` 分开检索,空 = 全部;
   `/agentApi` 镜像归为 read),前端页面在「订阅管理 → 订阅设备与点位」。
-  该页还支持**手工新增 / 编辑 / Excel 导入**(`source=manual`):手工行是运维的最终确认,
+  该页还支持**手工新增 / 编辑 / 删除 / Excel 导入**(`source=manual`):手工行是运维的最终确认,
   自动上报只更新 `source=auto` 的行,upsert 语义见 `subscribe/devicePointUpsert.go`;
   导入按自然键 upsert(已存在则覆盖元信息),自然键创建后不可修改。
+  编辑会把该行 `source` 置为 `manual`(即**接管维护** —— 不这么做,下次元信息变化
+  就会被报文覆盖,编辑等于没保存);因此页面把这列称为「维护方式」(自动同步 / 手工维护),
+  而不是「来源」。手工行可随时经 `POST /mqttSubscription/restoreMqttSubscriptionDevicePointAuto`
+  交还自动收录(只改 `source`,元信息保留;已是 `auto` 的行幂等成功)。
+  删除**只对手工行开放**(单条 `GET /mqttSubscription/deleteMqttSubscriptionDevicePoint`,
+  自然键走查询参数 `deviceId` / `deviceAddressId`;批量
+  `POST /mqttSubscription/batchDeleteMqttSubscriptionDevicePoint`,请求体
+  `{items:[{deviceId,deviceAddressId}]}`,上限 200):单条删除对自动行返回 60026 拒绝,
+  行不存在返回 60025;批量删除**不因个别条目删不掉而失败**(自动行、已被他人删除的
+  行都跳过),返回的实际 `deleted` 可能小于 `requested`。
+  恢复 / 删除 / 批量删除成功后,服务层会**作废这些点位的元信息指纹**
+  (`Manager.InvalidateDevicePoints` → `devicePointStore.Forget`),因此**下一条报文
+  到达时**就会重新入队:恢复即按报文值覆盖元信息,删除即重新收录为 `auto`。
+  这一步不能省 —— 落库器在内存里按点位缓存指纹,指纹不变时 `Record` 会一直跳过,
+  表现为"点了恢复,值却没变 / 删掉的自动记录再也不回来",只能等元信息变化或网关重启。
+  作废只清内存 map(持 store 的锁),不动落库协程状态;批量删除在事务提交后统一作废。
 - 订阅配置每 10s 比对校验和热加载;服务层增删改后也会立即 `Refresh()`。
   连接未变时只换解析器;只有连接参数变化才断开重连。
 

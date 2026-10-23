@@ -53,6 +53,18 @@
               @keyup.enter="handleSearch"
             />
           </div>
+          <div class="filter-field">
+            <span class="filter-label">{{ t('subscriptionDevicePoint.fieldMaintenance') }}</span>
+            <el-select
+              v-model="query.source"
+              clearable
+              class="filter-input"
+              :placeholder="t('subscriptionDevicePoint.sourceAll')"
+            >
+              <el-option :label="t('subscriptionDevicePoint.sourceManual')" value="manual" />
+              <el-option :label="t('subscriptionDevicePoint.sourceAuto')" value="auto" />
+            </el-select>
+          </div>
           <div class="filter-actions">
             <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
             <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
@@ -60,6 +72,17 @@
         </div>
 
         <div class="iot-toolbar-actions">
+          <!-- 按钮文案带勾选数：按下确认之前就能看到"要删几条" -->
+          <el-button
+            type="danger"
+            plain
+            :icon="Delete"
+            :disabled="selectedRows.length === 0"
+            @click="handleBatchDelete"
+          >
+            {{ batchDeleteLabel }}
+          </el-button>
+          <span class="iot-sep" aria-hidden="true" />
           <el-button :icon="Download" @click="handleDownloadTemplate">
             {{ t('common.downloadTemplate') }}
           </el-button>
@@ -73,7 +96,24 @@
         </div>
       </div>
 
-      <el-table class="iot-table" :data="rows" v-loading="loading" style="width: 100%">
+      <el-table
+        ref="tableRef"
+        class="iot-table"
+        :data="rows"
+        v-loading="loading"
+        :row-key="rowKey"
+        style="width: 100%"
+        @selection-change="handleSelectionChange"
+      >
+        <!-- 项目里没用 reserve-selection：跨页保留勾选会让「已勾选 N 条」与实际
+             能删到的集合不一致（翻页后看不见的行还在里面），批量删除宁可让人重勾。
+             自动行不可勾选：它由报文推导，删了也会在下一条报文回来。 -->
+        <el-table-column
+          type="selection"
+          width="44"
+          align="center"
+          :selectable="isRowSelectable"
+        />
         <el-table-column type="index" :label="t('common.index')" width="68" align="center" />
 
         <el-table-column
@@ -120,25 +160,58 @@
             <span v-else class="iot-cell-muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('subscriptionDevicePoint.fieldSource')" width="90" align="center">
+        <!-- source 同时表示维护方式：手工维护的行不会被订阅报文覆盖 -->
+        <el-table-column :label="t('subscriptionDevicePoint.fieldMaintenance')" width="100" align="center">
           <template #default="{ row }">
-            <!-- 手工行不会被订阅报文覆盖，来源标签让这件事在列表里可见 -->
             <span v-if="row.source === 'manual'" class="iot-chip is-manual">
               {{ t('subscriptionDevicePoint.sourceManual') }}
             </span>
             <span v-else class="iot-chip">{{ t('subscriptionDevicePoint.sourceAuto') }}</span>
           </template>
         </el-table-column>
-        <el-table-column
-          :label="t('common.action')"
-          width="88"
-          align="center"
-          fixed="right"
-        >
+        <el-table-column :label="t('common.action')" width="140" align="center" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" :icon="EditPen" @click="handleEdit(row)">
-              {{ t('common.edit') }}
-            </el-button>
+            <div class="iot-row-actions">
+              <el-tooltip :content="t('common.edit')" placement="top">
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="EditPen"
+                  :aria-label="t('common.edit')"
+                  @click="handleEdit(row)"
+                />
+              </el-tooltip>
+              <!-- 手工行可以交还给自动收录；自动行本来就是自动同步，不需要这个入口 -->
+              <el-tooltip
+                v-if="row.source === 'manual'"
+                :content="t('subscriptionDevicePoint.restoreAuto')"
+                placement="top"
+              >
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="Restore"
+                  :aria-label="t('subscriptionDevicePoint.restoreAuto')"
+                  @click="handleRestoreAuto(row)"
+                />
+              </el-tooltip>
+              <!-- 自动行由报文推导，删了也会在下一条报文回来，故只给手工行删除入口 -->
+              <el-tooltip v-if="row.source === 'manual'" :content="t('common.delete')" placement="top">
+                <el-button
+                  class="iot-row-btn"
+                  type="danger"
+                  link
+                  size="small"
+                  :icon="Delete"
+                  :aria-label="t('common.delete')"
+                  @click="handleDelete(row)"
+                />
+              </el-tooltip>
+            </div>
           </template>
         </el-table-column>
 
@@ -211,6 +284,10 @@
             />
           </el-select>
         </el-form-item>
+        <!-- 编辑自动行等于接管维护：先把后果说清楚，别让用户事后才发现元信息不再自动更新 -->
+        <el-form-item v-if="isEdit && editingSource === 'auto'">
+          <p class="form-hint">{{ t('subscriptionDevicePoint.switchToManualHint') }}</p>
+        </el-form-item>
       </el-form>
 
       <template #footer>
@@ -228,19 +305,24 @@
 <script setup>
 import { reactive, ref, computed, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   IconDeviceDesktop as DeviceDesktop,
   IconDownload as Download,
   IconPencil as EditPen,
   IconPlus as Plus,
+  IconArrowBackUp as Restore,
   IconPoint as Point,
+  IconTrash as Delete,
   IconUpload as Upload,
 } from '@tabler/icons-vue'
 import {
   getSubscriptionDevicePointList,
   createSubscriptionDevicePoint,
   updateSubscriptionDevicePoint,
+  deleteSubscriptionDevicePoint,
+  restoreSubscriptionDevicePointAuto,
+  batchDeleteSubscriptionDevicePoints,
   importSubscriptionDevicePoints,
   downloadSubscriptionDevicePointTemplate,
 } from '@/api/modules/mqttSubscription'
@@ -258,11 +340,36 @@ const query = reactive({
   deviceId: '',
   deviceName: '',
   deviceAddressId: '',
+  source: '',
 })
 
 // 首屏还没拿到数时显示占位符而不是 0：0 个点位会被当成"还没收到任何订阅报文"
 const displayTotal = computed(() =>
   loading.value && rows.value.length === 0 ? '—' : total.value
+)
+
+// ---------- 勾选与批量删除 ----------
+const tableRef = ref(null)
+const selectedRows = ref([])
+
+// 自然键是两段字符串，用 JSON 数组序列化拼接，避免分隔符出现在 ID 里造成碰撞。
+function rowKey(row) {
+  return JSON.stringify([row.deviceId, row.deviceAddressId])
+}
+
+// 自动行不可勾选：与单条删除同一口径，只允许删手工行。
+function isRowSelectable(row) {
+  return row.source === 'manual'
+}
+
+function handleSelectionChange(rows) {
+  selectedRows.value = rows
+}
+
+const batchDeleteLabel = computed(() =>
+  selectedRows.value.length
+    ? t('subscriptionDevicePoint.batchDeleteCount', { n: selectedRows.value.length })
+    : t('subscriptionDevicePoint.batchDelete')
 )
 
 async function fetchData() {
@@ -308,6 +415,8 @@ function handleCurrentChange() {
 // ---------- 新增 / 编辑 ----------
 const dialogVisible = ref(false)
 const isEdit = ref(false)
+// 正在编辑的行的维护方式：编辑自动行会在弹窗里提示它将转为手工维护。
+const editingSource = ref('')
 const submitting = ref(false)
 const formRef = ref(null)
 const formData = reactive({
@@ -356,6 +465,7 @@ const formRules = {
 
 function handleAdd() {
   isEdit.value = false
+  editingSource.value = ''
   Object.assign(formData, {
     deviceId: '',
     deviceAddressId: '',
@@ -369,6 +479,7 @@ function handleAdd() {
 
 function handleEdit(row) {
   isEdit.value = true
+  editingSource.value = row.source || ''
   Object.assign(formData, {
     deviceId: row.deviceId,
     deviceAddressId: row.deviceAddressId,
@@ -414,6 +525,99 @@ async function handleSubmit() {
     // 错误提示已由 axios 拦截器统一处理
   } finally {
     submitting.value = false
+  }
+}
+
+// ---------- 删除（只对手工行开放） ----------
+async function handleBatchDelete() {
+  const selected = selectedRows.value
+  if (!selected.length) return
+
+  try {
+    await ElMessageBox.confirm(
+      t('subscriptionDevicePoint.batchDeleteConfirm', { n: selected.length }),
+      t('subscriptionDevicePoint.batchDeleteTitle'),
+      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') }
+    )
+  } catch {
+    return // 用户取消
+  }
+
+  try {
+    const res = await batchDeleteSubscriptionDevicePoints(
+      selected.map((row) => ({
+        deviceId: row.deviceId,
+        deviceAddressId: row.deviceAddressId,
+      }))
+    )
+    // deleted 是服务端的实际删除行数，可能小于勾选数：勾选后又被报文重新收录、
+    // 或已被他人删掉的条目不在删除集里。少删了要说出来，不能一律报成功。
+    const deleted = res?.deleted ?? 0
+    const missing = selected.length - deleted
+    if (missing > 0) {
+      ElMessage.warning(t('subscriptionDevicePoint.batchDeletePartial', { n: deleted, missing }))
+    } else {
+      ElMessage.success(t('subscriptionDevicePoint.batchDeleteSuccess', { n: deleted }))
+    }
+    tableRef.value?.clearSelection()
+    selectedRows.value = []
+    // 勾选覆盖了当前页全部行时回退一页，避免停在空页
+    if (selected.length === rows.value.length && currentPage.value > 1) {
+      currentPage.value -= 1
+    }
+    fetchData()
+  } catch {
+    // 错误提示已由 axios 拦截器统一处理
+  }
+}
+
+async function handleRestoreAuto(row) {
+  const name = `${row.deviceId} / ${row.deviceAddressId}`
+  try {
+    await ElMessageBox.confirm(
+      t('subscriptionDevicePoint.restoreAutoConfirm', { name }),
+      t('subscriptionDevicePoint.restoreAutoTitle'),
+      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') }
+    )
+  } catch {
+    return // 用户取消
+  }
+
+  try {
+    await restoreSubscriptionDevicePointAuto(row.deviceId, row.deviceAddressId)
+    ElMessage.success(t('subscriptionDevicePoint.restoreAutoSuccess'))
+    tableRef.value?.clearSelection()
+    selectedRows.value = []
+    fetchData()
+  } catch {
+    // 错误提示已由 axios 拦截器统一处理
+  }
+}
+
+async function handleDelete(row) {
+  const name = `${row.deviceId} / ${row.deviceAddressId}`
+  try {
+    await ElMessageBox.confirm(
+      t('subscriptionDevicePoint.deleteConfirm', { name }),
+      t('subscriptionDevicePoint.deleteTitle'),
+      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') }
+    )
+  } catch {
+    return // 用户取消
+  }
+
+  try {
+    await deleteSubscriptionDevicePoint(row.deviceId, row.deviceAddressId)
+    ElMessage.success(t('subscriptionDevicePoint.deleteSuccess'))
+    tableRef.value?.clearSelection()
+    selectedRows.value = []
+    // 删掉当前页最后一条时回退一页，避免停在空页
+    if (rows.value.length === 1 && currentPage.value > 1) {
+      currentPage.value -= 1
+    }
+    fetchData()
+  } catch {
+    // 错误提示已由 axios 拦截器统一处理
   }
 }
 

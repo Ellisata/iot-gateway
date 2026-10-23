@@ -156,6 +156,129 @@ func (s *MqttSubscriptionService) UpdateMqttSubscriptionDevicePoint(ctx context.
 		}).Error
 }
 
+// DeleteMqttSubscriptionDevicePoint 删除一条手工维护的订阅设备/点位。
+//
+// 只允许删 source=manual 的行：auto 行由订阅报文推导而来，删掉之后下一条报文
+// 就会把它重新收录，删除对自动行没有任何持久效果。两种拒绝分开返回，是因为
+// 下一步动作不同：不存在说明本来就没有这条点位；auto 行说明它不受手工维护，
+// 想改成手工维护应该去编辑（编辑会把 source 置为 manual）。
+func (s *MqttSubscriptionService) DeleteMqttSubscriptionDevicePoint(ctx context.Context, req *dto.DeleteMqttSubscriptionDevicePointDTO) error {
+	deviceID := strings.TrimSpace(req.DeviceID)
+	addressID := strings.TrimSpace(req.DeviceAddressID)
+
+	var existing po.MqttSubscriptionDevicePoint
+	err := s.sqliteDB.WithContext(ctx).
+		Where("device_id = ? AND device_address_id = ?", deviceID, addressID).
+		First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return appError.NewAppErrorCtx(enums.MqttSubscriptionDevicePointNotExistsEnum.GetCode(),
+			enums.MqttSubscriptionDevicePointNotExistsEnum.GetMessage(),
+			enums.MqttSubscriptionDevicePointNotExistsEnum.GetMsgKey())
+	}
+	if err != nil {
+		return err
+	}
+	if existing.Source != po.MqttSubscriptionDevicePointSourceManual {
+		return appError.NewAppErrorCtx(enums.MqttSubscriptionDevicePointAutoNotDeletableEnum.GetCode(),
+			enums.MqttSubscriptionDevicePointAutoNotDeletableEnum.GetMessage(),
+			enums.MqttSubscriptionDevicePointAutoNotDeletableEnum.GetMsgKey())
+	}
+
+	if err := s.sqliteDB.WithContext(ctx).
+		Where("device_id = ? AND device_address_id = ?", deviceID, addressID).
+		Delete(&po.MqttSubscriptionDevicePoint{}).Error; err != nil {
+		return err
+	}
+	// 删掉的是"手工锁"，该点位应回到自动收录 —— 作废指纹后下一条报文就会重新收录。
+	s.invalidateDevicePoints([]subscribe.DevicePointKey{{DeviceID: deviceID, DeviceAddressID: addressID}})
+	return nil
+}
+
+// invalidateDevicePoints 作废落库器里这些点位的元信息指纹，使下一条报文重新
+// 收录 / 同步它们。manager 在单元测试里可能为 nil。
+func (s *MqttSubscriptionService) invalidateDevicePoints(keys []subscribe.DevicePointKey) {
+	if s.manager == nil || len(keys) == 0 {
+		return
+	}
+	s.manager.InvalidateDevicePoints(keys)
+}
+
+// RestoreMqttSubscriptionDevicePointAuto 把手工艺维护的行交还给自动收录。
+//
+// 只改 source，元信息原样保留；随后作废落库器里该点位的元信息指纹，使下一条
+// 报文到达时重新 upsert、按报文值覆盖元信息（不作废的话，指纹未变时 Record
+// 会一直跳过，要等元信息变化或网关重启才生效）。已是 auto 的行幂等成功。
+func (s *MqttSubscriptionService) RestoreMqttSubscriptionDevicePointAuto(ctx context.Context, req *dto.RestoreMqttSubscriptionDevicePointAutoDTO) error {
+	deviceID := strings.TrimSpace(req.DeviceID)
+	addressID := strings.TrimSpace(req.DeviceAddressID)
+
+	var existing po.MqttSubscriptionDevicePoint
+	err := s.sqliteDB.WithContext(ctx).
+		Where("device_id = ? AND device_address_id = ?", deviceID, addressID).
+		First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return appError.NewAppErrorCtx(enums.MqttSubscriptionDevicePointNotExistsEnum.GetCode(),
+			enums.MqttSubscriptionDevicePointNotExistsEnum.GetMessage(),
+			enums.MqttSubscriptionDevicePointNotExistsEnum.GetMsgKey())
+	}
+	if err != nil {
+		return err
+	}
+	if existing.Source == po.MqttSubscriptionDevicePointSourceAuto {
+		return nil
+	}
+
+	if err := s.sqliteDB.WithContext(ctx).Model(&po.MqttSubscriptionDevicePoint{}).
+		Where("device_id = ? AND device_address_id = ?", deviceID, addressID).
+		Update("source", po.MqttSubscriptionDevicePointSourceAuto).Error; err != nil {
+		return err
+	}
+	// 指纹没变时 Record 不会入队；作废它，下一条报文才会重新按报文值覆盖元信息。
+	s.invalidateDevicePoints([]subscribe.DevicePointKey{{DeviceID: deviceID, DeviceAddressID: addressID}})
+	return nil
+}
+
+// BatchDeleteMqttSubscriptionDevicePoint 批量删除手工维护的订阅设备/点位，
+// 返回实际删除的行数。
+//
+// 与单条删除不同，个别条目不存在、或已变回 source=auto 不算错误：批量场景下
+// "某个点位刚被别人删掉 / 刚被报文重新收录" 是常态，据此让整批失败只会让
+// 用户反复重试都删不掉。只删 source=manual 的约束仍逐条生效，删了多少就说多少，
+// 由调用方决定怎么提示（见 vo.BatchDeleteMqttSubscriptionDevicePointResultVO）。
+func (s *MqttSubscriptionService) BatchDeleteMqttSubscriptionDevicePoint(ctx context.Context, items []dto.DeleteMqttSubscriptionDevicePointDTO) (int64, error) {
+	if len(items) == 0 {
+		return 0, nil
+	}
+
+	var deleted int64
+	deletedKeys := make([]subscribe.DevicePointKey, 0, len(items))
+	err := s.sqliteDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, item := range items {
+			deviceID := strings.TrimSpace(item.DeviceID)
+			addressID := strings.TrimSpace(item.DeviceAddressID)
+			res := tx.Where("device_id = ? AND device_address_id = ? AND source = ?",
+				deviceID, addressID, po.MqttSubscriptionDevicePointSourceManual).
+				Delete(&po.MqttSubscriptionDevicePoint{})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected > 0 {
+				deleted += res.RowsAffected
+				deletedKeys = append(deletedKeys, subscribe.DevicePointKey{
+					DeviceID: deviceID, DeviceAddressID: addressID,
+				})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	// 事务提交后再作废指纹：事务内改库时落库协程拿不到写连接，作废也不会有报文能写进来。
+	s.invalidateDevicePoints(deletedKeys)
+	return deleted, nil
+}
+
 // ImportMqttSubscriptionDevicePoints 从 Excel(.xlsx) 批量导入/更新订阅设备与点位。
 //
 // 按自然键 upsert：已存在的行覆盖元信息并标记为 manual，不存在则新增。
