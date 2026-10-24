@@ -14,13 +14,21 @@ import (
 	"iot-gateway/logger"
 	"iot-gateway/model/po"
 	"iot-gateway/push"
+	"iot-gateway/push/codec"
 	"iot-gateway/utils"
 )
 
 // init 向 push 包注册 mqtt 通道工厂。
 // 依赖入口处（main.go）对本包的空导入触发，Engine 的 buildChannels 自动发现。
 func init() {
-	push.Register("mqtt", func(db *gorm.DB, ch *po.PushChannel) (push.Channel, error) {
+	push.RegisterType(push.ChannelTypeMeta{
+		Type:            "mqtt",
+		Label:           "MQTT",
+		MessageBased:    true,
+		Formats:         push.SupportedFormats(),
+		DefaultFormat:   push.FormatNativeJSON,
+		SupportsPreview: true,
+	}, func(db *gorm.DB, ch *po.PushChannel) (push.Channel, error) {
 		return newMqttChannel(db, ch)
 	})
 }
@@ -72,10 +80,12 @@ var drainPolicy = push.DrainPolicy{}
 // 队列、断网缓存、补发与状态统计由 push.Outbox 统一提供（见 push/outbox.go），
 // 本通道只负责 MQTT 连接维护、主题路由与载荷序列化。
 type mqttChannel struct {
-	id   string
-	name string
-	cfg  *mqttConfig
-	sig  string // 配置签名，用于热加载判断通道配置是否变化
+	id          string
+	name        string
+	channelType string
+	cfg         *mqttConfig
+	sig         string // 配置签名，用于热加载判断通道配置是否变化
+	encoder     push.Encoder
 
 	// clientID 实际使用的 clientId：配置值前缀 + 通道级随机后缀（见 resolveClientID）。
 	// 新建通道/重启进程即换新值，从根上避免多实例同 clientId 被 broker 会话接管踢断。
@@ -115,12 +125,22 @@ func newMqttChannel(db *gorm.DB, ch *po.PushChannel) (*mqttChannel, error) {
 	if err != nil {
 		return nil, err
 	}
+	enc, err := codec.New(cfg.Format, cfg.Mapping)
+	if err != nil {
+		return nil, err
+	}
+	channelType := ch.Type
+	if channelType == "" {
+		channelType = "mqtt"
+	}
 	mch := &mqttChannel{
-		id:       ch.ID,
-		name:     ch.Name,
-		cfg:      cfg,
-		sig:      ch.ID + "|" + ch.Name + "|" + ch.ConfigJSON,
-		clientID: resolveClientID(cfg.ClientID),
+		id:          ch.ID,
+		name:        ch.Name,
+		channelType: channelType,
+		cfg:         cfg,
+		sig:         ch.ID + "|" + ch.Name + "|" + ch.ConfigJSON,
+		encoder:     enc,
+		clientID:    resolveClientID(cfg.ClientID),
 	}
 	mch.ob = push.NewOutbox(push.OutboxConfig{
 		Tag:          "mqtt",
@@ -282,37 +302,68 @@ func (ch *mqttChannel) publish(client mqtt.Client, b push.PushBatch) bool {
 		return false
 	}
 
-	payload, err := marshalBatch(b.Records, b.CollectedAt)
+	messages, err := ch.encode(b)
 	if err != nil {
-		errMsg := fmt.Sprintf("marshal batch: %v", err)
+		errMsg := fmt.Sprintf("encode batch: %v", err)
 		logger.Error("%s", errMsg)
 		ch.ob.SetLastErr(errMsg)
 		ch.ob.Drop(1)
 		return false
 	}
+	if len(messages) == 0 {
+		ch.ob.MarkPublished(1)
+		return true
+	}
 
 	ok := true
-	for _, topic := range topics {
-		tok := client.Publish(topic, ch.cfg.QoS, false, payload)
-		if !tok.WaitTimeout(publishTimeout) {
-			errMsg := fmt.Sprintf("publish %s timed out", topic)
-			logger.Error("%s", errMsg)
-			ch.ob.SetLastErr(errMsg)
-			ch.ob.Drop(1)
-			ok = false
-			continue
+	for _, msg := range messages {
+		for _, topic := range topics {
+			tok := client.Publish(topic, ch.cfg.QoS, false, msg.Payload)
+			if !tok.WaitTimeout(publishTimeout) {
+				errMsg := fmt.Sprintf("publish %s timed out", topic)
+				logger.Error("%s", errMsg)
+				ch.ob.SetLastErr(errMsg)
+				ch.ob.Drop(1)
+				ok = false
+				continue
+			}
+			if err := tok.Error(); err != nil {
+				errMsg := fmt.Sprintf("publish %s: %v", topic, err)
+				logger.Error("%s", errMsg)
+				ch.ob.SetLastErr(errMsg)
+				ch.ob.Drop(1)
+				ok = false
+				continue
+			}
+			ch.ob.MarkPublished(1)
 		}
-		if err := tok.Error(); err != nil {
-			errMsg := fmt.Sprintf("publish %s: %v", topic, err)
-			logger.Error("%s", errMsg)
-			ch.ob.SetLastErr(errMsg)
-			ch.ob.Drop(1)
-			ok = false
-			continue
-		}
-		ch.ob.MarkPublished(1)
 	}
 	return ok
+}
+
+// encode 使用配置的编码器；零值通道（测试直接构造）回退 native，保证兼容。
+func (ch *mqttChannel) encode(b push.PushBatch) ([]push.EncodedMessage, error) {
+	if ch.encoder == nil {
+		payload, err := marshalBatch(b.Records, b.CollectedAt)
+		if err != nil {
+			return nil, err
+		}
+		return []push.EncodedMessage{{Payload: payload}}, nil
+	}
+	return ch.encoder.Encode(b)
+}
+
+// Preview 实现 push.Previewer：只编码，不发布。
+func (ch *mqttChannel) Preview(b push.PushBatch) push.PreviewResult {
+	msgs, err := ch.encode(b)
+	if err != nil {
+		return push.PreviewResult{Error: err.Error()}
+	}
+	out := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, string(m.Payload))
+	}
+	return push.PreviewResult{Payloads: out}
 }
 
 // drainWindow 按入队序逐批发布窗口内批次，成功批次收集后合并删除（单条 DELETE）；
@@ -347,7 +398,7 @@ func (ch *mqttChannel) isConnected() bool {
 // Snapshot 返回通道状态快照（用于状态查询）
 func (ch *mqttChannel) Snapshot() push.ChannelStatusVO {
 	vo := push.ChannelStatusVO{
-		Type:   "mqtt",
+		Type:   ch.channelType,
 		Broker: ch.cfg.brokerURL(),
 		Topic:  ch.cfg.Topic,
 	}

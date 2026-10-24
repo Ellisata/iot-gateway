@@ -332,9 +332,13 @@ func (e *Engine) buildChannels() ([]Channel, error) {
 	chans := make([]Channel, 0, len(rows))
 	for i := range rows {
 		ch := &rows[i]
-		factory, ok := channelFactories[strings.ToLower(ch.Name)]
+		channelType := ch.Type
+		if channelType == "" {
+			channelType = ch.Name // 旧行/旧测试兜底
+		}
+		factory, ok := channelFactories[strings.ToLower(channelType)]
 		if !ok {
-			logger.Warn("push: channel type %s not supported yet, skip", ch.Name)
+			logger.Warn("push: channel type %s not supported yet, skip", channelType)
 			continue
 		}
 		c, err := factory(e.db, ch)
@@ -398,11 +402,12 @@ func (e *Engine) loadChecksum() uint64 {
 	type row struct {
 		ID         string
 		Name       string
+		Type       string
 		ConfigJSON string
 	}
 	var rows []row
 	if err := e.db.Model(&po.PushChannel{}).
-		Select("id, name, config_json").
+		Select("id, name, type, config_json").
 		Where("status = 1").
 		Order("id").
 		Find(&rows).Error; err != nil {
@@ -415,6 +420,8 @@ func (e *Engine) loadChecksum() uint64 {
 		io.WriteString(h, r.ID)
 		io.WriteString(h, "|")
 		io.WriteString(h, r.Name)
+		io.WriteString(h, "|")
+		io.WriteString(h, r.Type)
 		io.WriteString(h, "|")
 		io.WriteString(h, r.ConfigJSON)
 		io.WriteString(h, "\n")

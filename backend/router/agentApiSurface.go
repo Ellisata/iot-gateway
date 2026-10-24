@@ -317,9 +317,36 @@ var agentApiSurface = map[string]SurfaceEntry{
 	"POST /pushChannel/testConnectivity": {
 		Access: AccessProbe,
 		Params: argBody(dto.TestPushChannelDTO{}, map[string]string{
+			"type":       "通道类型；旧客户端可省略并把类型放在 name 里",
 			"configJson": "要测试的连接配置",
 		}),
-		Note: "真实连接下游（MQTT 等），不保存配置",
+		Note: "真实连接下游（MQTT/HTTP 等），不保存配置；HTTP 只验证 TCP/TLS 可达",
+	},
+	"GET /pushChannel/listTypes": {
+		Access: AccessRead,
+		Params: argNone(),
+		Note:   "返回已注册通道类型、是否消息类、可选载荷格式与预览/测试发送能力",
+	},
+	"POST /pushChannel/preview": {
+		Access: AccessRead,
+		Params: argBody(dto.PreviewPushChannelDTO{}, map[string]string{
+			"configJson": "通道配置，可包含 format/mapping",
+		}),
+		Note: "用第一台启用设备/点位试编码，不发送、不落库",
+	},
+	"POST /pushChannel/previewMapping": {
+		Access: AccessRead,
+		Params: argBody(dto.PreviewPushChannelMappingDTO{}, map[string]string{
+			"mapping": "出站映射 JSON（version/emit/envelope/batchFields/fields）；不需要通道类型或连接配置",
+		}),
+		Note: "只用第一台启用设备/点位试编码映射，不发送、不落库；映射/编码错误放在 data.error",
+	},
+	"POST /pushChannel/testSend": {
+		Access: AccessProbe,
+		Params: argBody(dto.TestSendPushChannelDTO{}, map[string]string{
+			"configJson": "通道配置，可包含 format/mapping",
+		}),
+		Note: "**真的向配置的下游发送一条样例数据**，不保存配置",
 	},
 	"GET /push/status": {Access: AccessRead, Params: argNone()},
 	"POST /push/refresh": {

@@ -91,9 +91,17 @@
 | 通道 | 说明 |
 |---|---|
 | `mqtt` | Eclipse Paho MQTT 客户端，支持 QoS、TLS、遗嘱等 |
+| `http` | HTTP/Webhook：POST/PUT/PATCH，Bearer / Basic / HMAC-SHA256 鉴权、自定义请求头、断网缓存与补发 |
 | `tdengine-v3` | TDEngine 3.x，官方 driver-go WebSocket 驱动（免 CGO，经 taosAdapter 连接） |
 | `influxdb-v3` | InfluxDB 3.x，自研 Line Protocol over HTTP 直连（不引入官方重依赖客户端） |
 
+> 通道现在是「**类型 + 实例名**」：同一类型可建多条（例如两条 HTTP 通道分别接 MES 与 ERP）。
+>
+> 消息类通道（`mqtt` / `http`）支持两种载荷格式：`native-json`（默认，契约不变）与
+> `mapping-json`（自定义出站映射，复用订阅侧的 `path` / `const` / `template` / `map` /
+> `transform` 词汇）。控制台提供载荷预览与测试发送；映射规则见
+> [推送通道与出站映射](backend/docs/push-channels.md)。
+>
 > 推送通道与协议驱动均为**注册表 + 接口**的插件式设计，新增协议/通道无需改动引擎代码。
 
 ## MQTT 订阅入时序库
@@ -283,13 +291,15 @@ push:
 │   ├── driversdk/      # 进程外驱动插件开发套件（Serve / Meta / RPC 参数）
 │   ├── driversrc/      # 协议插件源码（9 个子目录，各编译成 iot-driver-<目录名>）
 │   ├── plugins/        # 插件运行时目录（构建产物，发行包自带）
-│   ├── push/           # 推送引擎（mqtt/tdengine-v3/influxdb-v3 + outbox）
+│   ├── mappingdsl/     # 入站解析 / 出站映射共用的映射原语（JSON 路径 / 模板 / 变换）
+│   ├── push/           # 推送引擎（mqtt/http/tdengine-v3/influxdb-v3 + outbox + codec/messagechannel）
 │   ├── parser/         # 订阅报文解析器（内置映射 DSL / goja 脚本，输出采集记录）
 │   ├── subscribe/      # MQTT 订阅引擎（连接 / 队列 / 热加载，解析与投递编排）
 │   ├── controller/ service/ model/  # HTTP 分层（Controller → Service → Database）
 │   ├── database/sqlite/migrations/  # SQLite 迁移脚本
 │   ├── router/ middleware/          # 路由与中间件（JWT / Open API 密钥 / CORS）
 │   ├── web/            # 前端构建产物（go:embed 嵌入）
+│   ├── docs/           # 使用文档（含 push-channels.md）
 │   └── specs/          # 项目技术规范文档
 ├── frontend/           # Vue3 管理前端（Element Plus + Pinia + vue-i18n）
 ├── docker-compose.yml  # Docker Compose 部署编排（配合 backend/Dockerfile 多阶段构建）

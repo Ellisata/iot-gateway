@@ -111,6 +111,56 @@ export function updateChannelFormJsonById(data) {
 }
 
 /**
+ * 已注册的通道类型（是否消息类、可选载荷格式、预览/测试发送能力）。
+ * @returns {Promise<Array>} ChannelTypeMeta 数组
+ */
+export function getPushChannelTypeList() {
+  return request({
+    url: '/pushChannel/listTypes',
+    method: 'get',
+  })
+}
+
+/**
+ * 预览出站载荷（不发送、不落库）。
+ * @param {Object} data - { type, configJson }
+ * @returns {Promise<{payload?: string, payloads?: string[], count: number, error?: string}>}
+ */
+export function previewPushChannel(data) {
+  return request({
+    url: '/pushChannel/preview',
+    method: 'post',
+    data,
+  })
+}
+
+/**
+ * 只预览出站编码：不依赖通道类型与连接配置，也不发送任何请求。
+ * @param {Object} data - { format, mapping }；format 省略时按 mapping-json
+ * @returns {Promise<{payload?: string, payloads?: string[], count: number, error?: string}>}
+ */
+export function previewPushMapping(data) {
+  return request({
+    url: '/pushChannel/previewMapping',
+    method: 'post',
+    data,
+  })
+}
+
+/**
+ * 测试发送：会真的向配置的下游发送一条样例数据。
+ * @param {Object} data - { type, configJson }
+ * @returns {Promise<{success: boolean, statusCode?: number, messages: number, durationMs: number, error?: string}>}
+ */
+export function testSendPushChannel(data) {
+  return request({
+    url: '/pushChannel/testSend',
+    method: 'post',
+    data,
+  })
+}
+
+/**
  * 获取推送通道运行状态。
  *
  * 与通道配置列表是两件事：这里返回的是运行中的通道实例（连接状态、

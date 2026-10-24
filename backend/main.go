@@ -21,7 +21,9 @@ import (
 	// 推送通道子包空导入：触发各通道在 push.Register 中注册，新增类型在此追加
 	_ "iot-gateway/push/influxdb/v3"
 	_ "iot-gateway/push/mqtt"
+	_ "iot-gateway/push/opcuaserver"
 	_ "iot-gateway/push/tdengine/v3"
+	_ "iot-gateway/push/webhook"
 
 	"github.com/gin-gonic/gin"
 )

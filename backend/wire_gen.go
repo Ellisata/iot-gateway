@@ -33,6 +33,7 @@ import (
 	_ "iot-gateway/push/influxdb/v3"
 	_ "iot-gateway/push/mqtt"
 	_ "iot-gateway/push/tdengine/v3"
+	_ "iot-gateway/push/webhook"
 )
 
 // Injectors from wire.go:

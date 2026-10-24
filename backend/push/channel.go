@@ -5,6 +5,7 @@ package push
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"gorm.io/gorm"
@@ -45,27 +46,83 @@ type TimeSeriesChannel interface {
 // db 注入用于通道级持久化（如断网本地缓存 push_outbox），不用的通道可忽略。
 type ChannelFactory func(db *gorm.DB, ch *po.PushChannel) (Channel, error)
 
+// ChannelTypeMeta 通道类型的展示与能力元数据。
+//
+// MessageBased 决定管理端是否显示「输出格式/映射/预览」；Formats 只在
+// MessageBased=true 时有意义。TDengine/InfluxDB 通过旧 Register 注册，
+// 元数据为 MessageBased=false。
+type ChannelTypeMeta struct {
+	Type             string       `json:"type"`
+	Label            string       `json:"label"`
+	MessageBased     bool         `json:"messageBased"`
+	Formats          []FormatMeta `json:"formats,omitempty"`
+	DefaultFormat    string       `json:"defaultFormat,omitempty"`
+	SupportsPreview  bool         `json:"supportsPreview"`
+	SupportsTestSend bool         `json:"supportsTestSend"`
+}
+
 // channelFactories 通道类型 → 构建器注册表。
-// 仅允许在 init 阶段通过 Register 写入，运行期只读，避免并发竞争。
+// 仅允许在 init 阶段通过 Register/RegisterType 写入，运行期只读，避免并发竞争。
 var channelFactories = make(map[string]ChannelFactory)
 
-// Register 注册通道类型构建器，供各通道子包在 init() 中调用。
-// 新增通道类型（如 opcua、netty）在此注册一行即可接入。
+// channelTypeMetas 通道类型 → 元数据，与 channelFactories 同生命周期。
+var channelTypeMetas = make(map[string]ChannelTypeMeta)
+
+// Register 注册通道类型构建器（无消息类能力的旧入口）。
 func Register(name string, factory ChannelFactory) {
-	// 统一小写注册，配合 buildChannels 的小写查找实现大小写不敏感匹配
-	channelFactories[strings.ToLower(name)] = factory
+	RegisterType(ChannelTypeMeta{Type: name, Label: name}, factory)
+}
+
+// RegisterType 注册通道类型构建器与元数据，供各通道子包在 init() 中调用。
+func RegisterType(meta ChannelTypeMeta, factory ChannelFactory) {
+	name := strings.ToLower(strings.TrimSpace(meta.Type))
+	if name == "" {
+		panic("push: RegisterType requires a non-empty type")
+	}
+	if _, exists := channelFactories[name]; exists {
+		panic("push: channel type registered twice: " + name)
+	}
+	meta.Type = name
+	channelFactories[name] = factory
+	channelTypeMetas[name] = meta
+}
+
+// SupportedChannelTypeMetas 返回全部已注册类型，按 Type 排序。
+func SupportedChannelTypeMetas() []ChannelTypeMeta {
+	out := make([]ChannelTypeMeta, 0, len(channelTypeMetas))
+	for _, meta := range channelTypeMetas {
+		out = append(out, meta)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Type < out[j].Type })
+	return out
+}
+
+// RegisteredTypeMeta 查询某个类型的元数据。
+func RegisteredTypeMeta(name string) (ChannelTypeMeta, bool) {
+	meta, ok := channelTypeMetas[strings.ToLower(strings.TrimSpace(name))]
+	return meta, ok
+}
+
+// NewTemporaryChannel 根据类型与配置构建一个未启动的通道实例。
+// 用于连通性测试、载荷预览与测试发送：走与运行期完全相同的工厂路径。
+func NewTemporaryChannel(db *gorm.DB, channelType, name, configJSON string) (Channel, error) {
+	typ := strings.ToLower(strings.TrimSpace(channelType))
+	factory, ok := channelFactories[typ]
+	if !ok {
+		return nil, fmt.Errorf("push: channel type %s not supported", channelType)
+	}
+	if strings.TrimSpace(name) == "" {
+		name = typ
+	}
+	return factory(db, &po.PushChannel{Name: name, Type: typ, ConfigJSON: configJSON})
 }
 
 // TestChannelConnectivity 根据通道类型名与 config_json 测试通道连通性。
 // 复用类型工厂构建临时通道实例（同时校验配置合法性），再调用其 TestConnectivity
 // 建立连接探测后释放，不落库、不启动后台 goroutine。测试通道若启用断网缓存
 // （spool）会绑定 db 做一次 seed 计数，但测试路径无任何写入。
-func TestChannelConnectivity(db *gorm.DB, name, configJSON string) error {
-	factory, ok := channelFactories[strings.ToLower(name)]
-	if !ok {
-		return fmt.Errorf("push: channel type %s not supported", name)
-	}
-	ch, err := factory(db, &po.PushChannel{Name: name, ConfigJSON: configJSON})
+func TestChannelConnectivity(db *gorm.DB, channelType, configJSON string) error {
+	ch, err := NewTemporaryChannel(db, channelType, channelType, configJSON)
 	if err != nil {
 		return err
 	}

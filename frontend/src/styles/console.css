@@ -506,6 +506,24 @@
   background: #f1f5f9;
 }
 
+/* 示例标识：贴在代码编辑器文件名旁，提示内容是内置样例而非已写好的脚本 */
+.iot-sample-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 16px;
+  color: #b45309;
+  white-space: nowrap;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 999px;
+  cursor: default;
+}
+
 .iot-pill.is-live .iot-pill-dot {
   animation: iotStatusPulse 1.4s ease-in-out infinite;
 }
@@ -755,6 +773,12 @@
 
 .iot-dialog .el-dialog__body {
   padding: 20px 24px 8px;
+}
+
+/* 通道弹窗内嵌映射编辑器，内容较长时让 body 自己滚动 */
+.channel-dialog .el-dialog__body {
+  max-height: 72vh;
+  overflow-y: auto;
 }
 
 .iot-dialog .el-dialog__footer {

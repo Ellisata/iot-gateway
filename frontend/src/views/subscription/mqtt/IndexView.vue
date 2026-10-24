@@ -213,7 +213,12 @@
         >
           <!-- ========== 基本信息 ========== -->
           <section class="sub-section is-first">
-            <p class="sub-section-title">{{ t('subscription.basicInfo') }}</p>
+            <div class="sub-section-head">
+              <span class="sub-section-mark" aria-hidden="true">
+                <el-icon><PlugConnected /></el-icon>
+              </span>
+              <p class="sub-section-title">{{ t('subscription.basicInfo') }}</p>
+            </div>
             <div class="grid grid-cols-2 gap-x-6">
               <el-form-item :label="t('common.name')" prop="name">
                 <el-input v-model="formData.name" :placeholder="t('subscription.namePlaceholder')" maxlength="100" />
@@ -284,65 +289,132 @@
 
           <!-- ========== 解析方式 ========== -->
           <section class="sub-section">
-            <p class="sub-section-title">{{ t('subscription.parser') }}</p>
-            <p class="sub-section-hint">{{ t('subscription.parserHint') }}</p>
-            <el-form-item :label="t('subscription.parserType')">
-              <div class="sub-parser-type">
-                <el-radio-group v-model="parserType">
-                  <el-radio-button value="builtin">{{ t('subscription.parserBuiltin') }}</el-radio-button>
-                  <el-radio-button value="script">{{ t('subscription.parserScript') }}</el-radio-button>
-                </el-radio-group>
-                <span class="sub-inline-hint">{{ t('subscription.parserTypeHint') }}</span>
+            <div class="sub-section-head">
+              <span class="sub-section-mark" aria-hidden="true">
+                <el-icon><Adjustments /></el-icon>
+              </span>
+              <div class="sub-section-head-text">
+                <p class="sub-section-title">{{ t('subscription.parser') }}</p>
+                <p class="sub-section-hint is-tight">{{ t('subscription.parserHint') }}</p>
               </div>
-            </el-form-item>
+            </div>
+            <!-- 两种解析方式做成可选卡片：名称 + 适用场景，比一排单选按钮更容易理解 -->
+            <div class="parser-modes" role="radiogroup" :aria-label="t('subscription.parserType')">
+              <button
+                type="button"
+                class="parser-mode"
+                :class="{ 'is-active': parserType === 'builtin' }"
+                role="radio"
+                :aria-checked="parserType === 'builtin'"
+                @click="setParserType('builtin')"
+              >
+                <span class="parser-mode-mark" aria-hidden="true">
+                  <el-icon><Table /></el-icon>
+                </span>
+                <span class="parser-mode-copy">
+                  <span class="parser-mode-name">{{ t('subscription.parserBuiltin') }}</span>
+                  <span class="parser-mode-desc">{{ t('subscription.parserBuiltinDesc') }}</span>
+                </span>
+                <span class="parser-mode-check" aria-hidden="true">
+                  <el-icon><Check /></el-icon>
+                </span>
+              </button>
+              <button
+                type="button"
+                class="parser-mode"
+                :class="{ 'is-active': parserType === 'script' }"
+                role="radio"
+                :aria-checked="parserType === 'script'"
+                @click="setParserType('script')"
+              >
+                <span class="parser-mode-mark" aria-hidden="true">
+                  <el-icon><Code /></el-icon>
+                </span>
+                <span class="parser-mode-copy">
+                  <span class="parser-mode-name">{{ t('subscription.parserScript') }}</span>
+                  <span class="parser-mode-desc">{{ t('subscription.parserScriptDesc') }}</span>
+                </span>
+                <span class="parser-mode-check" aria-hidden="true">
+                  <el-icon><Check /></el-icon>
+                </span>
+              </button>
+            </div>
           </section>
 
           <!-- ========== 映射规则 / 脚本 ========== -->
           <section class="sub-section">
-            <p class="sub-section-title">
-              {{ parserType === 'builtin' ? t('subscription.mapping') : t('subscription.script') }}
-            </p>
-            <p class="sub-section-hint">
-              {{ parserType === 'builtin' ? t('subscription.mappingHint') : t('subscription.scriptHint') }}
-            </p>
+            <div class="sub-section-head">
+              <span class="sub-section-mark" aria-hidden="true">
+                <el-icon>
+                  <component :is="parserType === 'builtin' ? Sitemap : Braces" />
+                </el-icon>
+              </span>
+              <div class="sub-section-head-text">
+                <p class="sub-section-title">
+                  {{ parserType === 'builtin' ? t('subscription.mapping') : t('subscription.script') }}
+                </p>
+                <p class="sub-section-hint is-tight">
+                  {{ parserType === 'builtin' ? t('subscription.mappingHint') : t('subscription.scriptHint') }}
+                </p>
+              </div>
+            </div>
 
             <template v-if="parserType === 'builtin'">
-            <el-form-item :label="t('subscription.root')">
-              <div class="sub-root-row">
-                <el-input v-model="rootPath" style="width: 220px" placeholder="$" />
-                <span class="sub-inline-hint">{{ t('subscription.rootHint') }}</span>
+            <!-- 报文定位：取值根与主题模板都是“从哪取数”的路径，收进同一张卡片，
+                 说明放在各自输入框下方，避免长句和窄输入框挤成一行 -->
+            <div class="sub-locate">
+              <div class="sub-locate-row">
+                <div class="sub-locate-label">
+                  <span class="sub-locate-name">{{ t('subscription.root') }}</span>
+                  <code class="sub-locate-tag">root</code>
+                </div>
+                <div class="sub-locate-control">
+                  <el-input
+                    v-model="rootPath"
+                    class="sub-locate-input"
+                    placeholder="$"
+                  />
+                  <p class="sub-locate-hint">{{ t('subscription.rootHint') }}</p>
+                </div>
               </div>
-            </el-form-item>
-
-            <el-form-item :label="t('subscription.topicPattern')">
-              <div class="sub-root-row">
-                <el-input
-                  v-model="topicPattern"
-                  style="width: 320px"
-                  placeholder="factory/{deviceId}/telemetry"
-                />
-                <span class="sub-inline-hint">{{ t('subscription.topicPatternHint') }}</span>
-              </div>
-            </el-form-item>
-
-            <div class="sub-inline-row">
-              <span class="sub-inline-hint">{{ t('subscription.primaryFieldsHint') }}</span>
-              <div class="sub-inline-actions">
-                <span v-if="advancedConfiguredCount" class="iot-pill is-amber">
-                  {{ t('subscription.advancedConfigured', { count: advancedConfiguredCount }) }}
-                </span>
-                <el-button
-                  type="primary"
-                  link
-                  size="small"
-                  @click="showAdvancedFields = !showAdvancedFields"
-                >
-                  {{ showAdvancedFields ? t('subscription.hideAdvancedFields') : t('subscription.showAdvancedFields') }}
-                </el-button>
+              <div class="sub-locate-row">
+                <div class="sub-locate-label">
+                  <span class="sub-locate-name">{{ t('subscription.topicPattern') }}</span>
+                  <code class="sub-locate-tag">topic</code>
+                </div>
+                <div class="sub-locate-control">
+                  <el-input
+                    v-model="topicPattern"
+                    class="sub-locate-input"
+                    placeholder="factory/{deviceId}/telemetry"
+                  />
+                  <p class="sub-locate-hint">{{ t('subscription.topicPatternHint') }}</p>
+                </div>
               </div>
             </div>
 
             <div class="mapping-table">
+              <div class="mapping-table-bar">
+                <div class="mapping-table-bar-title">
+                  <span>{{ t('subscription.fieldsPanel') }}</span>
+                  <span class="mapping-table-bar-count">
+                    {{ t('subscription.fieldsCount', { visible: visibleFieldDefs.length, total: FIELD_DEFS.length }) }}
+                  </span>
+                </div>
+                <div class="sub-inline-actions">
+                  <span v-if="advancedConfiguredCount" class="iot-pill is-amber">
+                    {{ t('subscription.advancedConfigured', { count: advancedConfiguredCount }) }}
+                  </span>
+                  <el-button
+                    type="primary"
+                    link
+                    size="small"
+                    @click="showAdvancedFields = !showAdvancedFields"
+                  >
+                    {{ showAdvancedFields ? t('subscription.hideAdvancedFields') : t('subscription.showAdvancedFields') }}
+                  </el-button>
+                </div>
+              </div>
               <div class="mapping-head">
                 <span>{{ t('subscription.targetField') }}</span>
                 <span>{{ t('subscription.source') }}</span>
@@ -351,9 +423,9 @@
               <template v-for="def in visibleFieldDefs" :key="def.key">
                 <div class="mapping-row">
                   <div class="mapping-label">
-                    <span class="text-gray-700">{{ t(def.labelKey) }}</span>
-                    <span v-if="def.required" class="text-red-500 ml-1">*</span>
-                    <span class="font-mono text-[11px] text-gray-400 ml-2">{{ def.key }}</span>
+                    <span class="mapping-label-name">{{ t(def.labelKey) }}</span>
+                    <span v-if="def.required" class="mapping-label-required" aria-hidden="true">*</span>
+                    <code class="mapping-key">{{ def.key }}</code>
                   </div>
                   <el-select
                     v-model="fieldMap[def.key].source"
@@ -537,6 +609,7 @@
                 </div>
               </template>
             </div>
+            <p class="sub-hint">{{ t('subscription.primaryFieldsHint') }}</p>
             <p class="sub-hint">{{ t('subscription.kindHint') }}</p>
 
             <!-- 多测点扇出：一条报文多个指标 → 每个扇出项一条记录 -->
@@ -612,46 +685,117 @@
 
             <!-- ========== 脚本解析 ========== -->
             <template v-else>
-              <el-form-item :label="t('subscription.scriptCode')">
-                <el-input
-                  v-model="scriptText"
-                  type="textarea"
-                  :rows="16"
-                  spellcheck="false"
-                  class="script-editor"
-                  :placeholder="SCRIPT_PLACEHOLDER"
-                />
-              </el-form-item>
-              <div class="script-limits">
-                <el-form-item :label="t('subscription.scriptTimeout')">
-                  <el-input-number v-model="scriptTimeoutMs" :min="1" :max="500" size="small" />
-                </el-form-item>
-                <el-form-item :label="t('subscription.scriptMaxRecords')">
-                  <el-input-number v-model="scriptMaxRecords" :min="1" :max="1000" size="small" />
-                </el-form-item>
-                <el-button type="primary" link size="small" @click="fillScriptSample">
-                  {{ t('subscription.scriptSample') }}
-                </el-button>
+              <!-- 运行限制与通道脚本保持一致：收进代码面板顶栏，和它约束的编辑器同一张卡片 -->
+              <CodeEditor
+                v-model="scriptText"
+                filename="parse.js"
+                height="320px"
+                :meta="scriptMeta"
+                :placeholder="SCRIPT_PLACEHOLDER"
+                :aria-label="t('subscription.scriptCode')"
+              >
+                <template #file-extra>
+                  <el-tooltip
+                    v-if="isScriptSample"
+                    :content="t('subscription.scriptSampleHint')"
+                    placement="top"
+                  >
+                    <span class="iot-sample-badge">{{ t('subscription.scriptSampleBadge') }}</span>
+                  </el-tooltip>
+                </template>
+                <template #bar-right>
+                  <label class="script-limit">
+                    <span class="script-limit-label">{{ t('subscription.scriptTimeout') }}</span>
+                    <el-input-number
+                      v-model="scriptTimeoutMs"
+                      :min="1"
+                      :max="500"
+                      size="small"
+                      controls-position="right"
+                    />
+                  </label>
+                  <label class="script-limit">
+                    <span class="script-limit-label">{{ t('subscription.scriptMaxRecords') }}</span>
+                    <el-input-number
+                      v-model="scriptMaxRecords"
+                      :min="1"
+                      :max="1000"
+                      size="small"
+                      controls-position="right"
+                    />
+                  </label>
+                </template>
+              </CodeEditor>
+              <p class="sub-info-hint">
+                <el-icon><InfoCircle /></el-icon>
+                <span>{{ t('subscription.scriptApiHint') }}</span>
+              </p>
+
+              <!-- 目标字段说明：默认收起，点击展开；写错字段名会让整条报文失败 -->
+              <div class="mapping-table script-field-ref">
+                <div class="mapping-table-bar">
+                  <div class="mapping-table-bar-title">
+                    <span>{{ t('subscription.scriptTargetFields') }}</span>
+                    <span class="mapping-table-bar-count">{{ SCRIPT_TARGET_FIELDS.length }}</span>
+                  </div>
+                  <el-button type="primary" link size="small" @click="scriptFieldTableOpen = !scriptFieldTableOpen">
+                    {{ scriptFieldTableOpen ? t('subscription.hideScriptTargetFields') : t('subscription.showScriptTargetFields') }}
+                  </el-button>
+                </div>
+                <template v-if="scriptFieldTableOpen">
+                  <p class="script-field-hint">{{ t('subscription.scriptTargetFieldsHint') }}</p>
+                  <div class="mapping-head">
+                    <span>{{ t('subscription.targetField') }}</span>
+                    <span>{{ t('subscription.fieldRequiredColumn') }}</span>
+                    <span>{{ t('subscription.fieldDescription') }}</span>
+                  </div>
+                  <div v-for="f in SCRIPT_TARGET_FIELDS" :key="f.key" class="mapping-row">
+                    <div class="mapping-label">
+                      <span class="mapping-label-name">{{ t(f.labelKey) }}</span>
+                      <span v-if="f.required" class="mapping-label-required" aria-hidden="true">*</span>
+                      <code class="mapping-key">{{ f.key }}</code>
+                    </div>
+                    <span class="script-field-required" :class="{ 'is-required': f.required }">
+                      {{ f.required ? t('subscription.fieldRequired') : t('subscription.fieldOptional') }}
+                    </span>
+                    <span class="script-field-desc">{{ t(f.hintKey) }}</span>
+                  </div>
+                </template>
               </div>
-              <p class="sub-hint">{{ t('subscription.scriptApiHint') }}</p>
+              <p v-if="scriptFieldTableOpen" class="sub-hint">
+                {{ t('subscription.scriptTargetFieldsNote') }}
+              </p>
             </template>
           </section>
 
           <!-- ========== 预览 ========== -->
           <section class="sub-section">
-            <p class="sub-section-title">{{ t('subscription.preview') }}</p>
-            <div class="sub-preview">
-              <div class="sub-preview-main">
-                <!-- 字段数预设只对内置映射有意义；脚本模式下默认示例在切换解析方式时自动填入 -->
-                <div v-if="parserType === 'builtin'" class="sub-sample-presets">
-                  <span class="sub-inline-hint">{{ t('subscription.samplePreset') }}</span>
-                  <el-button type="primary" link size="small" @click="useSample('minimal')">
-                    {{ t('subscription.sampleMinimal') }}
-                  </el-button>
-                  <el-button type="primary" link size="small" @click="useSample('advanced')">
-                    {{ t('subscription.sampleAdvanced') }}
-                  </el-button>
+            <div class="sub-section-head">
+              <span class="sub-section-mark" aria-hidden="true">
+                <el-icon><Eye /></el-icon>
+              </span>
+              <p class="sub-section-title">{{ t('subscription.preview') }}</p>
+            </div>
+            <div class="sub-preview-card">
+              <div class="sub-preview-bar">
+                <div class="sub-preview-bar-left">
+                  <span class="sub-preview-bar-title">{{ t('subscription.sampleCard') }}</span>
+                  <!-- 字段数预设只对内置映射有意义；脚本模式下默认示例在切换解析方式时自动填入 -->
+                  <div v-if="parserType === 'builtin'" class="sub-sample-presets">
+                    <span class="sub-inline-hint">{{ t('subscription.samplePreset') }}</span>
+                    <el-button type="primary" link size="small" @click="useSample('minimal')">
+                      {{ t('subscription.sampleMinimal') }}
+                    </el-button>
+                    <el-button type="primary" link size="small" @click="useSample('advanced')">
+                      {{ t('subscription.sampleAdvanced') }}
+                    </el-button>
+                  </div>
                 </div>
+                <el-button type="primary" size="small" :loading="previewing" @click="handlePreview">
+                  {{ t('subscription.runPreview') }}
+                </el-button>
+              </div>
+              <div class="sub-preview-body">
                 <el-input
                   v-model="sampleTopic"
                   size="small"
@@ -665,19 +809,15 @@
                 <el-input
                   v-model="sampleText"
                   type="textarea"
-                  :rows="9"
+                  :rows="8"
                   spellcheck="false"
+                  class="sample-payload-input"
                   :placeholder="
                     parserType === 'builtin'
                       ? t('subscription.samplePlaceholder')
                       : t('subscription.samplePlaceholderScript')
                   "
                 />
-              </div>
-              <div class="sub-preview-side">
-                <el-button type="primary" plain size="small" :loading="previewing" @click="handlePreview">
-                  {{ t('subscription.runPreview') }}
-                </el-button>
               </div>
             </div>
 
@@ -741,17 +881,27 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  IconAdjustments as Adjustments,
   IconAffiliate as Connection,
   IconAlertTriangle as AlertTriangle,
+  IconBraces as Braces,
+  IconCheck as Check,
   IconChevronRight as Right,
+  IconCode as Code,
+  IconEye as Eye,
+  IconInfoCircle as InfoCircle,
   IconMessage as Message,
   IconPencil as EditPen,
+  IconPlugConnected as PlugConnected,
   IconPlus as Plus,
   IconRefresh as Refresh,
   IconSearch as Search,
+  IconSitemap as Sitemap,
+  IconTable as Table,
   IconTrash as Delete,
 } from '@tabler/icons-vue'
 import { useI18n } from 'vue-i18n'
+import CodeEditor from '@/components/CodeEditor.vue'
 import {
   getSubscriptionList,
   getSubscriptionById,
@@ -800,6 +950,8 @@ const PRIMARY_FIELD_KEYS = [
   'quality',
 ]
 const showAdvancedFields = ref(false)
+// 脚本目标字段说明默认收起：编辑器才是主区域，说明按需展开。
+const scriptFieldTableOpen = ref(false)
 const visibleFieldDefs = computed(() =>
   showAdvancedFields.value
     ? FIELD_DEFS
@@ -1053,6 +1205,16 @@ const filterRows = ref([])
 
 // ---------- 解析方式 ----------
 const parserType = ref('builtin') // builtin | script
+
+function setParserType(type) {
+  if (parserType.value === type) return
+  parserType.value = type
+  // 切到脚本且尚未写过内容时，直接铺一份可用的示例（与通道脚本编辑器一致）。
+  // 编辑已有订阅走的是直接赋值，不会经过这里，不会覆盖已保存的脚本。
+  if (type === 'script' && String(scriptText.value || '').trim() === '') {
+    scriptText.value = SCRIPT_SAMPLE
+  }
+}
 const topicPattern = ref('') // 如 factory/{deviceId}/telemetry
 const fanoutEnabled = ref(false)
 const fanoutRows = ref([]) // { deviceAddressId, deviceAddressLabel, valuePath }
@@ -1061,6 +1223,12 @@ const fanoutRows = ref([]) // { deviceAddressId, deviceAddressLabel, valuePath }
 const scriptText = ref('')
 const scriptTimeoutMs = ref(50)
 const scriptMaxRecords = ref(200)
+const scriptMeta = computed(() =>
+  t('subscription.scriptCodeMeta', {
+    lines: String(scriptText.value || '').split('\n').length,
+    chars: String(scriptText.value || '').length,
+  }),
+)
 
 const TRANSFORM_OPS = [
   { value: 'scale', labelKey: 'subscription.transformScale' },
@@ -1097,6 +1265,29 @@ function parse(msg, ctx) {
     quality: 192
   });
 }`
+
+// 仍与内置示例逐字一致时，编辑器文件名旁显示「示例」标识；改动后自动消失。
+const isScriptSample = computed(
+  () =>
+    String(scriptText.value || '').trim() !== '' &&
+    String(scriptText.value || '').trim() === SCRIPT_SAMPLE.trim(),
+)
+
+// ctx.emit 的目标字段（backend/parser.RecordFromMap 白名单）。脚本模式没有映射表格，
+// 必须把这份清单摆在编辑器旁边：字段名写错会让整条报文失败，运维无从自查。
+const SCRIPT_TARGET_FIELDS = [
+  { key: 'deviceId', labelKey: 'subscription.fieldDeviceId', required: true, hintKey: 'subscription.scriptFieldDeviceId' },
+  { key: 'deviceName', labelKey: 'subscription.fieldDeviceName', required: false, hintKey: 'subscription.scriptFieldDeviceName' },
+  { key: 'deviceAddressId', labelKey: 'subscription.fieldDeviceAddressId', required: true, hintKey: 'subscription.scriptFieldDeviceAddressId' },
+  { key: 'deviceAddressName', labelKey: 'subscription.fieldDeviceAddressName', required: false, hintKey: 'subscription.scriptFieldDeviceAddressName' },
+  { key: 'deviceAddressLabel', labelKey: 'subscription.fieldDeviceAddressLabel', required: false, hintKey: 'subscription.scriptFieldDeviceAddressLabel' },
+  { key: 'value', labelKey: 'subscription.fieldValue', required: true, hintKey: 'subscription.scriptFieldValue' },
+  { key: 'collectedAt', labelKey: 'subscription.fieldCollectedAt', required: false, hintKey: 'subscription.scriptFieldCollectedAt' },
+  { key: 'dataType', labelKey: 'subscription.fieldDataType', required: false, hintKey: 'subscription.scriptFieldDataType' },
+  { key: 'kind', labelKey: 'subscription.fieldKind', required: false, hintKey: 'subscription.scriptFieldKind' },
+  { key: 'protocol', labelKey: 'subscription.fieldProtocol', required: false, hintKey: 'subscription.scriptFieldProtocol' },
+  { key: 'quality', labelKey: 'subscription.fieldQuality', required: false, hintKey: 'subscription.scriptFieldQuality' },
+]
 
 // 与 SCRIPT_SAMPLE 的取值路径一一对应：deviceId + data.temp + 主题里的设备段。
 const SCRIPT_SAMPLE_TOPIC = 'factory/meter-01/telemetry'
@@ -1248,6 +1439,7 @@ function resetForm() {
   previewResult.value = null
   filterRows.value = []
   showAdvancedFields.value = false
+  scriptFieldTableOpen.value = false
   parserType.value = 'builtin'
   topicPattern.value = ''
   fanoutEnabled.value = false
@@ -1358,10 +1550,6 @@ function buildTransform(tr) {
 
 function addFanoutRow() {
   fanoutRows.value.push({ deviceAddressId: '', deviceAddressLabel: '', valuePath: '' })
-}
-
-function fillScriptSample() {
-  scriptText.value = SCRIPT_SAMPLE
 }
 
 function buildScriptConfig() {
@@ -1810,16 +1998,42 @@ onBeforeUnmount(() => {
   border-top: 0;
 }
 
+.sub-section-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.sub-section-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
+.sub-section-mark .el-icon {
+  font-size: 15px;
+}
+
+.sub-section-head-text {
+  min-width: 0;
+}
+
 .sub-section-title {
-  margin: 0 0 12px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--ink-3);
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
 }
 
 .sub-section-hint {
-  margin: -4px 0 12px;
+  margin: 3px 0 0;
   font-size: 12px;
   line-height: 1.65;
   color: var(--ink-4);
@@ -1849,11 +2063,72 @@ onBeforeUnmount(() => {
   color: var(--ink-4);
 }
 
-.sub-root-row {
+/* 报文定位：两行一卡，标签固定宽度，输入框与说明左对齐成一列 */
+.sub-locate {
+  margin-bottom: 14px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.sub-locate-row {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.sub-locate-row + .sub-locate-row {
+  border-top: 1px solid var(--line-soft);
+}
+
+.sub-locate-label {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 7px;
+}
+
+.sub-locate-name {
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sub-locate-tag {
+  flex: none;
+  padding: 0 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--ink-4);
+  background: var(--canvas);
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+}
+
+.sub-locate-control {
+  min-width: 0;
+}
+
+.sub-locate-input {
   width: 100%;
+}
+
+.sub-locate-input :deep(.el-input__inner) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.sub-locate-hint {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-4);
 }
 
 .sub-inline-row {
@@ -1897,6 +2172,42 @@ onBeforeUnmount(() => {
   border-radius: 12px;
 }
 
+/* 表格顶栏：标题 + 字段数 + 收起/展开动作，与下方表头同处一张卡片 */
+.mapping-table-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--canvas);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+/* 折叠状态下顶栏就是卡片最后一行，不再多一条分隔线 */
+.mapping-table-bar:last-child {
+  border-bottom: 0;
+}
+
+.mapping-table-bar-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.mapping-table-bar-count {
+  padding: 1px 8px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-4);
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+}
+
 .mapping-head,
 .mapping-row {
   display: grid;
@@ -1926,7 +2237,34 @@ onBeforeUnmount(() => {
 .mapping-label {
   display: flex;
   align-items: center;
+  gap: 3px;
+  min-width: 0;
   font-size: 13px;
+}
+
+.mapping-label-name {
+  overflow: hidden;
+  color: var(--ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mapping-label-required {
+  flex: none;
+  color: var(--danger);
+}
+
+/* 字段标识做成右侧对齐的代码芯片，扫读时能和中文名区分开 */
+.mapping-key {
+  flex: none;
+  margin-left: auto;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-4);
+  background: var(--canvas);
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
 }
 
 /* kind / quality 值映射编辑器：紧跟在对应行下方，占满整行宽度 */
@@ -1944,12 +2282,102 @@ onBeforeUnmount(() => {
   margin-bottom: 6px;
 }
 
-/* 过滤条件：一行一条，底部用发丝线分隔 */
-.sub-parser-type {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+/* 解析方式：两张可选卡片，选中态用品牌色描边 + 勾选角标 */
+.parser-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.parser-mode {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+}
+
+.parser-mode:hover {
+  border-color: rgba(37, 99, 235, 0.3);
+  background: #fbfdff;
+}
+
+.parser-mode.is-active {
+  background: var(--brand-soft);
+  border-color: rgba(37, 99, 235, 0.5);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+}
+
+.parser-mode-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--ink-3);
+  background: var(--canvas);
+  border-radius: 9px;
+  transition: color 0.16s ease, background-color 0.16s ease;
+}
+
+.parser-mode.is-active .parser-mode-mark {
+  color: var(--brand);
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.12);
+}
+
+.parser-mode-mark .el-icon {
+  font-size: 16px;
+}
+
+.parser-mode-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.parser-mode-name {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.parser-mode-desc {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-4);
+}
+
+.parser-mode-check {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  color: transparent;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  transition: color 0.16s ease, background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.parser-mode-check .el-icon {
+  font-size: 11px;
+}
+
+.parser-mode.is-active .parser-mode-check {
+  color: #fff;
+  background: var(--brand);
+  border-color: var(--brand);
 }
 
 .transform-editor {
@@ -1978,26 +2406,83 @@ onBeforeUnmount(() => {
   border-bottom: none;
 }
 
-.script-editor :deep(textarea) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.script-limits {
+/* 与通道脚本编辑器同一套参数样式：小标签 + 92px 步进器 */
+.script-limit {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
-  margin-bottom: 8px;
+  gap: 6px;
 }
 
-.script-limits :deep(.el-form-item) {
-  margin-bottom: 0;
+.script-limit-label {
+  font-size: 11px;
+  color: var(--ink-4);
+  white-space: nowrap;
 }
 
-.sample-topic-input {
-  margin-bottom: 8px;
+.script-limit :deep(.el-input-number) {
+  width: 92px;
+}
+
+.sub-info-hint {
+  display: flex;
+  gap: 7px;
+  margin: 10px 2px 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+.sub-info-hint .el-icon {
+  flex: none;
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+/* 脚本目标字段说明：说明列可能换行，行高按内容撑开 */
+.script-field-ref {
+  margin-top: 14px;
+}
+
+.script-field-ref .mapping-head,
+.script-field-ref .mapping-row {
+  grid-template-columns: 250px 92px 1fr;
+}
+
+.script-field-ref .mapping-row {
+  align-items: start;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.script-field-hint {
+  margin: 0;
+  padding: 10px 12px 6px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+.script-field-desc {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-3);
+}
+
+.script-field-required {
+  justify-self: start;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: var(--ink-4);
+  background: var(--canvas);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+}
+
+.script-field-required.is-required {
+  font-weight: 600;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-color: rgba(37, 99, 235, 0.14);
 }
 
 .runtime-counts.is-warn {
@@ -2018,33 +2503,64 @@ onBeforeUnmount(() => {
 }
 
 /* ---------- 预览 ---------- */
-.sub-preview {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
+.sub-preview-card {
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
 }
 
-.sub-preview-main {
-  flex: 1;
+.sub-preview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px 8px 12px;
+  background: var(--canvas);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.sub-preview-bar-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
   min-width: 0;
 }
 
-.sub-preview-side {
-  width: 132px;
-  padding-top: 24px;
+.sub-preview-bar-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
 }
 
 .sub-sample-presets {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
+}
+
+.sub-preview-body {
+  padding: 12px;
+}
+
+.sample-topic-input {
   margin-bottom: 8px;
+}
+
+.sample-topic-input :deep(.el-input__inner),
+.sample-payload-input :deep(textarea) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .preview-result {
   margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line-soft);
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
 }
 
 .preview-head {
@@ -2076,17 +2592,14 @@ onBeforeUnmount(() => {
 
 @media (max-width: 860px) {
   .mapping-head,
-  .mapping-row {
+  .mapping-row,
+  .script-field-ref .mapping-head,
+  .script-field-ref .mapping-row {
     grid-template-columns: 1fr;
   }
 
-  .sub-preview {
-    flex-direction: column;
-  }
-
-  .sub-preview-side {
-    width: 100%;
-    padding-top: 0;
+  .parser-modes {
+    grid-template-columns: 1fr;
   }
 }
 </style>

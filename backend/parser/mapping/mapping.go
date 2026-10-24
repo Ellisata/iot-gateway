@@ -23,6 +23,7 @@ import (
 
 	"iot-gateway/collector"
 	"iot-gateway/driver"
+	"iot-gateway/mappingdsl"
 	"iot-gateway/parser"
 )
 
@@ -74,16 +75,16 @@ var strictRequiredFields = []string{
 
 // 取值方式。
 const (
-	SourcePath     = "path"
-	SourceConst    = "const"
-	SourceTemplate = "template"
+	SourcePath     = mappingdsl.SourcePath
+	SourceConst    = mappingdsl.SourceConst
+	SourceTemplate = mappingdsl.SourceTemplate
 	// SourceMap 读取报文中一个值，再按 Mapping 翻译成本系统的值。
 	// 典型用途：外部系统自有的类型定义（1/2/3、TEMP/SWITCH、DINT/REAL…）
 	// 与本系统的 kind 类别不一致时逐项翻译。
-	SourceMap = "map"
+	SourceMap = mappingdsl.SourceMap
 	// SourceTopic 从 topicPattern 的命名段取值。MQTT 遥测最常见的身份来源是主题，
 	// 只允许从 payload 取值会迫使这类报文写脚本。
-	SourceTopic = "topic"
+	SourceTopic = mappingdsl.SourceTopic
 )
 
 // Rule JSON 报文 → CollectedRecord 的映射规则（DSL v1）。
@@ -115,32 +116,16 @@ type Rule struct {
 
 	// topicSegs 由 Validate 编译，避免每条报文重复解析模板。
 	topicSegs []topicSeg `json:"-"`
+	// topicUsed 配置是否真的引用了命名段。没引用时 topicPattern 不参与解析，
+	// 也不做主题匹配校验（见 usesTopicVars）。
+	topicUsed bool `json:"-"`
 }
 
 // ValueSource 单个目标字段的取值方式。
 //
-//	Source:
-//	  ""/"path"   按 JSON 路径取值，如 "deviceId" / "data.list[0].id"
-//	  "const"     Value 直接作为固定值
-//	  "template"  Value 是形如 "gw_{deviceId}" 的模板，按 {路径} 从报文中取值拼接
-//	  "map"       按 Value 路径取值后查 Mapping 翻译（见 SourceMap）
-//	  "topic"     从 topicPattern 的命名段取值
-//
-// Mapping / Default：
-//   - source=map：Mapping 未命中时使用 Default；未配置则保留原值。
-//   - source=path：路径不存在时使用 Default（可选）。
-//
-// Transform 按顺序作用在取值结果上（见 transform.go）。
-type ValueSource struct {
-	Source string `json:"source"`
-	Value  string `json:"value"`
-	// Mapping 原始值 → 目标值。键比较大小写不敏感，纯数字键按数值比较。
-	Mapping map[string]string `json:"mapping,omitempty"`
-	// Default 未命中映射/路径不存在时的回落值。
-	Default string `json:"default,omitempty"`
-	// Transform 值变换流水线，如 scale(0.1) → round(2)。
-	Transform []Transform `json:"transform,omitempty"`
-}
+// 实现已下沉到 mappingdsl（入站与出站共用）；保留别名是为了让既有 JSON
+// 配置、前端映射编辑器与测试无需迁移。
+type ValueSource = mappingdsl.ValueSource
 
 // Parse 解析并校验映射规则（加载路径）。
 // 只要求结构性字段，保证历史配置在新增必填项后仍能继续运行。
@@ -227,6 +212,7 @@ func (r *Rule) Validate() error {
 	if err := r.compileTopicPattern(); err != nil {
 		return err
 	}
+	r.topicUsed = r.usesTopicVars()
 	if err := r.validateTopicSources(r.Fields, ""); err != nil {
 		return err
 	}
@@ -276,7 +262,7 @@ func (r *Rule) validateFieldSet(fields map[string]ValueSource, prefix string) er
 		if !validField(name) {
 			return fmt.Errorf("%s未知的目标字段 %q", prefix, name)
 		}
-		if err := fields[name].validate(); err != nil {
+		if err := fields[name].Validate(); err != nil {
 			return fmt.Errorf("%s字段 %q: %w", prefix, name, err)
 		}
 	}
@@ -286,7 +272,7 @@ func (r *Rule) validateFieldSet(fields map[string]ValueSource, prefix string) er
 // validateTopicSources 校验 source=topic 的字段都有对应的模板命名段。
 func (r *Rule) validateTopicSources(fields map[string]ValueSource, prefix string) error {
 	for name, src := range fields {
-		if !src.isTopic() {
+		if !src.IsTopic() {
 			continue
 		}
 		if r.TopicPattern == "" {
@@ -319,7 +305,7 @@ func mergeFields(base, overlay map[string]ValueSource) map[string]ValueSource {
 //   - 必须配置未命中默认值；
 //   - 默认值与每条映射的目标值都必须是整数质量码。
 func validateQualityMapping(src ValueSource, ok bool) error {
-	if !ok || !src.isMap() {
+	if !ok || !src.IsMap() {
 		return nil
 	}
 	if strings.TrimSpace(src.Default) == "" {
@@ -345,127 +331,7 @@ func validField(name string) bool {
 	return false
 }
 
-func (s ValueSource) validate() error {
-	switch strings.ToLower(strings.TrimSpace(s.Source)) {
-	case "", SourcePath, SourceConst, SourceTemplate:
-	case SourceMap:
-		if strings.TrimSpace(s.Value) == "" {
-			return errors.New("值映射需要填写取值路径")
-		}
-		if len(s.Mapping) == 0 {
-			return errors.New("值映射至少需要一条映射")
-		}
-	case SourceTopic:
-		if strings.TrimSpace(s.Value) == "" {
-			return errors.New("主题取值需要填写命名段")
-		}
-	default:
-		return fmt.Errorf("未知的取值方式 %q", s.Source)
-	}
-	for i := range s.Transform {
-		if err := s.Transform[i].validate(); err != nil {
-			return fmt.Errorf("第 %d 个变换: %w", i+1, err)
-		}
-	}
-	return nil
-}
-
-func (s ValueSource) isConst() bool {
-	return strings.EqualFold(strings.TrimSpace(s.Source), SourceConst)
-}
-
-func (s ValueSource) isTemplate() bool {
-	return strings.EqualFold(strings.TrimSpace(s.Source), SourceTemplate)
-}
-
-func (s ValueSource) isMap() bool {
-	return strings.EqualFold(strings.TrimSpace(s.Source), SourceMap)
-}
-
-func (s ValueSource) isTopic() bool {
-	return strings.EqualFold(strings.TrimSpace(s.Source), SourceTopic)
-}
-
-// resolve 按取值方式从单条文档中取值，再应用 transform 流水线。
-// 未命中返回 errValueMissing（配置了 Default 时回落）。
-func (s ValueSource) resolve(doc any, topic map[string]string) (any, error) {
-	v, err := s.resolveRaw(doc, topic)
-	if err != nil {
-		return nil, err
-	}
-	return s.applyTransforms(v)
-}
-
-func (s ValueSource) resolveRaw(doc any, topic map[string]string) (any, error) {
-	switch {
-	case s.isConst():
-		return s.Value, nil
-	case s.isTemplate():
-		return renderTemplate(doc, s.Value, topic)
-	case s.isTopic():
-		name := strings.TrimSpace(s.Value)
-		v, ok := topic[name]
-		if !ok {
-			return nil, fmt.Errorf("主题变量 %q 不存在", name)
-		}
-		return v, nil
-	case s.isMap():
-		v, ok := parser.LookupPath(doc, s.Value)
-		if !ok {
-			if s.Default != "" {
-				return s.Default, nil
-			}
-			return nil, fmt.Errorf("字段 %q %w", s.Value, errValueMissing)
-		}
-		raw := strings.TrimSpace(toString(v))
-		if mapped, ok := s.lookup(raw); ok {
-			return mapped, nil
-		}
-		if s.Default != "" {
-			return s.Default, nil
-		}
-		// 未配置 default：保留原值。对 kind 而言这会走「未知类别」的自动推断，
-		// 比静默丢弃整条记录更容易在数据里发现问题。
-		return raw, nil
-	default:
-		v, ok := parser.LookupPath(doc, s.Value)
-		if !ok {
-			if s.Default != "" {
-				return s.Default, nil
-			}
-			return nil, fmt.Errorf("字段 %q %w", s.Value, errValueMissing)
-		}
-		return v, nil
-	}
-}
-
-// lookup 在 Mapping 中查找原始值对应的目标值。
-//
-// 键比较按以下顺序：精确匹配 → 忽略大小写与首尾空白 → 数值相等（避免外部系统
-// 发 1 与 1.0、字符串 "1" 与数字 1 之间的无谓失配）。
-func (s ValueSource) lookup(raw string) (string, bool) {
-	if len(s.Mapping) == 0 {
-		return "", false
-	}
-	if dst, ok := s.Mapping[raw]; ok {
-		return dst, true
-	}
-	for k, dst := range s.Mapping {
-		if strings.EqualFold(strings.TrimSpace(k), raw) {
-			return dst, true
-		}
-	}
-	if f, ok := toFloat64(raw); ok {
-		for k, dst := range s.Mapping {
-			if kf, ok := toFloat64(k); ok && kf == f {
-				return dst, true
-			}
-		}
-	}
-	return "", false
-}
-
-var errValueMissing = errors.New("在报文中不存在")
+// ValueSource 的取值、变换与映射查找实现已下沉到 mappingdsl。
 
 // Result 一次报文转换的结果。
 type Result struct {
@@ -580,7 +446,7 @@ func (r *Rule) applyFields(doc any, fields map[string]ValueSource, topicVars map
 	if !ok {
 		return rec, errors.New("value 未配置取值")
 	}
-	valueRaw, err := valueSrc.resolve(doc, topicVars)
+	valueRaw, err := valueSrc.Resolve(doc, topicVars)
 	if err != nil {
 		return rec, fmt.Errorf("value 取值失败: %w", err)
 	}
@@ -617,7 +483,7 @@ func requiredField(fields map[string]ValueSource, doc any, topicVars map[string]
 	if !ok {
 		return "", fmt.Errorf("%s 未配置取值", field)
 	}
-	v, err := src.resolve(doc, topicVars)
+	v, err := src.Resolve(doc, topicVars)
 	if err != nil {
 		return "", fmt.Errorf("%s 取值失败: %w", field, err)
 	}
@@ -634,7 +500,7 @@ func optionalField(fields map[string]ValueSource, doc any, topicVars map[string]
 	if !ok {
 		return ""
 	}
-	v, err := src.resolve(doc, topicVars)
+	v, err := src.Resolve(doc, topicVars)
 	if err != nil {
 		return ""
 	}
@@ -648,7 +514,7 @@ func qualityOf(fields map[string]ValueSource, doc any, topicVars map[string]stri
 	if !ok {
 		return driver.QualityGood
 	}
-	v, err := src.resolve(doc, topicVars)
+	v, err := src.Resolve(doc, topicVars)
 	if err != nil {
 		return driver.QualityGood
 	}

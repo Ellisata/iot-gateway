@@ -117,6 +117,10 @@ API 字段：`parserType` / `parserConfig` / `mappingJson` / `sampleTopic`。
 - `{name}` 匹配一个 topic 段；整串必须完整匹配（不支持通配符）。
 - `source: "topic"` 从命名段取值；模板 `{deviceId}` 先查报文，取不到再查命名段。
 - 主题不匹配/为空是报文级错误，该报文不产出记录。
+- **只有被引用时才生效**：字段用了 `source: "topic"`，或模板里含
+  `{name}` / `{topic.name}` 且该名字在模板中，才按模板切分并校验主题。
+  填了 `topicPattern` 但没有任何字段引用时，它不参与解析、也不过滤报文
+  （避免随手填一个模板导致所有报文静默失败）。
 
 ### 4.2 多测点扇出
 

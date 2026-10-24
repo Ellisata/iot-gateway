@@ -90,6 +90,44 @@ func (ctr *PushChannelController) TestPushChannel(c *gin.Context) {
 	c.JSON(200, response.Success(nil))
 }
 
+// ListPushChannelTypes 已注册的通道类型（含是否消息类、可选格式、能力位）
+func (ctr *PushChannelController) ListPushChannelTypes(c *gin.Context) {
+	c.JSON(200, response.Success(ctr.pushChannelService.ListPushChannelTypes()))
+}
+
+// PreviewPushChannel 预览出站载荷（不发送、不落库）
+func (ctr *PushChannelController) PreviewPushChannel(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.PreviewPushChannelDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(ctr.pushChannelService.PreviewPushChannel(ctx, &req)))
+}
+
+// PreviewPushChannelMapping 只试编码出站映射（不依赖通道类型/连接配置，不发送）
+func (ctr *PushChannelController) PreviewPushChannelMapping(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.PreviewPushChannelMappingDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(ctr.pushChannelService.PreviewPushChannelMapping(ctx, &req)))
+}
+
+// TestSendPushChannel 测试发送（会真的向配置的下游发请求）
+func (ctr *PushChannelController) TestSendPushChannel(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.TestSendPushChannelDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(ctr.pushChannelService.TestSendPushChannel(ctx, &req)))
+}
+
 // PagePushChannel 数据推送通道分页查询（名称模糊检索）
 func (ctr *PushChannelController) PagePushChannel(c *gin.Context) {
 	ctx := c.Request.Context()

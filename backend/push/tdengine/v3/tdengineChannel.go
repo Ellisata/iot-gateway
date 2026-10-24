@@ -25,7 +25,10 @@ import (
 // init 向 push 包注册 tdengine 通道工厂。
 // 依赖入口处(main.go)对本包的空导入触发,Engine 的 buildChannels 自动发现。
 func init() {
-	push.Register("tdengine-v3", func(db *gorm.DB, ch *po.PushChannel) (push.Channel, error) {
+	push.RegisterType(push.ChannelTypeMeta{
+		Type:  "tdengine-v3",
+		Label: "TDengine v3",
+	}, func(db *gorm.DB, ch *po.PushChannel) (push.Channel, error) {
 		return newTdengineChannel(db, ch)
 	})
 }
@@ -67,10 +70,11 @@ var drainPolicy = push.DrainPolicy{Poison: true, Narrow: false}
 // 队列、断网缓存、补发与状态统计由 push.Outbox 统一提供(见 push/outbox.go),
 // 本通道只负责负载构造(insertBuilder)与下发(ch.write)。
 type tdengineChannel struct {
-	id   string
-	name string
-	cfg  *tdengineConfig
-	sig  string // 配置签名,用于热加载判断通道配置是否变化
+	id          string
+	name        string
+	channelType string
+	cfg         *tdengineConfig
+	sig         string // 配置签名,用于热加载判断通道配置是否变化
 
 	ob *push.Outbox
 
@@ -107,11 +111,16 @@ func newTdengineChannel(db *gorm.DB, ch *po.PushChannel) (*tdengineChannel, erro
 	if err != nil {
 		return nil, err
 	}
+	channelType := ch.Type
+	if channelType == "" {
+		channelType = "tdengine"
+	}
 	tch := &tdengineChannel{
-		id:   ch.ID,
-		name: ch.Name,
-		cfg:  cfg,
-		sig:  ch.ID + "|" + ch.Name + "|" + ch.ConfigJSON,
+		id:          ch.ID,
+		name:        ch.Name,
+		channelType: channelType,
+		cfg:         cfg,
+		sig:         ch.ID + "|" + ch.Name + "|" + ch.ConfigJSON,
 	}
 	tch.ob = push.NewOutbox(push.OutboxConfig{
 		Tag:          "tdengine",
@@ -400,7 +409,7 @@ func (ch *tdengineChannel) write(stmt string) bool {
 // Snapshot 返回通道状态快照(用于状态查询)
 func (ch *tdengineChannel) Snapshot() push.ChannelStatusVO {
 	vo := push.ChannelStatusVO{
-		Type:   "tdengine",
+		Type:   ch.channelType,
 		Broker: ch.cfg.endpoint(),
 		Topic:  ch.cfg.Database,
 	}

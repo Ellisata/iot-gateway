@@ -4,6 +4,16 @@
 
 > This spec defines the field semantics of each point-record JSON and the **self-describing parsing conventions** for the `value` field when collected data is pushed to external channels (currently MQTT). External consumers should parse according to this contract and must not depend on gateway internals.
 
+## 0. Payload formats
+
+Message-based push channels now support three payload formats, selected by the channel config's `format`:
+
+- `native-json` (default, may be omitted): the contract described in this document. Enabling format selection **does not change** its fields, order, or value semantics.
+- `mapping-json`: emits a customer-defined JSON payload from an outbound mapping. See [push-channels.md](../docs/push-channels.md).
+- `script`: emits arbitrary text produced by a goja script (a string for one message, a string[] for several). See [push-channels.md](../docs/push-channels.md).
+
+Channels using `mapping-json` or `script` are not described by the field table below; downstream systems should parse according to that channel's own mapping or script contract.
+
 ---
 
 ## 1. Payload structure

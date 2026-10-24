@@ -5,6 +5,20 @@
 > 本规范定义采集数据推送到外部通道（当前为 MQTT）时，每条点位 JSON 的字段语义与
 > `value` 值的**自描述解析约定**。外部消费端应据此解析，不依赖网关内部实现。
 
+## 0. 载荷格式
+
+推送通道现在支持三种载荷格式，由通道配置的 `format` 决定：
+
+- `native-json`（默认，可省略）：即本文描述的契约。引入格式选择**不会改变**它
+  的字段、顺序或取值。
+- `mapping-json`：按用户配置的出站映射生成客户自定义 JSON。见
+  [push-channels.md](../docs/push-channels.md)。
+- `script`：用 goja 脚本生成任意文本载荷（string 一条 / string[] 多条）。见
+  [push-channels.md](../docs/push-channels.md)。
+
+选择 `mapping-json` 或 `script` 的通道不适用本文的字段表；下游按该通道自己的
+映射规则或脚本约定解析。
+
 ---
 
 ## 1. 载荷结构

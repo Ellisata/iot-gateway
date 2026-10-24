@@ -4,14 +4,35 @@
 
 All notable changes to this project are documented in this file (Keep a Changelog format, SemVer versioning).
 
-## [Unreleased]
+## [0.2.0] - 2026-10-24
+
+### Added
+
+- **OPC UA Server 推送通道**：新增 `opcua` 类型，网关作为 OPC UA 服务端按设备/点位生成地址空间（`deviceIds` 限定范围、`nodeIdStyle` 选择 ID 风格），支持 Read / 订阅与变化通知、`None` / `Basic256Sha256` 安全策略，端点自动公布本机地址。迁移 `022_add_opcua_push_channel_form.sql`。
+  **OPC UA Server push channel**: new `opcua` type exposing collected data as an OPC UA server with a device/point address space (`deviceIds` scope, `nodeIdStyle`), Read/subscribe with change notifications, `None` / `Basic256Sha256` security and automatic endpoint advertisement. Migration `022_add_opcua_push_channel_form.sql`.
+- **HTTP/Webhook 推送通道**：新增 `http` 类型，支持 POST/PUT/PATCH、自定义请求头、Bearer / Basic / HMAC-SHA256 鉴权、超时与并发配置；2xx 成功，408/429/5xx 与网络错误重试，其余 4xx/3xx 丢弃；支持断网缓存补发。迁移 `021_add_http_push_channel_form.sql`。
+  **HTTP/Webhook push channel**: new `http` type with POST/PUT/PATCH, custom headers, Bearer / Basic / HMAC-SHA256 auth, timeout/worker settings and offline spool replay; 2xx succeeds, 408/429/5xx and network errors are retried, other 4xx/3xx are dropped. Migration `021_add_http_push_channel_form.sql`.
+- **出站映射（mapping-json）**：`mqtt` / `http` 通道可在 `config_json` 选择 `format` 与 `mapping`，把采集记录映射为自定义 JSON；复用 `path` / `const` / `template` / `map` 与 `transform`，新增 `type` / `emit` / `envelope` / `batchFields`。native-json 载荷保持逐字节不变。
+  **Outbound mapping (`mapping-json`)**: `mqtt` / `http` channels select `format` and `mapping` in `config_json` to map records into a custom JSON payload, reusing `path` / `const` / `template` / `map` and `transform` with new `type` / `emit` / `envelope` / `batchFields`. Native-json output stays byte-for-byte unchanged.
+- **通道多实例**：`push_channel` 新增 `type` 列，同类型可建多条通道；旧配置与接口保持兼容。迁移 `020_rebuild_push_channel_with_type.sql`。
+  **Multiple channel instances**: `push_channel` gains a `type` column so one type can be configured multiple times; legacy configs and clients keep working. Migration `020_rebuild_push_channel_with_type.sql`.
+- **载荷预览与测试发送**：新增 `listTypes` / `preview` / `testSend` 接口，控制台支持格式选择、映射编辑、预览与测试发送；`testConnectivity` 返回具体失败原因。
+  **Payload preview and test send**: new `listTypes` / `preview` / `testSend` endpoints; the console supports format selection, mapping editing, preview and test send, and `testConnectivity` reports the concrete failure reason.
+- **出站映射可视化编辑器**：通道弹窗内嵌字段表格，覆盖输出形态、取值方式、类型、默认值、变换与批次字段；保留高级 JSON 双向切换，新增只读接口 `POST /pushChannel/previewMapping`。
+  **Visual outbound mapping editor**: a field table in the channel dialog covers output shape, sources, types, defaults, transforms and batch fields, with a two-way advanced JSON mode and a read-only `POST /pushChannel/previewMapping`.
+- **脚本编码（script）**：消息类通道新增 `format: "script"`，用 goja 执行 `encode(batch, ctx)` 生成任意文本载荷；保存时预编译校验，每次编码使用独立 runtime。
+  **Script encoding (`script`)**: message-based channels gain `format: "script"` running a goja `encode(batch, ctx)` to produce arbitrary text payloads; scripts are compiled on save and every encode gets a fresh runtime.
+- **映射原语下沉**：新增 stdlib-only `mappingdsl` 包，入站解析与出站映射共用路径、模板、变换与标量转换；`parser/mapping` 行为不变。
+  **Shared mapping primitives**: new stdlib-only `mappingdsl` package shared by inbound parsing and outbound mapping (paths, templates, transforms, scalar coercion); `parser/mapping` behavior is unchanged.
+- 文档：[推送通道与出站映射](backend/docs/push-channels.md)；[推送载荷契约](backend/specs/push-payload.md) 增加格式选择说明。
+  Docs: [Push channels & outbound mapping](backend/docs/push-channels.md); [push payload contract](backend/specs/push-payload.md) documents format selection.
 
 ### Changed
 
-- **SQLite WAL 定期检查点**：WAL 自动 checkpoint 阈值显式设为 512 页（约 2MB）并经 DSN 下发，物理连接被连接池回收重开时不会丢；新增每 10 分钟一次的维护协程，先 `PASSIVE` 把已合并的帧写回主库，确认无读者后再 `TRUNCATE` 把 `-wal` 收缩到 0。外部进程（sqlite CLI、第二个网关实例、备份工具）持有旧快照钉住 WAL 时打 WARN 并给出已合并/总帧数，读者退出后自动恢复截断。纯内存 WAL 索引的读路径未改动。
-  **Periodic SQLite WAL checkpoints**: the WAL autocheckpoint threshold is now explicit (512 pages ≈ 2MB) and applied through the DSN, so it survives connection-pool recycling; a maintenance goroutine runs every 10 minutes, `PASSIVE`-checkpointing merged frames into the main database and, once no readers remain, `TRUNCATE`-ing `-wal` back to zero. If an external process (sqlite CLI, a second gateway instance, a backup tool) pins the WAL with an old snapshot, a WARN reports merged/total frames and truncation resumes after that reader exits. The in-memory WAL-index read path is unchanged.
-- **SQLite 写入吞吐**：WAL 连接改为 `synchronous=NORMAL`（经 DSN 按连接下发），断网缓存的落盘协程把排队中的批次合并成一次多行 INSERT。逐批提交的 fsync 是断网期写放大的主因：实测逐批自动提交约 1.86ms/批（≈540 批/秒，`synchronous=FULL`），改为 `NORMAL` 后同口径约 0.095ms/批（≈10500 批/秒）；`NORMAL` 下把 64 批合并成一次 INSERT 实测约 6ms（约 0.093ms/批）。代价是掉电时最多丢失上一次 checkpoint 之后的提交（约 2MB），库本身不会损坏（WAL + NORMAL 的官方保证）。合并写失败时自动退回逐条写，一条坏批次不会连坐整批。
-  **Faster SQLite writes**: the WAL connection now uses `synchronous=NORMAL` (applied per connection through the DSN), and the offline-spool writer coalesces queued batches into one multi-row INSERT. Per-batch fsync was the dominant write-amplification cost while disconnected: a per-batch autocommit measured ≈1.86ms (≈540 batches/s under `synchronous=FULL`) versus ≈0.095ms under `NORMAL` (≈10500 batches/s); with `NORMAL`, coalescing 64 batches into a single INSERT measured ≈6ms (≈0.093ms per batch). The trade-off is that a power loss can lose at most the commits since the last checkpoint (≈2MB); the database itself is not corrupted (SQLite's guarantee for WAL + NORMAL). If the merged write fails, the writer falls back to one row at a time so a single bad batch does not take the whole group down.
+- **SQLite WAL 定期检查点**：自动 checkpoint 阈值显式设为 512 页（约 2MB）并经 DSN 下发；新增每 10 分钟一次的维护协程，先 `PASSIVE` 回写已合并帧，无读者时再 `TRUNCATE` 把 `-wal` 收缩到 0。外部进程钉住 WAL 时打 WARN 并给出已合并/总帧数，读者退出后自动恢复截断。
+  **Periodic SQLite WAL checkpoints**: the autocheckpoint threshold is now explicit (512 pages ≈ 2MB) and applied through the DSN; a 10-minute maintenance goroutine `PASSIVE`-checkpoints merged frames and `TRUNCATE`s `-wal` back to zero once no readers remain. An external process pinning the WAL logs a WARN with merged/total frames, and truncation resumes after it exits.
+- **SQLite 写入吞吐**：WAL 连接改为 `synchronous=NORMAL`，断网缓存写入把排队批次合并为一次多行 INSERT，实测约 1.86ms/批降至约 0.09ms/批。代价是掉电最多丢失上次 checkpoint 之后的提交（约 2MB），库不会损坏；合并写失败时退回逐条写。
+  **Faster SQLite writes**: the WAL connection uses `synchronous=NORMAL`, and the offline-spool writer coalesces queued batches into one multi-row INSERT, cutting ≈1.86ms per batch to ≈0.09ms. Power loss can lose at most the commits since the last checkpoint (≈2MB) without corrupting the database; failed merged writes fall back to one row at a time.
 
 ## [0.1.4] - 2026-10-23
 

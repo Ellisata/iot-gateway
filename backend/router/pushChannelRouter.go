@@ -19,5 +19,9 @@ func PushChannelRoutes(r gin.IRouter, pc *controller.PushChannelController) {
 		channel.GET("/deletePushChannel/:id", pc.DeletePushChannel)
 		channel.GET("/pagePushChannel", pc.PagePushChannel)
 		channel.POST("/testConnectivity", pc.TestPushChannel)
+		channel.GET("/listTypes", pc.ListPushChannelTypes)
+		channel.POST("/preview", pc.PreviewPushChannel)
+		channel.POST("/previewMapping", pc.PreviewPushChannelMapping)
+		channel.POST("/testSend", pc.TestSendPushChannel)
 	}
 }

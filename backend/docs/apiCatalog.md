@@ -19,6 +19,7 @@
 | v1.2 | 2026-09-30 | 新增 `GET /agentApi/__surface` 机器可读分类清单（read/probe/write，见 §0.1），dsh 靠它判断是否需人确认 |
 | v1.3 | 2026-10-06 | `__surface` 每条新增 `params` 参数表（由反射从控制器绑定的 DTO 导出，184 条参数），dsh 不再需要按字段名猜参数；本文 §0.1 与 §4.1 的参数列以 `__surface` 为准 |
 | v1.4 | 2026-10-09 | 开放接口新增两条可靠性查询（`/openApi/alarm/deviceReliability`、`/openApi/alarm/pointAbnormal`），§3.0 开放接口由 4 条增至 6 条 |
+| v1.5 | 2026-10-24 | 新增只读接口 `POST /pushChannel/previewMapping`（只试编码出站映射，不依赖通道类型/连接配置）；按实际路由把 `/agentApi` 领域接口数校正为 111 |
 
 ---
 
@@ -28,14 +29,14 @@
 
 | 通道 | 覆盖范围 | 认证方式 | Agent 友好度 |
 | ---- | -------- | -------- | ------------ |
-| **dsh 专用** `/agentApi/*` | **全部 82 个领域接口**（含全部写操作） | **无任何鉴权** | ★★★ 直接可用 |
+| **dsh 专用** `/agentApi/*` | **全部 111 个领域接口**（含全部写操作） | **无任何鉴权** | ★★★ 直接可用 |
 | **开放接口** `/openApi/*` | 仅 6 个只读接口 | 请求头 `X-Api-Key` | ★★★ 直接可用 |
 | **管理接口**（根路径） | 只读 + 全部编辑能力 | `Authorization: Bearer <JWT>` | ★ 需先完成 RSA-OAEP 登录 |
 
 **决策规则：**
 
 - **dsh 一律走 `/agentApi/*`** —— 它是为 dsh 专门准备的整组镜像，覆盖内部接口的
-  **全部**能力（82 条，与根路径一一对应），**不需要任何凭据**。
+  **全部**能力（111 条，与根路径一一对应），**不需要任何凭据**。
 - 只在 `/agentApi` 尚未覆盖某个新接口时，才需要回落到 JWT 通道。
 
 ### 0.1 先调清单端点，拿到每个接口的分类与参数
@@ -46,7 +47,7 @@
 GET /agentApi/__surface        # 无需任何凭据
 ```
 
-它返回 **83 条**接口的分类（82 个领域接口 + 清单自身）**与逐条参数表**：
+它返回 **112 条**接口的分类（111 个领域接口 + 清单自身）**与逐条参数表**：
 
 ```json
 {
@@ -118,9 +119,9 @@ GET /agentApi/__surface        # 无需任何凭据
 
 | access | 条数 | 含义 | dsh 该怎么做 |
 | ------ | ---- | ---- | ------------ |
-| `read` | 38 | 不改网关任何状态，无对外副作用，代价可忽略 | 直接调 |
-| `probe` | 6 | 不改状态，但**有真实代价或对外副作用** | **先要人确认** |
-| `write` | 39 | **改变网关状态**（持久化数据，或启停/热刷新运行行为） | **先要人确认** |
+| `read` | 53 | 不改网关任何状态，无对外副作用，代价可忽略 | 直接调 |
+| `probe` | 8 | 不改状态，但**有真实代价或对外副作用** | **先要人确认** |
+| `write` | 50 | **改变网关状态**（持久化数据，或启停/热刷新运行行为） | **先要人确认** |
 
 **为什么不能按 HTTP 方法推**——本项目里方法完全不可靠：
 
@@ -130,7 +131,7 @@ GET /agentApi/__surface        # 无需任何凭据
 | `POST /agentApi/device/testDeviceConnection` | POST | 不改状态，但真实连一次 PLC |
 | `POST /agentApi/alarmWebhook/testSend` | POST | 不改状态，但**真的往钉钉/飞书发一条消息** |
 
-`probe` 这 6 条是全部清单里最容易被误判的一组，完整列出：
+`probe` 这 8 条是全部清单里最容易被误判的一组，完整列出：
 
 | 接口 | 代价 |
 | ---- | ---- |
@@ -139,7 +140,9 @@ GET /agentApi/__surface        # 无需任何凭据
 | `POST /agentApi/deviceScan/discoverPoints` | 同步阻塞最长约 7s，且占用该设备的采集会话锁 |
 | `POST /agentApi/deviceScan/cancel` | 取消在跑的扫描 |
 | `POST /agentApi/device/testDeviceConnection` | 真实连接一次 PLC |
-| `POST /agentApi/pushChannel/testConnectivity` | 真实连接下游（MQTT 等） |
+| `POST /agentApi/mqttSubscription/testConnectivity` | 真实连接一次 MQTT broker |
+| `POST /agentApi/pushChannel/testConnectivity` | 真实连接下游（MQTT/HTTP 等） |
+| `POST /agentApi/pushChannel/testSend` | ⚠️ **真的向配置的下游发送一条样例数据** |
 
 > **清单是端点而不是静态文件**，是为了让 dsh 拿到的分类永远与**正在跑的那个网关**
 > 一致：路由变了清单跟着变，没有「文件忘了同步」这种失败模式。
@@ -170,7 +173,7 @@ GET /agentApi/__surface        # 无需任何凭据
 **收回这个口子的方式**（无需改动任何路由注册）：
 删掉 [middleware/authMiddleware.go](../middleware/authMiddleware.go) 里的
 `agentApiPrefix` 常量与 `isPublicPath` 中对应的那一行 `HasPrefix` 判断即可
-—— `/agentApi` 下 82 条路由会立刻全部要求 JWT。
+—— `/agentApi` 下 111 条路由会立刻全部要求 JWT。
 设计取舍见 [router/agentApiRouter.go](../router/agentApiRouter.go) 文件头注释。
 
 **两个分组都是显式白名单**（`/openApi` 与 `/agentApi` 各自如此）：
@@ -192,7 +195,7 @@ GET /agentApi/__surface        # 无需任何凭据
 | GET | `/health` | 健康检查，返回 `{"status":"ok"}`（**裸 JSON，非统一信封**） | 真的无凭据 |
 | POST | `/user/login` | 登录换取 JWT（**账号密码需 RSA 加密**，见 §2.2） | 真的无凭据（登录本身不能要求已登录） |
 | GET | `/admin/*` | 内嵌 Vue 管理前端静态资源（SPA 回退 index.html） | 真的无凭据（只是静态文件） |
-| **ALL** | **`/agentApi/*`** | **dsh 调用面，82 条接口** | **真的无凭据 —— 风险最高，见 §0** |
+| **ALL** | **`/agentApi/*`** | **dsh 调用面，111 条接口** | **真的无凭据 —— 风险最高，见 §0** |
 | ALL | `/openApi/*` | 对外只读接口 | **免的只是 JWT，仍要 `X-Api-Key`** |
 
 除上表外，其余接口都需要 JWT。
@@ -370,8 +373,11 @@ Agent 不应在无用户意图时自行调用。
 | GET | `/protocol/getProtocolById/:id` | 按 ID 查协议 | 路径 `id` | `ProtocolVO` |
 | GET | `/protocol/getProtocolByName` | 按名查协议 | Query `name` | `ProtocolVO` |
 | GET | `/protocol/getDataTypes` | 协议可用数据类型（`kindByType` 给出每个类型的类别，供点位报警条件按类别切换比较符） | Query `protocolName` 或 `protocolId` | `DataTypeOptionVO` |
-| GET | `/pushChannel/pagePushChannel` | 推送通道分页 | `page`*, `size`*, `name` | `PageVo<PushChannelVO>` |
+| GET | `/pushChannel/pagePushChannel` | 推送通道分页 | `page`*, `size`*, `name`, `type` | `PageVo<PushChannelVO>` |
 | GET | `/pushChannel/getPushChannelById/:id` | 按 ID 查通道 | 路径 `id` | `PushChannelVO` |
+| GET | `/pushChannel/listTypes` | 已注册通道类型（是否消息类、可选载荷格式、预览/测试发送能力） | — | `[]ChannelTypeMeta` |
+| POST | `/pushChannel/preview` | 用第一台启用设备/点位试编码出站载荷，不发送、不落库 | `type`*, `configJson`* | `PushChannelPreviewVO` |
+| POST | `/pushChannel/previewMapping` | 只试编码出站映射/脚本，不依赖通道类型/连接配置，不发送、不落库 | `format`（默认 `mapping-json`）, `mapping`* | `PushChannelPreviewVO` |
 | GET | `/pushChannelForm/getPushChannelFormByName` | 按名查通道表单 | `name`* | `PushChannelFormVO` |
 | GET | `/push/status` | 推送通道运行状态 | — | `[]ChannelStatusVO` |
 | GET | `/alarm/pageAlarm` | 报警历史分页（`targetType`=device\|channel\|point\|point_threshold，`alarmType`=offline\|quality\|threshold\|recover） | `page`*, `size`*, `targetName`, `targetType`, `alarmType`, `status` | `PageVo<AlarmVO>` |
@@ -402,7 +408,8 @@ Agent 调用前应先获得用户明确意图。
 | 方法 | 路径 | 代价 | 参数 | 响应 |
 | ---- | ---- | ---- | ---- | ---- |
 | POST | `/device/testDeviceConnection` | 真实连接一次 PLC（超时受限于设备） | `protocolName`*, `protocolJson`* | `data: null` |
-| POST | `/pushChannel/testConnectivity` | 真实连接下游（MQTT 等），不保存配置 | `name`*, `configJson`* | `data: null` |
+| POST | `/pushChannel/testConnectivity` | 真实连接下游（MQTT/HTTP 等），不保存配置；HTTP 只验证 TCP/TLS 可达 | `type`*, `configJson`*；`name` 为旧客户端兼容字段 | `data: null` |
+| POST | `/pushChannel/testSend` | ⚠️ **真的向配置的下游发送一条样例数据**，不保存配置 | `type`*, `configJson`* | `PushChannelTestSendVO` |
 | POST | `/deviceScan/start` | **全网段扫描**，重且慢，同一时刻只允许一个任务 | `protocol`*, `options`, `subnets`, `port` | `ScanJobVO` |
 | POST | `/deviceScan/cancel` | 取消在跑的扫描 | `jobId`* | `data: null` |
 | POST | `/deviceScan/discoverPoints` | **同步 HTTP**，复用设备采集会话，最长 7 秒 | `deviceId`*, `options` | `PointScanResultVO` |
@@ -574,9 +581,13 @@ Agent 调用前应先获得用户明确意图。
 
 | 方法 | 路径 | 用途 | 参数 |
 | ---- | ---- | ---- | ---- |
-| POST | `/pushChannel/createPushChannel` | 创建通道 | `name`*(1–100), `description`, `configJson`* |
-| POST | `/pushChannel/updatePushChannel` | 更新通道 | `id`*, `name`, `description`, `configJson`, `status` |
+| POST | `/pushChannel/createPushChannel` | 创建通道；同一 `type` 下 `name` 唯一 | `type`*（旧客户端可省略并回落为 `name`）, `name`*(1–100), `description`, `configJson`* |
+| POST | `/pushChannel/updatePushChannel` | 更新通道；`type` 不可修改 | `id`*, `type`, `name`, `description`, `configJson`, `status` |
 | 🗑 GET | `/pushChannel/deletePushChannel/:id` | **删除通道** | 路径 `id` |
+| POST | `/pushChannel/preview` | 试编码出站载荷（不发送、不落库） | `type`*, `configJson`* |
+| POST | `/pushChannel/previewMapping` | 只试编码映射/脚本（不依赖连接配置，不发送、不落库） | `format`, `mapping`* |
+| POST | `/pushChannel/testSend` | ⚠️ **真的发送一条样例数据** | `type`*, `configJson`* |
+| GET | `/pushChannel/listTypes` | 通道类型元数据 | — |
 | POST | `/pushChannelForm/createPushChannelForm` | 创建通道表单 | `name`*, `formJson`* |
 | POST | `/pushChannelForm/updatePushChannelForm` | 更新通道表单 | `id`*, `name`, `formJson` |
 | POST | `/push/refresh` | 热刷新推送配置 | — |
@@ -715,7 +726,7 @@ Agent 调用前应先获得用户明确意图。
    就是 dsh 的调用地址，无需任何凭据、无需登录流程。
    例：`GET /device/pageDevice` → `GET /agentApi/device/pageDevice`。
 2. **不要让 dsh 走 JWT 通道**：RSA 加密登录对 Agent 是纯粹的负担，
-   而 `/agentApi` 已覆盖全部 82 条接口，没有能力缺口。
+   而 `/agentApi` 已覆盖全部 111 条接口，没有能力缺口。
 3. **调用编辑接口前**：把 §4.1 的两条高危提示写进 Agent 的工具描述里
    —— 尤其是「删除接口是 GET」这条，它是最容易造成不可逆损失的一个坑。
    无鉴权通道下这个坑的后果更重：**没有凭据这一层兜底，误调的门槛只剩工具描述**。

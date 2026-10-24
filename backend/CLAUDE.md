@@ -10,8 +10,8 @@
 - **语言**: Go 1.26
 - **HTTP 框架**: Gin v1.12
 - **ORM / 存储**: GORM + SQLite(纯 Go 实现 `glebarez/sqlite`,免 CGO;配置存储,路径见 `default.yaml`)
-- **协议驱动**: 全部为进程外插件(见 `driversrc/`)。`goburrow/modbus`(Modbus RTU/TCP)、`robinson/gos7`(Siemens S7)、`gopcua/opcua`(OPC UA)等第三方库只被插件二进制链接,**主二进制里不含任何协议实现**
-- **推送**: `eclipse/paho.mqtt.golang`(MQTT)
+- **协议驱动**: 全部为进程外插件(见 `driversrc/`)。`goburrow/modbus`(Modbus RTU/TCP)、`robinson/gos7`(Siemens S7)、`gopcua/opcua`(OPC UA)等第三方库只被插件二进制链接,**主二进制里不含任何驱动实现**。唯一例外是推送侧的 OPC UA Server 通道(`push/opcuaserver/`)——它是服务端而非驱动,在进程内链接 gopcua 的 server 包
+- **推送**: `eclipse/paho.mqtt.golang`(MQTT)、`gopcua/opcua` server(OPC UA Server 通道)
 - **订阅解析**: `dop251/goja`(纯 Go、无 CGO)执行自定义解析脚本;契约见 [specs/parser-plugins.md](specs/parser-plugins.md)
 - **依赖注入**: Google Wire(编译期 DI,`wire.go` / `wire_gen.go`)
 - **其他**: Viper(配置)、golang-jwt(认证)、go-redis(缓存)、自定义 i18n(JSON)
@@ -59,15 +59,22 @@
 │   ├── parity/          # 行为等价黄金基线的读写格式(pluginhost/testdata/parity/)
 │   ├── drivertest/      # 网关侧测试的合成协议(EnsureSyntheticProtocol)与桩驱动
 │   └── fake/            # 各协议的假 PLC(parity 比对与集成测试用)
+├── mappingdsl/          # 入站解析与出站映射共用的映射原语(仅标准库):JSON 路径/模板/变换/标量转换
 ├── parser/              # 外部报文解析契约与实现(**与报文来源解耦**,见 specs/parser-plugins.md)
 │   ├── parser.go        # Parser/Factory 契约、注册表、CollectedRecord 白名单与限制
-│   ├── path.go          # JSON 路径取值(映射与脚本共用)
+│   ├── path.go          # JSON 路径取值(委托 mappingdsl,保留旧 API)
 │   ├── mapping/         # builtin 声明式 DSL(topicPattern / fanout / transform)
 │   └── script/          # goja 脚本解析(沙箱、逐报文超时、超时后重建 VM)
 ├── push/                # 推送引擎: 接收采集数据,分发到各推送通道
+│   ├── encoder.go       # **载荷编码契约**:Encoder / FormatMeta(native-json / mapping-json)
+│   ├── optional.go      # 可选接口 Previewer / TestSender,不改 push.Channel
 │   ├── outbox.go        # **通道共用的队列 + 断网缓存骨架**(Outbox):入队路由/落盘/补发唤醒/状态/生命周期/重连
 │   ├── drain.go         # **补发策略**:DrainLoop(毒批次/窄化)+ GroupedDrainer(聚合回放算法)+ Aggregator 契约
 │   ├── writer.go        # **攒批下发写协程**(AggregateWriter):消费队列 → 聚合 → 按行数/时间窗刷出
+│   ├── codec/           # 载荷编码器实现:nativejson(默认契约)/ mappingjson(出站映射)
+│   ├── messagechannel/  # 消息类通道通用骨架:Outbox + Encoder + Transport
+│   ├── webhook/         # HTTP/Webhook 通道(注册类型 "http")
+│   ├── opcuaserver/     # OPC UA Server 通道(注册类型 "opcua"):状态型,地址空间 + 最新值 + 订阅通知
 │   └── mqtt/ tdengine/v3/ influxdb/v3/   # 各通道只实现「负载构造 + 下发 + 连接维护」
 ├── discovery/           # 局域网自动发现: 以 UDP 广播发布网关身份,供管理平台自动发现
 │   ├── message.go       # **对外契约**:报文常量/Message/encode/decode(见 specs/discovery.md)
@@ -106,6 +113,25 @@
 ### 推送引擎([push/engine.go](push/engine.go))
 - 实现 `collector.RecordSink`,按设备分组后非阻塞分发给所有活跃通道。
 - 同样带 watcher 热加载(`push_channel` 表),配置未变的通道保留运行实例。
+- **通道 = 类型 + 实例名**:`push_channel.type` 决定工厂,`name` 是实例名,同一类型可建多条。
+  旧库迁移为 `type = name`;`BeforeCreate` 在 Type 为空时回退 Name。
+- 通道注册统一走 `push.RegisterType(ChannelTypeMeta, factory)`;旧的 `Register` 等价于
+  `MessageBased:false` 的类型。`SupportedChannelTypeMetas` 供 `GET /pushChannel/listTypes`。
+
+### 载荷编码与出站映射([push/encoder.go](push/encoder.go), [push/codec/](push/codec/))
+- `Encoder` 只负责 `PushBatch → []EncodedMessage`;`native-json` 的字节契约由
+  `codec/nativejson` 唯一实现(golden 测试钉住),MQTT 只把序列化入口换成 `encoder`。
+- `mapping-json` 把 `CollectedRecord` 映射为客户 JSON,复用 [mappingdsl/](mappingdsl)
+  的 `path`/`const`/`template`/`map`/`transform`,并支持 `type`、`emit`、`envelope`、
+  `batchFields`。细节见 [docs/push-channels.md](docs/push-channels.md)。
+- `script` 格式([push/codec/scriptpayload](push/codec/scriptpayload))用 goja 执行
+  `function encode(batch, ctx)`,返回 string/string[] 作为一条或多条载荷。与订阅脚本
+  不同:每次 `Encode` 新建 runtime(通道多 worker 并发、断网补发会重放同一批次),
+  不提供跨批状态;脚本在保存时预编译并校验。
+- `push.NewTemporaryChannel` 用与运行期相同的工厂构建未启动实例,供 `testConnectivity`、
+  `preview`、`testSend` 复用;这三个能力走可选接口,不扩充 `push.Channel`。
+- `messagechannel.Channel` 是消息类通道通用骨架(Outbox + 编码 + Transport + 断网补发);
+  HTTP/Webhook(注册名 `http`)基于它实现。MQTT 保留自己的 paho 循环。
 
 ### 推送通道的共享骨架([push/outbox.go](push/outbox.go), [push/drain.go](push/drain.go), [push/writer.go](push/writer.go))
 每个通道 = **`push.Outbox`(队列/断网缓存/状态)+ 通用循环(攒批下发 / 补发 / 重连)+
@@ -498,21 +524,30 @@
 > 另外要决定 [push/writer.go](push/writer.go) 的 `Aggregator` 留网关侧(每批一次 RPC)
 > 还是随插件走(网关侧攒批/补发骨架作废)。
 
-1. 新建 `push/<type>/`,定义通道结构体并实现 `push.Channel`
-   (ChannelID/ConfigSig/Start/Stop/Enqueue/Snapshot/TestConnectivity)。
-   `Start/Stop/Enqueue/Snapshot` 基本都是对 `push.Outbox` 的一行转发
-   (参照 [mqttChannel.go](push/mqtt/mqttChannel.go));
-   另需实现 `push.Connectivity`(`Connected() bool`)供 Outbox 决定入队路由。
-2. 构造时用 `push.NewOutbox(push.OutboxConfig{...})` 建骨架,`Start()` 里 `ob.Start()` 后 `go run()`;
-   `Stop()` 里按 `ob.Close()` → 等 worker 组退出 → `ob.Wait()` 收尾。
-3. **聚合下发**的通道:负载构造器实现 `push.Aggregator`(Append/Rows/Empty/Payload),
+**消息类通道(发 JSON 到某个下游)优先走通用骨架**,不要复制 Outbox 循环:
+
+1. 新建 `push/<type>/`,实现 `messagechannel.Transport`(`Probe` + `Send`),
+   `newXxxChannel` 里用 `codec.New(cfg.Format, cfg.Mapping)` 构建编码器,再调用
+   `messagechannel.New(...)` 返回通道(参照 [push/webhook/](push/webhook))。
+   `Transport.Send` 必须把结果分类为 `FailureNone` / `FailureRetry` / `FailurePoison`。
+2. `init()` 中 `push.RegisterType(push.ChannelTypeMeta{...}, factory)`;消息类类型要置
+   `MessageBased:true` 并给出 `Formats`/`DefaultFormat`,需要预览/测试发送时再置
+   `SupportsPreview` / `SupportsTestSend`。旧的 `push.Register` 等价于 `MessageBased:false`。
+3. 新增 `push_channel_form` 行(迁移 `INSERT OR IGNORE`)供动态表单渲染;`format`/`mapping`
+   不放进动态表单,由通道页外层控件合并。
+4. 在 [main.go](main.go) 顶部**空导入**该子包(与 `_ "iot-gateway/push/mqtt"` 并列)。
+5. 控制台类型下拉来自 `GET /pushChannel/listTypes`,不要在前端硬编码类型列表。
+
+**聚合写入类通道(时序库/关系库)**仍各自实现 `push.Channel`:
+
+1. 负载构造器实现 `push.Aggregator`(Append/Rows/Empty/Payload),
    `run()` 里起 N 个 `push.AggregateWriter{New, Write, MaxRows, Interval}.Run(ob)`,
-   并用 `push.GroupedDrainer{...}.Drain` 作为 `DrainFunc` 交给 `ob.DrainLoop`;
-   **逐条下发**的通道(mqtt)自备写循环与 `DrainFunc`。
-4. `run()` 里再挂一个 `ob.ReconnectLoop(interval, ch.tryConnect)`;`tryConnect` 建连成功时
+   并用 `push.GroupedDrainer{...}.Drain` 作为 `DrainFunc` 交给 `ob.DrainLoop`。
+2. 构造时用 `push.NewOutbox(...)`,`Start()` 里 `ob.Start()` 后 `go run()`;
+   `Stop()` 里按 `ob.Close()` → 等 worker 组退出 → `ob.Wait()` 收尾。
+3. `run()` 里挂 `ob.ReconnectLoop(interval, ch.tryConnect)`;`tryConnect` 建连成功时
    置位连通状态并 `ob.Notify()` 唤醒补发。
-5. 在 `init()` 中 `push.Register("name", factory)` 注册。
-6. 在 [main.go](main.go) 顶部**空导入**该子包(与 `_ "iot-gateway/push/mqtt"` 并列)。
+4. 同样用 `push.RegisterType` 注册(或 `Register` 表示非消息类),并在 main 空导入。
 
 ### 新增业务领域模块
 1. 建 `model/po|dto|vo/xxx.go` → `service/xxxService.go` → `controller/xxxController.go` → `router/xxxRouter.go`。

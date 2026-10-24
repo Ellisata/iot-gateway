@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"iot-gateway/parser"
+	"iot-gateway/mappingdsl"
 )
 
 // 支持的过滤运算符（大小写不敏感，内部统一转小写）。
@@ -84,14 +84,14 @@ func (c *FilterCondition) match(doc any) bool {
 	op := c.normalizeOp()
 
 	if op == opExists || op == opNotExists {
-		_, ok := parser.LookupPath(doc, c.Path)
+		_, ok := mappingdsl.LookupPath(doc, c.Path)
 		if op == opExists {
 			return ok
 		}
 		return !ok
 	}
 
-	v, ok := parser.LookupPath(doc, c.Path)
+	v, ok := mappingdsl.LookupPath(doc, c.Path)
 	if !ok {
 		return false
 	}

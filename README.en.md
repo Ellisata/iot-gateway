@@ -94,8 +94,13 @@ English | [简体中文](README.md)
 | Channel | Notes |
 |---|---|
 | `mqtt` | Eclipse Paho MQTT client — QoS, TLS, last-will, etc. |
+| `http` | HTTP/Webhook — POST/PUT/PATCH, Bearer / Basic / HMAC-SHA256 auth, custom headers, offline spool and replay |
 | `tdengine-v3` | TDEngine 3.x via the official driver-go WebSocket driver (CGO-free, connects through taosAdapter) |
 | `influxdb-v3` | InfluxDB 3.x via a self-built Line-Protocol-over-HTTP client (no heavy official SDK) |
+
+> Channels are now **type + instance name**: multiple instances of the same type can coexist (e.g. two HTTP channels for MES and ERP).
+>
+> Message-based channels (`mqtt` / `http`) support two payload formats: `native-json` (default, contract unchanged) and `mapping-json` (customer-defined outbound mapping reusing the subscription vocabulary `path` / `const` / `template` / `map` / `transform`). The console provides payload preview and test send; see [Push channels & outbound mapping](backend/docs/push-channels.md) (中文).
 
 
 ## MQTT Subscription into Time-Series Databases
@@ -296,13 +301,15 @@ push:
 │   ├── driversdk/      # Out-of-process driver plugin SDK (Serve / Meta / RPC params)
 │   ├── driversrc/      # Protocol plugin sources (9 subdirs, each builds to iot-driver-<dir>)
 │   ├── plugins/        # Plugin runtime directory (build output; shipped in the release archive)
-│   ├── push/           # Push engine (mqtt/tdengine-v3/influxdb-v3 + outbox)
+│   ├── mappingdsl/     # Mapping primitives shared by inbound parsing and outbound mapping (paths / templates / transforms)
+│   ├── push/           # Push engine (mqtt/http/tdengine-v3/influxdb-v3 + outbox + codec/messagechannel)
 │   ├── parser/         # Subscription payload parsers (built-in mapping DSL / goja scripts, emit collection records)
 │   ├── subscribe/      # MQTT subscription engine (connection / queue / hot reload, parse & delivery orchestration)
 │   ├── controller/ service/ model/  # HTTP layers (Controller → Service → Database)
 │   ├── database/sqlite/migrations/  # SQLite migration scripts
 │   ├── router/ middleware/          # Routing and middleware (JWT / Open API key / CORS)
 │   ├── web/            # Frontend build artifacts (embedded via go:embed)
+│   ├── docs/           # User-facing docs (incl. push-channels.md)
 │   └── specs/          # Engineering specification documents
 ├── frontend/           # Vue3 admin frontend (Element Plus + Pinia + vue-i18n)
 ├── docker-compose.yml  # Docker Compose deployment orchestration (multi-stage build with backend/Dockerfile)

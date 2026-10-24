@@ -9,20 +9,22 @@
     :model-value="modelValue"
     :placeholder="resolvedPlaceholder"
     :disabled="disabled"
+    :loading="loading"
     @update:model-value="handleChange"
   >
     <el-option
-      v-for="channel in channelOptions"
-      :key="channel"
-      :label="channel"
-      :value="channel"
+      v-for="item in options"
+      :key="item.type"
+      :label="item.label || item.type"
+      :value="item.type"
     />
   </el-select>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { usePushChannelTypes } from '@/composables/usePushChannelTypes'
 
 defineOptions({ name: 'ChannelSelector' })
 
@@ -45,16 +47,30 @@ const { t } = useI18n()
 
 const emit = defineEmits(['update:modelValue', 'select'])
 
-// 未传入 placeholder 时使用当前语言的默认文案
+const { types, loading, load } = usePushChannelTypes()
+
+// 后端不可达时的兜底，至少不让选择器空白。
+const fallback = [
+  { type: 'mqtt', label: 'MQTT' },
+  { type: 'http', label: 'HTTP / Webhook' },
+  { type: 'tdengine-v3', label: 'TDengine v3' },
+  { type: 'influxdb-v3', label: 'InfluxDB v3' },
+]
+
+const options = computed(() => (types.value.length ? types.value : fallback))
+
 const resolvedPlaceholder = computed(() => props.placeholder || t('selector.selectChannel'))
 
-// 可选通道（固定协议）
-const channelOptions = ['mqtt', 'tdengine-v3', 'influxdb-v3']
+onMounted(() => {
+  load().catch(() => {
+    // 失败时保留兜底列表；具体错误由全局拦截器提示。
+  })
+})
 
 function handleChange(value) {
   emit('update:modelValue', value)
-  // 兼容旧事件契约：返回 { name, id }，协议通道无后端 id
-  emit('select', { name: value, id: '' })
+  // 兼容旧事件契约：name 仍是类型；新增 type 字段供通道页使用。
+  emit('select', { name: value, type: value, id: '' })
 }
 </script>
 

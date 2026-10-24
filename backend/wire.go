@@ -24,6 +24,12 @@ import (
 	"iot-gateway/notify"
 	"iot-gateway/pluginhost"
 	"iot-gateway/push"
+	// 推送通道子包空导入：触发各通道 init 注册；新增通道在此追加。
+	_ "iot-gateway/push/influxdb/v3"
+	_ "iot-gateway/push/mqtt"
+	_ "iot-gateway/push/opcuaserver"
+	_ "iot-gateway/push/tdengine/v3"
+	_ "iot-gateway/push/webhook"
 	"iot-gateway/realtime"
 	"iot-gateway/router"
 	"iot-gateway/runtimecfg"

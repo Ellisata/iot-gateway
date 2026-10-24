@@ -30,6 +30,11 @@ type mqttConfig struct {
 	// 见 publishWorkers()）。broker 慢或跨广域时调大以提升吞吐。
 	PublishWorkers int `json:"publishWorkers"`
 
+	// Format 载荷格式：空/native-json（默认）或 mapping-json。
+	Format string `json:"format,omitempty"`
+	// Mapping 出站映射配置，仅 format=mapping-json 时使用。
+	Mapping json.RawMessage `json:"mapping,omitempty"`
+
 	// SpoolDisabled 关闭断网本地缓存（可选，缺省=false 即默认启用）。
 	// 启用时断连/内存队列满的批次写入 SQLite push_outbox，重连后补发，发布成功删除。
 	// 关闭后回退为「丢最旧」的纯内存行为（见 mqttChannel.Enqueue）。

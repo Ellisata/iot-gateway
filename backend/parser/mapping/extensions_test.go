@@ -43,6 +43,57 @@ func TestTopicSource(t *testing.T) {
 	}
 }
 
+// 模板填了但没有任何字段引用命名段时，主题不匹配不能把报文丢掉 ——
+// 否则运维在表单里随手填一个模板，所有报文都会静默失败。
+func TestUnusedTopicPatternDoesNotFilter(t *testing.T) {
+	rule := mustParse(t, `{
+		"topicPattern": "factory/{deviceId}/telemetry",
+		"fields": {
+			"deviceId":        {"source": "path", "value": "id"},
+			"deviceAddressId": {"source": "const", "value": "temp"},
+			"value":           {"source": "path", "value": "v"}
+		}
+	}`)
+
+	res, err := rule.ConvertWithTopic("other/topic/x", []byte(`{"id":"d1","v":1}`))
+	if err != nil {
+		t.Fatalf("未被引用时主题不匹配不应报错: %v", err)
+	}
+	if len(res.Records) != 1 || res.Records[0].DeviceID != "d1" {
+		t.Fatalf("records = %+v, want one record for d1", res.Records)
+	}
+
+	// 空主题同理：没有字段需要从主题取值，就不该要求主题存在。
+	if _, err := rule.ConvertWithTopic("", []byte(`{"id":"d1","v":1}`)); err != nil {
+		t.Fatalf("未被引用时空主题不应报错: %v", err)
+	}
+}
+
+// 只有模板引用了命名段（没有 source=topic）时，模板仍然生效且主题必须匹配。
+func TestTemplateTopicVarUsesPattern(t *testing.T) {
+	rule := mustParse(t, `{
+		"topicPattern": "factory/{deviceId}/telemetry",
+		"fields": {
+			"deviceId":        {"source": "path", "value": "id"},
+			"deviceName":      {"source": "template", "value": "gw-{deviceId}"},
+			"deviceAddressId": {"source": "const", "value": "temp"},
+			"value":           {"source": "path", "value": "v"}
+		}
+	}`)
+
+	res, err := rule.ConvertWithTopic("factory/line1/telemetry", []byte(`{"id":"d1","v":1}`))
+	if err != nil {
+		t.Fatalf("ConvertWithTopic: %v", err)
+	}
+	if len(res.Records) != 1 || res.Records[0].DeviceName != "gw-line1" {
+		t.Fatalf("records = %+v, want deviceName gw-line1", res.Records)
+	}
+
+	if _, err := rule.ConvertWithTopic("factory/line1/other", []byte(`{"id":"d1","v":1}`)); err == nil {
+		t.Fatal("模板引用命名段时，主题不匹配应返回错误")
+	}
+}
+
 func TestTopicSourceRequiresPattern(t *testing.T) {
 	_, err := Parse([]byte(`{
 		"fields": {
