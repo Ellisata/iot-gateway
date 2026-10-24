@@ -31,7 +31,8 @@
 | [SECURITY.md](../SECURITY.md) | 漏洞报告渠道与部署加固建议（含插件信任边界） | 中文 / English |
 | [CHANGELOG.md](../CHANGELOG.md) | 版本变更记录（Keep a Changelog 格式） | 中文 / English |
 | [CLA.md](../CLA.md) / [LICENSE](../LICENSE) | 贡献者许可协议 / AGPL-3.0 许可证 | 中文 / English |
-| [backend/specs/](../backend/specs/) | 分层架构、目录结构、开发规范、断联报警、局域网发现、设备/点位扫描、推送载荷契约 | 中文（部分有 EN） |
+| [backend/specs/](../backend/specs/) | 分层架构、目录结构、开发规范、断联报警、局域网发现、设备/点位扫描、推送载荷契约、MQTT 订阅解析器 | 中文（部分有 EN） |
+| [backend/docs/parser-scripts.md](../backend/docs/parser-scripts.md) | MQTT 订阅脚本解析器：写法、`msg` / `ctx` API 与限制 | 中文 |
 | [backend/cmd/loadtest/](../backend/cmd/loadtest/) | 各协议容量压测的方法、矩阵与读数 | 中文 / English |
 | [backend/CLAUDE.md](../backend/CLAUDE.md) | 后端开发约定（改代码前必读） | 中文 |
 
@@ -59,6 +60,8 @@
 | [SECURITY](../SECURITY.md) | Vulnerability reporting and deployment hardening (incl. the plugin trust boundary) | English |
 | [Push payload contract](../backend/specs/push-payload.en.md) | Field semantics and parsing conventions for pushed data | English |
 | [Capacity load-test report](../backend/cmd/loadtest/README.en.md) | Benchmark method, matrix and readings | English |
-| [Engineering specs](../backend/specs/) | Architecture, directory layout, coding standards, alarms, discovery, point scan | Chinese (partly EN) |
+| [Subscription parser spec](../backend/specs/parser-plugins.md) | Contract, limits and hot-reload semantics for the built-in mapping DSL and goja scripts | Chinese |
+| [Subscription script guide](../backend/docs/parser-scripts.md) | Writing script parsers: `msg` / `ctx` API and examples | Chinese |
+| [Engineering specs](../backend/specs/) | Architecture, directory layout, coding standards, alarms, discovery, point scan, subscription parsers | Chinese (partly EN) |
 
 > Documents under `backend/specs/` that have an English counterpart cross-link each other at the top. Chinese-only documents are marked `(中文)` where they are referenced from the English README.

@@ -22,7 +22,7 @@
 - **进程外协议插件**：**上述 15 种协议驱动全部是插件**——主二进制不含任何协议实现，每个驱动是一个 `iot-driver-<名字>` 独立可执行文件，放进可执行文件同级的 `plugins/` 目录**即自动加载，无需停机重编网关**；插件进程崩溃自动退避重启、卡死自动检测，替换二进制即可热升级，见[驱动插件指南](docs/driver-plugins.md)。
 - **采集引擎**：Worker 并发池调度轮询任务；后台 watcher 检测配置变更，**零中断热加载**。
 - **推送引擎**：设备级分组批量分发；通道配置热加载；断网时数据写入 **本地 outbox 持久缓存**，恢复后自动补发，不丢数据。
-- **MQTT 订阅入时序库**：订阅外部 MQTT broker 上的 JSON 报文，按映射规则转换为采集记录后写入已启用的 TDengine / InfluxDB 通道；支持通配符 Topic、英文逗号分隔的多 Topic、QoS、鉴权、样例报文预览与连通性测试，配置增删改自动热加载。
+- **MQTT 订阅入时序库**：订阅外部 MQTT broker 上的 JSON 报文，按映射规则转换为采集记录后写入已启用的 TDengine / InfluxDB 通道；支持通配符 Topic、英文逗号分隔的多 Topic、QoS、鉴权、样例报文预览与连通性测试，解析器可选内置映射 DSL 或 goja JS 脚本，配置增删改自动热加载。
 - **断联报警**：设备采集失败与推送通道断连自动检测（去抖 + 状态机），离线/恢复边沿落库，统一报警中心查询。
 - **Web 管理控制台**：首页大盘、设备对象、地址标签、协议管理、通道管理、报警管理、日志查看、密钥管理，中英双语界面。
 - **开放接口**：`/openApi/*` 只读查询接口，`X-Api-Key` 密钥鉴权，供 MES / ERP 等外部系统对接。
@@ -106,10 +106,11 @@
 
 - **只写时序库通道**：记录只投递给 `tdengine-v3` / `influxdb-v3`，**不投 MQTT 等普通通道**——订阅主题与发布主题相同时会形成自激。转换结果复用推送通道的攒批、断网缓存（outbox）与补发。
 - **每条订阅独立连接**：Broker / 端口 / Client ID / 用户名密码 / Topic（支持 `+`、`#` 通配符，多个 Topic 用英文逗号分隔并共用同一套映射与 QoS）/ QoS `0`~`2` 分别配置；保存前可「测试连接」，并用样例报文「预览」转换结果（均不落库）。
-- **映射规则**：`root` 指定取值根（默认 `$`，整篇报文为数组时自动逐条拆条，也可显式写 `$.data[*]`）；目标字段是采集记录的白名单（设备 ID / 设备名称 / 点位 ID / 点位说明 / 采集值 / 类型类别 / 质量码等，未知字段保存即拒）；每个字段支持 `path`（JSON 路径）、`const`（固定值）、`template`（模板拼接）、`map`（值映射，用于外部类型与质量码翻译）四种取值方式；`filter` 为隐式 AND 的过滤条件（`eq` / `neq` / `gt` / `gte` / `lt` / `lte` / `contains` / `in` / `notin` / `exists` / `notexists`）。
+- **解析器**：每个订阅可选「内置映射」或「脚本」。内置映射即下一条的声明式 DSL；脚本在 goja 中运行 `function parse(msg, ctx)`，用于 DSL 表达不了的报文（逐报文 1–500ms 超时，超时后重建 VM；不提供文件、网络与 `require`），控制台内置解析器编辑器。仅修改解析器时**原地热替换**，不重连 MQTT。契约见[解析器规范](backend/specs/parser-plugins.md)，脚本写法见[脚本指南](backend/docs/parser-scripts.md)。
+- **映射规则**：`root` 指定取值根（默认 `$`，整篇报文为数组时自动逐条拆条，也可显式写 `$.data[*]`）；目标字段是采集记录的白名单（设备 ID / 设备名称 / 点位 ID / 点位说明 / 采集值 / 类型类别 / 质量码等，未知字段保存即拒）；每个字段支持 `path`（JSON 路径）、`const`（固定值）、`template`（模板拼接）、`map`（值映射，用于外部类型与质量码翻译）四种取值方式，并可附加 `transform` 算子链（`scale` / `round` / `trim` / `default` / `hexDecode` / `base64Decode` / `bitfield` / `regex`）；`topicPattern` 可按主题路径段取名（配合 `source: "topic"`），`fanout` 可把一条报文扇出成多条测点记录；`filter` 为隐式 AND 的过滤条件（`eq` / `neq` / `gt` / `gte` / `lt` / `lte` / `contains` / `in` / `notin` / `exists` / `notexists`）。
 - **采集时间**：报文自带时间时可映射到 `collectedAt`（epoch 秒 / 毫秒 / 微秒 / 纳秒与常见日期串，归一为毫秒精度本地时间）；未配置或无法识别时按收到报文的时间落库。
-- **设备 / 点位元信息**：时序库只保存 ID 与数值，订阅报文里出现过的设备 / 点位会按自然键 `(deviceId, deviceAddressId)` 异步收录到「订阅设备与点位」页（不含采样值），便于按名称查询与后续统计分析。
-- 订阅配置每 10 秒比对校验和热加载，新增 / 修改 / 删除 / 启停**无需重启网关**；运行状态页展示每个订阅的连接状态、报文数 / 记录数 / 错误数与最近错误。
+- **设备 / 点位元信息**：时序库只保存 ID 与数值，订阅报文里出现过的设备 / 点位会按自然键 `(deviceId, deviceAddressId)` 异步收录到「订阅设备与点位」页（不含采样值），便于按名称查询与后续统计分析。该页支持手工维护：新增 / 编辑 / Excel 导入（逐行返回错误）/ 模板下载；来源列区分「自动」与「手工」，手工行不会被后续自动收录覆盖，可批量删除（≤200，仅手工行）并「恢复为自动」。
+- 订阅配置每 10 秒比对校验和热加载，新增 / 修改 / 删除 / 启停**无需重启网关**；运行状态页展示每个订阅的连接状态、报文数 / 记录数 / 跳过数 / 丢弃数 / 错误数与最近错误。
 
 ## 快速开始
 
@@ -223,7 +224,7 @@ go build -o ./plugins/iot-driver-modbus ./driversrc/modbus    # Windows 上加 .
 | 设备对象 / 地址标签 | 按网关分组管理设备，维护采集点位与数据类型 |
 | 协议管理 | 协议参数动态表单配置（支持自定义表单 JSON） |
 | 通道管理 | MQTT / TDEngine / InfluxDB 推送通道配置与状态监控 |
-| 订阅管理 | 订阅外部 MQTT 报文并写入时序库：映射规则、样例预览、连通性测试与运行状态；「订阅设备与点位」页维护报文中的设备 / 点位元信息 |
+| 订阅管理 | 订阅外部 MQTT 报文并写入时序库：内置映射 / JS 脚本解析器、映射规则、样例预览、连通性测试与运行状态；「订阅设备与点位」页自动收录并支持手工增改、Excel 导入、删除与恢复 |
 | 报警管理 | 设备断联报警、通道断联报警，历史记录查询 |
 | 日志查看 | 在线浏览与下载网关运行日志 |
 | 密钥管理 | 生成 / 启停 Open API 访问密钥（admin） |
@@ -283,7 +284,8 @@ push:
 │   ├── driversrc/      # 协议插件源码（9 个子目录，各编译成 iot-driver-<目录名>）
 │   ├── plugins/        # 插件运行时目录（构建产物，发行包自带）
 │   ├── push/           # 推送引擎（mqtt/tdengine-v3/influxdb-v3 + outbox）
-│   ├── subscribe/      # MQTT 订阅引擎（JSON → 采集记录映射，写入时序库）
+│   ├── parser/         # 订阅报文解析器（内置映射 DSL / goja 脚本，输出采集记录）
+│   ├── subscribe/      # MQTT 订阅引擎（连接 / 队列 / 热加载，解析与投递编排）
 │   ├── controller/ service/ model/  # HTTP 分层（Controller → Service → Database）
 │   ├── database/sqlite/migrations/  # SQLite 迁移脚本
 │   ├── router/ middleware/          # 路由与中间件（JWT / Open API 密钥 / CORS）
@@ -313,6 +315,8 @@ push:
 | [驱动插件指南](docs/driver-plugins.md) | 进程外协议插件的开发、生命周期、安全与排错（新增协议必读） |
 | [技术规范](backend/specs/README.md) | 分层架构、目录结构、开发规范等 |
 | [推送载荷契约](backend/specs/push-payload.md) | 外发数据的字段语义与解析约定（[EN](backend/specs/push-payload.en.md)） |
+| [订阅解析器规范](backend/specs/parser-plugins.md) | 内置映射 DSL 与 goja 脚本的契约、限制与热加载语义 |
+| [订阅解析脚本指南](backend/docs/parser-scripts.md) | 脚本解析器的写法、`msg` / `ctx` API 与示例 |
 | [采集容量压测报告](backend/cmd/loadtest/README.md) | 各协议可承载的设备/点位容量与调优建议（[EN](backend/cmd/loadtest/README.en.md)） |
 | [安全策略](SECURITY.md) | 漏洞报告与部署加固建议 |
 | [贡献指南](CONTRIBUTING.md) | 提 Issue / PR 与开发流程 |
