@@ -81,6 +81,47 @@ func TestSqliteSpoolInsertFetchOrder(t *testing.T) {
 	}
 }
 
+// InsertMany 一次提交写入多批，入队序与 JSON 往返与逐条 Insert 完全一致。
+func TestSqliteSpoolInsertMany(t *testing.T) {
+	s := NewSqliteSpool(newTestSpoolDB(t), "c1")
+
+	err := s.InsertMany([]PushBatch{
+		sampleBatch("d1", "t1", "v1"),
+		sampleBatch("d1", "t2", "v2", "v3"),
+		sampleBatch("d1", "t3", "v4"),
+	})
+	if err != nil {
+		t.Fatalf("insert many failed: %v", err)
+	}
+	if n, _ := s.Count(); n != 3 {
+		t.Fatalf("count = %d, want 3", n)
+	}
+
+	got, err := s.FetchOldest(10)
+	if err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	for i, wantTs := range []string{"t1", "t2", "t3"} {
+		if got[i].CollectedAt != wantTs {
+			t.Errorf("batch[%d] collectedAt = %q, want %q", i, got[i].CollectedAt, wantTs)
+		}
+	}
+	if len(got[1].Records) != 2 || got[1].Records[0].Value != "v2" {
+		t.Errorf("records roundtrip failed: %+v", got[1].Records)
+	}
+
+	// 空切片 no-op，计数不变
+	if err := s.InsertMany(nil); err != nil {
+		t.Fatalf("empty insert many failed: %v", err)
+	}
+	if n, _ := s.Count(); n != 3 {
+		t.Errorf("count after empty insert many = %d, want 3", n)
+	}
+}
+
 func TestSqliteSpoolFetchLimit(t *testing.T) {
 	s := NewSqliteSpool(newTestSpoolDB(t), "c1")
 	for i, ts := range []string{"t1", "t2", "t3"} {

@@ -34,6 +34,13 @@ const (
 	// 缓解 SQLite 单连接写放大（断连持续期间）。
 	spoolTrimInterval = 16
 	spoolTrimChunk    = 16
+	// spoolWriteBatchSize 落盘协程单次合并写入的最大批次数。
+	//
+	// 断连期每个采集批次都单独进 spoolCh；逐批 INSERT 时每批都要等一次 WAL 提交
+	//（synchronous=FULL 下约 1.9ms/批，eMMC/SD 卡更慢）。把排队中的批次合并成一次
+	// 多行 INSERT，一次提交落盘数十批，断网缓存才不会被提交开销卡住而开始丢最旧。
+	// 上限同时约束单条 SQL 的大小和停机排空时单次写入的最长耗时。
+	spoolWriteBatchSize = 64
 )
 
 // Connectivity 通道连通状态判据：mqtt 由 paho 的连接/断开回调维护，
@@ -383,7 +390,7 @@ func (o *Outbox) SpoolEnqueue(b PushBatch) {
 	}
 }
 
-// spoolWriteLoop 本地缓存写协程：消费 spoolCh 串行写入 SQLite。
+// spoolWriteLoop 本地缓存写协程：消费 spoolCh，把排队中的批次合并后写入 SQLite。
 //
 // 退出前（quit 关闭）先排空在途批次，再等 Wait 标记 worker 组已退出 ——
 // worker 停服前会把 outbox 中写失败的批次转投 spoolCh，提前返回会把它们
@@ -391,6 +398,7 @@ func (o *Outbox) SpoolEnqueue(b PushBatch) {
 func (o *Outbox) spoolWriteLoop() {
 	defer close(o.spoolDone)
 
+	buf := make([]PushBatch, 0, spoolWriteBatchSize)
 	for {
 		select {
 		case <-o.quit:
@@ -401,38 +409,56 @@ func (o *Outbox) spoolWriteLoop() {
 					o.drainSpoolCh()
 					return
 				case b := <-o.spoolCh:
-					o.insert(b)
+					buf = o.collectSpoolBatch(append(buf[:0], b))
+					o.insertMany(buf)
 				}
 			}
 		case b := <-o.spoolCh:
-			o.insert(b)
+			buf = o.collectSpoolBatch(append(buf[:0], b))
+			o.insertMany(buf)
 		}
 	}
 }
 
+// collectSpoolBatch 非阻塞地把 spoolCh 中已在排队的批次追加到 buf，最多
+// spoolWriteBatchSize 条。返回的切片会复用 buf 的底层数组，调用方消费完即可丢弃。
+func (o *Outbox) collectSpoolBatch(buf []PushBatch) []PushBatch {
+	for len(buf) < spoolWriteBatchSize {
+		select {
+		case b := <-o.spoolCh:
+			buf = append(buf, b)
+		default:
+			return buf
+		}
+	}
+	return buf
+}
+
 // drainSpoolCh 非阻塞排空 spoolCh 中的在途批次（写协程退出前的收尾用）。
 func (o *Outbox) drainSpoolCh() {
+	buf := make([]PushBatch, 0, spoolWriteBatchSize)
 	for {
 		select {
 		case b := <-o.spoolCh:
-			o.insert(b)
+			buf = o.collectSpoolBatch(append(buf[:0], b))
+			o.insertMany(buf)
 		default:
 			return
 		}
 	}
 }
 
-// insert 将批次写入本地缓存，并 ping 补发协程（事件驱动补发，无需轮询）。
-// 达到上限后每 N 批批量裁剪最旧以约束磁盘占用：Count 为内存计数（无查询），
+// insertMany 将合并后的多个批次写入本地缓存，并 ping 补发协程（事件驱动补发，无需轮询）。
+// 达到上限后按 N 批批量裁剪最旧以约束磁盘占用：Count 为内存计数（无查询），
 // 裁剪由原逐批 DeleteOldest(1) 改为批量 DeleteOldest(N)，
 // 摊薄满盘期的 SQLite 写放大。
-func (o *Outbox) insert(b PushBatch) {
+func (o *Outbox) insertMany(batches []PushBatch) {
 	defer o.Notify()
 
-	if o.spool == nil {
+	if o.spool == nil || len(batches) == 0 {
 		return
 	}
-	o.trimTick++
+	o.trimTick += len(batches)
 	if o.trimTick >= spoolTrimInterval {
 		o.trimTick = 0
 		if count, err := o.spool.Count(); err == nil && count >= int64(o.spoolCap) {
@@ -441,9 +467,17 @@ func (o *Outbox) insert(b PushBatch) {
 			}
 		}
 	}
-	if err := o.spool.Insert(b); err != nil {
-		errMsg := fmt.Sprintf("spool insert: %v", err)
-		logger.Error("%s", errMsg)
-		o.SetLastErr(errMsg)
+	if err := o.spool.InsertMany(batches); err != nil {
+		// 合并写失败时退回逐条写：一条坏数据（或超长语句）不应连坐整批，
+		// 其余批次照常落盘 —— 与合并前「坏批次单独失败」的语义一致。
+		logger.Error("%s: spool insert %d batches failed, falling back to one by one: %v",
+			o.tag, len(batches), err)
+		for _, b := range batches {
+			if err := o.spool.Insert(b); err != nil {
+				errMsg := fmt.Sprintf("spool insert: %v", err)
+				logger.Error("%s", errMsg)
+				o.SetLastErr(errMsg)
+			}
+		}
 	}
 }

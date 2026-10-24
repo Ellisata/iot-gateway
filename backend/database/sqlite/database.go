@@ -21,6 +21,33 @@ import (
 // probeTable 启动写探针使用的表名，用完即删（见 verifyReadWrite）。
 const probeTable = "iot_gateway_rw_probe"
 
+// walAutocheckpointPages WAL 自动 checkpoint 的页数阈值（4KB 页下 512 页约 2MB）。
+//
+// SQLite 默认 1000 页（约 4MB）。这个阈值只决定「写提交时最多攒多少帧才合并回主库」，
+// 不决定文件能不能缩小 —— 缩文件由 WALCheckpointer 定期 TRUNCATE 负责。
+const walAutocheckpointPages = 512
+
+// dsnWithPragmas 在数据文件路径后追加**每连接**生效的 PRAGMA。
+//
+// 为什么必须走 DSN、不能打开后再 Exec：PRAGMA 是连接级设置，而 database/sql 会在
+// ConnMaxLifetime 到期后关掉物理连接、下次查询再开一条新的。新连接不会继承上一条
+// 连接上的 wal_autocheckpoint / synchronous，WAL 就会悄悄退回默认值（busy_timeout
+// 同理，不过 go-sqlite 自己会在每条新连接上设 BUSY_TIMEOUT(5000)）。
+//
+// synchronous=NORMAL：WAL 下每次提交只追加 -wal、不 fsync，checkpoint 回主库时才
+// fsync。掉电最多丢失上一次 checkpoint 之后的提交（默认约 wal_autocheckpoint 个页），
+// 库本身不会损坏 —— 这是 SQLite 官方对 WAL + NORMAL 的保证。默认的 FULL 会让**每一批**
+// 断网缓存落盘都等一次 fsync：实测单行 INSERT 1.86ms（约 540 次/秒）vs NORMAL 0.095ms
+// （约 10500 次/秒），是断网期写放大的主因，在 eMMC/SD 卡上差距还会更大。
+//
+// glebarez/go-sqlite 的 newConn 会把**不以 file: 开头**的 DSN 里 "?" 之后的部分从
+// 文件名剥掉，并在 applyQueryParams 里按顺序执行每个 _pragma，所以相对路径与 Windows
+// 路径都可以直接拼接；文件系统操作（MkdirAll / Abs / 日志）仍然只认原始 path。
+func dsnWithPragmas(path string) string {
+	return fmt.Sprintf("%s?_pragma=wal_autocheckpoint(%d)&_pragma=synchronous(NORMAL)",
+		path, walAutocheckpointPages)
+}
+
 // InitDB 初始化 SQLite 数据库连接
 func InitDB(cfg *configFile.Config) *gorm.DB {
 	path := cfg.SQLite.Path
@@ -56,7 +83,7 @@ func InitDB(cfg *configFile.Config) *gorm.DB {
 		gormConfig.Logger = gormlogger.Default.LogMode(gormlogger.Info)
 	}
 
-	conn, err := gorm.Open(sqlite.Open(path), gormConfig)
+	conn, err := gorm.Open(sqlite.Open(dsnWithPragmas(path)), gormConfig)
 	if err != nil {
 		appLogger.Fatal("failed to connect sqlite database %s: %v", absPath, err)
 		return nil
@@ -71,6 +98,9 @@ func InitDB(cfg *configFile.Config) *gorm.DB {
 
 	sqlDB.SetMaxIdleConns(1)
 	sqlDB.SetMaxOpenConns(1)
+	// 这两条会让物理连接在 1 小时后被回收重开，**连接级 PRAGMA 因此不能只在打开后
+	// Exec 一次**（新连接不继承），wal_autocheckpoint / synchronous 因此改由
+	// dsnWithPragmas 下发。
 	sqlDB.SetConnMaxLifetime(time.Hour)
 	sqlDB.SetConnMaxIdleTime(30 * time.Minute)
 

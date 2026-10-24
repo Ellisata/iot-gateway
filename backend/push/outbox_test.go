@@ -4,6 +4,8 @@
 package push
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -74,6 +76,104 @@ func waitSpoolCount(t *testing.T, spool *SqliteSpool, want int64) {
 	}
 	n, _ := spool.Count()
 	t.Fatalf("spool count = %d, want %d", n, want)
+}
+
+// ==================== 落盘合并写 ====================
+
+// spoolRecorder 记录落盘调用，用于验证合并写与逐条回退。
+type spoolRecorder struct {
+	insertManyCalls [][]PushBatch
+	insertCalls     int
+	insertManyErr   error
+	insertErr       error
+}
+
+func (r *spoolRecorder) Insert(b PushBatch) error {
+	r.insertCalls++
+	return r.insertErr
+}
+
+func (r *spoolRecorder) InsertMany(batches []PushBatch) error {
+	r.insertManyCalls = append(r.insertManyCalls, append([]PushBatch(nil), batches...))
+	return r.insertManyErr
+}
+
+func (r *spoolRecorder) FetchOldest(int) ([]SpoolBatch, error) { return nil, nil }
+func (r *spoolRecorder) Delete(int64) error                    { return nil }
+func (r *spoolRecorder) DeleteBatch([]int64) error             { return nil }
+func (r *spoolRecorder) DeleteOldest(int) error                { return nil }
+func (r *spoolRecorder) Count() (int64, error)                 { return 0, nil }
+
+// 写协程一次最多合并 spoolWriteBatchSize 批，剩余的留给下一轮。
+func TestOutboxCollectSpoolBatchCaps(t *testing.T) {
+	o := &Outbox{spoolCh: make(chan PushBatch, spoolChSize)}
+	total := spoolWriteBatchSize + 10
+	for i := 0; i < total; i++ {
+		o.spoolCh <- PushBatch{DeviceID: fmt.Sprintf("d%d", i)}
+	}
+
+	buf := o.collectSpoolBatch(nil)
+	if len(buf) != spoolWriteBatchSize {
+		t.Fatalf("collected %d batches, want %d", len(buf), spoolWriteBatchSize)
+	}
+	if got := len(o.spoolCh); got != total-spoolWriteBatchSize {
+		t.Errorf("remaining in spoolCh = %d, want %d", got, total-spoolWriteBatchSize)
+	}
+	// 顺序保持到达序
+	if buf[0].DeviceID != "d0" || buf[spoolWriteBatchSize-1].DeviceID != fmt.Sprintf("d%d", spoolWriteBatchSize-1) {
+		t.Errorf("collected order = %s..%s", buf[0].DeviceID, buf[len(buf)-1].DeviceID)
+	}
+}
+
+// 合并写成功时只调用一次 InsertMany，不再逐条 Insert。
+func TestOutboxInsertManyCoalesces(t *testing.T) {
+	rec := &spoolRecorder{}
+	o := &Outbox{tag: "test", spool: rec, spoolCap: 100}
+
+	batches := []PushBatch{{DeviceID: "a"}, {DeviceID: "b"}, {DeviceID: "c"}}
+	o.insertMany(batches)
+
+	if len(rec.insertManyCalls) != 1 || len(rec.insertManyCalls[0]) != 3 {
+		t.Fatalf("InsertMany calls = %d (sizes %v), want 1 call with 3 batches",
+			len(rec.insertManyCalls), callSizes(rec.insertManyCalls))
+	}
+	if rec.insertCalls != 0 {
+		t.Errorf("Insert called %d times after successful InsertMany, want 0", rec.insertCalls)
+	}
+}
+
+// 合并写失败必须逐条重试，不能让一条坏批次连坐整批。
+func TestOutboxInsertManyFallsBackToOneByOne(t *testing.T) {
+	rec := &spoolRecorder{insertManyErr: errors.New("boom")}
+	o := &Outbox{tag: "test", spool: rec, spoolCap: 100}
+
+	o.insertMany([]PushBatch{{DeviceID: "a"}, {DeviceID: "b"}})
+
+	if len(rec.insertManyCalls) != 1 {
+		t.Fatalf("InsertMany calls = %d, want 1", len(rec.insertManyCalls))
+	}
+	if rec.insertCalls != 2 {
+		t.Errorf("Insert calls = %d, want 2 (one per batch)", rec.insertCalls)
+	}
+}
+
+// 回退后仍失败的批次记录 lastErr，但不影响其余批次继续写入。
+func TestOutboxInsertManyFallbackKeepsGoing(t *testing.T) {
+	rec := &spoolRecorder{insertManyErr: errors.New("batch failed"), insertErr: errors.New("row failed")}
+	o := &Outbox{tag: "test", spool: rec, spoolCap: 100}
+
+	o.insertMany([]PushBatch{{DeviceID: "a"}, {DeviceID: "b"}, {DeviceID: "c"}})
+	if rec.insertCalls != 3 {
+		t.Errorf("Insert calls = %d, want 3", rec.insertCalls)
+	}
+}
+
+func callSizes(calls [][]PushBatch) []int {
+	sizes := make([]int, len(calls))
+	for i := range calls {
+		sizes[i] = len(calls[i])
+	}
+	return sizes
 }
 
 // ==================== 入队路由 ====================

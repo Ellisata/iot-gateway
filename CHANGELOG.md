@@ -4,6 +4,15 @@
 
 All notable changes to this project are documented in this file (Keep a Changelog format, SemVer versioning).
 
+## [Unreleased]
+
+### Changed
+
+- **SQLite WAL 定期检查点**：WAL 自动 checkpoint 阈值显式设为 512 页（约 2MB）并经 DSN 下发，物理连接被连接池回收重开时不会丢；新增每 10 分钟一次的维护协程，先 `PASSIVE` 把已合并的帧写回主库，确认无读者后再 `TRUNCATE` 把 `-wal` 收缩到 0。外部进程（sqlite CLI、第二个网关实例、备份工具）持有旧快照钉住 WAL 时打 WARN 并给出已合并/总帧数，读者退出后自动恢复截断。纯内存 WAL 索引的读路径未改动。
+  **Periodic SQLite WAL checkpoints**: the WAL autocheckpoint threshold is now explicit (512 pages ≈ 2MB) and applied through the DSN, so it survives connection-pool recycling; a maintenance goroutine runs every 10 minutes, `PASSIVE`-checkpointing merged frames into the main database and, once no readers remain, `TRUNCATE`-ing `-wal` back to zero. If an external process (sqlite CLI, a second gateway instance, a backup tool) pins the WAL with an old snapshot, a WARN reports merged/total frames and truncation resumes after that reader exits. The in-memory WAL-index read path is unchanged.
+- **SQLite 写入吞吐**：WAL 连接改为 `synchronous=NORMAL`（经 DSN 按连接下发），断网缓存的落盘协程把排队中的批次合并成一次多行 INSERT。逐批提交的 fsync 是断网期写放大的主因：实测逐批自动提交约 1.86ms/批（≈540 批/秒，`synchronous=FULL`），改为 `NORMAL` 后同口径约 0.095ms/批（≈10500 批/秒）；`NORMAL` 下把 64 批合并成一次 INSERT 实测约 6ms（约 0.093ms/批）。代价是掉电时最多丢失上一次 checkpoint 之后的提交（约 2MB），库本身不会损坏（WAL + NORMAL 的官方保证）。合并写失败时自动退回逐条写，一条坏批次不会连坐整批。
+  **Faster SQLite writes**: the WAL connection now uses `synchronous=NORMAL` (applied per connection through the DSN), and the offline-spool writer coalesces queued batches into one multi-row INSERT. Per-batch fsync was the dominant write-amplification cost while disconnected: a per-batch autocommit measured ≈1.86ms (≈540 batches/s under `synchronous=FULL`) versus ≈0.095ms under `NORMAL` (≈10500 batches/s); with `NORMAL`, coalescing 64 batches into a single INSERT measured ≈6ms (≈0.093ms per batch). The trade-off is that a power loss can lose at most the commits since the last checkpoint (≈2MB); the database itself is not corrupted (SQLite's guarantee for WAL + NORMAL). If the merged write fails, the writer falls back to one row at a time so a single bad batch does not take the whole group down.
+
 ## [0.1.4] - 2026-10-23
 
 ### Added

@@ -101,6 +101,7 @@ func InitializeApp() (*AppDependencies, func()) {
 	channelMonitor := alarm.NewChannelMonitor(db, engine, dispatcher)
 	announcer := discovery.NewAnnouncerWithPolicy(config, serviceGatewayService, openApiSecretService, manager)
 	sampler := metrics.NewSampler(recorder, deviceService, collectionService, engine)
+	walCheckpointer := sqlite.NewWALCheckpointer(db)
 	appDependencies := &AppDependencies{
 		Engine:           ginEngine,
 		CollectorEngine:  collectorEngine,
@@ -113,6 +114,7 @@ func InitializeApp() (*AppDependencies, func()) {
 		Subscription:     subscribeManager,
 		RuntimeConfig:    manager,
 		DashboardSampler: sampler,
+		WALCheckpointer:  walCheckpointer,
 	}
 	return appDependencies, func() {
 	}
@@ -146,6 +148,9 @@ type AppDependencies struct {
 	// DashboardSampler 大盘遥测采样器：每分钟把在线率、采集吞吐与推送积压
 	// 合成一个内存采样点，供 /dashboard/trend 查询。
 	DashboardSampler *metrics.Sampler
+	// WALCheckpointer SQLite WAL 定期维护：合并已 checkpoint 的帧，空闲时把 -wal
+	// 截断到 0；外部读者钉住 WAL 时打 WARN。见 database/sqlite/walCheckpoint.go。
+	WALCheckpointer *sqlite.WALCheckpointer
 }
 
 // NewRecordSink 组装采集记录的扇出接收者。

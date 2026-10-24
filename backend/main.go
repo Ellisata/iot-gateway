@@ -99,6 +99,12 @@ func runGateway(stop <-chan struct{}) error {
 	// 永远缺采样点。采样器只读各组件状态，不改变任何启动顺序。
 	deps.DashboardSampler.Start()
 
+	// 5.3 启动 SQLite WAL 定期维护（先 PASSIVE 合并，确认无读者后再 TRUNCATE）。
+	//
+	// 只是维护型 PRAGMA，不改变任何业务启动顺序；首次执行在一个间隔之后，
+	// 启动期的迁移写入由 SQLite 自己的 wal_autocheckpoint 兜底。
+	deps.WALCheckpointer.Start()
+
 	// 6. 启动报警通知器（把报警推送到钉钉/企微/飞书等 Webhook）。
 	//
 	// 必须在报警巡检与采集引擎之前启动：Dispatcher 未启动时 Notify 会把事件
@@ -143,9 +149,9 @@ func runGateway(stop <-chan struct{}) error {
 
 	// 停止顺序：先停自动发现，再停报警巡检（避免扫描关闭中的通道），然后停推送、
 	// 停采集，最后停插件管理器。
-	// defer 后进先出，所以这里从后往前注册：先注册的先执行、最后注册的最后执行。
+	// defer 后进先出，所以这里从后往前注册：先注册的后执行、最后注册的最先执行。
 	//
-	// Discovery 注册在最后，因此**最先**停止：网关一开始停机就先安静下来，
+	// Discovery 注册在靠后位置，因此很早停止：网关一开始停机就先安静下来，
 	// 而不是继续向平台广播一台正在关闭的自己。
 	// DriverManager 注册在最前，因此最后执行 —— 那时采集已完全停止
 	//（驱动已 Close、无 Read 在途），杀插件进程才安全。
@@ -169,11 +175,15 @@ func runGateway(stop <-chan struct{}) error {
 	defer deps.PushEngine.Stop()
 	defer deps.AlarmMonitor.Stop()
 	defer deps.Discovery.Stop()
-	// RuntimeConfig 注册在最末，因此**最先**执行：先关掉「运行开关」的更新入口，
+	// RuntimeConfig 注册在靠后位置，因此很早就执行：先关掉「运行开关」的更新入口，
 	// 避免停机过程中还有请求把刚停掉的 discovery 重新拉起来。
 	defer deps.RuntimeConfig.Close()
 	// 采样器最后注册、最先停止：停机过程中不再往趋势里写入半停机状态的采样点。
 	defer deps.DashboardSampler.Stop()
+	// WAL 维护器注册在最后，因此比采样器**更先**停止：停机期间不再发起新的
+	// checkpoint 去抢唯一的那条数据库连接，后续排空 outbox / 停采集的写入不会
+	// 撞上一次等待读者的 TRUNCATE（最长 busy_timeout=5s）。
+	defer deps.WALCheckpointer.Stop()
 
 	// 10. 启动 HTTP 服务器。使用 http.Server 而非 gin 的 Run，以便服务模式下优雅停机。
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

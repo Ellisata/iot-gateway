@@ -12,4 +12,5 @@ import (
 // DatabaseProviderSet 数据库层依赖提供者集合
 var DatabaseProviderSet = wire.NewSet(
 	sqlite.InitDB,
+	sqlite.NewWALCheckpointer,
 )

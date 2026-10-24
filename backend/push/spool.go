@@ -30,6 +30,9 @@ type SpoolBatch struct {
 type Spool interface {
 	// Insert 持久化一个批次(records 序列化为 JSON)。
 	Insert(batch PushBatch) error
+	// InsertMany 在一个事务里持久化多个批次（一次多行 INSERT）。
+	// 断网期把排队中的批次合并提交，避免逐批 fsync 的写放大；空切片为 no-op。
+	InsertMany(batches []PushBatch) error
 	// FetchOldest 按入队序取回最旧的至多 limit 个批次。
 	FetchOldest(limit int) ([]SpoolBatch, error)
 	// Delete 删除单个已成功发布的批次。
@@ -68,25 +71,40 @@ func NewSqliteSpool(db *gorm.DB, channelID string) *SqliteSpool {
 
 // Insert 持久化一个批次。records 序列化为 JSON 存入 records_json 列。
 func (s *SqliteSpool) Insert(batch PushBatch) error {
-	recordsJSON, err := json.Marshal(batch.Records)
-	if err != nil {
-		return fmt.Errorf("spool: marshal records failed: %w", err)
+	return s.InsertMany([]PushBatch{batch})
+}
+
+// InsertMany 在一个事务里持久化多个批次：一次多行 INSERT、一次 WAL 提交。
+//
+// 序列化在加锁前完成（JSON 可能较大），锁只包住数据库操作。合并写失败时整个
+// 语句回滚，不留下半批数据；调用方可退回逐条 Insert 隔离坏批次（见 Outbox.insertMany）。
+func (s *SqliteSpool) InsertMany(batches []PushBatch) error {
+	if len(batches) == 0 {
+		return nil
+	}
+
+	rows := make([]po.PushOutbox, 0, len(batches))
+	for i := range batches {
+		recordsJSON, err := json.Marshal(batches[i].Records)
+		if err != nil {
+			return fmt.Errorf("spool: marshal records failed: %w", err)
+		}
+		rows = append(rows, po.PushOutbox{
+			ChannelID:   s.channelID,
+			DeviceID:    batches[i].DeviceID,
+			CollectedAt: batches[i].CollectedAt,
+			RecordsJSON: string(recordsJSON),
+		})
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	row := po.PushOutbox{
-		ChannelID:   s.channelID,
-		DeviceID:    batch.DeviceID,
-		CollectedAt: batch.CollectedAt,
-		RecordsJSON: string(recordsJSON),
+	if err := s.db.CreateInBatches(&rows, len(rows)).Error; err != nil {
+		logger.Error("spool: insert %d batches failed (channel=%s): %v", len(rows), s.channelID, err)
+		return fmt.Errorf("spool: insert %d batches failed: %w", len(rows), err)
 	}
-	if err := s.db.Create(&row).Error; err != nil {
-		logger.Error("spool: insert failed (channel=%s): %v", s.channelID, err)
-		return fmt.Errorf("spool: insert failed: %w", err)
-	}
-	s.count++
+	s.count += int64(len(rows))
 	return nil
 }
 

@@ -44,10 +44,16 @@ func newFakeSpool() *fakeSpool {
 }
 
 func (s *fakeSpool) Insert(b push.PushBatch) error {
+	return s.InsertMany([]push.PushBatch{b})
+}
+
+func (s *fakeSpool) InsertMany(batches []push.PushBatch) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.nextID++
-	s.batches[s.nextID] = push.SpoolBatch{ID: s.nextID, DeviceID: b.DeviceID, CollectedAt: b.CollectedAt, Records: b.Records}
+	for _, b := range batches {
+		s.nextID++
+		s.batches[s.nextID] = push.SpoolBatch{ID: s.nextID, DeviceID: b.DeviceID, CollectedAt: b.CollectedAt, Records: b.Records}
+	}
 	return nil
 }
 

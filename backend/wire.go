@@ -17,6 +17,7 @@ import (
 	"iot-gateway/configFile"
 	"iot-gateway/controller"
 	"iot-gateway/database"
+	"iot-gateway/database/sqlite"
 	"iot-gateway/devicescan"
 	"iot-gateway/discovery"
 	"iot-gateway/metrics"
@@ -57,6 +58,9 @@ type AppDependencies struct {
 	// DashboardSampler 大盘遥测采样器：每分钟把在线率、采集吞吐与推送积压
 	// 合成一个内存采样点，供 /dashboard/trend 查询。
 	DashboardSampler *metrics.Sampler
+	// WALCheckpointer SQLite WAL 定期维护：合并已 checkpoint 的帧，空闲时把 -wal
+	// 截断到 0；外部读者钉住 WAL 时打 WARN。见 database/sqlite/walCheckpoint.go。
+	WALCheckpointer *sqlite.WALCheckpointer
 }
 
 // InitializeApp 构建完整的应用依赖图
