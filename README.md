@@ -2,7 +2,14 @@
 
 [English](README.en.md) | 简体中文
 
-**iot-gateway** 是一个开箱即用的工业物联网数据采集网关：定时轮询 PLC / 工业设备，将采集数据推送至 MQTT、TDEngine、InfluxDB 等下游通道，并提供内嵌的 Web 管理控制台。整体以 **单二进制** 形式部署到网关设备或工控机，无需外部数据库。
+[![CI](https://github.com/Ellisata/iot-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/Ellisata/iot-gateway/actions/workflows/ci.yml)
+![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
+![Release](https://img.shields.io/badge/release-v0.2.0-green)
+![Go](https://img.shields.io/badge/go-1.26-00ADD8)
+
+**一个 exe + 一个 `plugins/` 目录，就能在工控机上采集 PLC 数据并推送到 MQTT / TDengine / InfluxDB —— 不用装数据库，不用装运行时。**
+
+定时轮询 PLC / 工业设备，内嵌 Web 管理控制台；支持 Windows 服务 / Linux systemd / Docker 部署。
 
 <!-- 管理控制台概览：动图是唯一能在 Gitee/GitHub 上直接动起来的形式 ——
      <video> 标签会被 Markdown 清洗器丢弃。
@@ -10,10 +17,40 @@
      通道、日志、开放接口文档。
      点击进外链播放：仓库自己的 raw 链接带 Content-Disposition: attachment，
      只会触发下载；image.edwining.com 不带该头且支持 Range，浏览器直接播。 -->
-[![管理控制台概览](docs/images/demo.zh.gif)](https://image.edwining.com/public/redpandacompress_%E6%BC%94%E7%A4%BA%E8%A7%86%E9%A2%91.mp4)
+![管理控制台概览](docs/images/demo.zh.gif)
 
-*点击动图观看完整演示视频（90 秒）*
+## 为什么是它
 
+- **单二进制，零外部依赖** —— 前端 `go:embed` 内嵌、SQLite 纯 Go 实现（免 CGO）；主程序 + `plugins/` 即完整系统，拷到工控机就能跑。
+- **协议驱动进程隔离** —— 15 种协议全部是 `plugins/` 下的独立进程：驱动崩溃自动退避重启、卡死自动回收、替换二进制即热升级，主程序不受影响。
+- **按现场设计** —— 断网数据落本地 outbox 并自动补发、变化才推送、配置零中断热加载、设备/点位自动扫描、MQTT 订阅反向入时序库。
+
+## 5 分钟试用
+
+1. **下载**：从 [Releases](https://gitee.com/wang4856304/iot-gateway/releases) 获取对应平台发行包（v0.2.0：Windows amd64、Linux amd64 / arm64）。
+2. **解压**：保持 `iot-gateway`（Windows 为 `iot-gateway.exe`）与 `plugins/` 目录**同层**。
+3. **运行**：
+
+   ```bash
+   ./iot-gateway        # Windows 双击 iot-gateway.exe
+   ```
+
+4. **打开控制台**：`http://<主机IP>:9082/admin`，默认账号 `admin / hand@123` —— **首次登录后请立即修改**。
+5. **接入第一台设备**：在「设备对象」新增设备与点位，保存后首页大盘即可看到采集数据；在「通道管理」添加 MQTT / TDengine / InfluxDB 即可外发。
+
+> ⚠️ `plugins/` 缺失或为空时，网关能启动、能登录，但**一台设备也采不到**。发行包已自带插件，请勿只拷主程序。
+>
+> 手边没有 PLC？可先用 [`backend/cmd/loadtest`](backend/cmd/loadtest/README.md) 自带的假 PLC 跑通完整采集链路。
+
+## 适用场景
+
+| 适合 | 暂不覆盖（欢迎提 Issue） |
+|---|---|
+| 中小产线、单机部署、Windows 工控机 | IEC 60870-5-104 / IEC 61850 / BACnet / CAN |
+| 西门子、三菱、欧姆龙、罗克韦尔、OPC UA | Kafka / RabbitMQ / MySQL / PostgreSQL 等下游 |
+| DL/T 645 电表、ABB 机器人 | 集群 HA、规则引擎、集中式 fleet 管理 |
+
+**许可**：AGPL-3.0。公司内部部署、通过 Open API / MQTT 对接自有系统无需开源；OEM / 对外交付需商业授权，详见[许可证与 FAQ](#许可证与-faq)。
 
 ## 功能特性
 

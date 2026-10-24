@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Linux, race)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: gofmt
+        working-directory: backend
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt required for:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        working-directory: backend
+        run: go vet ./...
+
+      - name: go test -race
+        working-directory: backend
+        run: go test -race -count=1 -timeout 20m ./...
+
+  backend-windows:
+    name: Backend (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: go test
+        working-directory: backend
+        run: go test -count=1 -timeout 20m ./...
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm ci
+        working-directory: frontend
+        run: npm ci
+
+      - name: npm run build
+        working-directory: frontend
+        run: npm run build
+
+  build:
+    name: Build (all platforms)
+    runs-on: ubuntu-latest
+    needs: [ backend, frontend ]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm ci
+        working-directory: frontend
+        run: npm ci
+
+      # 与本地 / 发行包完全同一条构建路径：前端构建 → 嵌入产物 → 4 平台交叉编译 + 全部插件。
+      - name: Cross-compile main binary and plugins
+        run: bash ./build.sh
+
+      - name: Verify build artifacts
+        run: |
+          expected=$(find backend/driversrc -mindepth 2 -maxdepth 2 -name main.go | wc -l)
+          echo "expected plugins per platform: $expected"
+
+          for f in \
+            backend/iot-gateway \
+            backend/iot-gateway-linux-arm64 \
+            backend/iot-gateway-linux-arm \
+            backend/iot-gateway.exe; do
+            if [ ! -f "$f" ]; then
+              echo "::error::missing binary: $f"
+              exit 1
+            fi
+            echo "ok: $f"
+          done
+
+          for d in \
+            backend/plugins-linux \
+            backend/plugins-linux-arm64 \
+            backend/plugins-linux-arm \
+            backend/plugins-windows; do
+            n=$(find "$d" -maxdepth 1 -type f -name 'iot-driver-*' | wc -l)
+            echo "$d: $n plugins"
+            if [ "$n" -ne "$expected" ]; then
+              echo "::error::$d has $n plugins, expected $expected"
+              exit 1
+            fi
+          done

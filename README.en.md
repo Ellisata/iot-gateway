@@ -2,7 +2,14 @@
 
 English | [简体中文](README.md)
 
-**iot-gateway** is a ready-to-run industrial IoT data acquisition gateway: it polls PLCs and industrial devices on a schedule, pushes collected data to downstream channels such as MQTT, TDEngine and InfluxDB, and ships with an embedded web admin console. The whole system is deployed to gateways or industrial PCs as a **single binary** — no external database required.
+[![CI](https://github.com/Ellisata/iot-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/Ellisata/iot-gateway/actions/workflows/ci.yml)
+![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
+![Release](https://img.shields.io/badge/release-v0.2.0-green)
+![Go](https://img.shields.io/badge/go-1.26-00ADD8)
+
+**One executable + a `plugins/` directory is all it takes to poll PLCs on an industrial PC and push data to MQTT / TDengine / InfluxDB — no database, no runtime to install.**
+
+Polls PLCs and industrial devices on a schedule, ships with an embedded web admin console, and deploys as a Windows service, a Linux systemd unit or a Docker container.
 
 <!-- Admin console tour: an animated GIF -- the only form that actually moves
      on Gitee/GitHub. The video tag is sanitized away, and the raw URL sends
@@ -12,10 +19,42 @@ English | [简体中文](README.md)
      Clicking plays the video from image.edwining.com: the repo's own raw URL
      sends Content-Disposition: attachment, which only downloads, whereas
      this host omits the header and supports Range, so the browser plays it. -->
-[![Admin console](docs/images/demo.en.gif)](https://image.edwining.com/public/redpandacompress_demo%20video.mp4)
+[Admin console](docs/images/demo.en.gif)
 
 *Click the GIF to watch the full demo (62 s)*
 
+## Why iot-gateway
+
+- **Single binary, zero external dependencies** — the frontend is embedded via `go:embed` and SQLite is pure Go (CGO-free); the binary plus `plugins/` is the whole system.
+- **Process-isolated protocol drivers** — all 15 protocols run as separate `plugins/` processes: crashes restart with backoff, wedged processes are recycled, and replacing a binary hot-upgrades the driver without touching the gateway.
+- **Built for the field** — a persistent local outbox with automatic replay, change-only push, zero-downtime config reload, device/point scanning, and reverse MQTT ingestion into time-series databases.
+
+## Try it in 5 minutes
+
+1. **Download** the release for your platform from [Releases](https://gitee.com/wang4856304/iot-gateway/releases) (v0.2.0: Windows amd64, Linux amd64 / arm64).
+2. **Extract** and keep the `iot-gateway` binary and the `plugins/` directory **side by side**.
+3. **Run**:
+
+   ```bash
+   ./iot-gateway        # on Windows, double-click iot-gateway.exe
+   ```
+
+4. **Open the console** at `http://<host-ip>:9082/admin` — default account `admin / hand@123`; **change it immediately after the first login**.
+5. **Add your first device** under Device Objects and save; data appears on the dashboard. Add an MQTT / TDengine / InfluxDB channel under Channel Management to push it downstream.
+
+> ⚠️ With `plugins/` missing or empty the gateway still starts and lets you log in, but **it cannot collect a single point**. Release bundles ship with the plugins — do not copy the binary alone.
+>
+> No PLC at hand? Use the fake PLCs in [`backend/cmd/loadtest`](backend/cmd/loadtest/README.en.md) to exercise the full acquisition chain.
+
+## Scope
+
+| Covered | Not yet covered (issues welcome) |
+|---|---|
+| Small/medium production lines, single-node installs, Windows industrial PCs | IEC 60870-5-104 / IEC 61850 / BACnet / CAN |
+| Siemens, Mitsubishi, Omron, Rockwell, OPC UA | Kafka / RabbitMQ / MySQL / PostgreSQL downstreams |
+| DL/T 645 meters, ABB robots | Clustering / HA, rule engine, central fleet management |
+
+**License**: AGPL-3.0. Internal deployment and integration with your own systems via Open API / MQTT require no source disclosure; OEM or redistribution needs a commercial license — see [License & FAQ](#license--faq).
 
 ## Features
 

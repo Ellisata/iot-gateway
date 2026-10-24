@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v0.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # release.sh 用 bsdtar 生成 Windows zip；Ubuntu 自带的是 GNU tar。
+      - name: Install bsdtar
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
+
+      - name: npm ci
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build release bundles
+        run: bash ./release.sh "$VERSION"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: ${{ env.VERSION }}
+          generate_release_notes: true
+          files: |
+            release/*.zip
+            release/*.tar.gz
+            release/SHA256SUMS.txt
+
+      # 可选：同步到 Gitee Release。仓库 Settings → Secrets 配置 GITEE_TOKEN
+      # （Gitee 私人令牌，勾选 projects 权限）后生效；失败不阻塞 GitHub Release。
+      - name: Publish Gitee Release (optional)
+        if: env.GITEE_TOKEN != ''
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          api="https://gitee.com/api/v5/repos/wang4856304/iot-gateway"
+
+          curl -sS -X POST "$api/releases" \
+            --data-urlencode "access_token=$GITEE_TOKEN" \
+            --data-urlencode "tag_name=$VERSION" \
+            --data-urlencode "name=$VERSION" \
+            --data-urlencode "target_commitish=master" > /tmp/gitee-release.json
+
+          id=$(jq -r '.id // empty' /tmp/gitee-release.json)
+          if [ -z "$id" ]; then
+            id=$(curl -sS "$api/releases/tags/$VERSION?access_token=$GITEE_TOKEN" | jq -r '.id // empty')
+          fi
+          if [ -z "$id" ]; then
+            echo "::warning::could not create or find Gitee release for $VERSION"
+            exit 0
+          fi
+
+          for f in release/*.zip release/*.tar.gz release/SHA256SUMS.txt; do
+            echo "uploading $f"
+            curl -sS -X POST "$api/releases/$id/attach_files" \
+              -F "access_token=$GITEE_TOKEN" \
+              -F "file=@$f"
+          done
