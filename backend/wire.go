@@ -184,6 +184,9 @@ func NewWorkerPool(cfg *configFile.Config) *workerPool.WorkerPool {
 
 // ProvideRouteOptions 组装所有领域路由选项，新增模块在此追加
 func ProvideRouteOptions(
+	// runtimecfg.Reader 供 /agentApi 分组中间件按请求现读 agentApi.enabled。
+	// Wire 已把 *runtimecfg.Manager 绑定到该接口（见下方 wire.Bind）。
+	rcfg runtimecfg.Reader,
 	uc *controller.UserController,
 	dc *controller.DeviceController,
 	ac *controller.DeviceAddressController,
@@ -229,9 +232,10 @@ func ProvideRouteOptions(
 		router.WithDeviceScanRoutes(dsc),
 		router.WithSystemConfigRoutes(scc),
 		router.WithDashboardRoutes(dbc),
-		// dsh（AI Agent）调用面：把上述领域路由再挂一遍到 /agentApi（**无鉴权**）。
+		// dsh（AI Agent）调用面：把上述领域路由再挂一遍到 /agentApi（**无鉴权，
+		// 出厂关闭**，由运行期开关 agentApi.enabled 控制）。
 		// 刻意放在最后 —— 它复用同一批 controller，与前面各 With* 无顺序依赖。
 		// 风险与暴露清单见 router/agentApiRouter.go。
-		router.WithAgentApiRoutes(uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc),
+		router.WithAgentApiRoutes(rcfg, uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc),
 	}
 }

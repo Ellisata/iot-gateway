@@ -721,8 +721,10 @@ var agentApiSurface = map[string]SurfaceEntry{
 				"不要传字符串 \"true\" 或数字 1 —— 类型不符会被拒",
 		}),
 		Note: "修改会写入数据库并覆盖 default.yaml。discovery.enabled / deviceScan.enabled / " +
-			"push.changeOnly 立即生效；plugin.enabled 需**重启网关**后才生效（响应里 requiresRestart=true）。" +
-			"应用失败会回滚数据库与运行状态并返回错误",
+			"push.changeOnly / agentApi.enabled 立即生效；plugin.enabled 需**重启网关**后才生效" +
+			"（响应里 requiresRestart=true）。应用失败会回滚数据库与运行状态并返回错误。" +
+			"注意：agentApi.enabled=false 时本分组整体不可达（包括本接口），" +
+			"重新开启必须走需 JWT 的内部接口 POST /systemConfig/update",
 	},
 	"POST /systemConfig/reset": {
 		Access: AccessWrite,

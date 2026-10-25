@@ -24,6 +24,7 @@ system_config 表里的覆盖行  >  configFile（default.yaml + APP_ENV 环境�
 | `deviceScan.enabled` | 立即生效 | 只拦截**新**扫描；运行中的任务照常结束或由用户取消。 |
 | `push.changeOnly` | 立即生效 | 从下一批采集起生效。`false -> true` 时清空已投递记录，下一批全量下发一次。 |
 | `plugin.enabled` | **重启后生效** | 插件管理器的 `Stop` 是终态的，运行期启停需要重写进程监管生命周期。 |
+| `agentApi.enabled` | 立即生效 | **出厂 false**。控制整组免鉴权的 `/agentApi` 镜像：路由始终注册（gin 启动后不可增删），分组中间件按请求现读开关，关闭时整组返回 403 —— 包括清单与 `/agentApi/systemConfig/update`，即 dsh 不能自己把自己打开。 |
 
 未纳入（有意为之）：`server.port`、`jwt.*`、`log.*`、`sqlite.path`、
 `plugin.dir/glob/timeouts`、`discovery.port/intervalMs`，以及
@@ -101,6 +102,9 @@ CREATE TABLE IF NOT EXISTS system_config (
 - 这些开关能改变网关的对外行为（局域网可见性、扫描能力、推送量、重启后是否
   加载任何协议）。写接口应只对管理员开放。
 - `/agentApi` 按项目现有约定免鉴权，与 plugin 上传、设备删除同一暴露面；
-  风险说明见 `router/agentApiRouter.go` 顶部。若网关会暴露到不可信网络，
-  应先给整个 `/agentApi` 分组加鉴权。
+  **`agentApi.enabled` 出厂 false**，开启后整组可达。风险说明见
+  `router/agentApiRouter.go` 顶部。若网关会暴露到不可信网络，应保持关闭，
+  或给整个 `/agentApi` 分组加鉴权（`OpenApiAuthMiddleware`）。
+- 关闭 `agentApi.enabled` 不需要确认（收紧），**开启需要二次确认**（放开一个
+  免鉴权的写接口组）；页面对这一方向做了确认文案。
 - `plugin.enabled=false` 在重启后会让网关不支持任何协议，页面对该操作做了二次确认。

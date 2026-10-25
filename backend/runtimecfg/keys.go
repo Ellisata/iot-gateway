@@ -32,4 +32,8 @@ const (
 
 	// KeyPluginEnabled 外部协议插件总开关（仅重启生效）。
 	KeyPluginEnabled Key = "plugin.enabled"
+
+	// KeyAgentApiEnabled dsh（AI Agent）免鉴权调用面 /agentApi 的总开关。
+	// 出厂关闭：整个分组无凭据校验，且含删除设备、上传插件等写操作。
+	KeyAgentApiEnabled Key = "agentApi.enabled"
 )

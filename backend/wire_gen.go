@@ -32,6 +32,7 @@ import (
 	_ "embed"
 	_ "iot-gateway/push/influxdb/v3"
 	_ "iot-gateway/push/mqtt"
+	_ "iot-gateway/push/opcuaserver"
 	_ "iot-gateway/push/tdengine/v3"
 	_ "iot-gateway/push/webhook"
 )
@@ -42,12 +43,12 @@ import (
 func InitializeApp() (*AppDependencies, func()) {
 	config := configFile.InitConfig()
 	db := sqlite.InitDB(config)
+	manager := runtimecfg.NewManager(db, config)
 	userService := service.NewUserService(db)
 	userController := controller.NewUserController(userService)
 	workerPool := NewWorkerPool(config)
 	store := realtime.NewStore()
 	recorder := metrics.NewRecorder()
-	manager := runtimecfg.NewManager(db, config)
 	engine := push.NewEngineWithPolicy(db, config, manager)
 	recordSink := NewRecordSink(store, recorder, engine)
 	dispatcher := notify.NewDispatcher(db)
@@ -97,7 +98,7 @@ func InitializeApp() (*AppDependencies, func()) {
 	systemConfigController := controller.NewSystemConfigController(systemConfigService)
 	dashboardService := service.NewDashboardService(recorder)
 	dashboardController := controller.NewDashboardController(dashboardService)
-	v := ProvideRouteOptions(userController, deviceController, deviceAddressController, collectionController, realtimeController, protocolController, pushChannelController, pushChannelFormController, mqttSubscriptionController, pushController, alarmController, alarmWebhookController, alarmWebhookFormController, logFileController, openApiSecretController, openApiSecretService, openApiController, gatewayController, pluginController, deviceScanController, systemConfigController, dashboardController)
+	v := ProvideRouteOptions(manager, userController, deviceController, deviceAddressController, collectionController, realtimeController, protocolController, pushChannelController, pushChannelFormController, mqttSubscriptionController, pushController, alarmController, alarmWebhookController, alarmWebhookFormController, logFileController, openApiSecretController, openApiSecretService, openApiController, gatewayController, pluginController, deviceScanController, systemConfigController, dashboardController)
 	ginEngine := router.SetupRouter(v)
 	channelMonitor := alarm.NewChannelMonitor(db, engine, dispatcher)
 	announcer := discovery.NewAnnouncerWithPolicy(config, serviceGatewayService, openApiSecretService, manager)
@@ -172,6 +173,8 @@ func NewWorkerPool(cfg *configFile.Config) *workerPool.WorkerPool {
 
 // ProvideRouteOptions 组装所有领域路由选项，新增模块在此追加
 func ProvideRouteOptions(
+
+	rcfg runtimecfg.Reader,
 	uc *controller.UserController,
 	dc *controller.DeviceController,
 	ac *controller.DeviceAddressController,
@@ -195,5 +198,5 @@ func ProvideRouteOptions(
 	scc *controller.SystemConfigController,
 	dbc *controller.DashboardController,
 ) []router.RouteOption {
-	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectionRoutes(cc), router.WithRealtimeRoutes(rc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithMqttSubscriptionRoutes(msc), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithAlarmWebhookRoutes(awc), router.WithAlarmWebhookFormRoutes(awfc), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac), router.WithGatewayRoutes(gc), router.WithPluginRoutes(plc), router.WithDeviceScanRoutes(dsc), router.WithSystemConfigRoutes(scc), router.WithDashboardRoutes(dbc), router.WithAgentApiRoutes(uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc)}
+	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectionRoutes(cc), router.WithRealtimeRoutes(rc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithMqttSubscriptionRoutes(msc), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithAlarmWebhookRoutes(awc), router.WithAlarmWebhookFormRoutes(awfc), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac), router.WithGatewayRoutes(gc), router.WithPluginRoutes(plc), router.WithDeviceScanRoutes(dsc), router.WithSystemConfigRoutes(scc), router.WithDashboardRoutes(dbc), router.WithAgentApiRoutes(rcfg, uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc)}
 }

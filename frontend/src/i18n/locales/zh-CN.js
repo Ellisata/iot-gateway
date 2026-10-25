@@ -1412,6 +1412,7 @@ export default {
       deviceScan: '局域网设备扫描',
       push: '数据推送',
       plugin: '协议插件',
+      agentApi: 'AI Agent 调用面',
     },
     fields: {
       discoveryEnabled: {
@@ -1430,12 +1431,18 @@ export default {
         label: '协议插件',
         hint: '网关的全部协议驱动都来自插件目录。关闭后重启网关将不再加载任何协议，所有设备都会被跳过。',
       },
+      agentApiEnabled: {
+        label: '开放 /agentApi',
+        hint: '开启后，任何能访问网关端口的主机都可以在不携带任何凭据的情况下调用 /agentApi 下的全部接口，包括删除设备、上传并加载插件、读取推送凭据。仅应在网关部署于隔离内网、或 AI Agent 与网关同机时开启。',
+      },
     },
     confirm: {
       discoveryTitle: '关闭自动发现？',
       discoveryMessage: '关闭后本网关将停止局域网广播与探询应答，管理平台可能无法自动发现它。采集与上报不受影响。',
       pluginTitle: '关闭协议插件？',
       pluginMessage: '关闭后网关将不再加载任何协议插件。该设置重启网关后生效，届时所有设备都会被跳过。',
+      agentApiTitle: '开启 /agentApi 免鉴权调用面？',
+      agentApiMessage: '开启后，任何能访问该网关端口的主机都将拥有与管理员等价的写权限（删除设备、上传并加载插件、读取推送凭据等），且不需要任何凭据。请确认网关只部署在隔离内网，或 AI Agent 与网关同机。',
       resetTitle: '恢复默认值？',
       resetMessage: '将删除页面保存的覆盖值，回到 default.yaml 的设置。',
     },

@@ -7,6 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"iot-gateway/controller"
+	"iot-gateway/middleware"
+	"iot-gateway/runtimecfg"
 )
 
 // AgentApiPrefix dsh（AI Agent）调用面的路径前缀。
@@ -14,7 +16,12 @@ const AgentApiPrefix = "/agentApi"
 
 // AgentApiRoutes 把领域路由整体挂到 /agentApi 前缀下，供 dsh 调用。
 //
-// ⚠️ 这个分组**不经任何鉴权**（在 middleware.isPublicPath 里按前缀放行）。
+// **出厂关闭**：由运行期开关 agentApi.enabled 控制（default.yaml 默认 false，
+// 管理端「运行开关」页可动态开闭，立即生效）。路由始终注册 —— gin 的路由表
+// 在启动后不可增删 —— 分组中间件按请求现读开关，关闭时整组返回 403
+// （见 middleware.AgentApiSwitchMiddleware）。
+//
+// ⚠️ 开启后这个分组**不经任何鉴权**（在 middleware.isPublicPath 里按前缀放行）。
 // 任何能访问到网关端口的主机都可以调用下表的全部接口，包括：
 //   - POST /agentApi/plugin/importPlugin —— 上传并加载可执行文件（等价于远程代码执行）
 //   - GET  /agentApi/device/deleteDevice/:id —— 删除设备（静默停掉产线采集）
@@ -24,10 +31,14 @@ const AgentApiPrefix = "/agentApi"
 //   - POST /agentApi/systemConfig/update —— 改全局运行开关（可关闭局域网发现、
 //     设备扫描、变化才推送，或让插件在下次重启后全部失效）
 //
-// 这是**刻意的设计选择**，不是遗漏：前提是网关部署在隔离的工业内网，
-// 或 dsh 与网关同机。**若网关会暴露到不可信网络，这个分组必须先加回鉴权**
-// —— 最省事的做法是把下面的 AgentApiRoutes 改成挂 OpenApiAuthMiddleware
-// （见 openApiRouter.go），revoke 时只需在 isPublicPath 去掉一行前缀。
+// 因此默认关闭，开启的前提只有两个：网关部署在隔离的工业内网，或 dsh 与网关
+// 同机。**若网关会暴露到不可信网络，本开关必须保持关闭**；确有远程调用需求时，
+// 应把下面的 AgentApiRoutes 改成挂 OpenApiAuthMiddleware（见 openApiRouter.go），
+// 而不是打开这个开关。
+//
+// 开关**不能由 dsh 自己打开**：关闭状态下 /agentApi/systemConfig/update 同样被
+// 403 拦下，必须在管理端登录后用 /systemConfig/update 修改 —— 否则免鉴权调用面
+// 就能自己恢复自己，开关等于没有。
 //
 // 与 /openApi 的分工：那是给第三方系统开发者的**只读**对外契约（X-Api-Key 鉴权、
 // 脱敏 VO、带兼容性承诺）；本分组是给 dsh 的**全量**调用面（含全部写接口、
@@ -43,6 +54,7 @@ const AgentApiPrefix = "/agentApi"
 // 既能挂根路径，也能挂这里。
 func AgentApiRoutes(
 	r *gin.Engine,
+	cfg runtimecfg.Reader,
 	uc *controller.UserController,
 	dc *controller.DeviceController,
 	ac *controller.DeviceAddressController,
@@ -65,6 +77,9 @@ func AgentApiRoutes(
 	dbc *controller.DashboardController,
 ) {
 	g := r.Group(AgentApiPrefix)
+	// 整组的总开关（agentApi.enabled，出厂 false）。放在最前面：任何一条
+	// 镜像路由 —— 包括清单与 systemConfig —— 在关闭时都必须被拦下。
+	g.Use(middleware.AgentApiSwitchMiddleware(cfg))
 	{
 		// 接口清单：dsh 用它判断哪些接口只读、哪些要先问人。
 		// **必须挂在领域路由之前**——不依赖顺序，只是让读到这里的人先看见它。

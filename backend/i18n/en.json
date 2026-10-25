@@ -46,6 +46,7 @@
     "err.device_scan_unsupported": "This protocol does not support LAN scan (the plugin providing it declares no discovery capability)",
     "err.device_scan_no_targets": "No scannable target (this host has no usable subnet, or the selected subnets expand to no host address)",
     "err.device_scan_param_invalid": "Invalid scan parameters",
+    "err.agent_api_disabled": "Agent API is disabled (agentApi.enabled=false); enable it on the Runtime Switches page",
     "err.device_point_scan_unsupported": "This protocol does not support point discovery (the plugin providing it declares no point-scan capability)",
     "err.open_api_secret_exists": "Open API secret name already exists",
     "err.open_api_secret_not_found": "Open API secret not found",

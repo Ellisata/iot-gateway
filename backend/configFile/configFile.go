@@ -51,6 +51,27 @@ type Config struct {
 
 	// Plugin 外部协议插件（进程外驱动）配置
 	Plugin PluginConfig `mapstructure:"plugin"`
+
+	// AgentApi dsh（AI Agent）免鉴权调用面（/agentApi）配置
+	AgentApi AgentApiConfig `mapstructure:"agentApi"`
+}
+
+// AgentApiConfig dsh（AI Agent）调用面 /agentApi 的配置。
+//
+// 该分组把全部领域路由整体镜像一遍，且**不校验任何凭据**（见
+// middleware/authMiddleware.go 与 router/agentApiRouter.go 的说明）：能删设备、
+// 上传并加载插件（等价于远程代码执行）、读取推送凭据。故出厂**关闭**，
+// 与 discovery / plugin 等"接进来就能用"的开关方向相反。
+type AgentApiConfig struct {
+	// Enabled 总开关。出厂 false。
+	//
+	// 开启的前提只有两个：网关部署在隔离的工业内网，或 dsh 与网关同机。
+	// 网关一旦暴露到不可信网络，这里必须保持关闭。
+	//
+	// **本项只是默认值**：运行期经过 runtimecfg.Manager 读取，可在「运行开关」页
+	// 动态切换，**立即生效** —— 分组中间件按请求现读开关，关闭后下一次请求即被拒，
+	// 不需要撤掉已注册的路由（gin 的路由表在启动后不可增删）。
+	Enabled bool `mapstructure:"enabled"`
 }
 
 // PushConfig 推送引擎配置。

@@ -51,6 +51,9 @@ var (
 	UnauthorizedEnum = NewBusinessEnum("10002", "未授权", "err.unauthorized")
 	ForbiddenEnum    = NewBusinessEnum("10003", "禁止访问", "err.forbidden")
 	NotFoundEnum     = NewBusinessEnum("10004", "资源不存在", "err.not_found")
+	// AgentApiDisabledEnum /agentApi 分组的总开关（agentApi.enabled）关闭。
+	// 归在通用错误码：它拦的是**整组**接口，不属于任何业务领域。
+	AgentApiDisabledEnum = NewBusinessEnum("10005", "Agent API 未启用", "err.agent_api_disabled")
 
 	// 用户相关错误码
 	UserExistsEnum    = NewBusinessEnum("20001", "用户已存在", "err.user_exists")

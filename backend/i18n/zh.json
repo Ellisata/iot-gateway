@@ -46,6 +46,7 @@
     "err.device_scan_unsupported": "该协议不支持局域网扫描（提供该协议的插件未声明扫描能力）",
     "err.device_scan_no_targets": "没有可扫描的目标（本机没有可用网段，或所选网段展开后没有主机地址）",
     "err.device_scan_param_invalid": "扫描参数不合法",
+    "err.agent_api_disabled": "Agent API 未启用（agentApi.enabled=false），请在管理端「运行开关」页开启",
     "err.device_point_scan_unsupported": "该协议不支持点位扫描（提供该协议的插件未声明点位扫描能力）",
     "err.open_api_secret_exists": "开放接口密钥名称已存在",
     "err.open_api_secret_not_found": "开放接口密钥不存在",

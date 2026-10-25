@@ -1,1 +1,0 @@
-import{Rt as e,Yt as t}from"./vendor-IKDBeHKV.js";import{t as n}from"./AlarmTable-CBn3qYj2.js";var r={__name:`IndexView`,setup(r){return(r,i)=>(t(),e(n,{"target-type":`point_threshold`}))}};export{r as default};

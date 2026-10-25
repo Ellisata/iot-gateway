@@ -99,6 +99,18 @@ var specs = []Spec{
 		Mode:          ApplyRestart,
 		Base:          func(c *configFile.Config) bool { return c.Plugin.Enabled },
 	},
+	{
+		Key:           KeyAgentApiEnabled,
+		Type:          ValueTypeBool,
+		Group:         "agentApi",
+		GroupLabelKey: "runtimeConfig.groups.agentApi",
+		LabelKey:      "runtimeConfig.fields.agentApiEnabled.label",
+		DescKey:       "runtimeConfig.fields.agentApiEnabled.hint",
+		// 分组中间件按请求现读开关（middleware.AgentApiSwitchMiddleware），
+		// 不需要启停组件。
+		Mode: ApplyHotRead,
+		Base: func(c *configFile.Config) bool { return c.AgentApi.Enabled },
+	},
 }
 
 // All 返回注册表的副本，调用方不得依赖修改它来影响运行时。

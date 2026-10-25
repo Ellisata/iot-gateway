@@ -30,10 +30,10 @@ var publicPaths = map[string]bool{
 //   - /agentApi/* 是**真的没有任何凭据校验** —— 任何能访问到网关端口的主机都能
 //     调用，包括删除设备、上传并加载插件（可执行文件）、修改推送配置等写操作。
 //
-// 这是刻意的设计选择（前提：隔离内网，或 dsh 与网关同机），不是遗漏。
-// 取舍与完整暴露清单见 router/agentApiRouter.go 的文件头注释。
-//
-// **要收回这个口子，删掉本常量与下面那一行 HasPrefix 即可** —— 无需改动任何路由注册。
+// 因此整组出厂关闭，由运行期开关 agentApi.enabled 控制（分组中间件
+// AgentApiSwitchMiddleware 按请求现读，关闭时回 403）。放行在这里只说明
+// "不走 JWT"；是否可达由那个开关决定，两者不要混。取舍、开关语义与完整
+// 暴露清单见 router/agentApiRouter.go 的文件头注释。
 //
 // 写成常量而非字面量：router 包已用同一前缀建组（router.AgentApiPrefix），
 // 两处必须一致，钉在这一个值上。

@@ -15,8 +15,15 @@ import (
 
 	"iot-gateway/controller"
 	"iot-gateway/router"
+	"iot-gateway/runtimecfg"
 	"iot-gateway/service"
 )
+
+// staticReader 是 runtimecfg.Reader 的测试替身。只实现 Bool —— 路由层
+// 对开关的全部需求就是它。
+type staticReader map[runtimecfg.Key]bool
+
+func (r staticReader) Bool(key runtimecfg.Key) bool { return r[key] }
 
 // newTestEngine 用**真实的** ProvideRouteOptions + SetupRouter 组装引擎。
 //
@@ -24,9 +31,19 @@ import (
 // （nil 接收者的方法值在 Go 里合法），handler 要到真正被调用时才会解引用，
 // 所以这个测试不需要数据库、配置或任何运行时依赖 —— 而它断言的是**真实接线**，
 // 不是测试里另抄一份的路由表。
-func newTestEngine() *gin.Engine {
+//
+// agentApiEnabled 决定 /agentApi 分组开关的取值；路由**始终**注册，
+// 开关只影响分组中间件是否放行（见 middleware.AgentApiSwitchMiddleware）。
+func newTestEngine(agentApiEnabled bool) *gin.Engine {
+	return newTestEngineWithReader(staticReader{runtimecfg.KeyAgentApiEnabled: agentApiEnabled})
+}
+
+// newTestEngineWithReader 允许用例自己持有 reader 并改值，以验证开关是
+// **运行期**读取（同一个引擎，请求之间翻转取值）。
+func newTestEngineWithReader(cfg runtimecfg.Reader) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	return router.SetupRouter(ProvideRouteOptions(
+		cfg,
 		(*controller.UserController)(nil),
 		(*controller.DeviceController)(nil),
 		(*controller.DeviceAddressController)(nil),
@@ -85,7 +102,7 @@ func isMirroredElsewhere(path string) bool {
 // 反过来也守：AgentApiRoutes 里挂了某个领域、但 ProvideRouteOptions 里没有它，
 // 或者前缀拼错（/agentapi、/agent_api），这里同样会红。
 func TestAgentApiMirrorsInternalRoutes(t *testing.T) {
-	routes := registeredRoutes(newTestEngine())
+	routes := registeredRoutes(newTestEngine(true))
 
 	const prefix = router.AgentApiPrefix
 
@@ -126,18 +143,22 @@ func TestAgentApiMirrorsInternalRoutes(t *testing.T) {
 	t.Logf("内部路由 %d 条，%s 下镜像 %d 条", internal, prefix, mirrored)
 }
 
-// TestAgentApiIsUnauthenticated 钉住本次改动的**核心承诺**：/agentApi 不走凭据校验。
+// TestAgentApiIsUnauthenticated 钉住本次改动的**核心承诺**：开关开启后，
+// /agentApi 不走凭据校验。
 //
 // 上面那条守卫只保证"路由挂上了"；挂上了却被 AuthMiddleware 拦住同样是坏的
 // —— 对 dsh 而言两者都是"调不通"，但成因完全不同（一个改 agentApiRouter.go，
 // 一个改 authMiddleware.go）。这条把后半段钉死。
+//
+// 注意本用例只覆盖**开关开启**的情形（否则分组中间件会先回 403）；
+// 「关闭时整组不可达」由 TestAgentApiObeysSwitch 钉住。
 //
 // 用**哨兵 handler** 而不是真接口来探：真 handler 的 controller 是 nil，
 // 一调就 panic（靠 gin.Recovery 兜住）。那样虽然也能断言"不是 401"，
 // 但会打出一大段 panic 栈，让后来的人误以为测试坏了。
 // 哨兵只回一个固定状态码，把"是否被鉴权挡下"这件事从"handler 能否跑通"里剥离出来。
 func TestAgentApiIsUnauthenticated(t *testing.T) {
-	engine := newTestEngine()
+	engine := newTestEngine(true)
 
 	// 同一个 handler 挂两个位置：内部根路径 与 /agentApi 镜像路径。
 	const sentinel = 299
@@ -173,6 +194,32 @@ func doRequest(e *gin.Engine, method, path string) int {
 	return w.Code
 }
 
+// TestAgentApiObeysSwitch 钉住「出厂关闭、可在运行期开启」。
+//
+// gin 的路由表在启动后不可增删，所以关闭不能表现为"没挂路由"（那会是 404），
+// 只能是分组中间件把整组拦下（403）。因此这里断言的是同一张路由表在开关
+// 两个取值下的行为，且**翻转 reader 后立刻生效** —— 若中间件把开关缓存在
+// 构造期，第二段会红。
+//
+// 清单端点（/__surface）必须一并被拦：dsh 会先读清单再决定调什么，
+// 若关闭时清单还可读，它会据此认为整组可用。
+func TestAgentApiObeysSwitch(t *testing.T) {
+	reader := staticReader{runtimecfg.KeyAgentApiEnabled: false}
+	engine := newTestEngineWithReader(reader)
+	probe := router.AgentApiPrefix + "/__surface"
+
+	if got := doRequest(engine, "GET", probe); got != http.StatusForbidden {
+		t.Fatalf("关闭时 GET %s 得到 %d，期望 403 —— 分组中间件没拦住（或读到了过期值）",
+			probe, got)
+	}
+
+	reader[runtimecfg.KeyAgentApiEnabled] = true
+	if got := doRequest(engine, "GET", probe); got != http.StatusOK {
+		t.Fatalf("开启后 GET %s 得到 %d，期望 200 —— 开关没有按请求现读，可能被缓存在构造期",
+			probe, got)
+	}
+}
+
 // TestAgentApiSurfaceIsComplete 是 agentApiSurface.go 分类表的**完整性守卫**。
 //
 // 这张表是 dsh 判断"能不能直接调"的唯一依据，而它是一份**手写的**清单 ——
@@ -184,7 +231,7 @@ func doRequest(e *gin.Engine, method, path string) int {
 // 两种漂移都不会有任何运行时症状，只有 dsh 那边会莫名其妙地失败，
 // 而排查方向会指向 dsh 而不是这张表。所以必须由测试来咬。
 func TestAgentApiSurfaceIsComplete(t *testing.T) {
-	routes := registeredRoutes(newTestEngine())
+	routes := registeredRoutes(newTestEngine(true))
 
 	// 表里声明的（去掉 /agentApi 前缀，还原成键的形式）
 	declared := map[string]bool{}

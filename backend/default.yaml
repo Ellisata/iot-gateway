@@ -1,8 +1,8 @@
 # ============================================================================
 # 运行期配置覆盖：本文件是**默认值**。
 #
-# 其中 discovery.enabled / deviceScan.enabled / push.changeOnly / plugin.enabled
-# 可在管理端「运行开关」页面动态修改：修改结果写入 SQLite 的 system_config 表，
+# 其中 discovery.enabled / deviceScan.enabled / push.changeOnly / plugin.enabled /
+# agentApi.enabled 可在管理端「运行开关」页面动态修改：修改结果写入 SQLite 的 system_config 表，
 # 优先级高于本文件，重启后仍然有效；页面「恢复默认」删除覆盖值，回到这里。
 # 未登记在 runtimecfg 注册表里的配置项仍只在本文件维护，改动需要重启。
 # 完整契约（生效方式、更新事务、新增开关的步骤）见 specs/runtime-config.md。
@@ -193,3 +193,22 @@ plugin:
   # 该目录下的代码，加载新版本与首次加载并无信任级别差异。
   # 置 true 后回退旧行为：检测到替换只警告，继续跑旧版本，重启网关才生效。
   disableHotUpgrade: false
+
+# dsh（AI Agent）调用面：把全部领域路由整体镜像到 /agentApi 前缀下。
+#
+# **这个分组不校验任何凭据**（/openApi 至少还要 X-Api-Key），任何能连到网关
+# 端口的主机都可调用其全部接口，包括删除设备、上传并加载插件（等价于远程
+# 代码执行）、读取推送通道里的 MQTT 口令、创建用户。
+#
+# 因此本项出厂为 **false**，与 discovery / deviceScan / plugin 的方向相反：
+# 那几项的默认值回答"接进来能不能用"，本项回答"能不能被同网段任何人接管"。
+# 只有两种情况才该打开：网关部署在隔离的工业内网，或 dsh 与网关同机。
+#
+# **本项是默认值**，可在「运行开关」页动态修改，**立即生效**（分组中间件
+# 按请求现读开关）。关闭后 /agentApi/* 一律返回 403，采集与上报完全不受影响；
+# 已注册的路由不撤销 —— gin 的路由表在启动后不可增删，所以这里靠中间件
+# 而不是靠"不挂载"。开启与关闭都请走管理端页面（需 JWT）；关掉之后 dsh 自己
+# 就调不了 /agentApi/systemConfig/update，这是刻意的：不能让免鉴权的调用面
+# 自己把自己重新打开。
+agentApi:
+  enabled: false

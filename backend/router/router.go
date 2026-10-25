@@ -8,6 +8,7 @@ import (
 
 	"iot-gateway/controller"
 	"iot-gateway/middleware"
+	"iot-gateway/runtimecfg"
 	"iot-gateway/service"
 	"iot-gateway/web"
 )
@@ -194,11 +195,13 @@ func WithDashboardRoutes(dbc *controller.DashboardController) RouteOption {
 	}
 }
 
-// WithAgentApiRoutes dsh（AI Agent）调用面路由选项（**无鉴权**）。
+// WithAgentApiRoutes dsh（AI Agent）调用面路由选项（**无鉴权，出厂关闭**）。
 //
 // 与其余 With* 的差别：它是**整组**挂载 —— 把各领域路由的同一份定义再挂一遍到
-// /agentApi 前缀下，而不是新写一套路由表。风险与设计取舍见 agentApiRouter.go。
+// /agentApi 前缀下，而不是新写一套路由表；整组是否可达由运行期开关
+// agentApi.enabled 决定。风险与设计取舍见 agentApiRouter.go。
 func WithAgentApiRoutes(
+	cfg runtimecfg.Reader,
 	uc *controller.UserController,
 	dc *controller.DeviceController,
 	ac *controller.DeviceAddressController,
@@ -221,6 +224,6 @@ func WithAgentApiRoutes(
 	dbc *controller.DashboardController,
 ) RouteOption {
 	return func(r *gin.Engine) {
-		AgentApiRoutes(r, uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc)
+		AgentApiRoutes(r, cfg, uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc)
 	}
 }

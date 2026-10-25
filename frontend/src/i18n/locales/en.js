@@ -1424,6 +1424,7 @@ export default {
       deviceScan: 'LAN device scan',
       push: 'Data push',
       plugin: 'Protocol plugins',
+      agentApi: 'AI Agent API',
     },
     fields: {
       discoveryEnabled: {
@@ -1442,12 +1443,18 @@ export default {
         label: 'Protocol plugins',
         hint: 'All protocol drivers come from the plugin directory. If disabled, the gateway loads no protocols after restart and every device is skipped.',
       },
+      agentApiEnabled: {
+        label: 'Expose /agentApi',
+        hint: 'When enabled, any host that can reach the gateway port can call every /agentApi endpoint without credentials, including deleting devices, uploading and loading plugins, and reading push credentials. Enable it only on an isolated industrial network, or when the AI Agent runs on the same host as the gateway.',
+      },
     },
     confirm: {
       discoveryTitle: 'Disable discovery?',
       discoveryMessage: 'The gateway will stop LAN broadcasts and probe replies, so the management platform may no longer discover it automatically. Collection and reporting are unaffected.',
       pluginTitle: 'Disable protocol plugins?',
       pluginMessage: 'The gateway will load no protocol plugins after restart, and every device will be skipped. This takes effect only after a restart.',
+      agentApiTitle: 'Expose the unauthenticated /agentApi surface?',
+      agentApiMessage: 'Any host that can reach this gateway port will get administrator-equivalent write access (delete devices, upload and load plugins, read push credentials) without any credentials. Make sure the gateway runs on an isolated network, or that the AI Agent runs on the same host.',
       resetTitle: 'Restore default?',
       resetMessage: 'The saved override will be deleted and the value from default.yaml will apply.',
     },

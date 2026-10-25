@@ -17,7 +17,7 @@ import (
 // /openApi/*（见 isMirroredElsewhere），它只保证"内部接口都有 /agentApi 镜像"，
 // 对外接口不在它的守备范围内 —— 所以需要这条。
 func TestOpenApiRoutesRegistered(t *testing.T) {
-	routes := registeredRoutes(newTestEngine())
+	routes := registeredRoutes(newTestEngine(true))
 
 	want := []string{
 		"GET /openApi/device/page",
