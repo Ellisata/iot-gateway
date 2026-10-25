@@ -27,7 +27,7 @@
 
 ## 5 分钟试用
 
-1. **下载**：从 [Gitee Releases](https://gitee.com/wang4856304/iot-gateway/releases) 或 [GitHub Releases](https://github.com/Ellisata/iot-gateway/releases) 获取对应平台发行包（v0.2.0：Windows amd64、Linux amd64 / arm64）。
+1. **下载**：从 [Gitee Releases](https://gitee.com/wang4856304/iot-gateway/releases) 或 [GitHub Releases](https://github.com/Ellisata/iot-gateway/releases) 获取对应平台发行包（Windows amd64、Linux amd64 / arm64）。
 2. **解压**：保持 `iot-gateway`（Windows 为 `iot-gateway.exe`）与 `plugins/` 目录**同层**。
 3. **运行**：
 
