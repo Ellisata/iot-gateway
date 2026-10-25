@@ -29,7 +29,7 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 
 ## Try it in 5 minutes
 
-1. **Download** the release for your platform from [Releases](https://gitee.com/wang4856304/iot-gateway/releases) (v0.2.0: Windows amd64, Linux amd64 / arm64).
+1. **Download** the release for your platform from [Gitee Releases](https://gitee.com/wang4856304/iot-gateway/releases) or [GitHub Releases](https://github.com/Ellisata/iot-gateway/releases) (v0.2.0: Windows amd64, Linux amd64 / arm64).
 2. **Extract** and keep the `iot-gateway` binary and the `plugins/` directory **side by side**.
 3. **Run**:
 
