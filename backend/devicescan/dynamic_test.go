@@ -7,8 +7,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/configFile"
-	"iot-gateway/driver"
 	"iot-gateway/runtimecfg"
 )
 

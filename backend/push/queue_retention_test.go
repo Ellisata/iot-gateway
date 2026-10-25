@@ -28,9 +28,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driversdk"
 	"iot-gateway/collector"
-	"iot-gateway/driver"
-	"iot-gateway/driversdk"
 	"iot-gateway/push"
 )
 

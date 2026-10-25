@@ -31,10 +31,10 @@ import (
 	"testing"
 	"time"
 
-	"iot-gateway/driver"
-	"iot-gateway/driversdk"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driversdk"
+	"github.com/Ellisata/iot-gateway-sdk/pluginwire"
 	"iot-gateway/model/po"
-	"iot-gateway/pluginwire"
 )
 
 // benchPointCounts 覆盖「单点小设备」到「5000 点大设备」之间常见的批次规模。
@@ -142,7 +142,7 @@ func BenchmarkPluginOverheadRead(b *testing.B) {
 		b.Run(fmt.Sprintf("InProcess/points=%d", n), func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				if _, err := local.Read(addrs); err != nil {
+				if _, err := local.Read(sdkAddrs(addrs)); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -151,7 +151,7 @@ func BenchmarkPluginOverheadRead(b *testing.B) {
 		b.Run(fmt.Sprintf("PluginRPC/points=%d", n), func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				if _, err := rd.Read(addrs); err != nil {
+				if _, err := rd.Read(sdkAddrs(addrs)); err != nil {
 					b.Fatal(err)
 				}
 			}

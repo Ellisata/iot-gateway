@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/collector"
-	"iot-gateway/driver"
 )
 
 func rec(deviceID, addrID, value string) collector.CollectedRecord {

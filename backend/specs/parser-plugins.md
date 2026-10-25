@@ -225,7 +225,7 @@ paho onMessage → 有界队列（8192） → 解析 worker（批 ≤256）
 
 - 套件 `parsersdk/`、源码 `parsersrc/`、产物 `iot-parser-<name>`；
 - 宿主适配器 `pluginhost/adapter_parser.go`，**不复制** `process.go` / `upgrade.go`；
-- 线协议复用 [pluginwire/](../pluginwire/)，新增 `parse(batch)` 方法；
+- 线协议复用 [pluginwire/](../sdk/pluginwire/)，新增 `parse(batch)` 方法；
 - `Meta` 声明 `APIVersion`、解析器名、配置 JSON Schema、输出契约版本；
 - 必须按批 RPC；单批结果带逐条错误；
 - 插件崩溃/重启不得断开订阅：队列保留，标记错误，恢复后继续；

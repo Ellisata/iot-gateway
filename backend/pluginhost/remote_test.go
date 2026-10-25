@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"iot-gateway/driver"
-	"iot-gateway/driversdk"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driversdk"
 	"iot-gateway/model/po"
 )
 
@@ -47,7 +47,7 @@ func (d *ctlDriver) IsConnected() bool {
 	defer d.mu.Unlock()
 	return d.connected
 }
-func (d *ctlDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error) {
+func (d *ctlDriver) Read(addrs []driver.DeviceAddress) ([]driver.ReadResult, error) {
 	d.readCalls.Add(1)
 	d.mu.Lock()
 	err, n := d.readErr, d.resultCount
@@ -185,7 +185,7 @@ func TestRemoteDriverLifecycle(t *testing.T) {
 	}
 
 	addrs := testAddrs()
-	got, err := rd.Read(addrs)
+	got, err := rd.Read(sdkAddrs(addrs))
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestRemoteDriverReadBeforeConnect(t *testing.T) {
 	stub := &ctlDriver{resultCount: -1}
 	rd, _ := newTestRemote(t, stub, false)
 
-	if _, err := rd.Read(testAddrs()); !errors.Is(err, ErrNotConnected) {
+	if _, err := rd.Read(sdkAddrs(testAddrs())); !errors.Is(err, ErrNotConnected) {
 		t.Fatalf("未连接时 Read 应返回 ErrNotConnected，得到 %v", err)
 	}
 	if n := stub.readCalls.Load(); n != 0 {
@@ -244,7 +244,7 @@ func TestRemoteDriverReadIndexAlignment(t *testing.T) {
 	if err := rd.Connect(`{}`); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	_, err := rd.Read(testAddrs())
+	_, err := rd.Read(sdkAddrs(testAddrs()))
 	if err == nil {
 		t.Fatal("结果数量不符应报错")
 	}
@@ -274,7 +274,7 @@ func TestRemoteDriverConnectedFollowsDriverError(t *testing.T) {
 		d.readErr = errors.New("link down")
 	})
 
-	if _, err := rd.Read(testAddrs()); err == nil {
+	if _, err := rd.Read(sdkAddrs(testAddrs())); err == nil {
 		t.Fatal("驱动报错应向上返回")
 	}
 	if rd.IsConnected() {
@@ -300,7 +300,7 @@ func TestRemoteDriverProcessDeathFlipsConnected(t *testing.T) {
 	if rd.IsConnected() {
 		t.Error("进程下线后 IsConnected() 必须为 false")
 	}
-	if _, err := rd.Read(testAddrs()); !errors.Is(err, ErrProcessDown) {
+	if _, err := rd.Read(sdkAddrs(testAddrs())); !errors.Is(err, ErrProcessDown) {
 		t.Errorf("进程下线后 Read 应返回 ErrProcessDown，得到 %v", err)
 	}
 }
@@ -317,7 +317,7 @@ func TestRemoteDriverRPCFailureFlipsConnected(t *testing.T) {
 
 	// 驱动级错误：帧完好，应答里 connected 仍为 true（驱动只是读失败但仍连着）。
 	stub.set(func(d *ctlDriver) { d.readErr = errors.New("transient") })
-	if _, err := rd.Read(testAddrs()); err == nil {
+	if _, err := rd.Read(sdkAddrs(testAddrs())); err == nil {
 		t.Fatal("驱动报错应向上返回")
 	}
 	if !rd.IsConnected() {
@@ -360,7 +360,7 @@ func TestRemoteDriverEpochRestartForcesReconnect(t *testing.T) {
 		t.Fatal("进程重启后 IsConnected() 必须为 false，否则会向新进程发陈旧会话 id")
 	}
 	// Read 必须拒绝，而不是把陈旧会话 id 发出去。
-	if _, err := rd.Read(testAddrs()); err == nil {
+	if _, err := rd.Read(sdkAddrs(testAddrs())); err == nil {
 		t.Fatal("进程重启后 Read 应被拒绝（陈旧会话作废），不得发往新进程")
 	}
 
@@ -371,7 +371,7 @@ func TestRemoteDriverEpochRestartForcesReconnect(t *testing.T) {
 	if !rd.IsConnected() {
 		t.Fatal("重连后 IsConnected() 应为 true")
 	}
-	got, err := rd.Read(testAddrs())
+	got, err := rd.Read(sdkAddrs(testAddrs()))
 	if err != nil {
 		t.Fatalf("重连后 Read: %v", err)
 	}

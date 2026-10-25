@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"iot-gateway/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 )
 
 func mustParse(t *testing.T, raw string) *Rule {

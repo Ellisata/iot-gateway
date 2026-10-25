@@ -30,6 +30,14 @@ WORKDIR /src
 # 国内模块代理加速(直连 proxy.golang.org 会超时)
 ENV GOPROXY=https://goproxy.cn,direct
 
+# SDK 与官方驱动都是独立 Go module，通过 backend/ 下的 submodule 提供：
+#   backend/sdk/        Apache-2.0 驱动 SDK
+#   backend/driversrc/  AGPL-3.0 官方驱动
+# backend/go.mod 用 replace ./sdk / ./driversrc 指向它们。先把两个 go.mod 复制进来，
+# 让 go mod download 能解析本地 replace。
+COPY backend/sdk/go.mod ./sdk/go.mod
+COPY backend/driversrc/go.mod backend/driversrc/go.sum ./driversrc/
+
 # 先复制模块清单,利用层缓存
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
@@ -51,11 +59,12 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /out/iot-
 # 目录布局是拍平的一层:driversrc/*/ 直接就是插件目录,产物名取目录 basename,
 # 因此目录名必须唯一且不含层级。
 RUN mkdir -p /out/plugins && built=0 && \
-    for d in driversrc/*/; do \
+    cd driversrc && \
+    for d in */; do \
         [ -f "${d}main.go" ] || continue; \
         name="$(basename "$d")"; \
         CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" \
-            -o "/out/plugins/iot-driver-${name}" "./${d}" || exit 1; \
+            -o "/out/plugins/iot-driver-${name}" "./${name}" || exit 1; \
         echo "  [plugin] ${name}"; \
         built=$((built + 1)); \
     done && \

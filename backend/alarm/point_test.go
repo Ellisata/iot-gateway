@@ -9,7 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"iot-gateway/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/model/po"
 )
 

@@ -25,8 +25,8 @@ import (
 	"fmt"
 	"strings"
 
-	"iot-gateway/driver"
-	"iot-gateway/driversdk"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driversdk"
 )
 
 // register 把插件写入三个运行时注册表。

@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/collector"
-	"iot-gateway/driver"
 )
 
 const (

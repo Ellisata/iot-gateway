@@ -10,10 +10,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"iot-gateway/driver"
-	"iot-gateway/driversdk"
-	"iot-gateway/model/po"
-	"iot-gateway/pluginwire"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driversdk"
+	"github.com/Ellisata/iot-gateway-sdk/pluginwire"
 )
 
 // processLink 抽象 remoteDriver 对底层插件进程的依赖，便于测试注入替身。
@@ -122,7 +121,7 @@ func (d *remoteDriver) Connect(protocolJSON string) error {
 	return nil
 }
 
-func (d *remoteDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error) {
+func (d *remoteDriver) Read(addrs []driver.DeviceAddress) ([]driver.ReadResult, error) {
 	d.mu.Lock()
 	sess := d.session
 	d.mu.Unlock()

@@ -12,9 +12,9 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/configFile"
 	"iot-gateway/devicescan"
-	"iot-gateway/driver"
 	"iot-gateway/enums"
 	"iot-gateway/model/dto"
 	"iot-gateway/model/po"

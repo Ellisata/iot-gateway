@@ -31,21 +31,13 @@
 │   └── vo/              # 响应对象
 ├── database/sqlite/     # 数据库层 + migrations/*.sql(按文件名顺序执行)
 ├── collector/           # 采集引擎(核心): 轮询任务 + 配置热加载 watcher
-├── driver/              # 协议无关的契约与注册表（**不含任何协议实现**）
-│   ├── driver.go        # Driver 接口 + 协议注册表(Register/RegisterExternal/Unregister/Create/PingDevice)
-│   ├── types.go         # DataType(编解码函数带 json:"-",不出插件进程)
-│   ├── typeRegistry.go  # 类型注册表(TypeRegistry,按 scope 前缀命名空间)
-│   ├── dataTypeMap.go   # 通用类型清单 + scope 映射(内置基线表已清空,见文件内注释)
-│   ├── rangeSig.go      # RangeSig:区间缓存键,插件与网关共用的契约(插件也在用)
-│   ├── discovery.go     # 扫描发现契约:DiscoverySpec/ScanTarget/DiscoveredDevice
-│   └── pointDiscovery.go # 点位扫描契约:PointDiscoverySpec/PointScanResult/DiscoveredPoint(**与 discovery.go 是两件相反的事**,见下)
-├── pluginwire/          # 进程外插件的**传输层**(只依赖标准库):帧编解码/方法名/RemoteError
+├── driveradapter/       # 宿主侧 po.DeviceAddress ↔ SDK driver.DeviceAddress 转换
 ├── pluginhost/          # 进程外插件宿主(**与插件种类无关**):目录扫描/进程监管/RPC/热升级/权限校验
-│   ├── adapter_driver.go #   驱动侧适配:describe → driver 的三张运行时注册表(见该文件头的边界说明)
+│   ├── adapter_driver.go #   驱动侧适配:describe → sdk/driver 的三张运行时注册表(见该文件头的边界说明)
 │   ├── provision.go     #   驱动侧适配:iot_protocol 行供给(只插入/只补空)
-│   └── remote.go        #   驱动侧适配:把 RPC 调用包装成 driver.Driver 的 remoteDriver
-├── driversdk/           # 进程外驱动插件开发套件(Main/Serve/Meta/RPC 参数;依赖 pluginwire)
-├── driversrc/           # 协议插件的源码(**协议的唯一实现处**,编译成 iot-driver-* 独立可执行文件)
+│   └── remote.go        #   驱动侧适配:把 RPC 调用包装成 sdk/driver.Driver 的 remoteDriver
+├── sdk/                 # 驱动 SDK 独立仓库(**submodule**,Apache-2.0):driver/ + pluginwire/ + driversdk/
+├── driversrc/           # 官方驱动独立仓库(**submodule**,AGPL-3.0,独立 Go module;协议的唯一实现处)
 │   ├── modbus/          # ModBus.TCP / ModBus.RTU;实现在 modbusdrv/
 │   ├── mitsubishi/      # Mitsubishi.MC.TCP / .Serial;实现在 mitsubishidrv/（包名 mitsubishi）
 │   ├── s7/              # Siemens.S7;实现在 s7drv/（包名 s7）
@@ -100,8 +92,9 @@
 - 启动顺序有硬约束([main.go](main.go)):**`DriverManager.Start()` 必须早于 `CollectorEngine.Start()`** —— 插件驱动要先完成注册,采集引擎建任务时才能为使用插件协议的设备创建驱动,否则这些设备首轮会被判为「协议不支持」而跳过。停止顺序相反(插件管理器最后停)。
 
 ### 协议插件([pluginhost/](pluginhost/), [driversrc/](driversrc/))
-- 全部协议是进程外插件:独立可执行文件 `iot-driver-*`,由 `pluginhost.Manager` 扫描 `plugin.dir`(相对 `os.Executable()` 解析)、校验插件的 `driversdk.Meta.APIVersion` 并握手、把驱动工厂与类型/scope 注册进 `driver` 的运行时注册表,并在 `iot_protocol` 表里自动维护协议行(只插入、只补空,绝不覆盖运维改过的非空表单)。
-- **宿主分成通用核心与适配层**:扫描/进程监管/帧 RPC/热升级/目录权限校验([process.go](pluginhost/process.go) · [upgrade.go](pluginhost/upgrade.go) · [client.go](pluginhost/client.go))不认识任何插件种类,只依赖 [pluginwire/](pluginwire/);认识「驱动」的只有 [adapter_driver.go](pluginhost/adapter_driver.go) · [provision.go](pluginhost/provision.go) · [remote.go](pluginhost/remote.go)。将来推送通道进程外化时,加 `adapter_push.go` 而不复制通用核心。
+- **仓库边界**:宿主直接 import `sdk/`(Apache-2.0);官方驱动在 `driversrc/`(AGPL-3.0,独立仓库 submodule)。核心已不再保留 `driver/`、`pluginwire/`、`driversdk/` 副本;数据库模型与 SDK `DeviceAddress` 的转换统一在 `driveradapter/`。第三方驱动依赖 `github.com/Ellisata/iot-gateway-sdk`,不要 import 网关核心;官方驱动在 `iot-gateway-drivers` 仓库维护。
+- 全部协议是进程外插件:独立可执行文件 `iot-driver-*`,由 `pluginhost.Manager` 扫描 `plugin.dir`(相对 `os.Executable()` 解析)、校验插件的 `driversdk.Meta.APIVersion` 并握手、把驱动工厂与类型/scope 注册进 `sdk/driver` 的运行时注册表,并在 `iot_protocol` 表里自动维护协议行(只插入、只补空,绝不覆盖运维改过的非空表单)。
+- **宿主分成通用核心与适配层**:扫描/进程监管/帧 RPC/热升级/目录权限校验([process.go](pluginhost/process.go) · [upgrade.go](pluginhost/upgrade.go) · [client.go](pluginhost/client.go))不认识任何插件种类,只依赖 [sdk/pluginwire/](sdk/pluginwire/);认识「驱动」的只有 [adapter_driver.go](pluginhost/adapter_driver.go) · [provision.go](pluginhost/provision.go) · [remote.go](pluginhost/remote.go)。将来推送通道进程外化时,加 `adapter_push.go` 而不复制通用核心。
 - `plugin.enabled` **出厂为 `true`**([default.yaml](default.yaml)):协议驱动全部来自插件,关掉它等于网关不支持任何协议。
 - 替换已加载插件的二进制即**热升级**(见 [pluginhost/upgrade.go](pluginhost/upgrade.go));插件文件消失 = 协议消失,但**刻意保留 `iot_protocol` 行**(前端下拉还在,设备却被跳过)。
 
@@ -300,7 +293,7 @@
   **复用那台设备的采集会话**、一次 RPC 覆盖整段、**不可取消**)。
   代码分布:契约 [driver/pointDiscovery.go](driver/pointDiscovery.go)、
   宿主 [pluginhost/pointdiscovery.go](pluginhost/pointdiscovery.go)、
-  插件套件 `driversdk/serve.go` 的 `handleDiscoverPoints` / `selectSession`、
+  插件套件 `sdk/driversdk/serve.go` 的 `handleDiscoverPoints` / `selectSession`、
   Modbus 实现 `driversrc/modbus/modbusdrv/pointscan.go`(参考实现共六份,按形态挑:
   扫地址范围的看 Modbus/S7、按层枚举的看 OPC UA、**按协议自带的清单枚举的看
   `driversrc/dlt645/dlt645drv/pointscan.go`**)、
@@ -316,7 +309,7 @@
      (先拒绝配置模式那条守卫**只对 Modbus 那种形态成立**,见下面那条例外 —— 别照抄。)
   ② **块间必须释放会话锁**。一次 `Do` 覆盖整段扫描 = 把采集卡死几十秒
      (与 `pingSessionBudget` 同一条理由),所以主循环每块一次 `req.Session.Do`。
-     回归见 `driversdk/pointscan_test.go` 的 `TestDiscoverPointsReleasesLockBetweenChunks`。
+     回归见 `sdk/driversdk/pointscan_test.go` 的 `TestDiscoverPointsReleasesLockBetweenChunks`。
   ③ **串口协议复用不到会话时绝不回落临时实例**。回落会抢占串口句柄,采集侧下次重连
      报 Access is denied 并退避 —— "点一次扫描把设备打成离线"。回退表见 specs 的 §5。
   ④ **网关侧的 7000ms 钳制与 `main.go` 的 10s 关机宽限期互相耦合**:
@@ -442,8 +435,9 @@
 驱动做成独立可执行文件,丢进 `plugins/` 目录即自动加载。适合新 PLC 协议这类
 「现场才确定、不希望为它重编网关」的场景。作者指南见 [../docs/driver-plugins.md](../docs/driver-plugins.md)。
 
-1. 新建 `driversrc/<name>/main.go`(`package main`)。
-2. 实现 `driver.Driver` 接口(Connect/Ping/Read/IsConnected/Close),调用
+1. 在独立仓库 `iot-gateway-drivers` 新建 `<name>/main.go`(`package main`);本仓库的
+   `backend/driversrc/` 是它的 submodule,只用于构建与联调。
+2. 实现 SDK 的 `driver.Driver` 接口(Connect/Ping/Read/IsConnected/Close),调用
    `driversdk.Main(driversdk.Factories{...}, driversdk.Meta{...}, driversdk.Capabilities{...})` 注册。
    第三个参数是**能力实现**,两个字段各自可选,不需要就给零值
    (`driversdk.Capabilities{}`,**不是 `nil`** —— 它是结构体):
@@ -462,8 +456,8 @@
    **串口协议可以声明 `PointDiscovery` 但不能声明 `Discovery`** —— 这条不对称是刻意的,
    理由见 [specs/point-discovery.md](specs/point-discovery.md) §3。
 3. `Meta` 一次性声明协议列表(一个插件可提供多个协议)、类型 scope、类型表与各协议的配置表单;
-   类型表是**插件自带**的真源(通常放一个子包,如 `driversrc/modbus/modbusdrv/`),
-   只依赖 `iot-gateway/driver` 契约,不再从网关注册表派生。
+   类型表是**插件自带**的真源(通常放一个子包,如 `modbus/modbusdrv/`),
+   只依赖 `github.com/Ellisata/iot-gateway-sdk/driver` 契约,不再从网关注册表派生。
    **目录布局是拍平的一层**:目录名决定产物名 `iot-driver-<目录名>`,故必须唯一且不含层级
    (`omroncip` / `rockwellcip` 就是这么来的);子包目录名可与包名不一致。
 4. **协议名与 scope 沿用原值即可**(有既有协议时),不再要求「全新前缀」;唯一约束是
@@ -509,7 +503,7 @@
   [docs/parser-scripts.md](docs/parser-scripts.md) 与沙箱测试(超时、异常、精度、产出上限)。
 - **进程外插件(未实现,仅在二进制/厂商 SDK/崩溃隔离时启用)**:套件 `parsersdk/` +
   源码 `parsersrc/` + 产物 `iot-parser-<name>` + 适配器 `pluginhost/adapter_parser.go`;
-  线协议复用 [pluginwire/](pluginwire/),必须按批 `parse` RPC,禁止每报文一次调用;
+  线协议复用 [sdk/pluginwire/](sdk/pluginwire/),必须按批 `parse` RPC,禁止每报文一次调用;
   **不要复制** `process.go` / `upgrade.go`。宿主当前只扫描 `iot-driver-*`,接入时按前缀分流。
 - 任何解析器都必须输出 CollectedRecord 白名单(**一条记录一个 value**),走
   `parser.RecordFromMap` 或等价校验;不得自定义 measurement/tags/fields。
@@ -569,12 +563,13 @@ go generate             # 重新生成 wire_gen.go
 
 # 协议插件:必须编到主二进制同级目录(plugin.dir 相对 os.Executable() 解析,不是 cwd)。
 # **不编插件 = 网关不支持任何协议**(设备会被逐个静默跳过,前端看不出异常)。
-go build -o ./plugins/iot-driver-modbus ./driversrc/modbus
+# driversrc 是独立 Go module(submodule),必须从它内部构建。
+(cd driversrc && go build -o ../plugins/iot-driver-modbus ./modbus)
 ```
 
 一次性构建全部主二进制 + 全部插件请用仓库根目录的脚本:Linux/macOS 用 `../build.sh`
 (或 `../release.sh` 出发行包),Windows 用 `..\build.bat`(内部调 `package.bat`)。
-它们按 `driversrc/*/` 一层 glob 编译,默认产出 **四个平台**:
+脚本进入 `driversrc` 模块后按一层目录 glob 编译,默认产出 **四个平台**:
 `iot-gateway`(linux/amd64)、`iot-gateway-linux-arm64`、`iot-gateway-linux-arm`
 (linux/arm 32 位,固定 **GOARM=7**)、`iot-gateway.exe`(windows/amd64)。
 
@@ -591,7 +586,7 @@ arm32 的 `GOARM=7` 是编译期写死的(ARMv7-A + VFPv3 硬浮点)。**目标�
 (树莓派 1 / Zero 一代等),这个产物在板子上直接起不来 —— 得改成 `GOARM=5` 软浮点重编。
 
 插件改动后无需重编主二进制:**替换 `plugins/` 下的二进制即热升级**(默认开启)。
-本地改了插件源码要生效,重新 `go build -o ./plugins/iot-driver-<name> ./driversrc/<name>` 即可。
+本地改了插件源码要生效,重新 `(cd driversrc && go build -o ../plugins/iot-driver-<name> ./<name>)` 即可。
 
 ## 命名规范
 - 包名: 小写单数 (`user`, `configFile`)
@@ -600,16 +595,17 @@ arm32 的 `GOARM=7` 是编译期写死的(ARMv7-A + VFPv3 硬浮点)。**目标�
 - JSON: camelCase (`accessToken`, `serverTime`)
 - 单元测试: `{entity}_test.go`
 - 插件相关目录按**角色**命名,并列于 `backend/` 根下,互不嵌套:
-  `pluginhost/`(宿主,一种) · `pluginwire/`(传输层,共用) ·
-  `driversdk/` + `driversrc/`(驱动插件的套件与源码) · `plugins/`(运行时)。
-  - **宿主与传输层只有一份**:`pluginhost/` 不认识任何插件种类(只依赖 `pluginwire`),
+  `pluginhost/`(宿主,一种) · `sdk/`(SDK submodule,Apache-2.0:
+  `driver/` + `pluginwire/` + `driversdk/`) · `driversrc/`(官方驱动
+  submodule,AGPL-3.0) · `plugins/`(运行时)。
+  - **宿主与传输层只有一份**:`pluginhost/` 不认识任何插件种类(只依赖 `sdk/pluginwire`),
     各插件种类的差异全部收在同包的 `adapter_*.go` 里。将来接入推送插件时加
     `adapter_push.go` 即可,**不要**复制 `process.go`/`upgrade.go` 另起一个宿主 ——
     进程监管与热升级是最难写对、最容易悄悄漂移的部分。
-  - 传输层独立成 `pluginwire/`(只依赖标准库):帧编解码与插件种类无关,驱动与将来的
-    推送插件共用同一套帧,网关侧也复用它,两侧不会各自漂移出一份"差不多"的协议。
-  - `driver/` 与 `push/` 是**契约**(各自领域 + 引擎),不属于这组角色目录,不要并进
-    `driversdk/`(采集引擎与宿主都直接依赖契约,合并会让「采集引擎依赖插件 SDK」
+  - 传输层在 SDK 内是 `sdk/pluginwire/`(只依赖标准库),宿主直接 import;帧编解码与
+    插件种类无关,驱动与将来的推送插件共用同一套帧,两侧由集成测试钉住不会各自漂移。
+  - `sdk/driver/` 与 `push/` 是**契约**(各自领域 + 引擎),不属于这组角色目录,不要并进
+    `sdk/`(采集引擎与宿主都直接依赖契约,合并会让「采集引擎依赖插件 SDK」
     成为字面事实)。
   - 新增插件种类时的命名:套件 `xxxsdk/` + 源码 `xxxsrc/`,产物 `iot-xxx-<目录名>`,
     适配器 `pluginhost/adapter_xxx.go`。
@@ -619,7 +615,7 @@ arm32 的 `GOARM=7` 是编译期写死的(ARMv7-A + VFPv3 硬浮点)。**目标�
     产物,这条优先于"少写一份代码"。**需要就复制那几个纯函数**(如 EtherNet/IP 的
     ListIdentity 编解码:omroncip 与 rockwellcip 各持一份 `cipcore/`),代价(两份可能
     漂移)由"两边都用同一套独立实现的假应答驱动测试"兜底,而不是靠人工同步。
-    注意这与 `pluginhost/`+`pluginwire/`+`driversdk/` 的"只有一份"**不矛盾**:
+    注意这与 `pluginhost/`+`sdk/` 的"只有一份"**不矛盾**:
     那几个是**宿主与套件**(对全部插件一视同仁),不是某个插件的实现。
   - **设备扫描与点位扫描共用一套命名**(`devicescan/`、`pluginhost/discovery.go` ↔
     `pluginhost/pointdiscovery.go`、`driver/discovery.go` ↔ `driver/pointDiscovery.go`、

@@ -17,8 +17,7 @@ package drivertest
 import (
 	"errors"
 
-	"iot-gateway/driver"
-	"iot-gateway/model/po"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 )
 
 // 网关侧测试的合成协议。刻意不用任何真实协议名：名字若叫 ModBus.TCP，
@@ -128,7 +127,7 @@ func (FailingDriver) Ping(string) error    { return errFailingDriver }
 func (FailingDriver) IsConnected() bool    { return false }
 func (FailingDriver) Close() error         { return nil }
 
-func (FailingDriver) Read([]po.DeviceAddress) ([]driver.ReadResult, error) {
+func (FailingDriver) Read([]driver.DeviceAddress) ([]driver.ReadResult, error) {
 	return nil, errFailingDriver
 }
 
@@ -145,7 +144,7 @@ func (StubDriver) Close() error         { return nil }
 // 对齐是契约要求（见 docs/driver-plugins.md §3.2）：数量或 ID 对不上会让
 // 整批采集报错，而桩驱动出现在采集链路上时不该制造与被测逻辑无关的失败。
 // Kind 一律留空 —— 桩不代表任何真实类型，编一个 Kind 只会误导下游。
-func (StubDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error) {
+func (StubDriver) Read(addrs []driver.DeviceAddress) ([]driver.ReadResult, error) {
 	out := make([]driver.ReadResult, len(addrs))
 	for i := range addrs {
 		out[i] = driver.ReadResult{

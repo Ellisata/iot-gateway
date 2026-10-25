@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/collector"
-	"iot-gateway/driver"
 )
 
 // 超级表值族列宽:写入侧截断与建表 DDL 必须保持一致(见 ensureSchemaSQL),改动两处同步。

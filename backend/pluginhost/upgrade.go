@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"iot-gateway/driversdk"
+	"github.com/Ellisata/iot-gateway-sdk/driversdk"
 	"iot-gateway/logger"
 )
 

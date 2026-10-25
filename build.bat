@@ -1,27 +1,27 @@
 @echo off
 :: ============================================
-::  iot-gateway Éú²úÄ£Ê½Ò»¼ü¹¹½¨
-::  Ç°¶Ë¹¹½¨ -> Í¬²½µ½ backend/web/dist -> Go ±àÒë
-::  ÓÃ·¨: build.bat          ±àÒë Linux amd64 + arm64 + arm32 + Windows amd64£¨²¿ÊðÓÃ£¬Ä¬ÈÏ£©
-::        build.bat windows  ½ö±àÒë Windows amd64£¨±¾»úÔ­Éú£¬×î¿ì£©
-::        build.bat arm64    ½ö±àÒë Linux arm64£¨ARM64 ¹¤¿Ø»ú / Ê÷Ý®ÅÉµÈ£©
-::        build.bat arm32    ½ö±àÒë Linux arm 32 Î»£¨ARMv7 ¹¤¿Ø°å£¬¹Ì¶¨ GOARM=7£©
-::  ²úÎï: Ä¬ÈÏÄ£Ê½µ÷ backend\package.bat£¬²úÎïÂäÔÚ²Ö¿â¸ùÄ¿Â¼:
+::  iot-gateway ï¿½ï¿½ï¿½ï¿½Ä£Ê½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+::  Ç°ï¿½Ë¹ï¿½ï¿½ï¿½ -> Í¬ï¿½ï¿½ï¿½ï¿½ backend/web/dist -> Go ï¿½ï¿½ï¿½ï¿½
+::  ï¿½Ã·ï¿½: build.bat          ï¿½ï¿½ï¿½ï¿½ Linux amd64 + arm64 + arm32 + Windows amd64ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã£ï¿½Ä¬ï¿½Ï£ï¿½
+::        build.bat windows  ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Windows amd64ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô­ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ì£©
+::        build.bat arm64    ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Linux arm64ï¿½ï¿½ARM64 ï¿½ï¿½ï¿½Ø»ï¿½ / ï¿½ï¿½Ý®ï¿½ÉµÈ£ï¿½
+::        build.bat arm32    ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Linux arm 32 Î»ï¿½ï¿½ARMv7 ï¿½ï¿½ï¿½Ø°å£¬ï¿½Ì¶ï¿½ GOARM=7ï¿½ï¿½
+::  ï¿½ï¿½ï¿½ï¿½: Ä¬ï¿½ï¿½Ä£Ê½ï¿½ï¿½ backend\package.batï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú²Ö¿ï¿½ï¿½Ä¿Â¼:
 ::          iot-gateway / iot-gateway-linux-arm64 / iot-gateway-linux-arm / iot-gateway.exe
 ::          plugins-linux\ / plugins-linux-arm64\ / plugins-linux-arm\ / plugins-windows\
-::        µ¥Æ½Ì¨Ä£Ê½²úÎïÔÚ backend\ ÏÂ£¬±ãÓÚ¾ÍµØµ÷ÊÔ
+::        ï¿½ï¿½Æ½Ì¨Ä£Ê½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ backend\ ï¿½Â£ï¿½ï¿½ï¿½ï¿½Ú¾ÍµØµï¿½ï¿½ï¿½
 ::
-::  ×¢Òâ: ²å¼þÄ¿Â¼Ò»ÂÉ´øÆ½Ì¨ºó×º£¬Windows ÊÇ plugins-windows\£»Íø¹Ø plugin.dir
-::        Ä¬ÈÏÊÇ "plugins"¡¢Ïà¶Ô exe ½âÎö¡£±¾µØÖ±½ÓÅÜ exe Ö®Ç°Òª°Ñ¶ÔÓ¦Ä¿Â¼¸ÄÃû³É
-::        plugins\ »ò¸Ä plugin.dir£¬·ñÔòÒ»¸öÐ­ÒéÒ²É¨²»µ½¡£·¢ÐÐ°ü²»ÊÜÓ°Ïì¡£
+::  ×¢ï¿½ï¿½: ï¿½ï¿½ï¿½Ä¿Â¼Ò»ï¿½É´ï¿½Æ½Ì¨ï¿½ï¿½×ºï¿½ï¿½Windows ï¿½ï¿½ plugins-windows\ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ plugin.dir
+::        Ä¬ï¿½ï¿½ï¿½ï¿½ "plugins"ï¿½ï¿½ï¿½ï¿½ï¿½ exe ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö±ï¿½ï¿½ï¿½ï¿½ exe Ö®Ç°Òªï¿½Ñ¶ï¿½Ó¦Ä¿Â¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+::        plugins\ ï¿½ï¿½ï¿½ plugin.dirï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½Ð­ï¿½ï¿½Ò²É¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð°ï¿½ï¿½ï¿½ï¿½ï¿½Ó°ï¿½ì¡£
 ::
-::  arm32 ¹Ì¶¨ GOARM=7£¨ARMv7-A + VFPv3 Ó²¸¡µã£©¡£Ä¿±ê°åÈôÊÇ ARMv6/ARMv5
-::  £¨Ê÷Ý®ÅÉ 1 / Zero Ò»´ú£©µÃ¸ÄÓÃ GOARM=5 Èí¸¡µã£¬·ñÔò²úÎïÔÚ°å×ÓÉÏÖ±½ÓÆð²»À´¡£
+::  arm32 ï¿½Ì¶ï¿½ GOARM=7ï¿½ï¿½ARMv7-A + VFPv3 Ó²ï¿½ï¿½ï¿½ã£©ï¿½ï¿½Ä¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ARMv6/ARMv5
+::  ï¿½ï¿½ï¿½ï¿½Ý®ï¿½ï¿½ 1 / Zero Ò»ï¿½ï¿½ï¿½ï¿½ï¿½Ã¸ï¿½ï¿½ï¿½ GOARM=5 ï¿½ï¿½ï¿½ï¿½ï¿½ã£¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú°ï¿½ï¿½ï¿½ï¿½ï¿½Ö±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 :: ============================================
 setlocal
 set ROOT=%~dp0
 
-:: all£¨Ä¬ÈÏ£¬È«Á¿£© / windows / arm64 / arm32
+:: allï¿½ï¿½Ä¬ï¿½Ï£ï¿½È«ï¿½ï¿½ï¿½ï¿½ / windows / arm64 / arm32
 set BUILD_ALL=1
 set BUILD_ARM=0
 set BUILD_ARM32=0
@@ -50,7 +50,7 @@ if /i "%1"=="arm7" (
     set BUILD_ARM=0
     set BUILD_ARM32=1
 )
-rem arm °´ Go µÄ¹ßÀýÖ¸ 32 Î»£¨GOARCH=arm£©£¬64 Î»ÓÃ arm64¡£
+rem arm ï¿½ï¿½ Go ï¿½Ä¹ï¿½ï¿½ï¿½Ö¸ 32 Î»ï¿½ï¿½GOARCH=armï¿½ï¿½ï¿½ï¿½64 Î»ï¿½ï¿½ arm64ï¿½ï¿½
 if /i "%1"=="arm" (
     set BUILD_ALL=0
     set BUILD_ARM=0
@@ -58,12 +58,12 @@ if /i "%1"=="arm" (
 )
 
 echo.
-echo [1/3] ¹¹½¨Ç°¶Ë (npm run build) ...
+echo [1/3] ï¿½ï¿½ï¿½ï¿½Ç°ï¿½ï¿½ (npm run build) ...
 pushd "%ROOT%frontend"
 call npm run build
 if errorlevel 1 goto :fail
 
-echo [2/3] Í¬²½¹¹½¨²úÎïµ½ backend\web\dist ...
+echo [2/3] Í¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ïµ½ backend\web\dist ...
 if exist "%ROOT%backend\web\dist" (
     rmdir /s /q "%ROOT%backend\web\dist"
 )
@@ -71,7 +71,7 @@ mkdir "%ROOT%backend\web\dist"
 xcopy /e /y /q "%ROOT%frontend\dist\*" "%ROOT%backend\web\dist\" >nul
 if errorlevel 1 goto :fail
 
-echo [3/3] ±àÒë Go ºó¶Ë ...
+echo [3/3] ï¿½ï¿½ï¿½ï¿½ Go ï¿½ï¿½ï¿½ ...
 pushd "%ROOT%backend"
 
 if "%BUILD_ALL%"=="0" (
@@ -84,7 +84,7 @@ if "%BUILD_ALL%"=="0" (
     )
     if errorlevel 1 goto :fail
 ) else (
-    rem È«Á¿±àÒë½»¸ø package.bat£º¼Ü¹¹Çåµ¥Óë²å¼þ glob Ö»ÁôÄÇÒ»´¦£¬ÃâµÃÁ½±ßÆ¯ÒÆ¡£
+    rem È«ï¿½ï¿½ï¿½ï¿½ï¿½ë½»ï¿½ï¿½ package.batï¿½ï¿½ï¿½Ü¹ï¿½ï¿½åµ¥ï¿½ï¿½ï¿½ï¿½ glob Ö»ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ¯ï¿½Æ¡ï¿½
     call "%ROOT%backend\package.bat"
     if errorlevel 1 goto :fail
 )
@@ -93,34 +93,34 @@ echo.
 echo ============================================
 if "%BUILD_ALL%"=="0" (
   if "%BUILD_ARM%"=="1" (
-    echo   ¹¹½¨Íê³É:
+    echo   ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½:
     echo   - Linux arm64 : %ROOT%backend\iot-gateway-linux-arm64
-    echo   - ²å¼þÄ¿Â¼    : %ROOT%backend\plugins-linux-arm64
+    echo   - ï¿½ï¿½ï¿½Ä¿Â¼    : %ROOT%backend\plugins-linux-arm64
   ) else if "%BUILD_ARM32%"=="1" (
-    echo   ¹¹½¨Íê³É:
+    echo   ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½:
     echo   - Linux arm32 : %ROOT%backend\iot-gateway-linux-arm
-    echo   - ²å¼þÄ¿Â¼    : %ROOT%backend\plugins-linux-arm
+    echo   - ï¿½ï¿½ï¿½Ä¿Â¼    : %ROOT%backend\plugins-linux-arm
   ) else (
-    echo   ¹¹½¨Íê³É:
+    echo   ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½:
     echo   - Windows     : %ROOT%backend\iot-gateway.exe
-    echo   - ²å¼þÄ¿Â¼    : %ROOT%backend\plugins-windows
+    echo   - ï¿½ï¿½ï¿½Ä¿Â¼    : %ROOT%backend\plugins-windows
   )
 ) else (
-  echo   ¹¹½¨Íê³É£¨²úÎïÔÚ²Ö¿â¸ùÄ¿Â¼£©:
+  echo   ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú²Ö¿ï¿½ï¿½Ä¿Â¼ï¿½ï¿½:
   echo   - Linux amd64  : %ROOT%iot-gateway
   echo   - Linux arm64  : %ROOT%iot-gateway-linux-arm64
   echo   - Linux arm32  : %ROOT%iot-gateway-linux-arm
   echo   - Windows amd64: %ROOT%iot-gateway.exe
 )
-echo   ÔËÐÐ·½Ê½: Ë«»÷ run.bat »òÖ±½ÓÔËÐÐ iot-gateway.exe
-echo   ·ÃÎÊµØÖ·: http://localhost:9082/admin
+echo   ï¿½ï¿½ï¿½Ð·ï¿½Ê½: Ë«ï¿½ï¿½ run.bat ï¿½ï¿½Ö±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ iot-gateway.exe
+echo   ï¿½ï¿½ï¿½Êµï¿½Ö·: http://localhost:9082/admin
 echo ============================================
 endlocal
 exit /b 0
 
 :fail
 echo.
-echo [FAIL] ¹¹½¨Ê§°Ü£¬Çë²é¿´ÉÏ·½ÈÕÖ¾¡£
+echo [FAIL] ï¿½ï¿½ï¿½ï¿½Ê§ï¿½Ü£ï¿½ï¿½ï¿½é¿´ï¿½Ï·ï¿½ï¿½ï¿½Ö¾ï¿½ï¿½
 endlocal
 exit /b 1
 
@@ -205,8 +205,8 @@ set PB_EXT=
 if /i "%PB_GOOS%"=="windows" set PB_EXT=.exe
 if not exist "%PB_OUT%" mkdir "%PB_OUT%"
 set PB_BUILT=0
-pushd "%ROOT%backend"
-for /d %%d in (driversrc\*) do (
+pushd "%ROOT%backend\driversrc"
+for /d %%d in (*) do (
     if exist "%%d\main.go" (
         for %%n in ("%%d") do set PB_NAME=%%~nn
         set CGO_ENABLED=0

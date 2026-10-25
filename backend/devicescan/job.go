@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"iot-gateway/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 )
 
 // JobState 扫描任务状态。

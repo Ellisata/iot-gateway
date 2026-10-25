@@ -13,9 +13,9 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/appError"
 	"iot-gateway/collector"
-	"iot-gateway/driver"
 	"iot-gateway/enums"
 	"iot-gateway/logger"
 	"iot-gateway/model/dto"

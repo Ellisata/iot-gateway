@@ -38,10 +38,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ellisata/iot-gateway-drivers/testutil/fake"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/configFile"
-	"iot-gateway/driver"
 	"iot-gateway/logger"
-	"iot-gateway/testutil/fake"
 )
 
 // loadtestDefaultYAML loadtest 自包含配置：日志静音到 WARN 并落到临时目录，

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"iot-gateway/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/model/po"
 	"iot-gateway/workerPool"
 )
@@ -23,7 +23,7 @@ type mockDriver struct {
 
 func (d *mockDriver) Connect(protocolJSON string) error { return nil }
 func (d *mockDriver) Ping(protocolJSON string) error    { return nil }
-func (d *mockDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error) {
+func (d *mockDriver) Read(addrs []driver.DeviceAddress) ([]driver.ReadResult, error) {
 	if d.readDelay > 0 {
 		time.Sleep(d.readDelay)
 	}
@@ -127,7 +127,7 @@ type batchMockDriver struct {
 
 func (d *batchMockDriver) Connect(protocolJSON string) error { return nil }
 func (d *batchMockDriver) Ping(protocolJSON string) error    { return nil }
-func (d *batchMockDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error) {
+func (d *batchMockDriver) Read(addrs []driver.DeviceAddress) ([]driver.ReadResult, error) {
 	d.callCount++
 	d.callSizes = append(d.callSizes, len(addrs))
 	results := make([]driver.ReadResult, 0, len(addrs))
@@ -255,7 +255,7 @@ type failingDriver struct{}
 
 func (d *failingDriver) Connect(protocolJSON string) error { return fmt.Errorf("mock: connect failed") }
 func (d *failingDriver) Ping(protocolJSON string) error    { return nil }
-func (d *failingDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error) {
+func (d *failingDriver) Read(addrs []driver.DeviceAddress) ([]driver.ReadResult, error) {
 	return nil, fmt.Errorf("mock: not connected")
 }
 func (d *failingDriver) IsConnected() bool { return false }

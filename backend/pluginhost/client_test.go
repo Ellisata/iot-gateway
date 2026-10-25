@@ -13,10 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"iot-gateway/driver"
-	"iot-gateway/driversdk"
-	"iot-gateway/model/po"
-	"iot-gateway/pluginwire"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driversdk"
+	"github.com/Ellisata/iot-gateway-sdk/pluginwire"
 )
 
 // ==================== 测试替身 ====================
@@ -31,7 +30,7 @@ func (d *delayDriver) Connect(string) error { return nil }
 func (d *delayDriver) Ping(string) error    { return nil }
 func (d *delayDriver) IsConnected() bool    { return true }
 func (d *delayDriver) Close() error         { return nil }
-func (d *delayDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error) {
+func (d *delayDriver) Read(addrs []driver.DeviceAddress) ([]driver.ReadResult, error) {
 	time.Sleep(d.delay)
 	out := make([]driver.ReadResult, len(addrs))
 	for i, a := range addrs {
@@ -376,7 +375,7 @@ func TestDriverErrorKeepsResultDecodable(t *testing.T) {
 
 type failingReadDriver struct{ delayDriver }
 
-func (d *failingReadDriver) Read([]po.DeviceAddress) ([]driver.ReadResult, error) {
+func (d *failingReadDriver) Read([]driver.DeviceAddress) ([]driver.ReadResult, error) {
 	return nil, errors.New("boom")
 }
 func (d *failingReadDriver) IsConnected() bool { return false }
@@ -428,7 +427,7 @@ type hangDriver struct {
 func (d *hangDriver) Connect(string) error { return nil }
 func (d *hangDriver) IsConnected() bool    { return true }
 func (d *hangDriver) Close() error         { return nil }
-func (d *hangDriver) Read([]po.DeviceAddress) ([]driver.ReadResult, error) {
+func (d *hangDriver) Read([]driver.DeviceAddress) ([]driver.ReadResult, error) {
 	return nil, nil
 }
 

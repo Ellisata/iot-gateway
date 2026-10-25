@@ -12,8 +12,8 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/alarm"
-	"iot-gateway/driver"
 	"iot-gateway/model/dto"
 	"iot-gateway/model/po"
 	"iot-gateway/testutil/drivertest"

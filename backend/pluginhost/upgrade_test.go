@@ -11,9 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"iot-gateway/driver"
-	"iot-gateway/driversdk"
-	"iot-gateway/model/po"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driversdk"
 )
 
 // ==================== 测试辅助 ====================
@@ -113,7 +112,7 @@ func connectFixture(t *testing.T, protocol string) driver.Driver {
 // readFixture 读一个点位，返回格式化后的值。
 func readFixture(t *testing.T, d driver.Driver, name string) string {
 	t.Helper()
-	got, err := d.Read([]po.DeviceAddress{{ID: "a1", Name: name, DataType: "int16"}})
+	got, err := d.Read([]driver.DeviceAddress{{ID: "a1", Name: name, DataType: "int16"}})
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}

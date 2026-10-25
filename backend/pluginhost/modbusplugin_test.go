@@ -20,17 +20,18 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"gorm.io/gorm"
 
+	"github.com/Ellisata/iot-gateway-drivers/testutil/fake"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/collector"
 	"iot-gateway/configFile"
-	"iot-gateway/driver"
 	"iot-gateway/model/po"
-	"iot-gateway/testutil/fake"
 	"iot-gateway/workerPool"
 )
 
@@ -56,8 +57,11 @@ func buildPlugin(t *testing.T, srcDir string) string {
 	}
 	out := filepath.Join(t.TempDir(), name)
 
-	cmd := exec.Command("go", "build", "-o", out, srcDir)
-	cmd.Dir = ".." // 测试的工作目录是 backend/pluginhost，模块根在上一级
+	// 驱动源码在独立 module（backend/driversrc，由 submodule 提供）。
+	// 调用方仍可写 "./driversrc/modbus"，这里统一去掉前缀并从 driversrc 模块根构建。
+	srcDir = strings.TrimPrefix(srcDir, "./driversrc/")
+	cmd := exec.Command("go", "build", "-o", out, "./"+srcDir)
+	cmd.Dir = "../driversrc"
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("编译插件 %s 失败: %v\n%s", srcDir, err, output)
 	}

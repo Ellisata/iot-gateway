@@ -1,5 +1,11 @@
 # 进程外协议驱动插件
 
+> **仓库边界（2026-10）**：驱动 SDK 已独立为 [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk)
+> （Apache-2.0），官方驱动独立为 [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers)
+> （AGPL-3.0）。本仓库的 `backend/sdk/` 与 `backend/driversrc/` 是这两个仓库的 submodule。
+> 本文中的 `backend/driversrc/...` 路径指向 submodule；第三方新驱动请直接依赖 SDK，
+> 不要 import 网关核心。许可证边界见 [LICENSING.md](../LICENSING.md)。
+
 给网关**新增或升级一个 PLC 协议驱动**，不再需要修改网关源码、重新编译、停机部署：
 把驱动编译成一个独立可执行文件，丢进 `plugins/` 目录，下一次目录扫描（默认 10s）即自动加载；
 **替换**已在运行的插件二进制同样在下次扫描即生效，且不会牵动其它协议
@@ -29,8 +35,8 @@
 package main
 
 import (
-    "iot-gateway/driver"
-    "iot-gateway/driversdk"
+    "github.com/Ellisata/iot-gateway-sdk/driver"
+    "github.com/Ellisata/iot-gateway-sdk/driversdk"
     "iot-gateway/model/po"
 )
 
@@ -81,8 +87,8 @@ func main() {
 ### 1.2 编译
 
 ```bash
-cd backend
-go build -o ./plugins/iot-driver-acme ./driversrc/acme
+cd backend/driversrc
+go build -o ../plugins/iot-driver-acme ./acme
 ```
 
 文件名必须以 `iot-driver-` 开头（可配，见 §4），否则不会被扫描到。
@@ -167,7 +173,7 @@ pluginhost: 已为插件协议 Acme.PLC.Serial 创建 iot_protocol 行
 | 字段 | 说明 |
 |---|---|
 | `Name` | 驱动注册名，也是 `iot_protocol.name`。**全局唯一 —— 现在所有协议都来自插件，所以实际约束是不得与另一个插件（含大小写变体）重名**。同时也必须出现在 `driversdk.Factories` 的键里。 |
-| `SerialExclusive` | 该协议的底层连接是否独占串行总线（如 RS-485）。`true` 时采集引擎整轮持设备锁，保证总线上帧不交错；`false` 时只在单次 `Read` 期间持锁。见 [`driver.SerialExclusive`](../backend/driver/driver.go)。**按协议独立**：Modbus 的 RTU 是 `true`，TCP 是 `false`。 |
+| `SerialExclusive` | 该协议的底层连接是否独占串行总线（如 RS-485）。`true` 时采集引擎整轮持设备锁，保证总线上帧不交错；`false` 时只在单次 `Read` 期间持锁。见 [`driver.SerialExclusive`](../backend/sdk/driver/driver.go)。**按协议独立**：Modbus 的 RTU 是 `true`，TCP 是 `false`。 |
 | `Description` | 该协议的说明，写入 `iot_protocol.description`；留空回退到 `Meta.Description`。 |
 | `FormJSON` | 该协议的配置表单（form-create schema），原样写入 `iot_protocol.form_json`。形状参考随发行版插件的 `main.go`，例如 [`opcua/main.go`](../backend/driversrc/opcua/main.go) 的 `formOcUa`、[`abb/main.go`](../backend/driversrc/abb/main.go) 的 `formRWS`（含 `props` 密码框、`select` 三态、`value` 默认值的写法）。表单里的 `field` 就是 `Connect` 收到的 `protocolJSON` 的键 —— 两边错开一个字母的症状是「用户填了参数但它不生效」，没有任何报错，所以值得用一条测试把两个集合对上（见 [`dlt645/main_test.go`](../backend/driversrc/dlt645/main_test.go) 的 `TestFormsMatchConfigStruct`，以及 [`modbus/main_test.go`](../backend/driversrc/modbus/main_test.go) 的 `TestSerialParamsAreConfigurable`）。**按协议而非按插件** —— TCP 填 host/port，RTU 填串口号。 |
 | `Discovery` | 该协议的**局域网扫描发现**能力，见 [§2.6](#26-声明扫描能力discovery)。`nil` = 不支持扫描，该协议不会出现在扫描页的协议下拉里。**可选字段**，所以加了它不会让旧插件失效；但**串口协议（`SerialExclusive`）不得声明它** —— 探测的目标模型是 host/port，表达不了 `comPort`。 |
@@ -181,7 +187,7 @@ pluginhost: 已为插件协议 Acme.PLC.Serial 创建 iot_protocol 行
 （见 [`collector.toRecords`](../backend/collector/task.go)）。所以你必须在插件内完成解码，
 把最终字符串放进 `Value`，并填好 `Kind`。
 
-`TypeMap` 的 key 用 [`driver.CommonDataTypes`](../backend/driver/dataTypeMap.go) 里的规范名
+`TypeMap` 的 key 用 [`driver.CommonDataTypes`](../backend/sdk/driver/dataTypeMap.go) 里的规范名
 （`Boolean`/`Short`/`Float`/…）时，会出现在配置界面类型下拉的「通用」组并按全局展示顺序排列；
 其它名字（如 PLC 风格的 `Int`/`Real`）落在「扩展」组，按字母序。
 
@@ -242,7 +248,7 @@ Fins 是 `fins` 一个 scope、四个协议）。
 
 ```go
 // 旧版 A 的写法，现在已经编译/运行不过去
-import _ "iot-gateway/driver/modbus"     // ← 包里已经没有这个目录
+import _ "iot-gateway/driver/modbus"     // ← 旧的内置包已移除；驱动请用 SDK
 
 d, err := driver.Create("ModBus.TCP")     // ← 返回 unsupported protocol
 common, _ := driver.AvailableTypes("modbus")     // ← 返回空
@@ -251,15 +257,14 @@ internal, _ := driver.LookupScopeType("modbus", "Short") // ← 返回空
 
 逐条对应：
 
-- **内置驱动包已被整体移除。** `backend/driver/` 下现在只有协议无关的契约与注册表：
-  `driver.go`（`Driver` 接口 + 注册表）、`types.go`（`DataType`）、`typeRegistry.go`、
-  `dataTypeMap.go`、`rangeSig.go`。没有任何协议实现，空导入无从谈起。
-  插件开发套件在同级的 `backend/driversdk/`，**不在 `driver/` 下** —— 它与
-  `pluginhost/`（宿主）、`driversrc/`（源码）、`plugins/`（运行时）并列，都是按角色命名的目录。
-  另有 `backend/pluginwire/`：与插件种类无关的传输层（帧编解码 / 方法名 / `RemoteError`），
-  宿主与套件都依赖它，插件作者**不需要**直接用它。
+- **内置驱动包已被整体移除。** 协议契约、插件套件与线协议现在都在独立 SDK 仓库
+  （本仓库 `backend/sdk/` submodule，Apache-2.0）：`sdk/driver/`（`Driver` 接口 + 注册表 +
+  类型表）、`sdk/pluginwire/`（帧编解码 / 方法名 / `RemoteError`）、`sdk/driversdk/`
+  （`Main` / `Serve` / `Meta` / RPC 参数）。核心仓库不再保留这些包，宿主直接 import SDK；
+  数据库模型与 SDK `DeviceAddress` 的转换在 `backend/driveradapter/`。
+  官方驱动在 `backend/driversrc/`（`iot-gateway-drivers` submodule，AGPL-3.0）。
   7 个内置协议（Modbus / Mitsubishi MC / Siemens S7 / OPC UA / Rockwell CIP /
-  Omron CIP / Omron FINS）已全部搬成 `backend/driversrc/` 下的插件；
+  Omron CIP / Omron FINS）已全部搬成插件；
   此后新增的协议（如 `abb/` 的 `ABB.RWS`）从一开始就是插件，没有「内置版」那一段历史。
 - **`driver.Create` 的注册表里只剩插件注册的协议。** 主二进制启动后、插件加载前，
   `driver.Registered()` 返回空 —— 旧版 A 那种「从进程内注册表复用一份现成实现」
@@ -307,7 +312,7 @@ PLC 地址解析、区间规划、TCP/RTU 客户端、驱动），不导入任�
   （`modbusdrv.Debug` 就是这么来的），否则每轮采集都会刷屏。
 - **只实现 `driver.Driver` 的五个方法**。旧内置实现里往往还有一些接口之外的代码
   （Modbus 的写寄存器、`EncodeWriteValue`）—— 插件侧没有对应接口，不必搬。
-- **`RangeSig` / `RangeCacheMaxEntries` 仍然从 `iot-gateway/driver` 取。**
+- **`RangeSig` / `RangeCacheMaxEntries` 仍然从 `github.com/Ellisata/iot-gateway-sdk/driver` 取。**
   区间/规划缓存键是插件与网关**共用的契约**，所以它留在了 `driver/rangeSig.go` 里
   （`RangeSig` 是唯一没被搬走的协议相关代码）。Modbus / S7 / FINS / Mitsubishi
   四个插件照常 `driver.RangeSig(addrs)` 算缓存键，缓存条目上限也用它
@@ -318,7 +323,7 @@ PLC 地址解析、区间规划、TCP/RTU 客户端、驱动），不导入任�
   logger 与 import，所以会出现 `driversrc/mitsubishi/mitsubishidrv/` 里是
   `package mitsubishi`、`driversrc/rockwellcip/rockwellcipdrv/` 里是 `package cip`
   这种错位。`main.go` 里必须显式起别名
-  （`mitsubishidrv "iot-gateway/driversrc/mitsubishi/mitsubishidrv"`），
+  （`mitsubishidrv "github.com/Ellisata/iot-gateway-drivers/mitsubishi/mitsubishidrv"`），
   否则标识符是 `mitsubishi` 而不是 `mitsubishidrv`。
   子包目录名仍需唯一 —— 不同插件里的同名包在同一 module 下靠完整路径区分，没问题，
   但插件**目录**名（决定产物名 `iot-driver-<目录名>`）必须唯一且不含层级。
@@ -700,7 +705,7 @@ Modbus 的取舍（为什么必须用 IEC `%MW` 而不是传统 `40001` 风格�
 > 也因为基线表被清空而永远不会触发。照旧结论把 scope 改成全新前缀，反而会
 > 平白丢掉「零迁移」这个收益（见 §2.5）。
 
-现状（依据 [`driver/dataTypeMap.go`](../backend/driver/dataTypeMap.go)）：
+现状（依据 [`driver/dataTypeMap.go`](../backend/sdk/driver/dataTypeMap.go)）：
 
 - `scopeTypeMap` 与 `scopeProtocols` 两张**内置基线表已被清空** ——
   **变量保留、内容为空**。留着空表而不是删掉整段机制，是为了保住一条护栏：

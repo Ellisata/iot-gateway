@@ -16,8 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"iot-gateway/driversdk"
-	"iot-gateway/pluginwire"
+	"github.com/Ellisata/iot-gateway-sdk/driversdk"
+	"github.com/Ellisata/iot-gateway-sdk/pluginwire"
 )
 
 // errBinaryReplaced 磁盘上的插件二进制与加载/升级时记录的内容不一致。

@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"iot-gateway/pluginwire"
+	"github.com/Ellisata/iot-gateway-sdk/pluginwire"
 )
 
 // ErrProcessDown 插件进程已退出或帧流损坏，本次调用未能完成。

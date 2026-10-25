@@ -20,8 +20,8 @@ import (
 	"net"
 	"sort"
 
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/discovery"
-	"iot-gateway/driver"
 )
 
 // SubnetInfo 本机一个可扫描的 IPv4 网段。前端据此给用户列网段多选。

@@ -17,8 +17,8 @@ import (
 	"github.com/gopcua/opcua/ua"
 	"gorm.io/gorm"
 
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/collector"
-	"iot-gateway/driver"
 	"iot-gateway/model/po"
 	"iot-gateway/push"
 )

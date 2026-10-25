@@ -11,7 +11,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"iot-gateway/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"iot-gateway/driveradapter"
 	"iot-gateway/logger"
 	"iot-gateway/model/po"
 	"iot-gateway/workerPool"
@@ -362,7 +363,7 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 			// data_type 是写入时派生的协议内部类型名缓存，可能因协议类型注册名变更、
 			// 旧数据或外部改库而漂移。加载时统一回退修正（data_type 仍可解析则保留原值），
 			// 修正结果回写库自愈，避免采集时驱动解码失败、寄存器/字数算错或类型码错取。
-			if normalized := driver.NormalizeAddressType(protocolName, *addr); normalized != addr.DataType {
+			if normalized := driver.NormalizeAddressType(protocolName, driveradapter.FromPO(*addr)); normalized != addr.DataType {
 				addr.DataType = normalized
 				if err := db.Model(&po.DeviceAddress{}).Where("id = ?", addr.ID).
 					UpdateColumn("data_type", normalized).Error; err != nil {
@@ -762,7 +763,7 @@ func (g *frequencyGroup) doPollDevice(deviceID string, addrs []po.DeviceAddress)
 	// 通过协议驱动读取本频率分组的点位数据。
 	// 分批流式处理：每批读取 → 转换 → 推送，避免整台设备点位一次性累积内存。
 	err := forEachBatch(addrs, func(batch []po.DeviceAddress) error {
-		results, err := drv.Read(batch)
+		results, err := drv.Read(driveradapter.FromPOs(batch))
 		if err != nil {
 			return err
 		}
@@ -836,7 +837,7 @@ func (g *frequencyGroup) doPollDeviceConcurrent(deviceID string, addrs []po.Devi
 	// 分批流式处理：每批仅在 Read 期间持锁，转换与推送不持锁。
 	err := forEachBatch(addrs, func(batch []po.DeviceAddress) error {
 		dm.Lock()
-		results, err := drv.Read(batch)
+		results, err := drv.Read(driveradapter.FromPOs(batch))
 		dm.Unlock()
 		if err != nil {
 			return err

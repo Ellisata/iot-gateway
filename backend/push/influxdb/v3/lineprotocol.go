@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/collector"
-	"iot-gateway/driver"
 )
 
 // lineBuilder 将多个采集批次聚合为单个 HTTP POST 的 Line Protocol body

@@ -20,9 +20,9 @@ import (
 	"sort"
 	"time"
 
-	"iot-gateway/driver"
-	"iot-gateway/driversdk"
-	"iot-gateway/pluginwire"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driversdk"
+	"github.com/Ellisata/iot-gateway-sdk/pluginwire"
 )
 
 // ErrDiscoveryUnsupported 当前没有任何已加载的插件为该协议提供扫描能力。

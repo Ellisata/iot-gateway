@@ -6,7 +6,7 @@ package devicescan
 import (
 	"testing"
 
-	"iot-gateway/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 )
 
 // 目标展开是**纯函数**，所以广播/双模这几条可以直接断言，不必经 Engine。

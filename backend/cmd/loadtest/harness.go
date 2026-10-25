@@ -15,12 +15,12 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
+	"github.com/Ellisata/iot-gateway-drivers/testutil/fake"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/collector"
 	"iot-gateway/configFile"
 	dbsqlite "iot-gateway/database/sqlite"
-	"iot-gateway/driver"
 	"iot-gateway/model/po"
-	"iot-gateway/testutil/fake"
 	"iot-gateway/workerPool"
 )
 

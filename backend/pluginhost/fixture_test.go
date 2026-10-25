@@ -30,10 +30,20 @@ import (
 	"testing"
 	"time"
 
-	"iot-gateway/driver"
-	"iot-gateway/driversdk"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driversdk"
+	"iot-gateway/driveradapter"
 	"iot-gateway/model/po"
 )
+
+// sdkAddrs / sdkAddr 把测试里的数据库模型地址转成驱动契约地址。
+func sdkAddrs(addrs []po.DeviceAddress) []driver.DeviceAddress {
+	return driveradapter.FromPOs(addrs)
+}
+
+func sdkAddr(a po.DeviceAddress) driver.DeviceAddress {
+	return driveradapter.FromPO(a)
+}
 
 // envFixture 标记子进程以夹具插件身份启动。取值：
 //
@@ -176,7 +186,7 @@ func fixturePortOf(protocolJSON string) string {
 	return cfg.Port
 }
 
-func (d *fixtureDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error) {
+func (d *fixtureDriver) Read(addrs []driver.DeviceAddress) ([]driver.ReadResult, error) {
 	switch d.mode {
 	case "crash":
 		// 直接退出进程，模拟插件崩溃。
@@ -513,7 +523,7 @@ func TestProcessHandshakeAndDriverLifecycle(t *testing.T) {
 		{ID: "a1", Name: "point1", DataType: "int16"},
 		{ID: "a2", Name: "point2", DataType: "bool"},
 	}
-	got, err := rd.Read(addrs)
+	got, err := rd.Read(sdkAddrs(addrs))
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -564,7 +574,7 @@ func TestProcessCrashRestartAndRecovery(t *testing.T) {
 	if err := rd.Connect(`{"mode":"crash"}`); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	if _, err := rd.Read([]po.DeviceAddress{{ID: "a1", Name: "p1", DataType: "int16"}}); err == nil {
+	if _, err := rd.Read([]driver.DeviceAddress{{ID: "a1", Name: "p1", DataType: "int16"}}); err == nil {
 		t.Fatal("插件进程已退出，Read 应报错")
 	}
 
@@ -581,7 +591,7 @@ func TestProcessCrashRestartAndRecovery(t *testing.T) {
 	if !rd.IsConnected() {
 		t.Fatal("恢复后应已连接")
 	}
-	got, err := rd.Read([]po.DeviceAddress{{ID: "a1", Name: "p1", DataType: "int16"}})
+	got, err := rd.Read([]driver.DeviceAddress{{ID: "a1", Name: "p1", DataType: "int16"}})
 	if err != nil {
 		t.Fatalf("恢复后 Read: %v", err)
 	}
@@ -612,7 +622,7 @@ func TestProcessStuckIsKilledAndRestarted(t *testing.T) {
 		t.Fatalf("Connect: %v", err)
 	}
 	// 这次 Read 会永久阻塞在插件里，直到网关侧超时放弃。
-	if _, err := rd.Read([]po.DeviceAddress{{ID: "a1", Name: "p1", DataType: "int16"}}); err == nil {
+	if _, err := rd.Read([]driver.DeviceAddress{{ID: "a1", Name: "p1", DataType: "int16"}}); err == nil {
 		t.Fatal("卡死的插件不应返回成功")
 	}
 
@@ -624,7 +634,7 @@ func TestProcessStuckIsKilledAndRestarted(t *testing.T) {
 	if err := rd.Connect(`{}`); err != nil {
 		t.Fatalf("卡死恢复后 Connect: %v", err)
 	}
-	got, err := rd.Read([]po.DeviceAddress{{ID: "a1", Name: "p1", DataType: "int16"}})
+	got, err := rd.Read([]driver.DeviceAddress{{ID: "a1", Name: "p1", DataType: "int16"}})
 	if err != nil {
 		t.Fatalf("卡死恢复后 Read: %v", err)
 	}

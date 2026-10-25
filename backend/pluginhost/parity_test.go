@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"iot-gateway/driver"
+	"github.com/Ellisata/iot-gateway-drivers/testutil/fake"
+	"github.com/Ellisata/iot-gateway-drivers/testutil/parity"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/model/po"
-	"iot-gateway/testutil/fake"
-	"iot-gateway/testutil/parity"
 )
 
 // ==================== 行为等价的共享基建 ====================
@@ -180,7 +180,7 @@ func readParity(t *testing.T, d driver.Driver, c parityCase) []parity.Result {
 	t.Helper()
 
 	addrs := c.deviceAddresses()
-	got, err := d.Read(addrs)
+	got, err := d.Read(sdkAddrs(addrs))
 	if err != nil {
 		t.Fatalf("Read 失败: %v", err)
 	}

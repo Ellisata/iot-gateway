@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"iot-gateway/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 )
 
 // ==================== 点位扫描能力发现（describe → Manager → discoverPoints） ====================

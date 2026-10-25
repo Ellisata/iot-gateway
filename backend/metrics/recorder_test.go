@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/collector"
-	"iot-gateway/driver"
 	"iot-gateway/model/vo"
 	"iot-gateway/push"
 )

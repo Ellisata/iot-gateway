@@ -6,7 +6,7 @@ package collector
 import (
 	"testing"
 
-	"iot-gateway/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/model/po"
 )
 

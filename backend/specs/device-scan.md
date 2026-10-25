@@ -4,7 +4,7 @@
 >
 > **本文档是契约**：`probe` 方法的字段、预算模型与取消语义是网关与协议插件之间
 > 的约定。字段真源在 [../driver/discovery.go](../driver/discovery.go)、
-> [../driversdk/rpc.go](../driversdk/rpc.go) 与 [../pluginhost/discovery.go](../pluginhost/discovery.go)，
+> [../sdk/driversdk/rpc.go](../sdk/driversdk/rpc.go) 与 [../pluginhost/discovery.go](../pluginhost/discovery.go)，
 > 改动契约时两者必须同步。
 
 范围：**只做"网关去问网段里谁在"**，不做"我告诉局域网我在哪" ——
@@ -377,8 +377,8 @@ FINS 也有一个"决定连上看不看得到设备"的参数：帧头里的 **D
 | 文件 | 职责 |
 |------|------|
 | [../driver/discovery.go](../driver/discovery.go) | **契约**：`DiscoverySpec` / `ScanTarget` / `DiscoveredDevice` / `TargetMode` |
-| [../driversdk/rpc.go](../driversdk/rpc.go) | `ProbeParams` / `ProbeReply`（过线载荷） |
-| [../driversdk/serve.go](../driversdk/serve.go) | `Probers` / `ProbeFunc` / `ProbeRequest`、启动期校验、`handleProbe`、预算钳制 |
+| [../sdk/driversdk/rpc.go](../sdk/driversdk/rpc.go) | `ProbeParams` / `ProbeReply`（过线载荷） |
+| [../sdk/driversdk/serve.go](../sdk/driversdk/serve.go) | `Probers` / `ProbeFunc` / `ProbeRequest`、启动期校验、`handleProbe`、预算钳制 |
 | [../pluginhost/discovery.go](../pluginhost/discovery.go) | 驱动侧适配：`DiscoverySpecs`（现算，不缓存）/ `ProbeTargets`（RPC 超时推导） |
 | [../devicescan/](../devicescan/) | 任务引擎：目标规划（`targets.go`）、任务与快照（`job.go`）、并发/取消/过期（`engine.go`） |
 | [../discovery/netif.go](../discovery/netif.go) | `eachUsableIPv4`（两处共用的网卡过滤）+ `LocalSubnets` |

@@ -8,14 +8,10 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-playground/validator/v10 v10.30.1
-	github.com/goburrow/modbus v0.1.0
-	github.com/goburrow/serial v0.1.0
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/uuid v1.6.0
 	github.com/google/wire v0.7.0
 	github.com/gopcua/opcua v0.9.1
-	github.com/iceisfun/goindustrial v0.3.0
-	github.com/robinson/gos7 v0.0.0-20260622162611-2d6806f80c8b
 	github.com/spf13/viper v1.19.0
 	github.com/taosdata/driver-go/v3 v3.8.2
 	github.com/xuri/excelize/v2 v2.11.0
@@ -44,6 +40,8 @@ require (
 )
 
 require (
+	github.com/Ellisata/iot-gateway-drivers v0.1.0
+	github.com/Ellisata/iot-gateway-sdk v0.1.0
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
@@ -93,3 +91,7 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.49.1 // indirect
 )
+
+replace github.com/Ellisata/iot-gateway-sdk => ./sdk
+
+replace github.com/Ellisata/iot-gateway-drivers => ./driversrc

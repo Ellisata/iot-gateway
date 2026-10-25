@@ -1,0 +1,6 @@
+[submodule "backend/sdk"]
+	path = backend/sdk
+	url = https://github.com/Ellisata/iot-gateway-sdk.git
+[submodule "backend/driversrc"]
+	path = backend/driversrc
+	url = https://github.com/Ellisata/iot-gateway-drivers.git

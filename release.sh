@@ -80,9 +80,9 @@ build_plugins() {
     [ -f "${d}main.go" ] || continue
     local name
     name="$(basename "$d")"
-    (cd "$ROOT/backend" && \
+    (cd "$ROOT/backend/driversrc" && \
       CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags="-s -w" \
-      -o "$outdir/iot-driver-${name}${ext}" "./driversrc/${name}")
+      -o "$outdir/iot-driver-${name}${ext}" "./${name}")
     echo "    [插件] ${name} ($os/$arch)"
     built=$((built + 1))
   done

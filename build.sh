@@ -105,8 +105,10 @@ build_one() { # $1=GOOS $2=GOARCH $3=output-name [$4=GOARM，仅 GOARCH=arm 需�
     local name
     name="$(basename "$d")"
     mkdir -p "$dir"
-    env "${genv[@]}" go build -ldflags="-s -w" \
-      -o "$dir/iot-driver-${name}${ext}" "./${d}"
+    # driversrc 是独立 Go module（由 submodule 提供），必须从它内部构建；
+    # 从 backend 直接 go build ./driversrc/<name> 会因嵌套 module 而失败。
+    (cd driversrc && env "${genv[@]}" go build -ldflags="-s -w" \
+      -o "$dir/iot-driver-${name}${ext}" "./${name}")
     echo "    [OK] ${pdir}/iot-driver-${name}${ext}"
     built=$((built + 1))
   done

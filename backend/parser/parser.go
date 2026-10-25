@@ -21,8 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/collector"
-	"iot-gateway/driver"
 )
 
 // 解析方式（Config.Type）。空类型按 builtin 处理，兼容历史配置。

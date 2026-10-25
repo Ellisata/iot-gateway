@@ -1,28 +1,28 @@
 @echo off
-:: ¶àÆ½Ì¨´ò°ü½Å±¾ - Linux amd64 / Linux arm64 / Linux arm(32) / Windows amd64
+:: ï¿½ï¿½Æ½Ì¨ï¿½ï¿½ï¿½ï¿½Å±ï¿½ - Linux amd64 / Linux arm64 / Linux arm(32) / Windows amd64
 :: ============================================
-:: Í³Ò»ÇÐµ½½Å±¾ËùÔÚÄ¿Â¼£¬ÕâÑù´ÓÈÎºÎÎ»ÖÃµ÷ÓÃ¶¼³ÉÁ¢£¨%~dp0 ¶ø·Çµ÷ÓÃÕß cwd£©¡£
-:: ÓÃ pushd ¶ø²»ÊÇ cd /d£ºUNC Â·¾¶£¨ÍøÂç¹²Ïí£©ÏÂ cd /d »áÖ±½ÓÊ§°Ü¡£
+:: Í³Ò»ï¿½Ðµï¿½ï¿½Å±ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿Â¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îºï¿½Î»ï¿½Ãµï¿½ï¿½Ã¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½%~dp0 ï¿½ï¿½ï¿½Çµï¿½ï¿½ï¿½ï¿½ï¿½ cwdï¿½ï¿½ï¿½ï¿½
+:: ï¿½ï¿½ pushd ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ cd /dï¿½ï¿½UNC Â·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ç¹²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ cd /d ï¿½ï¿½Ö±ï¿½ï¿½Ê§ï¿½Ü¡ï¿½
 ::
-:: ÓÃ·¨:
-::   package.bat           È«Á¿: Linux amd64 + Windows amd64 + Linux arm64 + Linux arm32
-::   package.bat linux     ½ö Linux amd64
-::   package.bat windows   ½ö Windows amd64
-::   package.bat arm64     ½ö Linux arm64
-::   package.bat arm32     ½ö Linux arm 32 Î»£¨¹Ì¶¨ GOARM=7£©
+:: ï¿½Ã·ï¿½:
+::   package.bat           È«ï¿½ï¿½: Linux amd64 + Windows amd64 + Linux arm64 + Linux arm32
+::   package.bat linux     ï¿½ï¿½ Linux amd64
+::   package.bat windows   ï¿½ï¿½ Windows amd64
+::   package.bat arm64     ï¿½ï¿½ Linux arm64
+::   package.bat arm32     ï¿½ï¿½ Linux arm 32 Î»ï¿½ï¿½ï¿½Ì¶ï¿½ GOARM=7ï¿½ï¿½
 ::
-:: ²úÎïÂäÔÚ²Ö¿â¸ùÄ¿Â¼£¨±¾½Å±¾µÄÉÏÒ»¼¶£©:
+:: ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú²Ö¿ï¿½ï¿½Ä¿Â¼ï¿½ï¿½ï¿½ï¿½ï¿½Å±ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½:
 ::   iot-gateway              + plugins-linux\        Linux amd64
 ::   iot-gateway-linux-arm64  + plugins-linux-arm64\  Linux arm64
-::   iot-gateway-linux-arm    + plugins-linux-arm\    Linux arm32£¨GOARM=7£©
+::   iot-gateway-linux-arm    + plugins-linux-arm\    Linux arm32ï¿½ï¿½GOARM=7ï¿½ï¿½
 ::   iot-gateway.exe          + plugins-windows\      Windows amd64
 ::
-::  ×¢Òâ: ²å¼þÄ¿Â¼Ò»ÂÉ´øÆ½Ì¨ºó×º£¬Windows ÊÇ plugins-windows\£»Íø¹Ø plugin.dir
-::        Ä¬ÈÏÊÇ "plugins"¡¢Ïà¶Ô exe ½âÎö¡£±¾µØÖ±½ÓÅÜ exe Ö®Ç°Òª°Ñ¶ÔÓ¦Ä¿Â¼¸ÄÃû³É
-::        plugins\ »ò¸Ä plugin.dir£¬·ñÔòÒ»¸öÐ­ÒéÒ²É¨²»µ½¡£·¢ÐÐ°ü²»ÊÜÓ°Ïì¡£
+::  ×¢ï¿½ï¿½: ï¿½ï¿½ï¿½Ä¿Â¼Ò»ï¿½É´ï¿½Æ½Ì¨ï¿½ï¿½×ºï¿½ï¿½Windows ï¿½ï¿½ plugins-windows\ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ plugin.dir
+::        Ä¬ï¿½ï¿½ï¿½ï¿½ "plugins"ï¿½ï¿½ï¿½ï¿½ï¿½ exe ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö±ï¿½ï¿½ï¿½ï¿½ exe Ö®Ç°Òªï¿½Ñ¶ï¿½Ó¦Ä¿Â¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+::        plugins\ ï¿½ï¿½ï¿½ plugin.dirï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½Ð­ï¿½ï¿½Ò²É¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð°ï¿½ï¿½ï¿½ï¿½ï¿½Ó°ï¿½ì¡£
 ::
-:: arm32 ¹Ì¶¨ GOARM=7£¨ARMv7-A + VFPv3 Ó²¸¡µã£©¡£Ä¿±ê°åÈôÊÇ ARMv6/ARMv5
-:: £¨Ê÷Ý®ÅÉ 1 / Zero Ò»´ú£©µÃ¸ÄÓÃ GOARM=5 Èí¸¡µã£¬·ñÔò²úÎïÔÚ°å×ÓÉÏÖ±½ÓÆð²»À´¡£
+:: arm32 ï¿½Ì¶ï¿½ GOARM=7ï¿½ï¿½ARMv7-A + VFPv3 Ó²ï¿½ï¿½ï¿½ã£©ï¿½ï¿½Ä¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ARMv6/ARMv5
+:: ï¿½ï¿½ï¿½ï¿½Ý®ï¿½ï¿½ 1 / Zero Ò»ï¿½ï¿½ï¿½ï¿½ï¿½Ã¸ï¿½ï¿½ï¿½ GOARM=5 ï¿½ï¿½ï¿½ï¿½ï¿½ã£¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú°ï¿½ï¿½ï¿½ï¿½ï¿½Ö±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 pushd "%~dp0"
 
 set PKG_TARGET=%1
@@ -45,11 +45,11 @@ if /i "%PKG_TARGET%"=="win" set DO_WINDOWS=1
 if /i "%PKG_TARGET%"=="arm64" set DO_ARM64=1
 if /i "%PKG_TARGET%"=="arm32" set DO_ARM32=1
 if /i "%PKG_TARGET%"=="arm7" set DO_ARM32=1
-rem arm °´ Go µÄ¹ßÀýÖ¸ 32 Î»£¨GOARCH=arm£©£¬64 Î»ÓÃ arm64¡£
+rem arm ï¿½ï¿½ Go ï¿½Ä¹ï¿½ï¿½ï¿½Ö¸ 32 Î»ï¿½ï¿½GOARCH=armï¿½ï¿½ï¿½ï¿½64 Î»ï¿½ï¿½ arm64ï¿½ï¿½
 if /i "%PKG_TARGET%"=="arm" set DO_ARM32=1
 
 if "%DO_LINUX%%DO_WINDOWS%%DO_ARM64%%DO_ARM32%"=="0000" (
-    echo [FAIL] Î´ÖªÄ¿±ê: %PKG_TARGET%   ¿ÉÓÃ: all / linux / windows / arm64 / arm32
+    echo [FAIL] Î´ÖªÄ¿ï¿½ï¿½: %PKG_TARGET%   ï¿½ï¿½ï¿½ï¿½: all / linux / windows / arm64 / arm32
     popd
     exit /b 1
 )
@@ -82,20 +82,20 @@ if "%DO_WINDOWS%"=="1" echo   - iot-gateway.exe         (windows/amd64)
 if "%DO_ARM64%"=="1"   echo   - iot-gateway-linux-arm64 (linux/arm64)
 if "%DO_ARM32%"=="1"   echo   - iot-gateway-linux-arm   (linux/arm, GOARM=7)
 echo ========================================
-:: Ö÷Á÷³Ìµ½´ËÎªÖ¹¡£ÉÙÁËÕâÐÐ£¬Ö´ÐÐ»á¡¸µô½ø¡¹ÏÂÃæµÄ :build_one / :build_plugins
-:: ±êÇ©£¬ÓÃ¿ÕµÄ %~1/%~2 ÔÙ±àÒ»±é²å¼þ£¬%PB_OUT% Îª¿ÕÊ±Êä³öÂ·¾¶ÍË»¯³ÉÅÌ¸ù¡£
+:: ï¿½ï¿½ï¿½ï¿½ï¿½Ìµï¿½ï¿½ï¿½ÎªÖ¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð£ï¿½Ö´ï¿½Ð»á¡¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ :build_one / :build_plugins
+:: ï¿½ï¿½Ç©ï¿½ï¿½ï¿½Ã¿Õµï¿½ %~1/%~2 ï¿½Ù±ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½%PB_OUT% Îªï¿½ï¿½Ê±ï¿½ï¿½ï¿½Â·ï¿½ï¿½ï¿½Ë»ï¿½ï¿½ï¿½ï¿½Ì¸ï¿½ï¿½ï¿½
 popd
 exit /b 0
 
 :fail
 echo.
-echo [FAIL] ¹¹½¨Ê§°Ü£¬Çë²é¿´ÉÏ·½ÈÕÖ¾¡£
+echo [FAIL] ï¿½ï¿½ï¿½ï¿½Ê§ï¿½Ü£ï¿½ï¿½ï¿½é¿´ï¿½Ï·ï¿½ï¿½ï¿½Ö¾ï¿½ï¿½
 popd
 exit /b 1
 
 
-:: build_one <GOOS> <GOARCH> <Ö÷¶þ½øÖÆÃû> <²å¼þÄ¿Â¼Ãû> [GOARM]
-:: Ö÷¶þ½øÖÆÓëÍ¬Ãû plugins-* Ä¿Â¼¶¼ÂäÔÚ²Ö¿â¸ù£¨±¾½Å±¾µÄÉÏÒ»¼¶£©¡£
+:: build_one <GOOS> <GOARCH> <ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½> <ï¿½ï¿½ï¿½Ä¿Â¼ï¿½ï¿½> [GOARM]
+:: ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¬ï¿½ï¿½ plugins-* Ä¿Â¼ï¿½ï¿½ï¿½ï¿½ï¿½Ú²Ö¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Å±ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 :build_one
 setlocal
 set BO_GOOS=%1
@@ -124,8 +124,8 @@ if errorlevel 1 (
     endlocal & exit /b 1
 )
 
-:: ½ø³ÌÍâÐ­Òé²å¼þ£ºÓëÖ÷¶þ½øÖÆÍ¬Æ½Ì¨**Í¬ GOARM** ½»²æ±àÒë£¬ÂäÔÚ²Ö¿â¸ùµÄÍ¬Ãû plugins-* Ä¿Â¼¡£
-:: ±à²»³öÀ´¾ÍÖÐÖ¹ ¡ª¡ª ¼û :build_plugins µÄËµÃ÷¡£
+:: ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð­ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¬Æ½Ì¨**Í¬ GOARM** ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ë£¬ï¿½ï¿½ï¿½Ú²Ö¿ï¿½ï¿½ï¿½ï¿½Í¬ï¿½ï¿½ plugins-* Ä¿Â¼ï¿½ï¿½
+:: ï¿½à²»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¹ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ :build_plugins ï¿½ï¿½Ëµï¿½ï¿½ï¿½ï¿½
 call :build_plugins %BO_GOOS% %BO_ARCH% "%~dp0..\%BO_PLUGINS%" %BO_GOARM%
 if errorlevel 1 (
     endlocal & exit /b 1
@@ -158,7 +158,8 @@ set PB_EXT=
 if /i "%PB_GOOS%"=="windows" set PB_EXT=.exe
 if not exist "%PB_OUT%" mkdir "%PB_OUT%"
 set PB_BUILT=0
-for /d %%d in (driversrc\*) do (
+pushd driversrc
+for /d %%d in (*) do (
     if exist "%%d\main.go" (
         for %%n in ("%%d") do set PB_NAME=%%~nn
         set CGO_ENABLED=0
@@ -168,7 +169,7 @@ for /d %%d in (driversrc\*) do (
         go build -ldflags="-s -w" -o "%PB_OUT%\iot-driver-!PB_NAME!%PB_EXT%" ".\%%d"
         if errorlevel 1 (
             echo [FAIL] plugin !PB_NAME! build failed for %PB_GOOS%/%PB_ARCH%
-            endlocal & exit /b 1
+            endlocal & popd & exit /b 1
         )
         echo     [OK] iot-driver-!PB_NAME!%PB_EXT%
         set /a PB_BUILT+=1
@@ -176,6 +177,6 @@ for /d %%d in (driversrc\*) do (
 )
 if %PB_BUILT%==0 (
     echo [FAIL] no protocol plugin built -- the package must ship plugins\
-    endlocal & exit /b 1
+    endlocal & popd & exit /b 1
 )
-endlocal & exit /b 0
+endlocal & popd & exit /b 0

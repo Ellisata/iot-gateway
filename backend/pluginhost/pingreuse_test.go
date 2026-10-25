@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"iot-gateway/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 )
 
 // TestPingReusesSessionAcrossRPC 串口「测试连接」在**真实的进程边界**上复用采集会话。

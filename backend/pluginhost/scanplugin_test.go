@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"iot-gateway/driver"
-	"iot-gateway/testutil/fake"
+	"github.com/Ellisata/iot-gateway-drivers/testutil/fake"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 )
 
 // fakeTarget 把一个 "host:port" 地址转成探测目标。

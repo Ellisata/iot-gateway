@@ -10,7 +10,7 @@ import (
 	"github.com/gopcua/opcua/id"
 	"github.com/gopcua/opcua/ua"
 
-	"iot-gateway/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 )
 
 func TestCodecForCommonDataType(t *testing.T) {

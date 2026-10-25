@@ -15,8 +15,8 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/configFile"
-	"iot-gateway/driver"
 	"iot-gateway/model/po"
 )
 
@@ -144,7 +144,7 @@ func TestManagerDiscoversAndRegisters(t *testing.T) {
 		t.Errorf("LookupDataType(Short) = %q,%v; want int16,true", internal, ok)
 	}
 	// 采集读取路径的类型兜底可用。
-	if got := driver.NormalizeAddressType(fixtureProtocol, po.DeviceAddress{DataType: "int16"}); got != "int16" {
+	if got := driver.NormalizeAddressType(fixtureProtocol, sdkAddr(po.DeviceAddress{DataType: "int16"})); got != "int16" {
 		t.Errorf("NormalizeAddressType = %q, want int16", got)
 	}
 

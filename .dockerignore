@@ -1,5 +1,8 @@
 # 构建上下文为仓库根目录(多阶段全流程构建)
 # 只保留 frontend/ 与 backend/ 源码,其余一律排除
+# backend/sdk 与 backend/driversrc 是 submodule（SDK Apache-2.0 / 官方驱动 AGPL-3.0），
+# backend/go.mod 以 replace ./sdk / ./driversrc 依赖它们；缺了它们 Docker 构建会在
+# go mod download / 插件编译阶段失败，因此不能在构建上下文中排除。
 
 # 版本管理与文档(注意: backend/docs/openApi*.md 被 go:embed 嵌入,不能排除)
 .git

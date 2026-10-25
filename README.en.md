@@ -52,7 +52,7 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 | Siemens, Mitsubishi, Omron, Rockwell, OPC UA | Kafka / RabbitMQ / MySQL / PostgreSQL downstreams |
 | DL/T 645 meters, ABB robots | Clustering / HA, rule engine, central fleet management |
 
-**License**: AGPL-3.0. Internal deployment and integration with your own systems via Open API / MQTT require no source disclosure; OEM or redistribution needs a commercial license — see [License & FAQ](#license--faq).
+**License**: the gateway core and official drivers are AGPL-3.0; the driver SDK is published separately under Apache-2.0. Internal deployment and integration with your own systems via Open API / MQTT require no source disclosure; OEM or redistribution needs a commercial license — see [License & FAQ](#license--faq) and [LICENSING.md](LICENSING.md).
 
 ## Features
 
@@ -121,7 +121,7 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 - Each plugin builds to `iot-driver-<dir-name>` (plus `.exe` on Windows) and lives in the `plugins/` directory **next to the executable**.
 - The gateway scans it using `plugin.dir` (default `plugins`; an empty or relative path resolves **relative to the executable's directory**, not the working directory) and `plugin.glob` (default `iot-driver-*`). Plugins are **loaded at startup, and ones added while running are picked up automatically**.
 - `plugin.enabled` **ships as `true`**: all protocols come from plugins, so turning it off means the gateway supports **no protocol at all** (devices are skipped silently with a single WARN line).
-- Plugin sources live in `backend/driversrc/<dir-name>/`; `build.sh` / `release.sh` / `backend/Dockerfile` cross-compile them into the release archive (**if not a single plugin builds, the build fails** — it never produces a protocol-less package).
+- Plugin sources live in the standalone [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers) repository (pinned here as the `backend/driversrc` submodule); `build.sh` / `release.sh` / `backend/Dockerfile` cross-compile them into the release archive (**if not a single plugin builds, the build fails** — it never produces a protocol-less package).
 - Loading a plugin means **executing the programs in that directory with the gateway's own OS privileges** — plugins are trusted code, not sandboxed. Ensure the directory is writable only by administrators; see [SECURITY.md](SECURITY.md).
 
 > For measured per-protocol capacity (devices × points) and tuning advice, see the [capacity load-test report](backend/cmd/loadtest/README.en.md). Since 2026-09 every measurement there is taken on the **plugin build** (each read/write costs one gateway ↔ plugin RPC round-trip, and the readings already include it), covering all 7 protocols across scan 1000/200/100ms × RTT 0/10/20ms, plus a dedicated DL/T 645 section (`ABB.RWS` was not part of this benchmark); the frame-count model and tuning conclusions are in the [capacity testing findings](backend/specs/capacity-testing.en.md).
@@ -221,7 +221,7 @@ docker compose down             # Stop and remove the container
 
 ### Plugin packaging
 
-Plugins are **never compiled one by one by hand** — every build entry point cross-compiles them from a single-level glob over `backend/driversrc/*/`, where **the directory name is the artifact name**:
+Plugins are **never compiled one by one by hand** — every build entry point cross-compiles them from a single-level glob over `backend/driversrc/*/` (the `iot-gateway-drivers` submodule), where **the directory name is the artifact name**:
 
 - Each **direct-level** subdirectory of `backend/driversrc/` that contains a `main.go` compiles to `iot-driver-<directory name>` (with an `.exe` suffix on Windows).
 - They are compiled with the **same** `GOOS` / `GOARCH` / `GOARM` environment as the main binary. A plugin whose architecture does not match the host will not stop the gateway from starting, but that plugin is silently skipped — the symptom is "the device is configured but no value is ever collected".
@@ -237,11 +237,11 @@ Plugins are **never compiled one by one by hand** — every build entry point cr
 **To rebuild a single plugin** (you changed one protocol, or you want to verify locally), just `go build` it:
 
 ```bash
-cd backend
-go build -o ./plugins/iot-driver-modbus ./driversrc/modbus    # add the .exe suffix on Windows
+cd backend/driversrc
+go build -o ../plugins/iot-driver-modbus ./modbus    # add the .exe suffix on Windows
 ```
 
-**To add a protocol**, create one directory under `backend/driversrc/` (containing a `package main` `main.go`) — **no build script needs changing**; the next build picks it up via the glob. The only constraint: **directory name = artifact name, and it must be unique and non-nested** (hence `omroncip` / `rockwellcip` rather than `omron/cip`).
+**To add a protocol**, create one directory in the [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers) repository (the `backend/driversrc` submodule) — **no core-repo build script needs changing**; the next build picks it up via the glob. The only constraint: **directory name = artifact name, and it must be unique and non-nested** (hence `omroncip` / `rockwellcip` rather than `omron/cip`).
 
 > The `-<platform>` suffix on locally built directories (`plugins-windows/`, …) exists to keep the four platforms' identically named artifacts from overwriting one another — mixing them in a single directory overwrites files with the wrong architecture, and **the overwrite fails silently**. At deploy time rename the directory for your platform to `plugins/` and put it next to the executable; `release.sh` already does this for you.
 
@@ -330,13 +330,11 @@ push:
 ```
 ├── backend/            # Go backend
 │   ├── collector/      # Acquisition engine (poll scheduling / config hot reload)
-│   ├── driver/         # Protocol driver contract & infra (registry / type tables / type mapping,
-│   │                   #   no protocol implementation)
-│   ├── pluginwire/     # Out-of-process plugin wire layer (frame codec / method names / RemoteError, kind-agnostic)
+│   ├── driveradapter/  # Host-side po.DeviceAddress ↔ SDK driver.DeviceAddress conversion
 │   ├── pluginhost/     # Out-of-process plugin host (dir scan / process supervision / RPC proxy / hot upgrade;
-│   │                   #   driver-specific adapter lives in adapter_driver.go)
-│   ├── driversdk/      # Out-of-process driver plugin SDK (Serve / Meta / RPC params)
-│   ├── driversrc/      # Protocol plugin sources (9 subdirs, each builds to iot-driver-<dir>)
+│   │                   #   contract & wire layer come from backend/sdk)
+│   ├── sdk/            # Driver SDK standalone repository (submodule, Apache-2.0; driver/pluginwire/driversdk)
+│   ├── driversrc/      # Official drivers standalone repository (submodule, AGPL-3.0; 9 subdirs)
 │   ├── plugins/        # Plugin runtime directory (build output; shipped in the release archive)
 │   ├── mappingdsl/     # Mapping primitives shared by inbound parsing and outbound mapping (paths / templates / transforms)
 │   ├── push/           # Push engine (mqtt/http/tdengine-v3/influxdb-v3 + outbox + codec/messagechannel)
@@ -361,9 +359,13 @@ push:
 |---|---|
 | Backend | Go 1.26 + Gin + GORM + Google Wire + Viper + JWT |
 | Storage | SQLite (pure Go implementation, CGO-free) |
-| Protocol libs | **Shipped with the plugins**: goburrow/modbus · robinson/gos7 · gopcua/opcua etc. are linked only by the plugins under `backend/driversrc/`; the main binary links no protocol library |
+| Protocol libs | **Shipped with the plugins**: goburrow/modbus · robinson/gos7 · gopcua/opcua etc. are linked only by the plugins under `backend/driversrc/` (the `iot-gateway-drivers` submodule); the main binary links no protocol library |
 | Frontend | Vue 3 + Vite + Element Plus + Pinia + Tailwind CSS 4 + vue-i18n |
 | Deployment | go:embed single binary · Windows service / Linux systemd |
+
+### Driver SDK (Apache-2.0)
+
+Third parties can build protocol plugins — including proprietary ones — with the standalone [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk) repository. The SDK is Apache-2.0, has zero third-party dependencies and does not import the gateway core; a driver runs as a separate process and talks to the gateway over the wire protocol, so a closed-source driver is not an AGPL derivative work. The nine official drivers live in the [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers) repository and stay AGPL-3.0. This repository pins both as the `backend/sdk` and `backend/driversrc` submodules; see [LICENSING.md](LICENSING.md) for the boundary.
 
 ## Contributing
 
@@ -374,6 +376,7 @@ Bug reports, documentation, new protocol drivers and push channels are all welco
 | Document | Contents |
 |---|---|
 | [Driver plugin guide](docs/driver-plugins.md) (中文) | Developing, lifecycle, security and troubleshooting for out-of-process protocol plugins — required reading before adding a protocol |
+| [Driver SDK](backend/sdk/README.md) | Apache-2.0 SDK for third-party and proprietary drivers (standalone `iot-gateway-sdk` repository); see [LICENSING.md](LICENSING.md) |
 | [Engineering specs](backend/specs/README.md) (中文) | Layering, directory layout, coding standards, etc. |
 | [Push payload contract](backend/specs/push-payload.en.md) | Field semantics and parsing conventions for pushed data |
 | [Subscription parser spec](backend/specs/parser-plugins.md) (中文) | Contract, limits and hot-reload semantics for the built-in mapping DSL and goja scripts |

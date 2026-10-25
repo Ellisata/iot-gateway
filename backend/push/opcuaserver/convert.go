@@ -12,7 +12,7 @@ import (
 	"github.com/gopcua/opcua/id"
 	"github.com/gopcua/opcua/ua"
 
-	"iot-gateway/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 )
 
 // valueCodec 描述一个点位的「OPC UA 数据类型 + 字符串值解析」。

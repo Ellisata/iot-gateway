@@ -6,7 +6,7 @@ package alarm
 import (
 	"gorm.io/gorm"
 
-	"iot-gateway/driver"
+	"github.com/Ellisata/iot-gateway-sdk/driver"
 )
 
 // 质量码文案（进报警内容，如「点位 1#炉.温度 采集质量异常（地址无效）」）。
