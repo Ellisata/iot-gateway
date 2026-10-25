@@ -10,10 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Ellisata/iot-gateway-drivers/testutil/fake"
-	"github.com/Ellisata/iot-gateway-drivers/testutil/parity"
 	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"github.com/Ellisata/iot-gateway-sdk/testkit/fake"
+
 	"iot-gateway/model/po"
+	"iot-gateway/testutil/parity"
 )
 
 // ==================== 行为等价的共享基建 ====================
@@ -26,14 +27,13 @@ import (
 //	        把逐点位的 Value/DataType/Kind/Quality 冻进 <case>.golden.json；
 //	阶段 2+ 用**插件驱动**跑同一份 addresses.json，与黄金逐项比对。
 //
-// 黄金文件的读写格式定义在 testutil/parity（普通包），因为 driversrc/ 下的
-// 插件（package main）也要读同一批文件。本文件是消费侧的**驱动侧**基建：
-// 拉起假 PLC、把共享输入渲染成协议 JSON、跑一轮 Read。
+// 黄金文件的读写格式定义在 testutil/parity（普通包）。本文件是消费侧的
+// **驱动侧**基建：拉起假 PLC、把共享输入渲染成协议 JSON、跑一轮 Read。
 //
 // 覆盖面：帧格式、地址解析、区间规划、类型映射、格式化，外加插件侧的
 // driversdk 帧编解码与 client.go 的 RPC 链路（内置版没有这一段）。
 //
-// **已知局限**：testutil/fake 的假 PLC 一律回定长全零数据，所以除 OPC UA 外
+// **已知局限**：SDK testkit 的假 PLC 一律回定长全零数据，所以除 OPC UA 外
 // 各协议的 Value 恒为 "0"/空串 —— 黄金比对能抓住"帧没对上、索引错位、Quality
 // 掉了、DataType/Kind 变了"，抓不住"字节序或解码算式改了"。后者由随实现一起
 // 搬进插件包的 5800 行单测（parser_test / frame_test / driver_test 等）守着，

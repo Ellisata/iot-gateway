@@ -95,25 +95,37 @@ build_one() { # $1=GOOS $2=GOARCH $3=output-name [$4=GOARM，仅 GOARCH=arm 需�
   # 插件也必须跟主二进制同 GOARM —— 这里复用同一个 genv，别另起一份环境。
   # **插件是必需的**:全部协议驱动都已搬成插件、主程序不含任何内置实现,
   # 插件目录为空 = 网关不支持任何协议(设备会被逐个静默跳过)。
+  #
+  # 驱动源码来自已发布的模块（drivers.txt 列目录名、drivers.version 定版本）。
+  #
+  # 用一个临时模块来解析源码：`go install` 在设置 GOBIN 时**禁止交叉编译**，
+  # 而 `go build` 需要一个主模块来解析依赖与 go.sum 条目。`-o` 让产物名精确可控。
   local ext="" built=0
-  local pdir dir
+  local pdir dir name ver buildtmp
+  ver="$(tr -d '[:space:]' < "$ROOT/drivers.version")"
+  [ -n "$ver" ] || { echo "  [FAIL] $ROOT/drivers.version 为空"; return 1; }
   pdir="$(plugin_dir_for "$1" "$2")"
   dir="$ROOT/backend/$pdir"
   [ "$1" = "windows" ] && ext=".exe"
-  for d in driversrc/*/; do
-    [ -f "${d}main.go" ] || continue
-    local name
-    name="$(basename "$d")"
-    mkdir -p "$dir"
-    # driversrc 是独立 Go module（由 submodule 提供），必须从它内部构建；
-    # 从 backend 直接 go build ./driversrc/<name> 会因嵌套 module 而失败。
-    (cd driversrc && env "${genv[@]}" go build -ldflags="-s -w" \
-      -o "$dir/iot-driver-${name}${ext}" "./${name}")
+  mkdir -p "$dir"
+
+  buildtmp="$(mktemp -d)"
+  ( cd "$buildtmp" && GOWORK=off go mod init driverbuild >/dev/null 2>&1 )
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    ( cd "$buildtmp" && \
+      env "${genv[@]}" GOWORK=off go get \
+        "github.com/Ellisata/iot-gateway-drivers/${name}@${ver}" >/dev/null && \
+      env "${genv[@]}" GOWORK=off go build \
+        -ldflags="-s -w -X main.version=${ver}" \
+        -o "$dir/iot-driver-${name}${ext}" \
+        "github.com/Ellisata/iot-gateway-drivers/${name}" )
     echo "    [OK] ${pdir}/iot-driver-${name}${ext}"
     built=$((built + 1))
-  done
+  done < "$ROOT/drivers.txt"
+  rm -rf "$buildtmp"
 
-  # 一个插件都没编出来就是环境坏了(没有 driversrc/*/main.go,或全部编译失败)。
+  # 一个插件都没编出来就是环境坏了(drivers.txt 为空,或全部安装失败)。
   # 这里必须失败:主程序不含任何内置协议,插件目录为空 = 网关不支持任何协议。
   if [ "$built" = "0" ]; then
     echo "  [FAIL] $1/$2: 没有编译出任何插件 —— 网关将不支持任何协议"

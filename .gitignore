@@ -38,3 +38,7 @@ plugins-windows/
 plugins-linux/
 plugins-linux-arm64/
 plugins-linux-arm/
+
+# 跨仓联调用的本地工作区（指向同级 SDK / 驱动检出），不入库
+go.work
+go.work.sum

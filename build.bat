@@ -182,14 +182,15 @@ if errorlevel 1 exit /b 1
 exit /b 0
 
 :: build_plugins <GOOS> <GOARCH> <OUTDIR> [GOARM]
-:: Cross-compile every backend\driversrc\* plugin into OUTDIR as iot-driver-<name>.
+:: Resolve every driver listed in drivers.txt at drivers.version from the module
+:: proxy and cross-compile it into OUTDIR as iot-driver-<name>.
+::
+:: A throwaway module is used on purpose: go install refuses to cross-compile
+:: when GOBIN is set, while go build needs a main module to resolve go.sum.
 ::
 :: Plugins are NOT optional: all protocol drivers live in plugins now, the main
 :: binary has no built-in protocol left. An empty plugins dir means the gateway
 :: supports nothing, so a failure here is fatal.
-::
-:: The layout is deliberately FLAT (driversrc\<name>\main.go); the output name is
-:: the directory basename, so names must be unique and must not be nested.
 ::
 :: NOTE: the plugin binaries must match the main binary's GOOS/GOARCH/GOARM, so
 :: those are parameters here -- building arm64 plugins as amd64 (or a GOARM=7
@@ -205,25 +206,40 @@ set PB_EXT=
 if /i "%PB_GOOS%"=="windows" set PB_EXT=.exe
 if not exist "%PB_OUT%" mkdir "%PB_OUT%"
 set PB_BUILT=0
-pushd "%ROOT%backend\driversrc"
-for /d %%d in (*) do (
-    if exist "%%d\main.go" (
-        for %%n in ("%%d") do set PB_NAME=%%~nn
-        set CGO_ENABLED=0
-        set GOOS=%PB_GOOS%
-        set GOARCH=%PB_ARCH%
-        set GOARM=%PB_GOARM%
-        go build -ldflags="-s -w" -o "%PB_OUT%\iot-driver-!PB_NAME!%PB_EXT%" ".\%%d"
-        if errorlevel 1 (
-            echo [FAIL] plugin !PB_NAME! build failed for %PB_GOOS%/%PB_ARCH%
-            endlocal & popd & exit /b 1
-        )
-        echo     [OK] iot-driver-!PB_NAME!%PB_EXT%
-        set /a PB_BUILT+=1
-    )
+set "PB_VER="
+for /f "usebackq delims=" %%v in ("%ROOT%drivers.version") do set "PB_VER=%%v"
+if not defined PB_VER (
+    echo [FAIL] "%ROOT%drivers.version" is empty
+    endlocal & exit /b 1
 )
+set "PB_TMP=%TEMP%\iot-driver-build"
+if exist "%PB_TMP%" rmdir /s /q "%PB_TMP%"
+mkdir "%PB_TMP%"
+pushd "%PB_TMP%"
+set GOWORK=off
+go mod init driverbuild >nul 2>&1
+for /f "usebackq delims=" %%n in ("%ROOT%drivers.txt") do (
+    set CGO_ENABLED=0
+    set GOOS=%PB_GOOS%
+    set GOARCH=%PB_ARCH%
+    set GOARM=%PB_GOARM%
+    go get "github.com/Ellisata/iot-gateway-drivers/%%n@!PB_VER!"
+    if errorlevel 1 (
+        echo [FAIL] plugin %%n resolve failed for %PB_GOOS%/%PB_ARCH%
+        popd & rmdir /s /q "%PB_TMP%" & endlocal & exit /b 1
+    )
+    go build -ldflags="-s -w -X main.version=!PB_VER!" -o "%PB_OUT%\iot-driver-%%n%PB_EXT%" "github.com/Ellisata/iot-gateway-drivers/%%n"
+    if errorlevel 1 (
+        echo [FAIL] plugin %%n build failed for %PB_GOOS%/%PB_ARCH%
+        popd & rmdir /s /q "%PB_TMP%" & endlocal & exit /b 1
+    )
+    echo     [OK] iot-driver-%%n%PB_EXT%
+    set /a PB_BUILT+=1
+)
+popd
+rmdir /s /q "%PB_TMP%"
 if %PB_BUILT%==0 (
     echo [FAIL] no protocol plugin built -- the package must ship plugins\
-    endlocal & popd & exit /b 1
+    endlocal & exit /b 1
 )
-endlocal & popd & exit /b 0
+endlocal & exit /b 0

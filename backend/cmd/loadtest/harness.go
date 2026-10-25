@@ -15,8 +15,8 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
-	"github.com/Ellisata/iot-gateway-drivers/testutil/fake"
 	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"github.com/Ellisata/iot-gateway-sdk/testkit/fake"
 	"iot-gateway/collector"
 	"iot-gateway/configFile"
 	dbsqlite "iot-gateway/database/sqlite"
@@ -28,9 +28,9 @@ import (
 // 假服务器工厂 + 设备连接配置生成 + 点位地址名生成 + 数据类型。
 // 采集引擎通过 iot_protocol.name（驱动注册名）匹配驱动，name 必须与 driver.Register 完全一致。
 type protocolAdapter struct {
-	name      string // iot_protocol.name（驱动注册名）
-	pluginSrc string // 提供该协议的插件源码目录（编译命令与「插件缺失」报错都靠它）
-	newServer func() (*fake.Server, error)
+	name       string // iot_protocol.name（驱动注册名）
+	driverName string // 驱动名（= iot-gateway-drivers 仓库的顶层目录名）；产物名与报错提示都靠它
+	newServer  func() (*fake.Server, error)
 	// newServerWithLatency 带 RTT 模拟的假服务器工厂。全部 8 个协议都支持 -latency；
 	// nil 时 main 会直接报错退出（保留该分支是为了让新加协议忘了实现时立刻暴露）。
 	newServerWithLatency func(time.Duration) (*fake.Server, error)
@@ -72,12 +72,12 @@ func lineTimeAt(baud, n int) time.Duration {
 
 // pluginBinary 本协议对应的插件产物名。
 //
-// 派生而非另存一份：产物名恒为 `iot-driver-<driversrc 目录名>`（见 build.sh 与
+// 派生而非另存一份：产物名恒为 `iot-driver-<驱动目录名>`（见 build.sh 与
 // docs/driver-plugins.md §1.2），目录名与 adapters 的 key 并不总是一致
 // （key `mc` → 目录 `mitsubishi`、key `cip` → 目录 `omroncip`），写死两份迟早会对不上。
 // Windows 下必须带 .exe：build.sh 与 pluginhost 的测试助手都按平台补后缀。
 func (pa protocolAdapter) pluginBinary() string {
-	name := "iot-driver-" + filepath.Base(pa.pluginSrc)
+	name := "iot-driver-" + filepath.Base(pa.driverName)
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
@@ -87,7 +87,7 @@ func (pa protocolAdapter) pluginBinary() string {
 var adapters = map[string]protocolAdapter{
 	"modbus": {
 		name:                 "ModBus.TCP",
-		pluginSrc:            "./driversrc/modbus",
+		driverName:           "modbus",
 		newServer:            fake.NewModbusTCP,
 		newServerWithLatency: fake.NewModbusTCPWithLatency,
 		deviceJSON:           func(port int, opts Options) string { return fmt.Sprintf(`{"host":"127.0.0.1","port":%d}`, port) },
@@ -100,7 +100,7 @@ var adapters = map[string]protocolAdapter{
 	},
 	"mc": {
 		name:                 "Mitsubishi.MC.TCP",
-		pluginSrc:            "./driversrc/mitsubishi",
+		driverName:           "mitsubishi",
 		newServer:            fake.NewMC3E,
 		newServerWithLatency: fake.NewMC3EWithLatency,
 		deviceJSON:           func(port int, opts Options) string { return fmt.Sprintf(`{"host":"127.0.0.1","port":%d}`, port) },
@@ -113,7 +113,7 @@ var adapters = map[string]protocolAdapter{
 	},
 	"fins": {
 		name:                 "Omron.FINS.TCP",
-		pluginSrc:            "./driversrc/fins",
+		driverName:           "fins",
 		newServer:            fake.NewFINSTCP,
 		newServerWithLatency: fake.NewFINSTCPWithLatency,
 		deviceJSON: func(port int, opts Options) string {
@@ -128,7 +128,7 @@ var adapters = map[string]protocolAdapter{
 	},
 	"s7": {
 		name:                 "Siemens.S7",
-		pluginSrc:            "./driversrc/s7",
+		driverName:           "s7",
 		newServer:            fake.NewS7,
 		newServerWithLatency: fake.NewS7WithLatency,
 		deviceJSON: func(port int, opts Options) string {
@@ -143,7 +143,7 @@ var adapters = map[string]protocolAdapter{
 	},
 	"cip": {
 		name:                 "Omron.CIP",
-		pluginSrc:            "./driversrc/omroncip",
+		driverName:           "omroncip",
 		newServer:            fake.NewCIP,
 		newServerWithLatency: fake.NewCIPWithLatency,
 		deviceJSON: func(port int, opts Options) string {
@@ -164,7 +164,7 @@ var adapters = map[string]protocolAdapter{
 	},
 	"rockwell": {
 		name:                 "Rockwell.CIP",
-		pluginSrc:            "./driversrc/rockwellcip",
+		driverName:           "rockwellcip",
 		newServer:            fake.NewCIPAB,
 		newServerWithLatency: fake.NewCIPABWithLatency,
 		deviceJSON: func(port int, opts Options) string {
@@ -179,7 +179,7 @@ var adapters = map[string]protocolAdapter{
 	},
 	"opcua": {
 		name:                 "OPC.UA",
-		pluginSrc:            "./driversrc/opcua",
+		driverName:           "opcua",
 		newServer:            fake.NewOpcUa,
 		newServerWithLatency: fake.NewOpcUaWithLatency,
 		deviceJSON: func(port int, opts Options) string {
@@ -200,7 +200,7 @@ var adapters = map[string]protocolAdapter{
 	},
 	"dlt645": {
 		name:                 "DLT645.TCP",
-		pluginSrc:            "./driversrc/dlt645",
+		driverName:           "dlt645",
 		newServer:            fake.NewDLT645,
 		newServerWithLatency: fake.NewDLT645WithLatency,
 		deviceJSON: func(port int, opts Options) string {
@@ -236,7 +236,7 @@ var adapters = map[string]protocolAdapter{
 	},
 }
 
-// DL/T 645-2007 帧布局常量（与 driversrc/dlt645/dlt645drv/codec.go 对齐）。
+// DL/T 645-2007 帧布局常量（与 iot-gateway-drivers 仓库的 dlt645/dlt645drv/codec.go 对齐）。
 const (
 	// dlt645FrameOverhead 帧定界开销：起始(1)+地址域(6)+起始(1)+控制码(1)+长度(1)+校验(1)+结束(1)。
 	dlt645FrameOverhead = 12
@@ -246,7 +246,7 @@ const (
 	// 改这里必须同步改 testutil/fake 的 dltDefaultDataSize —— 两者是一对约定。
 	dlt645DataBytes = 4
 	// dlt645DefaultDIs 驱动出厂默认的 maxDIsPerRead（协议上限）。
-	// 与 driversrc/dlt645/dlt645drv 的 defaultMaxDIsPerRead 是同一个值：压测不带
+	// 与 iot-gateway-drivers 仓库 dlt645/dlt645drv 的 defaultMaxDIsPerRead 是同一个值：压测不带
 	// -dlt645-dis 时驱动实际用的就是它，两边不一致会算出偏小的线路时间。
 	dlt645DefaultDIs = 12
 )

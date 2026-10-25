@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Ellisata/iot-gateway-drivers/testutil/fake"
 	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"github.com/Ellisata/iot-gateway-sdk/testkit/fake"
 )
 
 // fakeTarget 把一个 "host:port" 地址转成探测目标。
@@ -51,7 +51,7 @@ func TestFinsPluginScanCapabilities(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short 模式跳过需要编译插件的测试")
 	}
-	m, _ := startPluginManager(t, "./driversrc/fins", nil)
+	m, _ := startPluginManager(t, "fins", nil)
 
 	want := map[string]bool{
 		"Omron.FINS.UDP":         true,
@@ -124,7 +124,7 @@ func TestOmronCipPluginScanCapabilities(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short 模式跳过需要编译插件的测试")
 	}
-	m, _ := startPluginManager(t, "./driversrc/omroncip", nil)
+	m, _ := startPluginManager(t, "omroncip", nil)
 
 	var found bool
 	for _, pd := range m.DiscoverySpecs() {
@@ -169,7 +169,7 @@ func TestFinsProbeEndToEnd(t *testing.T) {
 	}
 	defer srv.Close()
 
-	m, _ := startPluginManager(t, "./driversrc/fins", nil)
+	m, _ := startPluginManager(t, "fins", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -209,7 +209,7 @@ func TestOmronCipProbeEndToEnd(t *testing.T) {
 	}
 	defer srv.Close()
 
-	m, _ := startPluginManager(t, "./driversrc/omroncip", nil)
+	m, _ := startPluginManager(t, "omroncip", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -245,7 +245,7 @@ func TestRockwellCipPluginScanCapabilities(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short 模式跳过需要编译插件的测试")
 	}
-	m, _ := startPluginManager(t, "./driversrc/rockwellcip", nil)
+	m, _ := startPluginManager(t, "rockwellcip", nil)
 
 	var found bool
 	for _, pd := range m.DiscoverySpecs() {
@@ -306,7 +306,7 @@ func TestRockwellCipProbeEndToEnd(t *testing.T) {
 	}
 	defer srv.Close()
 
-	m, _ := startPluginManager(t, "./driversrc/rockwellcip", nil)
+	m, _ := startPluginManager(t, "rockwellcip", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -361,7 +361,7 @@ func TestRockwellCipPointScanEndToEnd(t *testing.T) {
 	}
 	defer srv.Close()
 
-	m, _ := startPluginManager(t, "./driversrc/rockwellcip", nil)
+	m, _ := startPluginManager(t, "rockwellcip", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -415,7 +415,7 @@ func TestMitsubishiMcPluginScanCapabilities(t *testing.T) {
 	if testing.Short() {
 		t.Skip("-short 模式跳过需要编译插件的测试")
 	}
-	m, _ := startPluginManager(t, "./driversrc/mitsubishi", nil)
+	m, _ := startPluginManager(t, "mitsubishi", nil)
 
 	want := map[string]bool{
 		"Mitsubishi.MC.TCP":    true,  // 两项能力
@@ -486,7 +486,7 @@ func TestMitsubishiMcProbeEndToEnd(t *testing.T) {
 	}
 	defer srv.Close()
 
-	m, _ := startPluginManager(t, "./driversrc/mitsubishi", nil)
+	m, _ := startPluginManager(t, "mitsubishi", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -532,7 +532,7 @@ func TestMitsubishiMcPointScanEndToEnd(t *testing.T) {
 	}
 	defer srv.Close()
 
-	m, _ := startPluginManager(t, "./driversrc/mitsubishi", nil)
+	m, _ := startPluginManager(t, "mitsubishi", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

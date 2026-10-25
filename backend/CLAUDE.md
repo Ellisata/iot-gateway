@@ -10,7 +10,7 @@
 - **语言**: Go 1.26
 - **HTTP 框架**: Gin v1.12
 - **ORM / 存储**: GORM + SQLite(纯 Go 实现 `glebarez/sqlite`,免 CGO;配置存储,路径见 `default.yaml`)
-- **协议驱动**: 全部为进程外插件(见 `driversrc/`)。`goburrow/modbus`(Modbus RTU/TCP)、`robinson/gos7`(Siemens S7)、`gopcua/opcua`(OPC UA)等第三方库只被插件二进制链接,**主二进制里不含任何驱动实现**。唯一例外是推送侧的 OPC UA Server 通道(`push/opcuaserver/`)——它是服务端而非驱动,在进程内链接 gopcua 的 server 包
+- **协议驱动**: 全部为进程外插件(源码在独立仓库 `iot-gateway-drivers`,本文中的 `driversrc/...` 是该仓库路径的简写)。`goburrow/modbus`(Modbus RTU/TCP)、`robinson/gos7`(Siemens S7)、`gopcua/opcua`(OPC UA)等第三方库只被插件二进制链接,**主二进制里不含任何驱动实现**。唯一例外是推送侧的 OPC UA Server 通道(`push/opcuaserver/`)——它是服务端而非驱动,在进程内链接 gopcua 的 server 包
 - **推送**: `eclipse/paho.mqtt.golang`(MQTT)、`gopcua/opcua` server(OPC UA Server 通道)
 - **订阅解析**: `dop251/goja`(纯 Go、无 CGO)执行自定义解析脚本;契约见 [specs/parser-plugins.md](specs/parser-plugins.md)
 - **依赖注入**: Google Wire(编译期 DI,`wire.go` / `wire_gen.go`)
@@ -36,21 +36,14 @@
 │   ├── adapter_driver.go #   驱动侧适配:describe → sdk/driver 的三张运行时注册表(见该文件头的边界说明)
 │   ├── provision.go     #   驱动侧适配:iot_protocol 行供给(只插入/只补空)
 │   └── remote.go        #   驱动侧适配:把 RPC 调用包装成 sdk/driver.Driver 的 remoteDriver
-├── sdk/                 # 驱动 SDK 独立仓库(**submodule**,Apache-2.0):driver/ + pluginwire/ + driversdk/
-├── driversrc/           # 官方驱动独立仓库(**submodule**,AGPL-3.0,独立 Go module;协议的唯一实现处)
-│   ├── modbus/          # ModBus.TCP / ModBus.RTU;实现在 modbusdrv/
-│   ├── mitsubishi/      # Mitsubishi.MC.TCP / .Serial;实现在 mitsubishidrv/（包名 mitsubishi）
-│   ├── s7/              # Siemens.S7;实现在 s7drv/（包名 s7）
-│   ├── opcua/           # OPC.UA;实现在 opcuadrv/（包名 opcua）
-│   ├── rockwellcip/     # Rockwell.CIP;实现在 rockwellcipdrv/（包名 cip）;cipcore/ 是 omroncip 那份的裁剪副本,刻意不共享（见「命名规范」）
-│   ├── omroncip/        # Omron.CIP;实现在 omroncipdrv/（包名 cip）;EtherNet/IP 封装层在 cipcore/
-│   ├── fins/            # Omron.FINS.UDP/TCP/Serial/HostLinkTCP;实现在 finsdrv/（包名 fins）
-│   ├── abb/             # ABB.RWS（机器人 Robot Web Services）;实现在 abbdrv/（包名 abb）;纯 HTTP，无第三方依赖
-│   └── dlt645/          # DLT645.Serial / DLT645.TCP（DL/T 645 电能表）;实现在 dlt645drv/（包名 dlt645）;移植自 iot-gateway 内置驱动
-├── testutil/            # 测试基建(非 _test 文件,插件也能 import)
+├── testutil/            # 测试基建
 │   ├── parity/          # 行为等价黄金基线的读写格式(pluginhost/testdata/parity/)
-│   ├── drivertest/      # 网关侧测试的合成协议(EnsureSyntheticProtocol)与桩驱动
-│   └── fake/            # 各协议的假 PLC(parity 比对与集成测试用)
+│   └── drivertest/      # 网关侧测试的合成协议(EnsureSyntheticProtocol)与桩驱动
+│
+│   # 驱动 SDK(Apache-2.0)与官方驱动(AGPL-3.0)都不在本仓库:
+│   #   SDK 由 backend/go.mod 依赖 github.com/Ellisata/iot-gateway-sdk(+ /testkit)
+│   #   官方驱动由仓库根的 drivers.version 固定版本、drivers.txt 列出要打包的目录名,
+│   #   构建期用 go get 拉取源码后 go build。假 PLC 已随 testkit 迁到 SDK 仓库。
 ├── mappingdsl/          # 入站解析与出站映射共用的映射原语(仅标准库):JSON 路径/模板/变换/标量转换
 ├── parser/              # 外部报文解析契约与实现(**与报文来源解耦**,见 specs/parser-plugins.md)
 │   ├── parser.go        # Parser/Factory 契约、注册表、CollectedRecord 白名单与限制
@@ -91,8 +84,8 @@
 - 依赖通过 **Google Wire** 编译期组装,根节点为 `InitializeApp`([wire.go](wire.go)),返回 `AppDependencies{Engine, CollectorEngine, PushEngine, AlarmMonitor, DriverManager, Subscription}`。`wire_gen.go` 为生成文件,改 `wire.go` 后执行 `go generate`。
 - 启动顺序有硬约束([main.go](main.go)):**`DriverManager.Start()` 必须早于 `CollectorEngine.Start()`** —— 插件驱动要先完成注册,采集引擎建任务时才能为使用插件协议的设备创建驱动,否则这些设备首轮会被判为「协议不支持」而跳过。停止顺序相反(插件管理器最后停)。
 
-### 协议插件([pluginhost/](pluginhost/), [driversrc/](driversrc/))
-- **仓库边界**:宿主直接 import `sdk/`(Apache-2.0);官方驱动在 `driversrc/`(AGPL-3.0,独立仓库 submodule)。核心已不再保留 `driver/`、`pluginwire/`、`driversdk/` 副本;数据库模型与 SDK `DeviceAddress` 的转换统一在 `driveradapter/`。第三方驱动依赖 `github.com/Ellisata/iot-gateway-sdk`,不要 import 网关核心;官方驱动在 `iot-gateway-drivers` 仓库维护。
+### 协议插件([pluginhost/](pluginhost/))
+- **仓库边界**:宿主直接 import `github.com/Ellisata/iot-gateway-sdk`(Apache-2.0,由 `backend/go.mod` 按版本依赖);官方驱动在独立仓库 `iot-gateway-drivers`(AGPL-3.0,由 `drivers.version` 固定版本)。核心不保留 `driver/`、`pluginwire/`、`driversdk/` 副本;数据库模型与 SDK `DeviceAddress` 的转换统一在 `driveradapter/`。第三方驱动依赖 SDK,不要 import 网关核心。
 - 全部协议是进程外插件:独立可执行文件 `iot-driver-*`,由 `pluginhost.Manager` 扫描 `plugin.dir`(相对 `os.Executable()` 解析)、校验插件的 `driversdk.Meta.APIVersion` 并握手、把驱动工厂与类型/scope 注册进 `sdk/driver` 的运行时注册表,并在 `iot_protocol` 表里自动维护协议行(只插入、只补空,绝不覆盖运维改过的非空表单)。
 - **宿主分成通用核心与适配层**:扫描/进程监管/帧 RPC/热升级/目录权限校验([process.go](pluginhost/process.go) · [upgrade.go](pluginhost/upgrade.go) · [client.go](pluginhost/client.go))不认识任何插件种类,只依赖 [sdk/pluginwire/](sdk/pluginwire/);认识「驱动」的只有 [adapter_driver.go](pluginhost/adapter_driver.go) · [provision.go](pluginhost/provision.go) · [remote.go](pluginhost/remote.go)。将来推送通道进程外化时,加 `adapter_push.go` 而不复制通用核心。
 - `plugin.enabled` **出厂为 `true`**([default.yaml](default.yaml)):协议驱动全部来自插件,关掉它等于网关不支持任何协议。
@@ -435,8 +428,8 @@
 驱动做成独立可执行文件,丢进 `plugins/` 目录即自动加载。适合新 PLC 协议这类
 「现场才确定、不希望为它重编网关」的场景。作者指南见 [../docs/driver-plugins.md](../docs/driver-plugins.md)。
 
-1. 在独立仓库 `iot-gateway-drivers` 新建 `<name>/main.go`(`package main`);本仓库的
-   `backend/driversrc/` 是它的 submodule,只用于构建与联调。
+1. 在独立仓库 `iot-gateway-drivers` 新建 `<name>/main.go`(`package main`),并在本仓库的
+   `drivers.txt` 里加一行(构建时按它逐个 `go get` 该版本源码后 `go build`)。
 2. 实现 SDK 的 `driver.Driver` 接口(Connect/Ping/Read/IsConnected/Close),调用
    `driversdk.Main(driversdk.Factories{...}, driversdk.Meta{...}, driversdk.Capabilities{...})` 注册。
    第三个参数是**能力实现**,两个字段各自可选,不需要就给零值
@@ -466,9 +459,9 @@
    协议名同时是 `iot_protocol.name` 与 `device.protocol_id` 的解析目标,改一个字就让既有设备
    静默采不到值。各插件用一条 `TestProtocolIdentityPinned` 把字面量钉住。
 5. 构建产物名为 `iot-driver-<name>`,放在可执行文件同级的 `plugins/` 目录;
-   `build.sh` / `release.sh` / `Dockerfile` / `build.bat` / `backend/package.bat` 按
-   `driversrc/*/` 一层 glob 自动交叉编译并打包,`release.sh` 与 `Dockerfile`
-   **在没编出任何插件时会失败**(插件是发行包的必需组成,不是可选项)。
+   `build.sh` / `release.sh` / `Dockerfile` / `build.bat` / `backend/package.bat` 读取
+   `drivers.txt` + `drivers.version`,逐个 `go get` 源码后交叉编译打包,`release.sh` 与
+   `Dockerfile` **在没装出任何插件时会失败**(插件是发行包的必需组成,不是可选项)。
    **替换已加载插件的二进制即可热升级**(默认开启,`plugin.disableHotUpgrade=true` 关闭):
    网关拉起新进程、经稳定间接层 `pluginLink` 把驱动切过去,靠世代号让既有驱动实例
    自动重连,**不触发全局 Refresh**;只有协议名集合或 SerialExclusive 变化才重建采集任务。
@@ -563,13 +556,14 @@ go generate             # 重新生成 wire_gen.go
 
 # 协议插件:必须编到主二进制同级目录(plugin.dir 相对 os.Executable() 解析,不是 cwd)。
 # **不编插件 = 网关不支持任何协议**(设备会被逐个静默跳过,前端看不出异常)。
-# driversrc 是独立 Go module(submodule),必须从它内部构建。
-(cd driversrc && go build -o ../plugins/iot-driver-modbus ./modbus)
+# 驱动源码在独立仓库:在 iot-gateway-drivers 检出的目录里构建,或者按
+# drivers.version 在临时模块里 go get 后 go build(见 build.sh 的 build_plugins 循环)。
+(cd ../iot-gateway-drivers && go build -o ../iot-gateway/backend/plugins/iot-driver-modbus ./modbus)
 ```
 
 一次性构建全部主二进制 + 全部插件请用仓库根目录的脚本:Linux/macOS 用 `../build.sh`
 (或 `../release.sh` 出发行包),Windows 用 `..\build.bat`(内部调 `package.bat`)。
-脚本进入 `driversrc` 模块后按一层目录 glob 编译,默认产出 **四个平台**:
+脚本读取仓库根的 `drivers.txt` + `drivers.version`,逐个 `go get` 该版本源码后编译,默认产出 **四个平台**:
 `iot-gateway`(linux/amd64)、`iot-gateway-linux-arm64`、`iot-gateway-linux-arm`
 (linux/arm 32 位,固定 **GOARM=7**)、`iot-gateway.exe`(windows/amd64)。
 
@@ -586,7 +580,7 @@ arm32 的 `GOARM=7` 是编译期写死的(ARMv7-A + VFPv3 硬浮点)。**目标�
 (树莓派 1 / Zero 一代等),这个产物在板子上直接起不来 —— 得改成 `GOARM=5` 软浮点重编。
 
 插件改动后无需重编主二进制:**替换 `plugins/` 下的二进制即热升级**(默认开启)。
-本地改了插件源码要生效,重新 `(cd driversrc && go build -o ../plugins/iot-driver-<name> ./<name>)` 即可。
+本地改了插件源码要生效,在驱动仓库检出目录里重新 `go build -o <网关的>/plugins/iot-driver-<name> ./<name>` 即可。
 
 ## 命名规范
 - 包名: 小写单数 (`user`, `configFile`)
@@ -595,18 +589,17 @@ arm32 的 `GOARM=7` 是编译期写死的(ARMv7-A + VFPv3 硬浮点)。**目标�
 - JSON: camelCase (`accessToken`, `serverTime`)
 - 单元测试: `{entity}_test.go`
 - 插件相关目录按**角色**命名,并列于 `backend/` 根下,互不嵌套:
-  `pluginhost/`(宿主,一种) · `sdk/`(SDK submodule,Apache-2.0:
-  `driver/` + `pluginwire/` + `driversdk/`) · `driversrc/`(官方驱动
-  submodule,AGPL-3.0) · `plugins/`(运行时)。
-  - **宿主与传输层只有一份**:`pluginhost/` 不认识任何插件种类(只依赖 `sdk/pluginwire`),
+  `pluginhost/`(宿主,一种) · `plugins/`(运行时)。
+  SDK(`driver/` + `pluginwire/` + `driversdk/`)与官方驱动都在独立仓库,
+  分别由 `backend/go.mod` 与 `drivers.version` 按版本引用,不在本仓库建目录。
+  - **宿主与传输层只有一份**:`pluginhost/` 不认识任何插件种类(只依赖 SDK 的 `pluginwire`),
     各插件种类的差异全部收在同包的 `adapter_*.go` 里。将来接入推送插件时加
     `adapter_push.go` 即可,**不要**复制 `process.go`/`upgrade.go` 另起一个宿主 ——
     进程监管与热升级是最难写对、最容易悄悄漂移的部分。
-  - 传输层在 SDK 内是 `sdk/pluginwire/`(只依赖标准库),宿主直接 import;帧编解码与
+  - 传输层在 SDK 内是 `pluginwire/`(只依赖标准库),宿主直接 import;帧编解码与
     插件种类无关,驱动与将来的推送插件共用同一套帧,两侧由集成测试钉住不会各自漂移。
-  - `sdk/driver/` 与 `push/` 是**契约**(各自领域 + 引擎),不属于这组角色目录,不要并进
-    `sdk/`(采集引擎与宿主都直接依赖契约,合并会让「采集引擎依赖插件 SDK」
-    成为字面事实)。
+  - SDK 的 `driver/` 与核心的 `push/` 是**契约**(各自领域 + 引擎):`push/` 留在核心,
+    `driver/` 在 SDK 仓库。采集引擎与宿主都直接依赖契约,别把 `push/` 并进 SDK 目录组。
   - 新增插件种类时的命名:套件 `xxxsdk/` + 源码 `xxxsrc/`,产物 `iot-xxx-<目录名>`,
     适配器 `pluginhost/adapter_xxx.go`。
   - **插件之间不得互相 import**:两个插件共用一段源码,就把它们的构建绑在了一起 ——

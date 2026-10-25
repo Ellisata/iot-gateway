@@ -12,10 +12,11 @@
 //
 // 用法：
 //
-//	go build -o ./plugins/iot-driver-modbus ./driversrc/modbus
+//	# 在 iot-gateway-drivers 检出目录里构建插件，或直接跑仓库根的 ./build.sh
+//	go build -o <本仓库>/backend/plugins/iot-driver-modbus ./modbus
 //	go run ./cmd/loadtest -protocol modbus -devices 10,50,100 -points 500,2000,5000 -plugins-dir ./plugins
 //
-// 支持协议：modbus / mc / fins / s7 / cip / rockwell / opcua / dlt645（各协议假服务器见 testutil/fake）。
+// 支持协议：modbus / mc / fins / s7 / cip / rockwell / opcua / dlt645（各协议假服务器见 SDK 的 testkit/fake）。
 // 常用选项：
 //
 //	-plugins-dir ./plugins  插件目录（相对路径按「可执行文件旁 → 当前工作目录」依次解析）
@@ -38,8 +39,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ellisata/iot-gateway-drivers/testutil/fake"
 	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"github.com/Ellisata/iot-gateway-sdk/testkit/fake"
 	"iot-gateway/configFile"
 	"iot-gateway/logger"
 )
@@ -69,7 +70,7 @@ func main() {
 	serialBaud := flag.Int("serial-baud", 0, "model a serial line at this baud rate: derive the per-frame line time from the protocol frame size (8E1, 11 bits/byte) and ADD it to -latency; use -latency for meter processing time (0 = off; errors out for protocols with no known frame layout)")
 	workers := flag.Int("workers", 0, "worker pool concurrency (0 = NumCPU*2)")
 	pluginsDir := flag.String("plugins-dir", "plugins",
-		"plugin directory; a relative path resolves against the executable's dir first, then the invocation working directory (NOT cwd only); must contain iot-driver-* built from driversrc/")
+		"plugin directory; a relative path resolves against the executable's dir first, then the invocation working directory (NOT cwd only); must contain iot-driver-* installed from the iot-gateway-drivers module (or built from a driver checkout)")
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file for the largest case")
 	memprofile := flag.String("memprofile", "", "write heap profile to file for the largest case")
 	flag.Parse()
@@ -112,10 +113,10 @@ func main() {
 	// （时序与 backend/main.go 的 deps.DriverManager.Start() 完全一致。）
 	resolvedDir, err := resolvePluginsDir(*pluginsDir, invocationDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n  需要的插件产物：%s（源码 %s）\n"+
-			"  编译：cd backend && go build -o ./plugins/%s %s\n"+
-			"  （或在仓库根执行 ./build.sh，一次性编出全部插件）\n",
-			err, pa.pluginBinary(), pa.pluginSrc, pa.pluginBinary(), pa.pluginSrc)
+		fmt.Fprintf(os.Stderr, "%v\n  需要的插件产物：%s（驱动 %s）\n"+
+			"  编译：在 iot-gateway-drivers 检出目录执行 go build -o <本仓库>/backend/plugins/%s ./%s\n"+
+			"  （或在仓库根执行 ./build.sh，按 drivers.version 一次性装出全部插件）\n",
+			err, pa.pluginBinary(), pa.driverName, pa.pluginBinary(), pa.driverName)
 		os.Exit(1)
 	}
 	mgr, stopPlugins, err := startPluginManager(resolvedDir)

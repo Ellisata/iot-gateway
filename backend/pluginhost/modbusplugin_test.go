@@ -3,7 +3,7 @@
 
 package pluginhost
 
-// Modbus 插件（driversrc/modbus）的集成测试。
+// Modbus 插件（iot-gateway-drivers/modbus）的集成测试。
 //
 // 这里编译并加载的是**真实的插件源码产物**，不是测试替身 —— 唯一能在
 // 测试里替代它的是一个重写了同样逻辑的冒牌货，那样的测试即使插件写错了也会通过。
@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -27,8 +28,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/Ellisata/iot-gateway-drivers/testutil/fake"
 	"github.com/Ellisata/iot-gateway-sdk/driver"
+	"github.com/Ellisata/iot-gateway-sdk/testkit/fake"
 	"iot-gateway/collector"
 	"iot-gateway/configFile"
 	"iot-gateway/model/po"
@@ -38,34 +39,84 @@ import (
 const (
 	modbusTCP = "ModBus.TCP"
 	modbusRTU = "ModBus.RTU"
-	modbusDir = "./driversrc/modbus"
+	modbusDir = "modbus"
 )
 
 // ==================== 通用插件测试基建 ====================
 //
 // 下面这几个助手是**全部插件测试共用的**：每个协议搬成插件后，
-// 自己的测试文件只需声明「插件目录 + scope + 用例名」，
+// 自己的测试文件只需声明「驱动名 + scope + 用例名」，
 // 剩下的编译、加载、比对都在这里。
 
-// buildPlugin 把插件源码编译成插件二进制放进临时目录，返回其路径。
-func buildPlugin(t *testing.T, srcDir string) string {
+// buildPlugin 准备好某个驱动的插件二进制，返回其路径。
+//
+// 两种取源方式：
+//   - 设置了 IOT_DRIVERS_SRC（指向 iot-gateway-drivers 检出目录）时，直接编译本地源码，
+//     用于跨仓联调未发布的驱动改动；
+//   - 否则在临时模块里 `go get` 已发布的驱动版本（drivers.version）再 `go build`，
+//     走 GOPROXY 与校验和，不需要任何源码检出。
+func buildPlugin(t *testing.T, name string) string {
 	t.Helper()
 
-	name := "iot-driver-" + filepath.Base(srcDir)
+	outDir := t.TempDir()
+	binName := "iot-driver-" + name
 	if runtime.GOOS == "windows" {
-		name += ".exe"
+		binName += ".exe"
 	}
-	out := filepath.Join(t.TempDir(), name)
+	out := filepath.Join(outDir, binName)
 
-	// 驱动源码在独立 module（backend/driversrc，由 submodule 提供）。
-	// 调用方仍可写 "./driversrc/modbus"，这里统一去掉前缀并从 driversrc 模块根构建。
-	srcDir = strings.TrimPrefix(srcDir, "./driversrc/")
-	cmd := exec.Command("go", "build", "-o", out, "./"+srcDir)
-	cmd.Dir = "../driversrc"
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("编译插件 %s 失败: %v\n%s", srcDir, err, output)
+	if src := os.Getenv("IOT_DRIVERS_SRC"); src != "" {
+		cmd := exec.Command("go", "build", "-o", out, "./"+name)
+		cmd.Dir = src
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("编译插件 %s（源码 %s）失败: %v\n%s", name, src, err, output)
+		}
+		return out
 	}
+
+	// 用一个临时模块解析已发布的驱动源码：
+	//   - go install 在设置 GOBIN 时禁止交叉编译；
+	//   - go build 需要一个主模块来解析依赖与 go.sum。
+	// 临时模块同时满足两者，产物名由 -o 精确控制。
+	ver := driversVersion(t)
+	buildDir := t.TempDir()
+	runGo := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("go", args...)
+		cmd.Dir = buildDir
+		cmd.Env = append(os.Environ(), "GOWORK=off")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("go %s 失败（可设 IOT_DRIVERS_SRC 指向本地驱动仓库）: %v\n%s",
+				strings.Join(args, " "), err, output)
+		}
+	}
+	runGo("mod", "init", "driverbuild")
+	runGo("get", "github.com/Ellisata/iot-gateway-drivers/"+name+"@"+ver)
+	runGo("build",
+		"-ldflags", "-s -w -X main.version="+ver,
+		"-o", out,
+		"github.com/Ellisata/iot-gateway-drivers/"+name)
 	return out
+}
+
+// driversVersion 读取仓库根的 drivers.version（构建脚本与插件测试共用的版本真源）。
+func driversVersion(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		if b, err := os.ReadFile(filepath.Join(dir, "drivers.version")); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("向上未找到 drivers.version（从 %s 起）", dir)
+		}
+		dir = parent
+	}
 }
 
 // pluginConfigFor 构造指向某目录的插件配置。

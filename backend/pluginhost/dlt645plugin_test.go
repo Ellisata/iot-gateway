@@ -3,7 +3,7 @@
 
 package pluginhost
 
-// DL/T 645 插件（driversrc/dlt645）的集成测试。
+// DL/T 645 插件（iot-gateway-drivers/dlt645）的集成测试。
 //
 // 这里编译并加载的是**真实的插件源码产物**，不是测试替身 —— 唯一能在测试里
 // 替代它的是一个重写了同样逻辑的冒牌货，那样的测试即使插件写错了也会通过。
@@ -37,7 +37,7 @@ const (
 	dlt645SerialProtocol = "DLT645.Serial"
 	dlt645TCPProtocol    = "DLT645.TCP"
 	dlt645Scope          = "dlt645"
-	dlt645Dir            = "./driversrc/dlt645"
+	dlt645Dir            = "dlt645"
 )
 
 // TestDLT645PluginRegistersProtocol 插件被加载后，两个协议、scope、类型映射、

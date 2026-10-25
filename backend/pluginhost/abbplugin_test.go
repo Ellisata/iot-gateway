@@ -3,7 +3,7 @@
 
 package pluginhost
 
-// ABB RWS 插件（driversrc/abb）的集成测试。
+// ABB RWS 插件（iot-gateway-drivers/abb）的集成测试。
 //
 // 这里编译并加载的是**真实的插件源码产物**，不是测试替身 —— 唯一能在测试里
 // 替代它的是一个重写了同样逻辑的冒牌货，那样的测试即使插件写错了也会通过。
@@ -31,7 +31,7 @@ import (
 const (
 	abbProtocol = "ABB.RWS"
 	abbScope    = "abb"
-	abbDir      = "./driversrc/abb"
+	abbDir      = "abb"
 )
 
 // TestABBPluginRegistersProtocol 插件被加载后，协议、scope、类型映射、

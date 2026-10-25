@@ -21,8 +21,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: actions/setup-go@v5
         with:
@@ -47,65 +45,18 @@ jobs:
       #   working-directory: backend
       #   run: go test -count=1 -timeout 20m ./...
 
-  sdk:
-    name: Driver SDK (Apache-2.0)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: backend/sdk/go.mod
-
-      - name: gofmt
-        working-directory: backend/sdk
-        run: |
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            echo "::error::gofmt required for:"
-            echo "$unformatted"
-            exit 1
-          fi
-
-      - name: go vet
-        working-directory: backend/sdk
-        run: go vet ./...
-
-      - name: go test
-        working-directory: backend/sdk
-        run: go test -count=1 ./...
-
-      - name: Build example plugin
-        working-directory: backend/sdk
-        run: go build -o /tmp/iot-driver-hello ./examples/hello-driver
-
-      # 许可证边界守卫：SDK 是 Apache-2.0，绝不能反向依赖 AGPL 的网关核心。
-      # 否则「第三方可以闭源写驱动」这句话在法律上就不成立。
-      - name: SDK must not depend on the AGPL core
-        working-directory: backend/sdk
-        run: |
-          if grep -rn '"iot-gateway/' --include='*.go' .; then
-            echo "::error::SDK imports the AGPL gateway core"
-            exit 1
-          fi
-          if go list -deps ./... | grep -qE '^(iot-gateway|github\.com/Ellisata/iot-gateway)(/|$)'; then
-            echo "::error::SDK dependency graph contains the AGPL gateway core"
-            exit 1
-          fi
-
-  # 只跑「真实插件源码 + 宿主」的 Modbus 集成测试：这是 SDK 与核心线协议
-  # 不漂移的最短反馈。全量 go test 仍按上面的注释策略不阻塞 PR。
+  # SDK 已有自己的仓库与 CI（含许可证边界守卫），这里不再重复跑。
+  #
+  # 只跑「已发布驱动 + 宿主」的 Modbus 集成测试：这是 SDK 与核心线协议
+  # 不漂移的最短反馈。插件按 drivers.version 从模块代理安装，
+  # 因此这个 job 同时验证了「网关 HEAD ↔ 已发布驱动」的兼容性。
+  # 全量 go test 仍按上面的注释策略不阻塞 PR。
   modbus-plugin:
     name: Modbus plugin ↔ host
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: actions/setup-go@v5
         with:
@@ -114,9 +65,7 @@ jobs:
 
       - name: Integration tests
         working-directory: backend
-        run: |
-          (cd driversrc && go test ./modbus/... -count=1)
-          go test ./pluginhost -run 'TestModbusPlugin' -count=1 -timeout 10m
+        run: go test ./pluginhost -run 'TestModbusPlugin' -count=1 -timeout 10m
 
   # race 检测只在 master push / 手动触发时跑，不阻塞 PR 反馈。
   # 想彻底关掉：删除本 job 即可（其余 job 不依赖它）。
@@ -143,8 +92,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: actions/setup-go@v5
         with:
@@ -183,8 +130,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: actions/setup-go@v5
         with:
@@ -207,7 +152,7 @@ jobs:
 
       - name: Verify build artifacts
         run: |
-          expected=$(find backend/driversrc -mindepth 2 -maxdepth 2 -name main.go | wc -l)
+          expected=$(grep -cve '^[[:space:]]*$' drivers.txt)
           echo "expected plugins per platform: $expected"
 
           for f in \

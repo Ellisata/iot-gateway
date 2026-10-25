@@ -9,12 +9,13 @@ licenses:
 | [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk) | **Apache-2.0** | Driver SDK: contract, wire protocol, plugin serve loop, examples. |
 | [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers) | **AGPL-3.0-only** | Official protocol drivers. Commercial/OEM licensing available. |
 
-In this repository, the SDK and the official drivers are **Git submodules**:
+The core repository vendors neither of them. It consumes them as Go modules:
 
-| Path | Points to | License |
+| Dependency | Pinned by | License |
 |---|---|---|
-| `backend/sdk/` | `iot-gateway-sdk` | Apache-2.0 |
-| `backend/driversrc/` | `iot-gateway-drivers` | AGPL-3.0-only |
+| `github.com/Ellisata/iot-gateway-sdk` | `backend/go.mod` + `go.sum` | Apache-2.0 |
+| `github.com/Ellisata/iot-gateway-sdk/testkit` | `backend/go.mod` (tests only) | Apache-2.0 |
+| `github.com/Ellisata/iot-gateway-drivers` | `drivers.version` (build-time `go get` + `go build`) | AGPL-3.0-only |
 | the rest of `backend/` and `frontend/` | this repository | AGPL-3.0-only |
 
 ## The process boundary

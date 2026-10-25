@@ -30,15 +30,13 @@ WORKDIR /src
 # 国内模块代理加速(直连 proxy.golang.org 会超时)
 ENV GOPROXY=https://goproxy.cn,direct
 
-# SDK 与官方驱动都是独立 Go module，通过 backend/ 下的 submodule 提供：
-#   backend/sdk/        Apache-2.0 驱动 SDK
-#   backend/driversrc/  AGPL-3.0 官方驱动
-# backend/go.mod 用 replace ./sdk / ./driversrc 指向它们。先把两个 go.mod 复制进来，
-# 让 go mod download 能解析本地 replace。
-COPY backend/sdk/go.mod ./sdk/go.mod
-COPY backend/driversrc/go.mod backend/driversrc/go.sum ./driversrc/
+# 驱动版本真源：构建脚本、插件测试与 CI 共用这两个文件。
+#   drivers.version  官方驱动仓库的 tag（go install 时使用）
+#   drivers.txt      要打包的驱动目录名（每行一个）
+COPY drivers.version drivers.txt ./
 
-# 先复制模块清单,利用层缓存
+# 先复制模块清单,利用层缓存。SDK 与 testkit 都是已发布的 Go module，
+# 由 GOPROXY 按 go.mod 的版本拉取。
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
@@ -51,23 +49,30 @@ COPY --from=frontend /src/dist ./web/dist
 # -ldflags="-s -w" 移除调试信息,减小二进制大小
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /out/iot-gateway .
 
-# 外部协议驱动插件(进程外驱动): 与主二进制同平台交叉编译。
+# 外部协议驱动插件(进程外驱动): 按 drivers.txt + drivers.version 从模块代理拉取源码,
+# 与主二进制同平台编译。
 #
 # **插件是运行镜像的必需组成**:全部协议驱动都由插件提供,主程序不含任何内置实现,
 # plugins/ 为空 = 网关不支持任何协议。所以这里数一下编出几个,一个都没有就让构建失败
 # —— 否则会产出一个能启动、能登录、却一台设备也采不到的镜像。
-# 目录布局是拍平的一层:driversrc/*/ 直接就是插件目录,产物名取目录 basename,
-# 因此目录名必须唯一且不含层级。
-RUN mkdir -p /out/plugins && built=0 && \
-    cd driversrc && \
-    for d in */; do \
-        [ -f "${d}main.go" ] || continue; \
-        name="$(basename "$d")"; \
-        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" \
-            -o "/out/plugins/iot-driver-${name}" "./${name}" || exit 1; \
-        echo "  [plugin] ${name}"; \
+#
+# 用临时模块解析源码：go install 在设置 GOBIN 时禁止交叉编译，而 go build 需要
+# 一个主模块来解析依赖与 go.sum；-o 让产物名精确可控。
+RUN mkdir -p /out/plugins /tmp/driverbuild && built=0 && \
+    ver="$(tr -d '[:space:]' < /src/drivers.version)" && \
+    [ -n "$ver" ] || { echo "[FAIL] drivers.version 为空"; exit 1; } && \
+    cd /tmp/driverbuild && GOWORK=off go mod init driverbuild >/dev/null 2>&1 && \
+    while IFS= read -r name; do \
+        [ -n "$name" ] || continue; \
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOWORK=off go get \
+            "github.com/Ellisata/iot-gateway-drivers/${name}@${ver}" >/dev/null || exit 1; \
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOWORK=off go build \
+            -ldflags="-s -w -X main.version=${ver}" \
+            -o "/out/plugins/iot-driver-${name}" \
+            "github.com/Ellisata/iot-gateway-drivers/${name}" || exit 1; \
+        echo "  [plugin] ${name} ${ver}"; \
         built=$((built + 1)); \
-    done && \
+    done < /src/drivers.txt && \
     [ "$built" -gt 0 ] || { echo "[FAIL] 没有编译出任何协议插件"; exit 1; }
 
 # ========== 第三阶段: 运行镜像 ==========

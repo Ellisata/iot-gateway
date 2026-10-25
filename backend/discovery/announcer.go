@@ -501,7 +501,7 @@ func (a *Announcer) reply(conn net.PacketConn, to *net.UDPAddr) {
 // 办法是拿一个连向对端的 UDP "连接"去问内核：UDP 的 connect 只建立默认对端
 // 并完成路由查找与源地址选择，**不发送任何报文**，所以这是标准库能问出这个
 // 问题的办法。自己遍历网卡做最长前缀匹配要多写几十行，而且仍然只是猜。
-// （driversrc/fins/finsdrv/clientUdp.go 求 FINS 源节点号用的是同一手法。）
+// （iot-gateway-drivers 仓库 fins/finsdrv/clientUdp.go 求 FINS 源节点号用的是同一手法。）
 //
 // 取不到就返回空串：回包照发，接收方应以 UDP 源地址为准，本字段本就只是参考。
 func (a *Announcer) localIPv4For(dst *net.UDPAddr) string {

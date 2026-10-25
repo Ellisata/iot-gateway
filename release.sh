@@ -60,32 +60,41 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 
 # build_plugins <GOOS> <GOARCH> <输出目录>
-# 把 backend/driversrc/ 下的插件交叉编译成 iot-driver-<名字>。
+# 按 drivers.txt 列出的驱动、用 drivers.version 指定的版本，从模块代理拉取源码
+# 并交叉编译成 iot-driver-<名字>。
 #
 # **插件是发行包的必需组成，不是可选项。** 全部协议驱动都已搬成插件、
 # 主二进制里不再有任何协议实现：plugins/ 为空 = 网关不支持任何协议。
 # 因此"一个插件都没编出来"在这里是致命错误 —— 否则会产出一个能启动、
 # 能登录、却一台设备也采不到的发行包，而现场要到接设备时才发现。
 #
-# 目录布局是**拍平的一层**：driversrc/*/ 直接就是插件目录（内含 main.go），
-# 产物名取目录 basename。所以嵌套目录会被漏扫、basename 重名会互相覆盖 ——
-# 新增插件时目录名务必唯一且不含层级（omron 的两个 CIP 插件就因此叫
-# omroncip / rockwellcip，而不是各自留一层 cip）。
+# drivers.txt 每行一个驱动目录名（对应 iot-gateway-drivers 仓库的顶层目录），
+# 产物名统一为 iot-driver-<目录名>。新增驱动时同时更新 drivers.txt。
+#
+# 用临时模块解析源码：`go install` 在设置 GOBIN 时禁止交叉编译，而 `go build`
+# 需要一个主模块来解析依赖与 go.sum；`-o` 让产物名精确可控。
 build_plugins() {
-  local os="$1" arch="$2" outdir="$3" ext="" built=0
+  local os="$1" arch="$2" outdir="$3" ext="" built=0 name ver buildtmp
+  ver="$(tr -d '[:space:]' < "$ROOT/drivers.version")"
+  [ -n "$ver" ] || { echo "  [FAIL] $ROOT/drivers.version 为空"; return 1; }
   [ "$os" = "windows" ] && ext=".exe"
 
   mkdir -p "$outdir"
-  for d in "$ROOT"/backend/driversrc/*/; do
-    [ -f "${d}main.go" ] || continue
-    local name
-    name="$(basename "$d")"
-    (cd "$ROOT/backend/driversrc" && \
-      CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags="-s -w" \
-      -o "$outdir/iot-driver-${name}${ext}" "./${name}")
-    echo "    [插件] ${name} ($os/$arch)"
+  buildtmp="$(mktemp -d)"
+  ( cd "$buildtmp" && GOWORK=off go mod init driverbuild >/dev/null 2>&1 )
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    ( cd "$buildtmp" && \
+      CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" GOWORK=off go get \
+        "github.com/Ellisata/iot-gateway-drivers/${name}@${ver}" >/dev/null && \
+      CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" GOWORK=off go build \
+        -ldflags="-s -w -X main.version=${ver}" \
+        -o "$outdir/iot-driver-${name}${ext}" \
+        "github.com/Ellisata/iot-gateway-drivers/${name}" )
+    echo "    [插件] ${name} ${ver} ($os/$arch)"
     built=$((built + 1))
-  done
+  done < "$ROOT/drivers.txt"
+  rm -rf "$buildtmp"
 
   if [ "$built" = "0" ]; then
     echo "  [FAIL] $os/$arch: 没有编译出任何插件 —— 发行包必须自带 plugins/，否则网关不支持任何协议"

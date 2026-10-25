@@ -1,10 +1,12 @@
 # 进程外协议驱动插件
 
-> **仓库边界（2026-10）**：驱动 SDK 已独立为 [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk)
-> （Apache-2.0），官方驱动独立为 [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers)
-> （AGPL-3.0）。本仓库的 `backend/sdk/` 与 `backend/driversrc/` 是这两个仓库的 submodule。
-> 本文中的 `backend/driversrc/...` 路径指向 submodule；第三方新驱动请直接依赖 SDK，
-> 不要 import 网关核心。许可证边界见 [LICENSING.md](../LICENSING.md)。
+> **仓库边界（2026-10）**：驱动 SDK 独立在 [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk)
+> （Apache-2.0），官方驱动独立在 [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers)
+> （AGPL-3.0）。本仓库不再包含它们的源码：SDK（含 testkit）由 `backend/go.mod`
+> 按版本依赖，驱动由 `drivers.version` 在构建期用 `go get` 拉取源码后 `go build`。
+> 因此**本文中的 `driversrc/...` 是 `iot-gateway-drivers` 仓库内路径的简写**
+> （如 `driversrc/modbus/` = 该仓库的 `modbus/`）。
+> 第三方新驱动请直接依赖 SDK，不要 import 网关核心。许可证边界见 [LICENSING.md](../LICENSING.md)。
 
 给网关**新增或升级一个 PLC 协议驱动**，不再需要修改网关源码、重新编译、停机部署：
 把驱动编译成一个独立可执行文件，丢进 `plugins/` 目录，下一次目录扫描（默认 10s）即自动加载；
@@ -26,7 +28,7 @@
 
 ### 1.1 写一个插件
 
-完整的真实范例见 [`backend/driversrc/modbus/`](../backend/driversrc/modbus/)
+完整的真实范例见 [`driversrc/modbus/`](https://github.com/Ellisata/iot-gateway-drivers/tree/main/modbus)
 （自包含的 Modbus 实现，见 §2.5）。
 
 最小骨架：
@@ -37,14 +39,13 @@ package main
 import (
     "github.com/Ellisata/iot-gateway-sdk/driver"
     "github.com/Ellisata/iot-gateway-sdk/driversdk"
-    "iot-gateway/model/po"
 )
 
 type myDriver struct{ /* ... */ }
 
-func (d *myDriver) Connect(protocolJSON string) error                          { /* ... */ }
-func (d *myDriver) Ping(protocolJSON string) error                             { /* ... */ }
-func (d *myDriver) Read(addrs []po.DeviceAddress) ([]driver.ReadResult, error) { /* ... */ }
+func (d *myDriver) Connect(protocolJSON string) error { /* ... */ }
+func (d *myDriver) Ping(protocolJSON string) error    { /* ... */ }
+func (d *myDriver) Read(addrs []driver.DeviceAddress) ([]driver.ReadResult, error) { /* ... */ }
 func (d *myDriver) IsConnected() bool                                          { /* ... */ }
 func (d *myDriver) Close() error                                               { /* ... */ }
 
@@ -75,20 +76,22 @@ func main() {
 
 `driver.Driver` 的五个方法签名与网关里其它任何驱动**完全一致** —— 你可以照抄随发行版的
 任何一个协议插件，例如
-[`driversrc/modbus/modbusdrv/driverTcp.go`](../backend/driversrc/modbus/modbusdrv/driverTcp.go)
+[`driversrc/modbus/modbusdrv/driverTcp.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/modbus/modbusdrv/driverTcp.go)
 （`driver/` 下已经没有协议实现可抄了，见 §2.5）。
 
 > **已有现成协议想直接搬成插件？** 见 §2.5 —— 注意这一版里「复用内置包」那条路
 > **已经不存在**：主二进制里不再有任何协议实现，内置基线表也已清空，
 > 唯一路径是把实现整体搬进插件包。随发行版的 Modbus 插件
->（[`backend/driversrc/modbus/`](../backend/driversrc/modbus/)）就是这条路的样子：
+>（[`driversrc/modbus/`](https://github.com/Ellisata/iot-gateway-drivers/tree/main/modbus/)）就是这条路的样子：
 > 它自带一份完整的 Modbus 实现（`modbusdrv/` 子包），可当作真实协议插件的范例来读。
 
 ### 1.2 编译
 
+在驱动仓库的检出目录里构建（`git clone https://github.com/Ellisata/iot-gateway-drivers`）：
+
 ```bash
-cd backend/driversrc
-go build -o ../plugins/iot-driver-acme ./acme
+cd ../iot-gateway-drivers
+go build -o ../iot-gateway/backend/plugins/iot-driver-acme ./acme
 ```
 
 文件名必须以 `iot-driver-` 开头（可配，见 §4），否则不会被扫描到。
@@ -100,9 +103,10 @@ go build -o ../plugins/iot-driver-acme ./acme
 `backend/plugins-windows/` 等，跑之前得改名或改配置）；发行包里二进制在包根，
 插件就在包根的 `plugins/`。
 
-仓库内自带的插件（放在 `backend/driversrc/<名字>/`，**拍平的一层目录，每个目录里是
-`main.go` 加一个实现子包**）会被 `build.sh` / `release.sh` / `backend/Dockerfile`
-按 `driversrc/*/` 一层 glob 自动交叉编译到上述位置并打进发行包。
+官方驱动都在 `iot-gateway-drivers` 仓库里（**顶层拍平的一层目录，每个目录里是
+`main.go` 加一个实现子包**）。本仓库的 `build.sh` / `release.sh` / `backend/Dockerfile`
+读取仓库根的 `drivers.txt`（要打包的目录名）与 `drivers.version`（驱动 tag），
+逐个 `go get` 后交叉编译到上述位置并打进发行包。
 
 > **插件是发行包的必需组成，不是可选项。** 全部协议驱动都由插件提供，
 > 主二进制里没有任何协议实现，所以 `plugins/` 为空 = 网关不支持任何协议。
@@ -173,9 +177,9 @@ pluginhost: 已为插件协议 Acme.PLC.Serial 创建 iot_protocol 行
 | 字段 | 说明 |
 |---|---|
 | `Name` | 驱动注册名，也是 `iot_protocol.name`。**全局唯一 —— 现在所有协议都来自插件，所以实际约束是不得与另一个插件（含大小写变体）重名**。同时也必须出现在 `driversdk.Factories` 的键里。 |
-| `SerialExclusive` | 该协议的底层连接是否独占串行总线（如 RS-485）。`true` 时采集引擎整轮持设备锁，保证总线上帧不交错；`false` 时只在单次 `Read` 期间持锁。见 [`driver.SerialExclusive`](../backend/sdk/driver/driver.go)。**按协议独立**：Modbus 的 RTU 是 `true`，TCP 是 `false`。 |
+| `SerialExclusive` | 该协议的底层连接是否独占串行总线（如 RS-485）。`true` 时采集引擎整轮持设备锁，保证总线上帧不交错；`false` 时只在单次 `Read` 期间持锁。见 [`driver.SerialExclusive`](https://github.com/Ellisata/iot-gateway-sdk/blob/main/driver/driver.go)。**按协议独立**：Modbus 的 RTU 是 `true`，TCP 是 `false`。 |
 | `Description` | 该协议的说明，写入 `iot_protocol.description`；留空回退到 `Meta.Description`。 |
-| `FormJSON` | 该协议的配置表单（form-create schema），原样写入 `iot_protocol.form_json`。形状参考随发行版插件的 `main.go`，例如 [`opcua/main.go`](../backend/driversrc/opcua/main.go) 的 `formOcUa`、[`abb/main.go`](../backend/driversrc/abb/main.go) 的 `formRWS`（含 `props` 密码框、`select` 三态、`value` 默认值的写法）。表单里的 `field` 就是 `Connect` 收到的 `protocolJSON` 的键 —— 两边错开一个字母的症状是「用户填了参数但它不生效」，没有任何报错，所以值得用一条测试把两个集合对上（见 [`dlt645/main_test.go`](../backend/driversrc/dlt645/main_test.go) 的 `TestFormsMatchConfigStruct`，以及 [`modbus/main_test.go`](../backend/driversrc/modbus/main_test.go) 的 `TestSerialParamsAreConfigurable`）。**按协议而非按插件** —— TCP 填 host/port，RTU 填串口号。 |
+| `FormJSON` | 该协议的配置表单（form-create schema），原样写入 `iot_protocol.form_json`。形状参考随发行版插件的 `main.go`，例如 [`opcua/main.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/opcua/main.go) 的 `formOcUa`、[`abb/main.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/abb/main.go) 的 `formRWS`（含 `props` 密码框、`select` 三态、`value` 默认值的写法）。表单里的 `field` 就是 `Connect` 收到的 `protocolJSON` 的键 —— 两边错开一个字母的症状是「用户填了参数但它不生效」，没有任何报错，所以值得用一条测试把两个集合对上（见 [`dlt645/main_test.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/dlt645/main_test.go) 的 `TestFormsMatchConfigStruct`，以及 [`modbus/main_test.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/modbus/main_test.go) 的 `TestSerialParamsAreConfigurable`）。**按协议而非按插件** —— TCP 填 host/port，RTU 填串口号。 |
 | `Discovery` | 该协议的**局域网扫描发现**能力，见 [§2.6](#26-声明扫描能力discovery)。`nil` = 不支持扫描，该协议不会出现在扫描页的协议下拉里。**可选字段**，所以加了它不会让旧插件失效；但**串口协议（`SerialExclusive`）不得声明它** —— 探测的目标模型是 host/port，表达不了 `comPort`。 |
 
 ### 2.2 数据类型
@@ -187,7 +191,7 @@ pluginhost: 已为插件协议 Acme.PLC.Serial 创建 iot_protocol 行
 （见 [`collector.toRecords`](../backend/collector/task.go)）。所以你必须在插件内完成解码，
 把最终字符串放进 `Value`，并填好 `Kind`。
 
-`TypeMap` 的 key 用 [`driver.CommonDataTypes`](../backend/sdk/driver/dataTypeMap.go) 里的规范名
+`TypeMap` 的 key 用 [`driver.CommonDataTypes`](https://github.com/Ellisata/iot-gateway-sdk/blob/main/driver/dataTypeMap.go) 里的规范名
 （`Boolean`/`Short`/`Float`/…）时，会出现在配置界面类型下拉的「通用」组并按全局展示顺序排列；
 其它名字（如 PLC 风格的 `Int`/`Real`）落在「扩展」组，按字母序。
 
@@ -258,11 +262,11 @@ internal, _ := driver.LookupScopeType("modbus", "Short") // ← 返回空
 逐条对应：
 
 - **内置驱动包已被整体移除。** 协议契约、插件套件与线协议现在都在独立 SDK 仓库
-  （本仓库 `backend/sdk/` submodule，Apache-2.0）：`sdk/driver/`（`Driver` 接口 + 注册表 +
-  类型表）、`sdk/pluginwire/`（帧编解码 / 方法名 / `RemoteError`）、`sdk/driversdk/`
+  （`iot-gateway-sdk`，Apache-2.0，由 `backend/go.mod` 按版本依赖）：`driver/`（`Driver` 接口 +
+  注册表 + 类型表）、`pluginwire/`（帧编解码 / 方法名 / `RemoteError`）、`driversdk/`
   （`Main` / `Serve` / `Meta` / RPC 参数）。核心仓库不再保留这些包，宿主直接 import SDK；
   数据库模型与 SDK `DeviceAddress` 的转换在 `backend/driveradapter/`。
-  官方驱动在 `backend/driversrc/`（`iot-gateway-drivers` submodule，AGPL-3.0）。
+  官方驱动在 `iot-gateway-drivers` 仓库（AGPL-3.0，由 `drivers.version` 固定版本）。
   7 个内置协议（Modbus / Mitsubishi MC / Siemens S7 / OPC UA / Rockwell CIP /
   Omron CIP / Omron FINS）已全部搬成插件；
   此后新增的协议（如 `abb/` 的 `ABB.RWS`）从一开始就是插件，没有「内置版」那一段历史。
@@ -279,15 +283,15 @@ internal, _ := driver.LookupScopeType("modbus", "Short") // ← 返回空
 #### 搬的时候注意
 
 随发行版的插件全部走这条路，任选一个当范例：`driversrc/modbus/` 自带一份完整实现
-（[`modbusdrv/`](../backend/driversrc/modbus/modbusdrv/) 子包 —— 类型表、配置解析、
+（[`modbusdrv/`](https://github.com/Ellisata/iot-gateway-drivers/tree/main/modbus/modbusdrv/) 子包 —— 类型表、配置解析、
 PLC 地址解析、区间规划、TCP/RTU 客户端、驱动），不导入任何网关内的协议代码。
-**若你要写的是一个全新协议**（没有前身），看 [`driversrc/abb/`](../backend/driversrc/abb/)
+**若你要写的是一个全新协议**（没有前身），看 [`driversrc/abb/`](https://github.com/Ellisata/iot-gateway-drivers/tree/main/abb/)
 更直接：它没有「对齐内置行为」这层约束，能一眼看出一个协议插件**至少**要有哪些文件 ——
 `config.go`（配置解析）、`address.go`（地址语法）、`types.go`（类型表与 Kind 解析）、
 `driver.go`（五个方法）、`metadata.go`（上报），外加 `main.go` 的 `Meta` 与配置表单。
 
 **若协议是从别的项目移植过来的**（本仓库没有它的内置前身），看
-[`driversrc/dlt645/`](../backend/driversrc/dlt645/)：实现在 iot-gateway 那边以内置驱动的
+[`driversrc/dlt645/`](https://github.com/Ellisata/iot-gateway-drivers/tree/main/dlt645/)：实现在 iot-gateway 那边以内置驱动的
 形式存在过，逐文件搬过来即可 —— 搬迁作业量最小，但要额外守住一条：**协议名与 scope 沿用
 来源项目的原值**（`DLT645.Serial` / `DLT645.TCP` / `dlt645`），两侧的 `device.protocol_id`、
 点位地址与类型名才能直接互相迁移。代价是拿不到黄金基线（黄金是「本仓库的内置实现在被移除
@@ -458,7 +462,7 @@ prober，插件进程会启动失败** —— 与"每个协议都必须有工厂
 **结果里的 `ProtocolJSON` 必须能被你自己的配置解析器吃下**：键名与配置结构的
 json tag 逐一对上，否则「扫描 → 一键建设备」建出来的设备连不上，而两边都不报错。
 建议在测试里直接调一次自己的解析函数把这条钉住
-（[`modbusdrv/probe_test.go`](../backend/driversrc/modbus/modbusdrv/probe_test.go) 的
+（[`modbusdrv/probe_test.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/modbus/modbusdrv/probe_test.go) 的
 `TestProbeTCPFindsDeviceWithDeviceID` 就是这么做的）。
 
 **预算要按"一次探测包含几次 socket 等待"反推着花。** 若你的协议一次握手要顺序做
@@ -466,37 +470,37 @@ json tag 逐一对上，否则「扫描 → 一键建设备」建出来的设备
 那么"每个目标最多花 `connectTimeout`"这种写法在最坏情况下会花掉
 `阶段数 × connectTimeout`，用户把超时值填大一点就能让探测突破 `req.Budget` ——
 而那正是 §③-3 里那条会重启整个插件进程的路径。正确做法是把每个候选/阶段的时间上限
-从**剩余预算**里反推出来（[`s7drv/probe.go`](../backend/driversrc/s7/s7drv/probe.go) 的
+从**剩余预算**里反推出来（[`s7drv/probe.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/s7/s7drv/probe.go) 的
 `ProbeTCP` 就是按 `剩余预算 / 阶段数` 逐候选收缩的），并用一条断言耗时的测试钉住它
 （同文件的 `TestProbeTCPRespectsBudget`）。
 
 五个可参考的完整实现，覆盖五种协议形态：
 
-- [`modbusdrv/probe.go`](../backend/driversrc/modbus/modbusdrv/probe.go) —— 裸发 MBAP 帧读
+- [`modbusdrv/probe.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/modbus/modbusdrv/probe.go) —— 裸发 MBAP 帧读
   FC43/14 设备标识，再用一次 FC3 兜底判定"这是 Modbus 设备"。**适合"一次请求就能判定"
   的协议**，判据是应答的自洽性（协议号 / 事务号回显 / 长度），自己校验。
-- [`s7drv/probe.go`](../backend/driversrc/s7/s7drv/probe.go) —— 复用驱动自己的连接握手，
+- [`s7drv/probe.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/s7/s7drv/probe.go) —— 复用驱动自己的连接握手，
   **适合"必须先建立会话才知道对面是不是我的设备"的协议**。它还示范了两件事：
   ① 协议特有的连接参数（S7 的机架/槽位）做成**候选列表**逐组尝试，并把连上的那一组
   写回 `ProtocolJSON`（否则一键建出来的设备连不上）；② 连不上的原因分两类处理 ——
   TCP 层失败直接放弃该目标（可达性与机架/槽位无关，换候选只是白花超时），
   协议层失败才换下一组。
-- [`finsdrv/probe.go`](../backend/driversrc/fins/finsdrv/probe.go) —— **复用驱动自己的
+- [`finsdrv/probe.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/fins/finsdrv/probe.go) —— **复用驱动自己的
   传输层**（`newTransport` + `client.Read`），完全不另写裸帧。协议本身**没有设备标识**
   时照这份看；它还示范了"结束码错误也算设备"与"候选列表可选（留空走采集同款推导）"
   两处取舍。
-- [`omroncipdrv/probe.go`](../backend/driversrc/omroncip/omroncipdrv/probe.go) 与
-  [`rockwellcipdrv/probe.go`](../backend/driversrc/rockwellcip/rockwellcipdrv/probe.go) ——
+- [`omroncipdrv/probe.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/omroncip/omroncipdrv/probe.go) 与
+  [`rockwellcipdrv/probe.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/rockwellcip/rockwellcipdrv/probe.go) ——
   **广播型发现**：声明 `TargetMode=both`，一条数据报拿回整个网段。适合 EtherNet/IP
   这类有标准发现命令（ListIdentity）的协议；两份**逐段同形，差别只有厂商过滤**
   （47 / 1），但帧的编解码**各持一份**（`driversrc/omroncip/cipcore/` 与
   `driversrc/rockwellcip/cipcore/`）。
-- [`mitsubishidrv/probe.go`](../backend/driversrc/mitsubishi/mitsubishidrv/probe.go) ——
+- [`mitsubishidrv/probe.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/mitsubishi/mitsubishidrv/probe.go) ——
   **上面 FINS 那份的最简一档**：MC 3E 帧的网络号 / PC 号 / I-O 号 / 站号在驱动里是
   写死的常量，既不是 `protocol_json` 的字段、也不随目标变化，所以**没有候选参数**，
   一次探测就是一次拨号加一次读取。协议里没有"决定连上看不看得到"的旋钮时照这份看
   —— 上面那条"多阶段握手要按剩余预算反推"也顺带不需要了。
-- [`opcuadrv/probe.go`](../backend/driversrc/opcua/opcuadrv/probe.go) ——
+- [`opcuadrv/probe.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/opcua/opcuadrv/probe.go) ——
   **调协议自带的发现服务，不建会话**：OPC UA 的 `GetEndpoints` 规范允许在"只建立了
   SecureChannel、尚未 `CreateSession`"时调用，所以一次探测是"拨号 → OpenSecureChannel
   → GetEndpoints → 关闭"。两个要点：① **它完全不校验认证**，用户名密码错的服务器
@@ -623,11 +627,11 @@ Modbus 的取舍（为什么必须用 IEC `%MW` 而不是传统 `40001` 风格�
 
 六个可参考的完整实现：
 
-- [`modbusdrv/pointscan.go`](../backend/driversrc/modbus/modbusdrv/pointscan.go) ——
+- [`modbusdrv/pointscan.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/modbus/modbusdrv/pointscan.go) ——
   **按功能区扫寄存器/位**，示范了 §③-1 里那条守卫（先拒绝配置模式）与
   "整段 → 对半 → 单点"的降级。降级是必需的：设备对**含空洞的区间**会整段拒绝，
   只有拆到单点才能把"哪几个地址真的不存在"摘出来。
-- [`s7drv/pointscan.go`](../backend/driversrc/s7/s7drv/pointscan.go) ——
+- [`s7drv/pointscan.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/s7/s7drv/pointscan.go) ——
   **按区域（DB/M/I/Q）+ 字节偏移 + 粒度（位/字节/字/双字）扫**，示范了三件 Modbus
   那边没有的事：① 你的协议**可能没有**"地址含义由配置决定"的形态（S7 就没有，
   `StringLen`/`MaxGap` 只影响采集侧的区间规划）—— 那就**不要**照抄那条守卫，
@@ -636,7 +640,7 @@ Modbus 的取舍（为什么必须用 IEC `%MW` 而不是传统 `40001` 风格�
   "地址/对象不存在"的那几句**判成可降级，其余一律中止 —— 并写清每一句的出处；
   ③ 除了 `deadline`，再加一条**请求数上限**：对一段"整段都读不到"的地址，
   对半降级会退化成一棵满二叉树，光靠 deadline 止损会让耗时随网络延迟漂移。
-- [`rockwellcipdrv/pointscan.go`](../backend/driversrc/rockwellcip/rockwellcipdrv/pointscan.go) ——
+- [`rockwellcipdrv/pointscan.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/rockwellcip/rockwellcipdrv/pointscan.go) ——
   **第三种形态：原生枚举**。前两份都是"扫一段地址、问哪些读得到"，这一份是
   "让设备把它的标签表交出来"（CIP Symbol Object）。**如果你的协议是让设备自报点位
   （OPC UA 的 Browse、ABB 的 RWS 信号表），照这份看**；若点位来自**协议自己的一张
@@ -648,7 +652,7 @@ Modbus 的取舍（为什么必须用 IEC `%MW` 而不是传统 `40001` 风格�
   预算，并让收尾的 `Close` 把阻塞解开；④ 结果不读采样值时，**让
   `AssumedCommonDataType` 留空**（前端据它隐藏「显示 0 值」开关），
   并把每个点位的类型放进 `DiscoveredPoint.CommonDataType`。
-- [`mitsubishidrv/pointscan.go`](../backend/driversrc/mitsubishi/mitsubishidrv/pointscan.go) ——
+- [`mitsubishidrv/pointscan.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/mitsubishi/mitsubishidrv/pointscan.go) ——
   **同一段地址空间里既有"连续"也有"有空洞"的软元件**，这是前几份都没遇到的形态。
   它示范了三件事：① **单请求点数上限随「软元件类别 × 粒度」变四档**，
   当成一个常数会静默错两档（请求数变 16 倍，或每帧字数翻倍）；②
@@ -659,7 +663,7 @@ Modbus 的取舍（为什么必须用 IEC `%MW` 而不是传统 `40001` 风格�
   家族是 `0xC056`、在 iQ 家族是 `0x4031`，漏掉一个的表现是把"这里没有点位"报成
   "扫描失败"（真机踩过）；白名单与黑名单各写一遍测试。若你的协议里软元件的地址
   空间性质是**混的**，照这份看。
-- [`opcuadrv/pointscan.go`](../backend/driversrc/opcua/opcuadrv/pointscan.go) ——
+- [`opcuadrv/pointscan.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/opcua/opcuadrv/pointscan.go) ——
   **第四种形态：按层推进的 Browse 枚举**。与上一份同属"原生枚举"，但**三处不能照抄**：
   ① 它是**能拿到部分结果**的（按层推进，停在哪儿就有多少），所以超预算时
   **带 `Incomplete` 正常返回**，而不是像 Rockwell 那样报错；② 它**有分块**，
@@ -671,7 +675,7 @@ Modbus 的取舍（为什么必须用 IEC `%MW` 而不是传统 `40001` 风格�
   `pointaddr.go`（渲染出的地址必须能**解析回来逐段比对**才允许产出 —— 这里的
   危险不是"读不到"，而是**解析到另一个节点**：那条曲线看起来完全合理）。
   地址空间是一棵树、且能问出每个节点的类型/名字的协议，照这两份看。
-- [`dlt645drv/pointscan.go`](../backend/driversrc/dlt645/dlt645drv/pointscan.go) ——
+- [`dlt645drv/pointscan.go`](https://github.com/Ellisata/iot-gateway-drivers/blob/main/dlt645/dlt645drv/pointscan.go) ——
   **第五种形态：字典枚举，且带采样值**。点位来自**协议自带的数据标识字典**
   （不是设备自报的），而"读一遍"既是判定这块表有没有该数据标识的手段、又顺带取到了值。
   因此它示范了上一份**没有**的两件事：① **结果级 `AssumedCommonDataType` 与逐点的
@@ -705,7 +709,7 @@ Modbus 的取舍（为什么必须用 IEC `%MW` 而不是传统 `40001` 风格�
 > 也因为基线表被清空而永远不会触发。照旧结论把 scope 改成全新前缀，反而会
 > 平白丢掉「零迁移」这个收益（见 §2.5）。
 
-现状（依据 [`driver/dataTypeMap.go`](../backend/sdk/driver/dataTypeMap.go)）：
+现状（依据 [`driver/dataTypeMap.go`](https://github.com/Ellisata/iot-gateway-sdk/blob/main/driver/dataTypeMap.go)）：
 
 - `scopeTypeMap` 与 `scopeProtocols` 两张**内置基线表已被清空** ——
   **变量保留、内容为空**。留着空表而不是删掉整段机制，是为了保住一条护栏：
@@ -1174,8 +1178,9 @@ pluginhost: 已热升级插件 iot-driver-modbus.exe（第 1 次，版本 1.0.0 
   的名字下（同目录才在同一文件系统上，`rename` 才是原子的），再 `mv` 覆盖：
 
   ```bash
-  go build -o plugins/new-modbus ./driversrc/modbus
-  mv plugins/new-modbus plugins/iot-driver-modbus      # rename(2)，原子
+  # 在 iot-gateway-drivers 检出目录里构建
+  go build -o ../iot-gateway/backend/plugins/new-modbus ./modbus
+  mv ../iot-gateway/backend/plugins/new-modbus ../iot-gateway/backend/plugins/iot-driver-modbus   # rename(2)，原子
   ```
 
   旧进程照常运行，只是它的 `/proc/<pid>/exe` 会变成 `...(deleted)` ——

@@ -118,14 +118,14 @@
 - 每个插件编译为 `iot-driver-<目录名>`（Windows 加 `.exe`），放在**可执行文件同级的 `plugins/`** 目录。
 - 网关按 `plugin.dir`（默认 `plugins`，空或相对路径时**相对可执行文件所在目录**解析，而非当前工作目录）与 `plugin.glob`（默认 `iot-driver-*`）扫描目录，**启动即加载，运行期新放入的插件也会被自动加载**。
 - `plugin.enabled` **出厂即为 `true`**：协议全部来自插件，关掉它网关就**不支持任何协议**（设备被静默跳过，只有一行 WARN）。
-- 插件源码在独立仓库 [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers)（本仓库通过 `backend/driversrc` submodule 固定版本）；`build.sh` / `release.sh` / `backend/Dockerfile` 会从该 submodule 交叉编译并打进发行包（**一个插件都没编出来时构建直接失败**，不会产出没有协议的包）。
+- 插件源码在独立仓库 [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers)：仓库根的 `drivers.version` 固定驱动版本、`drivers.txt` 列出要打包的驱动，`build.sh` / `release.sh` / `backend/Dockerfile` 在构建期用 `go get` 拉取源码后交叉编译打进发行包（**一个插件都没编出来时构建直接失败**，不会产出没有协议的包）。
 - 加载插件等于**以网关自身的 OS 权限执行该目录下的程序**——插件是可信代码而非沙箱内容，部署时须保证该目录仅管理员可写，详见 [SECURITY.md](SECURITY.md)。
 
 > 各协议可承载的设备/点位容量与调优建议，见[采集容量压测报告](backend/cmd/loadtest/README.md)。该报告自 2026-09 起全部采自**插件版**（每次读写多一次网关 ↔ 插件 RPC 往返，读数已含该开销），覆盖 7 个协议在扫描频率 1000/200/100ms × RTT 0/10/20ms 下的完整矩阵，另含 DL/T 645 专节（`ABB.RWS` 未纳入本轮压测）；帧数模型与调优结论见[容量测试结论](backend/specs/capacity-testing.md)。
 
 ### 驱动 SDK（Apache-2.0）
 
-第三方可以基于独立仓库 [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk) 编写协议插件，**包括闭源驱动**。SDK 以 Apache-2.0 发布、零第三方依赖、不 import 网关核心；驱动作为独立进程通过线协议与网关通信，因此闭源驱动不构成 AGPL 衍生作品。官方 9 个驱动在独立仓库 [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers) 维护，保持 AGPL-3.0；本仓库通过 `backend/sdk` 与 `backend/driversrc` 两个 submodule 固定版本。许可证边界见 [LICENSING.md](LICENSING.md)。
+第三方可以基于独立仓库 [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk) 编写协议插件，**包括闭源驱动**。SDK 以 Apache-2.0 发布、零第三方依赖、不 import 网关核心；驱动作为独立进程通过线协议与网关通信，因此闭源驱动不构成 AGPL 衍生作品。官方 9 个驱动在独立仓库 [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers) 维护，保持 AGPL-3.0；本仓库通过 `backend/go.mod`（SDK 与 testkit）和 `drivers.version`（驱动）按版本依赖，不 vendoring 它们的源码。许可证边界见 [LICENSING.md](LICENSING.md)。
 
 > 当前 Modbus 插件已作为首个迁移样本改用 SDK，其余插件按版本逐步迁移；两条路径的线协议完全一致，插件二进制可混用。
 
@@ -226,11 +226,11 @@ docker compose down             # 停止并移除容器
 
 ### 插件打包
 
-插件**不需要逐个手动编译**——所有构建入口都按 `backend/driversrc/*/`（`iot-gateway-drivers` submodule）一层目录交叉编译，**目录名即产物名**：
+插件**不需要逐个手动编译**——构建入口读取仓库根的 `drivers.txt`（要打包的驱动目录名）与 `drivers.version`（驱动仓库 tag），用 `go get` 拉取已发布驱动源码后交叉编译，**目录名即产物名**：
 
-- 扫描 `backend/driversrc/` 下的**一层**子目录（含 `main.go` 的才编），每个编成 `iot-driver-<目录名>`（Windows 加 `.exe` 后缀）；
+- `drivers.txt` 每行一个驱动目录名，每个装成 `iot-driver-<目录名>`（Windows 加 `.exe` 后缀）；
 - 用与主二进制**同一份** `GOOS` / `GOARCH` / `GOARM` 环境编译——插件与宿主架构不一致时网关照样启动，但该插件会被静默跳过，表现为「设备建好了却采不到值」；
-- **一个插件都没编出来时构建直接失败**，不会产出没有协议的包。
+- **一个插件都没装出来时构建直接失败**，不会产出没有协议的包。
 
 | 打包入口 | 运行环境 | 产物 |
 |---|---|---|
@@ -239,14 +239,16 @@ docker compose down             # 停止并移除容器
 | `release.sh` | Linux·macOS / Git Bash | `release/` 下的 `*.zip` / `*.tar.gz`，压缩包内就是 `iot-gateway(.exe)` + `plugins/` 两层 |
 | `backend/Dockerfile` | 容器（多阶段构建） | 镜像内 `/app/plugins/`，出厂即带全部插件 |
 
-**只重编单个插件**（改了某个协议、或本地验证），直接 `go build` 即可：
+**只重编单个插件**（改了某个协议、或本地验证），在驱动仓库检出目录里直接 `go build`：
 
 ```bash
-cd backend/driversrc
-go build -o ../plugins/iot-driver-modbus ./modbus    # Windows 上加 .exe 后缀
+cd ../iot-gateway-drivers        # git clone https://github.com/Ellisata/iot-gateway-drivers
+go build -o ../iot-gateway/backend/plugins/iot-driver-modbus ./modbus   # Windows 加 .exe
 ```
 
-**新增协议**在 [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers) 仓库新增一个同级目录（本仓库的 `backend/driversrc` 是它的 submodule），**无需改动核心仓库的构建脚本**——下一次打包就会被 glob 到。唯一约束是**目录名 = 产物名，必须唯一且不嵌套**（所以是 `omroncip` / `rockwellcip`，而不是 `omron/cip`）。
+想复现发行包里的那一份，则按 `drivers.version` 在临时模块里 `go get` 该版本再 `go build -o`（`build.sh` 的 `build_plugins` 就是这段逻辑）。
+
+**新增协议**在 [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers) 仓库新增一个顶层目录，并在本仓库的 `drivers.txt` 里加一行，**无需改动构建逻辑**——下一次打包就会安装它。唯一约束是**目录名 = 产物名，必须唯一且不嵌套**（所以是 `omroncip` / `rockwellcip`，而不是 `omron/cip`）。
 
 > 本地构建产出的目录带平台后缀（`plugins-windows/` 等），是为了避免四个平台的同名产物互相覆盖——混在一个目录里会覆盖成错的架构，而且**覆盖后不报任何错**。部署时把对应平台的目录改名为 `plugins/` 并放到可执行文件同级即可，`release.sh` 已经替你做好了这一步。
 
@@ -329,9 +331,8 @@ push:
 ├── backend/            # Go 后端
 │   ├── collector/      # 采集引擎（轮询调度 / 配置热加载）
 │   ├── driveradapter/  # 宿主侧 po.DeviceAddress ↔ SDK driver.DeviceAddress 转换
-│   ├── pluginhost/     # 进程外插件宿主（目录扫描 / 进程监管 / RPC 代理 / 热升级；契约与传输层来自 backend/sdk）
-│   ├── sdk/            # 驱动 SDK 独立仓库（submodule，Apache-2.0；driver/pluginwire/driversdk）
-│   ├── driversrc/      # 官方驱动独立仓库（submodule，AGPL-3.0；9 个子目录）
+│   ├── pluginhost/     # 进程外插件宿主（目录扫描 / 进程监管 / RPC 代理 / 热升级；契约与传输层来自 SDK 模块）
+│   ├── testutil/       # 测试基建（parity 黄金基线 / drivertest 合成协议）
 │   ├── plugins/        # 插件运行时目录（构建产物，发行包自带）
 │   ├── mappingdsl/     # 入站解析 / 出站映射共用的映射原语（JSON 路径 / 模板 / 变换）
 │   ├── push/           # 推送引擎（mqtt/http/tdengine-v3/influxdb-v3 + outbox + codec/messagechannel）
@@ -356,7 +357,7 @@ push:
 |---|---|
 | 后端 | Go 1.26 + Gin + GORM + Google Wire + Viper + JWT |
 | 存储 | SQLite（纯 Go 实现，免 CGO） |
-| 协议库 | **随插件分发**：goburrow/modbus · robinson/gos7 · gopcua/opcua 等仅被 `backend/driversrc/`（`iot-gateway-drivers` submodule）下的插件链接，主二进制不链接任何协议库 |
+| 协议库 | **随插件分发**：goburrow/modbus · robinson/gos7 · gopcua/opcua 等仅被官方驱动插件（独立仓库 `iot-gateway-drivers`）链接，主二进制不链接任何协议库 |
 | 前端 | Vue 3 + Vite + Element Plus + Pinia + Tailwind CSS 4 + vue-i18n |
 | 部署 | go:embed 单二进制 · Windows 服务 / Linux systemd |
 
@@ -365,7 +366,7 @@ push:
 | 文档 | 内容 |
 |---|---|
 | [驱动插件指南](docs/driver-plugins.md) | 进程外协议插件的开发、生命周期、安全与排错（新增协议必读） |
-| [驱动 SDK](backend/sdk/README.md) | Apache-2.0 的独立驱动开发套件（第三方 / 闭源驱动，独立仓库 `iot-gateway-sdk`）；见 [LICENSING.md](LICENSING.md) |
+| [驱动 SDK](https://github.com/Ellisata/iot-gateway-sdk) | Apache-2.0 的独立驱动开发套件（第三方 / 闭源驱动）；见 [LICENSING.md](LICENSING.md) |
 | [技术规范](backend/specs/README.md) | 分层架构、目录结构、开发规范等 |
 | [推送载荷契约](backend/specs/push-payload.md) | 外发数据的字段语义与解析约定（[EN](backend/specs/push-payload.en.md)） |
 | [订阅解析器规范](backend/specs/parser-plugins.md) | 内置映射 DSL 与 goja 脚本的契约、限制与热加载语义 |

@@ -172,11 +172,11 @@ func requireProtocol(pa protocolAdapter, pluginsDir string) error {
 	bin := pa.pluginBinary()
 	return fmt.Errorf("\n协议 %s 未注册：插件目录 %s 里没有成功加载到提供该协议的插件。\n"+
 		"  当前已注册协议：%s\n"+
-		"  需要的插件产物：%s（源码 %s）\n"+
-		"  编译：cd backend && go build -o ./%s/%s %s\n"+
-		"  （或在仓库根执行 ./build.sh，一次性编出全部插件）\n"+
+		"  需要的插件产物：%s（驱动 %s）\n"+
+		"  编译：在 iot-gateway-drivers 检出目录执行 go build -o <本仓库>/backend/%s/%s ./%s\n"+
+		"  （或在仓库根执行 ./build.sh，按 drivers.version 一次性装出全部插件）\n"+
 		"  插件产物名必须以 iot-driver- 开头，否则目录扫描匹配不到；\n"+
 		"  若文件已存在却仍报此错，请查看上方 pluginhost 日志里的加载失败原因。\n",
-		pa.name, pluginsDir, list, bin, pa.pluginSrc,
-		filepath.Base(pluginsDir), bin, pa.pluginSrc)
+		pa.name, pluginsDir, list, bin, pa.driverName,
+		filepath.Base(pluginsDir), bin, pa.driverName)
 }

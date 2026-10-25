@@ -181,7 +181,7 @@ func (t *gatewayTask) clearReadErrLocked(deviceID string) {
 //
 // 为什么不能每轮都记：设备进入"每轮断开 → 每轮重连"的状态时这一行就按轮询周期
 // 无限重复（真机验证过：设备在封装层拒绝命令 → 库 Reset 掉会话 → 采集侧下一轮
-// 只能重连，见 driversrc/rockwellcip 的 encapError）。而它讲的"连上了"本身不是
+// 只能重连，见 iot-gateway-drivers 仓库 rockwellcip 的 encapError）。而它讲的"连上了"本身不是
 // 新事实 —— 在线状态另有 reportState 与断联报警在管。
 //
 // 但**被压掉的次数必须在下一次输出时带出来**：一台设备"每分钟连一次"与"每轮都连"
