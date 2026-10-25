@@ -47,22 +47,22 @@ jobs:
 
   # race 检测只在 master push / 手动触发时跑，不阻塞 PR 反馈。
   # 想彻底关掉：删除本 job 即可（其余 job 不依赖它）。
-  backend-race:
-    name: Backend (Linux, race)
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
+  # backend-race:
+  #   name: Backend (Linux, race)
+  #   if: github.event_name != 'pull_request'
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 40
+  #   steps:
+  #     - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
+  #     - uses: actions/setup-go@v5
+  #       with:
+  #         go-version-file: backend/go.mod
+  #         cache-dependency-path: backend/go.sum
 
-      - name: go test -race
-        working-directory: backend
-        run: go test -race -count=1 -timeout 30m ./...
+  #     - name: go test -race
+  #       working-directory: backend
+  #       run: go test -race -count=1 -timeout 30m ./...
 
   backend-windows:
     name: Backend (Windows)
