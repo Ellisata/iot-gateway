@@ -4,7 +4,7 @@ English | [简体中文](README.md)
 
 [![CI](https://github.com/Ellisata/iot-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/Ellisata/iot-gateway/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
-![Release](https://img.shields.io/badge/release-v0.2.0-green)
+[![Release](https://img.shields.io/github/v/tag/Ellisata/iot-gateway?label=release&sort=semver&color=green)](https://github.com/Ellisata/iot-gateway/releases)
 ![Go](https://img.shields.io/badge/go-1.26-00ADD8)
 
 **One executable + a `plugins/` directory is all it takes to poll PLCs on an industrial PC and push data to MQTT / TDengine / InfluxDB — no database, no runtime to install.**

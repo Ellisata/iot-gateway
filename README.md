@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/Ellisata/iot-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/Ellisata/iot-gateway/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
-![Release](https://img.shields.io/badge/release-v0.2.0-green)
+[![Release](https://img.shields.io/github/v/tag/Ellisata/iot-gateway?label=release&sort=semver&color=green)](https://github.com/Ellisata/iot-gateway/releases)
 ![Go](https://img.shields.io/badge/go-1.26-00ADD8)
 
 **一个 exe + 一个 `plugins/` 目录，就能在工控机上采集 PLC 数据并推送到 MQTT / TDengine / InfluxDB —— 不用装数据库，不用装运行时。**
