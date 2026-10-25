@@ -19,9 +19,7 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
      Clicking plays the video from image.edwining.com: the repo's own raw URL
      sends Content-Disposition: attachment, which only downloads, whereas
      this host omits the header and supports Range, so the browser plays it. -->
-[Admin console](docs/images/demo.en.gif)
-
-*Click the GIF to watch the full demo (62 s)*
+![Admin console](docs/images/demo.en.gif)
 
 ## Why iot-gateway
 
