@@ -196,10 +196,16 @@ func TestNotifySinkMustNotBlock(t *testing.T) {
 	e := NewEngine(db, sink)
 	e.tr.cfg.ConsecutiveFailures = 1
 
+	// 迭代次数只用来多造几次边沿，不是吞吐基准：队列满时阻塞实现**第一次**边沿
+	// 就会卡住，30 轮足够暴露。刻意不取大值 —— 每轮都要同步落一次 SQLite，慢盘
+	// （GitHub 的 Windows runner，单条 INSERT 200~300ms）上 200 轮曾把下面的守卫
+	// 超时撑爆，误报成「Report blocked」。
+	//
+	// 超时同样放宽到 30s：这条守卫要判的是"永远不返回"，不是"多快返回"。
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < 200; i++ {
+		for i := 0; i < 30; i++ {
 			// 反复在离线/恢复间翻转，制造边沿触发
 			e.ReportDevicePoll("dev-1", "dev1", i%2 == 1)
 		}
@@ -207,7 +213,7 @@ func TestNotifySinkMustNotBlock(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("Report blocked: NotifySink implementation must not block (see NotifySink contract)")
 	}
 }

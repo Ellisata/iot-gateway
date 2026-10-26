@@ -14,9 +14,13 @@ import (
 )
 
 // newTestDB 构建临时文件 SQLite（文件库保证跨连接可见，与生产一致），AutoMigrate alarm 表。
+//
+// synchronous(OFF)：临时库不需要崩溃持久性，而默认的 FULL 会让每条 INSERT 都等一次
+// fsync。GitHub 的 Windows runner 磁盘很慢（实测单条 INSERT 200~300ms），
+// 像 TestNotifySinkMustNotBlock 这种逐次落库的用例会被 DB 吞吐而不是被测行为卡死。
 func newTestDB(t *testing.T) *gorm.DB {
 	dbPath := filepath.Join(t.TempDir(), "alarm.db")
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(dbPath+"?_pragma=synchronous(OFF)"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
