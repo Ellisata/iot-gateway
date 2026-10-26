@@ -148,7 +148,9 @@ func (s *LogFileService) DownloadPath(fileName string) (string, error) {
 // safePath 防目录穿越：只允许纯文件名（不含 /、\、..），
 // 且解析后的绝对路径必须仍位于日志目录内。
 func (s *LogFileService) safePath(name string) (string, error) {
-	if name == "" || filepath.Base(name) != name {
+	// filepath.Base 在 Unix 上不把反斜杠当分隔符，只靠它会让 "..\x" 在 Linux
+	// 上被当成普通文件名放行；显式检查两种分隔符，规则才与平台无关。
+	if name == "" || strings.ContainsAny(name, `/\`) || filepath.Base(name) != name {
 		return "", appError.NewAppError(errLogFile, "日志文件名非法")
 	}
 	path := filepath.Join(s.logDir, name)
