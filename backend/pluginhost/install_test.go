@@ -28,6 +28,22 @@ var fakeELF = append([]byte{0x7f, 'E', 'L', 'F'}, bytes.Repeat([]byte{0}, 512)..
 // fakeMachO64 64 位小端 Mach-O 魔数。
 var fakeMachO64 = append([]byte{0xcf, 0xfa, 0xed, 0xfe}, bytes.Repeat([]byte{0}, 512)...)
 
+// fakeSelfImage 返回一个按**本机** GOOS 能通过容器格式校验的伪二进制。
+//
+// InstallPlugin 按 runtime.GOOS 校验，固定用 fakePE 在 Linux CI 上会被判成
+// 「windows/PE 传到 linux」而拒绝。落盘类用例要验的是写入路径，不是跨平台校验
+// （后者由 TestValidatePluginBinary / TestInstallPluginRejectsWithoutWriting 覆盖）。
+func fakeSelfImage() []byte {
+	switch runtime.GOOS {
+	case "windows":
+		return fakePE
+	case "darwin":
+		return fakeMachO64
+	default:
+		return fakeELF
+	}
+}
+
 // realSelf 本测试二进制自身：一个货真价实的 Go 可执行文件，
 // buildinfo 可解析，且其 GOOS/GOARCH 必然等于 runtime 的值。
 func realSelf(t *testing.T) []byte {
@@ -256,7 +272,7 @@ func TestInstallPluginWritesFile(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "not-yet-created", "plugins")
 	m := testManagerAt(t, dir)
 
-	data := fakePE
+	data := fakeSelfImage()
 	name := "iot-driver-modbus" + pluginExt()
 
 	if err := m.InstallPlugin(name, data); err != nil {
@@ -287,12 +303,13 @@ func TestInstallPluginLeavesNoDebris(t *testing.T) {
 	dir := t.TempDir()
 	m := testManagerAt(t, dir)
 	name := "iot-driver-modbus" + pluginExt()
+	data := fakeSelfImage()
 
-	if err := m.InstallPlugin(name, fakePE); err != nil {
+	if err := m.InstallPlugin(name, data); err != nil {
 		t.Fatalf("首次上传: %v", err)
 	}
 	// 覆盖同一个文件：走「旧文件让位」路径。
-	if err := m.InstallPlugin(name, append(fakePE, 'X')); err != nil {
+	if err := m.InstallPlugin(name, append(append([]byte{}, data...), 'X')); err != nil {
 		t.Fatalf("覆盖上传: %v", err)
 	}
 
@@ -314,8 +331,9 @@ func TestInstallPluginUnchangedSkipsWrite(t *testing.T) {
 	dir := t.TempDir()
 	m := testManagerAt(t, dir)
 	name := "iot-driver-modbus" + pluginExt()
+	data := fakeSelfImage()
 
-	if err := m.InstallPlugin(name, fakePE); err != nil {
+	if err := m.InstallPlugin(name, data); err != nil {
 		t.Fatalf("首次上传: %v", err)
 	}
 	target := filepath.Join(dir, name)
@@ -324,7 +342,7 @@ func TestInstallPluginUnchangedSkipsWrite(t *testing.T) {
 		t.Fatalf("stat: %v", err)
 	}
 
-	if err := m.InstallPlugin(name, fakePE); !errors.Is(err, ErrPluginUnchanged) {
+	if err := m.InstallPlugin(name, data); !errors.Is(err, ErrPluginUnchanged) {
 		t.Fatalf("重复上传应返回 ErrPluginUnchanged，实际: %v", err)
 	}
 

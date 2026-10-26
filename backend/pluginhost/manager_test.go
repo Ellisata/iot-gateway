@@ -6,6 +6,7 @@ package pluginhost
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -481,16 +482,56 @@ func TestResolvePluginDirIsExecutableRelative(t *testing.T) {
 
 // ==================== 小工具 ====================
 
+// asideSeq 给 appendBytes 的让位文件生成唯一后缀（见该函数里的说明）。
+var asideSeq atomic.Int64
+
+// appendBytes 给插件文件追加 b 字节，模拟运维替换了插件二进制。
+//
+// 必须走「临时文件 + rename」而不能就地 O_APPEND：Linux 上对**正在执行**的文件
+// open(O_WRONLY) 会返回 ETXTBSY（text file busy），而热升级用例里插件进程恰好
+// 还在跑 —— 就地追加在 CI 上随调度时机时过时不过。rename 在两端都成立：正在跑的
+// 旧进程继续持有旧 inode，扫描器看到的始终是完整的新文件；Windows 上运行中的 exe
+// 同样不能被覆盖，但可以改名让位（与 install.go 的 replaceFile 同一道理）。
+//
+// 让位文件名带唯一序号而不是固定名：同一用例可能连续替换多次，而上一轮的让位
+// 文件在 Windows 上仍被旧进程占用、删不掉，固定名会挡住下一次改名。
 func appendBytes(t *testing.T, path string, b []byte) {
 	t.Helper()
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o755)
+
+	dir := filepath.Dir(path)
+	data := append(readFile(t, path), b...)
+
+	tmp, err := os.CreateTemp(dir, tempFilePrefix)
 	if err != nil {
-		t.Fatalf("打开 %s: %v", path, err)
+		t.Fatalf("创建临时文件: %v", err)
 	}
-	defer f.Close()
-	if _, err := f.Write(b); err != nil {
-		t.Fatalf("追加写入: %v", err)
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		t.Fatalf("写入临时文件: %v", err)
 	}
+	// CreateTemp 建出的是 0600；rename 保留临时文件的权限位，不提权在 Unix 上不可执行。
+	if err := tmp.Chmod(0o755); err != nil {
+		tmp.Close()
+		t.Fatalf("设置权限位: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("关闭临时文件: %v", err)
+	}
+
+	aside := filepath.Join(dir, fmt.Sprintf(".%s.old%d", filepath.Base(path), asideSeq.Add(1)))
+	if err := os.Rename(path, aside); err != nil {
+		t.Fatalf("旧二进制让位: %v", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Rename(aside, path)
+		t.Fatalf("写入新二进制: %v", err)
+	}
+	// Linux 上旧 inode 只是被 unlink，必然成功；Windows 上旧进程仍占用时删不掉，
+	// 带前导点的让位文件不匹配扫描 glob，留给测试目录清理。
+	_ = os.Remove(aside)
+
 	// 确保 mtime 变化可被指纹捕捉。
 	now := time.Now().Add(2 * time.Second)
 	if err := os.Chtimes(path, now, now); err != nil {
