@@ -1,27 +1,44 @@
 @echo off
+:: Keep this file pure ASCII, comments included. cmd.exe parses batch files with
+:: the console code page; non-ASCII (GBK or UTF-8) lines can desync its line
+:: offsets and make it run the tail of a comment line as a command -- and only
+:: sometimes, which is far worse to debug.
 :: ============================================
-::  iot-gateway ����ģʽһ������
-::  ǰ�˹��� -> ͬ���� backend/web/dist -> Go ����
-::  �÷�: build.bat          ���� Linux amd64 + arm64 + arm32 + Windows amd64�������ã�Ĭ�ϣ�
-::        build.bat windows  ������ Windows amd64������ԭ������죩
-::        build.bat arm64    ������ Linux arm64��ARM64 ���ػ� / ��ݮ�ɵȣ�
-::        build.bat arm32    ������ Linux arm 32 λ��ARMv7 ���ذ壬�̶� GOARM=7��
-::  ����: Ĭ��ģʽ�� backend\package.bat���������ڲֿ��Ŀ¼:
+::  iot-gateway one-shot production build
+::  Frontend build -> sync to backend/web/dist -> compile Go
+::  Usage: build.bat          build Linux amd64 + arm64 + arm32 + Windows amd64 (default)
+::         build.bat windows  Windows amd64 only (native, fastest)
+::         build.bat arm64    Linux arm64 only (ARM64 IPC / Raspberry Pi)
+::         build.bat arm32    Linux arm 32-bit only (ARMv7 board, GOARM=7 pinned)
+::  Output: the default mode delegates to backend\package.bat; artifacts land in
+::          the repo root:
 ::          iot-gateway / iot-gateway-linux-arm64 / iot-gateway-linux-arm / iot-gateway.exe
 ::          plugins-linux\ / plugins-linux-arm64\ / plugins-linux-arm\ / plugins-windows\
-::        ��ƽ̨ģʽ������ backend\ �£����ھ͵ص���
+::          Single-platform mode writes into backend\ so you can run it in place.
 ::
-::  ע��: ���Ŀ¼һ�ɴ�ƽ̨��׺��Windows �� plugins-windows\������ plugin.dir
-::        Ĭ���� "plugins"����� exe ����������ֱ���� exe ֮ǰҪ�Ѷ�ӦĿ¼������
-::        plugins\ ��� plugin.dir������һ��Э��Ҳɨ���������а�����Ӱ�졣
+::  NOTE: plugin dirs always carry a platform suffix (Windows is plugins-windows\).
+::        The gateway resolves plugin.dir (default "plugins") relative to the exe,
+::        so rename the matching dir to plugins\ (or point plugin.dir at it)
+::        before running the exe locally, otherwise no protocol is found at all.
+::        Release packages are unaffected.
 ::
-::  arm32 �̶� GOARM=7��ARMv7-A + VFPv3 Ӳ���㣩��Ŀ������� ARMv6/ARMv5
-::  ����ݮ�� 1 / Zero һ�����ø��� GOARM=5 �����㣬��������ڰ�����ֱ��������
+::  arm32 pins GOARM=7 (ARMv7-A + VFPv3 hard float). If the target board is
+::  ARMv6/ARMv5 (Raspberry Pi 1 / Zero gen 1) rebuild with GOARM=5 (soft float),
+::  otherwise the binary will not even start there.
 :: ============================================
 setlocal
 set ROOT=%~dp0
 
-:: all��Ĭ�ϣ�ȫ���� / windows / arm64 / arm32
+:: Build version: explicit VERSION wins, otherwise the latest git tag, then dev.
+:: Injected as -X main.version so the binary describes itself; without it the
+:: gateway identity falls back to gateway.version in default.yaml.
+set "BUILD_VERSION=%VERSION%"
+if not "%BUILD_VERSION%"=="" goto :build_version_ready
+for /f "usebackq delims=" %%v in (`git -C "%ROOT%." describe --tags --abbrev^=0 2^>nul`) do set "BUILD_VERSION=%%v"
+:build_version_ready
+if "%BUILD_VERSION%"=="" set "BUILD_VERSION=dev"
+
+:: all (default, everything) / windows / arm64 / arm32
 set BUILD_ALL=1
 set BUILD_ARM=0
 set BUILD_ARM32=0
@@ -50,7 +67,7 @@ if /i "%1"=="arm7" (
     set BUILD_ARM=0
     set BUILD_ARM32=1
 )
-rem arm �� Go �Ĺ���ָ 32 λ��GOARCH=arm����64 λ�� arm64��
+rem "arm" means 32-bit by Go convention (GOARCH=arm); 64-bit is arm64.
 if /i "%1"=="arm" (
     set BUILD_ALL=0
     set BUILD_ARM=0
@@ -58,12 +75,12 @@ if /i "%1"=="arm" (
 )
 
 echo.
-echo [1/3] ����ǰ�� (npm run build) ...
+echo [1/3] Building frontend (npm run build) ...
 pushd "%ROOT%frontend"
 call npm run build
 if errorlevel 1 goto :fail
 
-echo [2/3] ͬ���������ﵽ backend\web\dist ...
+echo [2/3] Syncing build output to backend\web\dist ...
 if exist "%ROOT%backend\web\dist" (
     rmdir /s /q "%ROOT%backend\web\dist"
 )
@@ -71,7 +88,7 @@ mkdir "%ROOT%backend\web\dist"
 xcopy /e /y /q "%ROOT%frontend\dist\*" "%ROOT%backend\web\dist\" >nul
 if errorlevel 1 goto :fail
 
-echo [3/3] ���� Go ��� ...
+echo [3/3] Compiling Go backend ...
 pushd "%ROOT%backend"
 
 if "%BUILD_ALL%"=="0" (
@@ -84,7 +101,8 @@ if "%BUILD_ALL%"=="0" (
     )
     if errorlevel 1 goto :fail
 ) else (
-    rem ȫ�����뽻�� package.bat���ܹ��嵥���� glob ֻ����һ�����������Ư�ơ�
+    rem Full builds go through package.bat: the platform list and plugin glob
+    rem live in exactly one place, so the two scripts cannot drift apart.
     call "%ROOT%backend\package.bat"
     if errorlevel 1 goto :fail
 )
@@ -93,34 +111,41 @@ echo.
 echo ============================================
 if "%BUILD_ALL%"=="0" (
   if "%BUILD_ARM%"=="1" (
-    echo   �������:
+    echo   Build complete:
     echo   - Linux arm64 : %ROOT%backend\iot-gateway-linux-arm64
-    echo   - ���Ŀ¼    : %ROOT%backend\plugins-linux-arm64
+    echo   - Plugins     : %ROOT%backend\plugins-linux-arm64
   ) else if "%BUILD_ARM32%"=="1" (
-    echo   �������:
+    echo   Build complete:
     echo   - Linux arm32 : %ROOT%backend\iot-gateway-linux-arm
-    echo   - ���Ŀ¼    : %ROOT%backend\plugins-linux-arm
+    echo   - Plugins     : %ROOT%backend\plugins-linux-arm
   ) else (
-    echo   �������:
+    echo   Build complete:
     echo   - Windows     : %ROOT%backend\iot-gateway.exe
-    echo   - ���Ŀ¼    : %ROOT%backend\plugins-windows
+    echo   - Plugins     : %ROOT%backend\plugins-windows
   )
 ) else (
-  echo   ������ɣ������ڲֿ��Ŀ¼��:
+  echo   Build complete - artifacts are in the repo root:
   echo   - Linux amd64  : %ROOT%iot-gateway
   echo   - Linux arm64  : %ROOT%iot-gateway-linux-arm64
   echo   - Linux arm32  : %ROOT%iot-gateway-linux-arm
   echo   - Windows amd64: %ROOT%iot-gateway.exe
 )
-echo   ���з�ʽ: ˫�� run.bat ��ֱ������ iot-gateway.exe
-echo   ���ʵ�ַ: http://localhost:9082/admin
+echo   Run: double-click run.bat or start iot-gateway.exe directly
+echo   Console: http://localhost:9082/admin
 echo ============================================
+:: Keep the window open when double-clicked, like install.bat. A redirected
+:: stdin (CI, `cmd /c ... < nul`) makes pause return immediately.
+:: NOTE: the full build delegates to backend\package.bat -- when this script is
+:: driven by another script, call it as `call build.bat ... < nul` or the pause
+:: will wait for a keypress.
+pause
 endlocal
 exit /b 0
 
 :fail
 echo.
-echo [FAIL] ����ʧ�ܣ���鿴�Ϸ���־��
+echo [FAIL] Build failed, see the log above.
+pause
 endlocal
 exit /b 1
 
@@ -131,7 +156,7 @@ set CGO_ENABLED=0
 set GOOS=windows
 set GOARCH=amd64
 set GOARM=
-go build -ldflags="-s -w" -o iot-gateway.exe .
+go build -ldflags="-s -w -X main.version=%BUILD_VERSION%" -o iot-gateway.exe .
 if errorlevel 1 (
     echo [FAIL] Windows build failed!
     exit /b 1
@@ -150,7 +175,7 @@ set CGO_ENABLED=0
 set GOOS=linux
 set GOARCH=arm64
 set GOARM=
-go build -ldflags="-s -w" -o iot-gateway-linux-arm64 .
+go build -ldflags="-s -w -X main.version=%BUILD_VERSION%" -o iot-gateway-linux-arm64 .
 if errorlevel 1 (
     echo [FAIL] Linux arm64 build failed!
     exit /b 1
@@ -169,7 +194,7 @@ set CGO_ENABLED=0
 set GOOS=linux
 set GOARCH=arm
 set GOARM=7
-go build -ldflags="-s -w" -o iot-gateway-linux-arm .
+go build -ldflags="-s -w -X main.version=%BUILD_VERSION%" -o iot-gateway-linux-arm .
 if errorlevel 1 (
     echo [FAIL] Linux arm build failed!
     exit /b 1

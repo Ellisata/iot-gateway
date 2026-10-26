@@ -9,7 +9,7 @@ package dto
 //
 // 刻意只含 name 与 description 两个可编辑项：
 //   - id 由首次启动生成，是网关的唯一标识，改了等于换一台设备；
-//   - firmware_version 只读，以配置项 gateway.version 为准（启动时自动同步进库），
+//   - firmware_version 只读，以构建注入版本（其次 gateway.version）为准（启动时自动同步进库），
 //     让运维手改会把「版本」变成一句无法核实的话；
 //   - status 本轮不开放。
 type UpdateGatewayDTO struct {

@@ -14,6 +14,11 @@ Dockerfile text eol=lf
 *.go text eol=lf
 *.mod text eol=lf
 *.sum text eol=lf
+# build.sh / release.sh 用 `while read` 逐行读这两个清单，CRLF 会让包名带上 \r
+# （报错形如 "module ...@v0.1.0 found, but does not contain package .../abb"）。
+# build.bat 侧 `for /f` 两种行尾都能读，所以统一成 LF 即可。
+drivers.txt text eol=lf
+drivers.version text eol=lf
 
 # 前端资源统一 LF
 *.js text eol=lf

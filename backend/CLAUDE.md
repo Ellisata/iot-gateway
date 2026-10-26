@@ -459,9 +459,9 @@
    协议名同时是 `iot_protocol.name` 与 `device.protocol_id` 的解析目标,改一个字就让既有设备
    静默采不到值。各插件用一条 `TestProtocolIdentityPinned` 把字面量钉住。
 5. 构建产物名为 `iot-driver-<name>`,放在可执行文件同级的 `plugins/` 目录;
-   `build.sh` / `release.sh` / `Dockerfile` / `build.bat` / `backend/package.bat` 读取
-   `drivers.txt` + `drivers.version`,逐个 `go get` 源码后交叉编译打包,`release.sh` 与
-   `Dockerfile` **在没装出任何插件时会失败**(插件是发行包的必需组成,不是可选项)。
+   `build.sh` / `build.bat` / `backend/package.bat` / `release.sh` / `release.bat` / `Dockerfile`
+   读取 `drivers.txt` + `drivers.version`,逐个 `go get` 源码后交叉编译打包,`release.sh` /
+   `release.bat` / `Dockerfile` **在没装出任何插件时会失败**(插件是发行包的必需组成,不是可选项)。
    **替换已加载插件的二进制即可热升级**(默认开启,`plugin.disableHotUpgrade=true` 关闭):
    网关拉起新进程、经稳定间接层 `pluginLink` 把驱动切过去,靠世代号让既有驱动实例
    自动重连,**不触发全局 Refresh**;只有协议名集合或 SerialExclusive 变化才重建采集任务。
@@ -563,6 +563,8 @@ go generate             # 重新生成 wire_gen.go
 
 一次性构建全部主二进制 + 全部插件请用仓库根目录的脚本:Linux/macOS 用 `../build.sh`
 (或 `../release.sh` 出发行包),Windows 用 `..\build.bat`(内部调 `package.bat`)。
+出发行包两个平台各有一个入口:`release.sh`(shell)与 `release.bat`(原生 cmd),
+产物与包内布局必须一致,改一个要同步另一个。
 脚本读取仓库根的 `drivers.txt` + `drivers.version`,逐个 `go get` 该版本源码后编译,默认产出 **四个平台**:
 `iot-gateway`(linux/amd64)、`iot-gateway-linux-arm64`、`iot-gateway-linux-arm`
 (linux/arm 32 位,固定 **GOARM=7**)、`iot-gateway.exe`(windows/amd64)。

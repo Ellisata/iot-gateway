@@ -1,15 +1,18 @@
 @echo off
+:: Keep this file pure ASCII, comments included. cmd.exe parses batch files with
+:: the console code page; non-ASCII (GBK or UTF-8) lines can desync its line
+:: offsets and make it run the tail of a comment line as a command.
 :: ============================================================
-::  iot-gateway Windows 服务安装脚本（原生 sc，无需 NSSM）
-::  将脚本同目录下的 iot-gateway.exe 注册为系统后台服务
-::  （exe 内置 Windows 服务支持，见 backend/service_windows.go）
+::  iot-gateway Windows service installer (native sc, no NSSM)
+::  Registers the iot-gateway.exe sitting next to this script as a system service.
+::  (The exe has built-in Windows service support, see backend/service_windows.go)
 ::
-::  用法:
-::    install.bat                          安装并启动服务（默认 %ProgramFiles%\iot-gateway）
-::    set IOT_GATEWAY_HOME=C:\iot-gateway  自定义安装目录
+::  Usage:
+::    install.bat                          install and start (default dir: %ProgramFiles%\iot-gateway)
+::    set IOT_GATEWAY_HOME=C:\iot-gateway  custom install directory
 ::
-::  服务名: iot-gateway
-::  管理地址: http://localhost:9082/admin
+::  Service name: iot-gateway
+::  Console: http://localhost:9082/admin
 :: ============================================================
 setlocal
 set "SERVICE_NAME=iot-gateway"
@@ -19,88 +22,99 @@ set "SRC_DIR=%~dp0"
 set "INSTALL_DIR=%ProgramFiles%\iot-gateway"
 if not "%IOT_GATEWAY_HOME%"=="" set "INSTALL_DIR=%IOT_GATEWAY_HOME%"
 
-:: 检查管理员权限
+:: Require administrator privileges
 net session >nul 2>&1
 if errorlevel 1 (
-    echo [FAIL] 需要管理员权限运行此脚本!
+    echo [FAIL] This script must be run as Administrator.
     pause
     exit /b 1
 )
 
-:: 检查可执行文件（由 backend\package.bat 生成）
+:: Require the executable (produced by backend\package.bat)
 if not exist "%SRC_DIR%%BINARY_NAME%" (
-    echo [FAIL] 未找到 %BINARY_NAME%，请在 backend 目录执行 package.bat 生成。
+    echo [FAIL] %BINARY_NAME% not found. Build it first: run package.bat in backend.
     pause
     exit /b 1
 )
 
 echo.
-echo [1/3] 复制程序文件到 %INSTALL_DIR% ...
+echo [1/3] Copying program files to %INSTALL_DIR% ...
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 if not exist "%INSTALL_DIR%\data" mkdir "%INSTALL_DIR%\data"
 if not exist "%INSTALL_DIR%\log"  mkdir "%INSTALL_DIR%\log"
 if not exist "%INSTALL_DIR%\plugins" mkdir "%INSTALL_DIR%\plugins"
 copy /y "%SRC_DIR%%BINARY_NAME%" "%INSTALL_DIR%\%BINARY_NAME%" >nul
 if errorlevel 1 (
-    echo [FAIL] 复制可执行文件失败!
+    echo [FAIL] Copying the executable failed.
     pause
     exit /b 1
 )
-:: 脚本同目录若存在 default.yaml，一并复制（可覆盖嵌入的默认配置，如端口/日志级别）
+:: Release manifest (versions + plugin checksums), kept for field checks.
+if exist "%SRC_DIR%MANIFEST.json" (
+    copy /y "%SRC_DIR%MANIFEST.json" "%INSTALL_DIR%\MANIFEST.json" >nul
+    echo   [OK] MANIFEST.json copied
+)
+:: Copy default.yaml too when it sits next to this script; it overrides the
+:: embedded defaults (port, log level, ...).
 if exist "%SRC_DIR%default.yaml" (
     copy /y "%SRC_DIR%default.yaml" "%INSTALL_DIR%\default.yaml" >nul
-    echo   [OK] 已复制 default.yaml
+    echo   [OK] default.yaml copied
 )
-:: 进程外协议插件（外部驱动）。网关按 plugin.dir 扫描此目录，**出厂即加载**
-:: （plugin.enabled 默认 true）—— 全部协议驱动都由插件提供、主程序不含任何
-:: 内置实现，该目录为空等于网关不支持任何协议（设备会被逐个静默跳过）。
-:: 加载插件等于以网关权限执行其中的程序，请确保该目录仅管理员可写。
-:: 目录按 exe 所在位置解析，
-:: 与 sc create 不设工作目录无关。
+:: Out-of-process protocol plugins (external drivers). The gateway scans this
+:: dir via plugin.dir and loads it out of the box (plugin.enabled defaults to
+:: true). Every protocol driver is a plugin and the main binary contains no
+:: built-in protocol, so an empty dir means the gateway supports nothing (each
+:: device gets silently skipped).
+:: Loading a plugin runs it with the gateway's privileges -- keep this dir
+:: writable by administrators only.
+:: The dir resolves relative to the exe location, independent of the working
+:: directory sc create uses.
 if exist "%SRC_DIR%plugins" (
     xcopy /y /e /i /q "%SRC_DIR%plugins" "%INSTALL_DIR%\plugins" >nul
-    echo   [OK] 已复制协议插件（已启用）
+    echo   [OK] Protocol plugins copied, enabled
 )
 
-echo [2/3] 注册 Windows 服务 ...
-:: 若服务已存在，先停止并删除（重新安装）。ping 延迟等待 SCM 完成停止
+echo [2/3] Registering the Windows service ...
+:: If the service already exists, stop and delete it first (reinstall). The
+:: ping delay gives the SCM time to finish stopping.
 sc stop   "%SERVICE_NAME%" >nul 2>&1
 >nul 2>&1 ping -n 3 127.0.0.1
 sc delete "%SERVICE_NAME%" >nul 2>&1
 
-:: binPath 对含空格的路径需再加一层引号（sc 参数形式: binPath= "\"路径\""）
+:: binPath needs an extra layer of quotes when the path contains spaces
+:: (sc syntax: binPath= "\"path\"")
 sc create "%SERVICE_NAME%" binPath= "\"%INSTALL_DIR%\%BINARY_NAME%\"" start= auto DisplayName= "%DISPLAY_NAME%"
 if errorlevel 1 (
-    echo [FAIL] 服务注册失败!
+    echo [FAIL] Service registration failed.
     pause
     exit /b 1
 )
-:: 崩溃自动重启（延迟 5 秒，最多尝试 3 次；24 小时内无故障则重置计数）
+:: Auto-restart on crash (5s delay, up to 3 attempts; counter resets after 24h)
 sc failure "%SERVICE_NAME%" reset= 86400 actions= restart/5000/restart/5000/restart/5000
-sc description "%SERVICE_NAME%" "%DISPLAY_NAME% - 工业 IoT 数据采集网关"
+sc description "%SERVICE_NAME%" "%DISPLAY_NAME% - industrial IoT data collection gateway"
 
-echo [3/3] 启动服务 ...
+echo [3/3] Starting the service ...
 sc start "%SERVICE_NAME%"
 if errorlevel 1 (
-    echo [FAIL] 服务启动失败，请查看日志目录: %INSTALL_DIR%\log
+    echo [FAIL] Starting the service failed. Check the log dir: %INSTALL_DIR%\log
     pause
     exit /b 1
 )
 
 echo.
 echo ============================================
-echo   服务安装完成
-echo   服务状态: 运行中（开机自启）
-echo   管理地址: http://localhost:9082/admin
-echo   安装目录: %INSTALL_DIR%
-echo   数据目录: %INSTALL_DIR%\data
-echo   日志目录: %INSTALL_DIR%\log
-echo   插件目录: %INSTALL_DIR%\plugins (全部协议驱动，已启用)
-echo   常用命令:
-echo     net start %SERVICE_NAME%     启动服务
-echo     net stop %SERVICE_NAME%      停止服务
-echo     sc query %SERVICE_NAME%      查看状态
-echo     sc stop %SERVICE_NAME% ^&^& sc delete %SERVICE_NAME%   卸载服务
+echo   Service installed
+echo   Status   : running (auto-start on boot)
+echo   Console  : http://localhost:9082/admin
+echo   Install  : %INSTALL_DIR%
+echo   Data     : %INSTALL_DIR%\data
+echo   Logs     : %INSTALL_DIR%\log
+echo   Plugins  : %INSTALL_DIR%\plugins (all protocol drivers, enabled)
+echo   Commands :
+echo     net start %SERVICE_NAME%     start the service
+echo     net stop %SERVICE_NAME%      stop the service
+echo     sc query %SERVICE_NAME%      query status
+echo     sc stop %SERVICE_NAME% ^&^& sc delete %SERVICE_NAME%   uninstall
 echo ============================================
 endlocal
 pause

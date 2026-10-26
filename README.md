@@ -236,7 +236,7 @@ docker compose down             # 停止并移除容器
 |---|---|---|
 | `build.bat` / `build.sh` | Windows / Linux·macOS | `backend/iot-gateway(.exe)` + `backend/plugins-<平台>/`（与主二进制同层） |
 | `backend/package.bat` | Windows | 同上，一次产出 4 个平台目录（`plugins-linux/`、`plugins-linux-arm64/`、`plugins-linux-arm/`、`plugins-windows/`） |
-| `release.sh` | Linux·macOS / Git Bash | `release/` 下的 `*.zip` / `*.tar.gz`，压缩包内就是 `iot-gateway(.exe)` + `plugins/` 两层 |
+| `release.sh` / `release.bat` | Linux·macOS / Git Bash、Windows cmd | `release/` 下的 `*.zip` / `*.tar.gz`，压缩包内就是 `iot-gateway(.exe)` + `plugins/` 两层 |
 | `backend/Dockerfile` | 容器（多阶段构建） | 镜像内 `/app/plugins/`，出厂即带全部插件 |
 
 **只重编单个插件**（改了某个协议、或本地验证），在驱动仓库检出目录里直接 `go build`：
@@ -260,12 +260,14 @@ go build -o ../iot-gateway/backend/plugins/iot-driver-modbus ./modbus   # Window
 
 ## 升级须知（破坏性变更，非滚动升级）
 
-协议驱动全部搬为进程外插件后，**主二进制与 `plugins/` 目录是严格的版本配对关系**：
+协议驱动全部搬为进程外插件后，**主二进制与 `plugins/` 是成对发行、成对测试的关系**：
 
-- **两种混搭都会失效**：旧网关二进制 + 新插件、新网关二进制 + 旧插件，都会让对应协议不可用（插件与网关之间是一套进程间契约，版本不匹配的插件不会被正常加载）。
-- **必须成对替换**：升级时把**主二进制与 `plugins/` 目录作为一个整体**替换，不要只换其中一个。
-- **回滚很干净**：本次改造**未改动数据库**（`migrations/` 未新增或修改，`iot_protocol` 等表结构不变），把旧二进制与旧 `plugins/` **成对换回**即可完全回到原状。
+- **官方支持成对替换**：升级时把**主二进制与 `plugins/` 目录作为一个整体**替换，不要只换其中一个。
+- **技术判据只有一条**：插件的 `driversdk.APIVersion` 必须与网关编译时链接的一致；不匹配的插件在握手阶段被拒绝加载，不会静默误解析。**同一 `APIVersion` 内**的混搭可以加载，但不属于官方配对组合；**跨 `APIVersion`** 则必然失效。
+- **回滚很干净**：本次插件化改造**未改动数据库**（`migrations/` 未新增或修改，`iot_protocol` 等表结构不变），把旧二进制与旧 `plugins/` **成对换回**即可完全回到原状。
 - **协议名没变**：原有的 12 个协议名与类型 scope 沿用原值，**既有设备配置、`iot_protocol` 行、前端表单都不需要迁移**（`ABB.RWS` 与 `DLT645.Serial` / `DLT645.TCP` 是新增的协议，只影响新建设备）。
+
+完整的版本关系、官方发行配对矩阵与升级规则见 [版本兼容性](docs/version-compatibility.md)。
 
 **Docker 部署注意**：`docker-compose.yml` 里原先的 `./plugins:/app/plugins:ro` 绑定挂载会**遮蔽镜像内已构建好的插件**（宿主目录为空 = 网关没有任何协议），现已注释掉。若确需在运行期挂载插件（灰度 / 热升级），**必须先把发行包 `plugins/` 的内容拷进宿主目录**再挂载，并保持只读。
 

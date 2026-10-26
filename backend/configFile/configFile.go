@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/spf13/viper"
@@ -26,6 +27,47 @@ const EnvGatewayName = "IOT_GATEWAY_NAME"
 
 // EnvGatewayVersion 环境变量名：网关软件版本，优先级高于所有配置文件
 const EnvGatewayVersion = "IOT_GATEWAY_VERSION"
+
+// FallbackGatewayVersion 构建期版本缺失、配置也未提供时的兜底值。
+// 与 release.sh / release.bat 的 `git describe ... || echo dev` 保持同一口径。
+const FallbackGatewayVersion = "dev"
+
+// buildVersion 由 main 通过 SetBuildVersion 注入（构建脚本的 -X main.version）。
+// 发行二进制因此自描述；未注入时为 FallbackGatewayVersion。
+var buildVersion = FallbackGatewayVersion
+
+// SetBuildVersion 注入构建期版本号。空串被忽略，不会把已有值抹掉。
+func SetBuildVersion(v string) {
+	if v = strings.TrimSpace(v); v != "" {
+		buildVersion = v
+	}
+}
+
+// BuildVersion 返回当前构建期版本（未注入时为 "dev"）。
+func BuildVersion() string { return buildVersion }
+
+// ResolveGatewayVersion 解析网关实际运行版本，优先级由高到低：
+//
+//	IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> gateway.version > "dev"
+//
+// 构建注入版本优先于配置文件，是因为它描述的是**这个二进制**；配置文件可能随
+// 部署目录残留上一版的值，而发行包的 default.yaml 是嵌入二进制的。
+// 本地 go run / 未带 ldflags 的 go build 注入值是 "dev"，此时配置项仍然生效，
+// 便于开发时用一个可读版本号。
+func ResolveGatewayVersion(cfg *Config) string {
+	if s := strings.TrimSpace(os.Getenv(EnvGatewayVersion)); s != "" {
+		return s
+	}
+	if s := strings.TrimSpace(buildVersion); s != "" && s != FallbackGatewayVersion {
+		return s
+	}
+	if cfg != nil {
+		if s := strings.TrimSpace(cfg.Gateway.Version); s != "" {
+			return s
+		}
+	}
+	return FallbackGatewayVersion
+}
 
 // Config 全局配置结构体
 //
@@ -151,9 +193,11 @@ type GatewayConfig struct {
 	// 优先级更高的是环境变量 IOT_GATEWAY_NAME。
 	Name string `mapstructure:"name"`
 
-	// Version 网关软件版本号，随发行版更新；留空时回退为 "dev"。
-	// 库内值以本项（或 IOT_GATEWAY_VERSION）为准：每次启动比对，不一致就刷新。
-	// 优先级更高的是环境变量 IOT_GATEWAY_VERSION。
+	// Version 网关软件版本号。**发行二进制以构建注入版本为准**
+	// （构建脚本传 -X main.version，见 ResolveGatewayVersion），本项只在未注入
+	// （本地 go run / 普通 go build）时生效，留空则回退为 "dev"。
+	// 每次启动都会与库内值比对，不一致就刷新；优先级更高的是环境变量
+	// IOT_GATEWAY_VERSION。
 	Version string `mapstructure:"version"`
 }
 

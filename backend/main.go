@@ -25,6 +25,7 @@ import (
 	_ "iot-gateway/push/tdengine/v3"
 	_ "iot-gateway/push/webhook"
 
+	"github.com/Ellisata/iot-gateway-sdk/driversdk"
 	"github.com/gin-gonic/gin"
 )
 
@@ -61,13 +62,18 @@ func runGateway(stop <-chan struct{}) error {
 	configFile.SetDefaultConfig(defaultYAML)
 	cfg := configFile.InitConfig()
 
+	// 构建期版本（-X main.version）必须在任何读取网关身份的代码之前注入，
+	// 否则身份行会先按配置文件里的旧值落库。
+	configFile.SetBuildVersion(version)
+
 	// 2. 初始化日志
 	logger.InitLogger(cfg)
 
 	// 3. 初始化国际化
 	i18n.InitI18n()
 
-	logger.Info("application starting...")
+	logger.Info("application starting... (version %s, plugin APIVersion %d)",
+		configFile.ResolveGatewayVersion(cfg), driversdk.APIVersion)
 	if strings.ToUpper(cfg.Log.Level) == "DEBUG" {
 		gin.SetMode(gin.DebugMode)
 	} else if strings.ToUpper(cfg.Log.Level) == "INFO" {

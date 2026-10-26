@@ -231,7 +231,7 @@ Plugins are **never compiled one by one by hand** — every build entry point re
 |---|---|---|
 | `build.bat` / `build.sh` | Windows / Linux·macOS | `backend/iot-gateway(.exe)` + `backend/plugins-<platform>/` (same layer as the binary) |
 | `backend/package.bat` | Windows | The same, for all four platforms at once (`plugins-linux/`, `plugins-linux-arm64/`, `plugins-linux-arm/`, `plugins-windows/`) |
-| `release.sh` | Linux·macOS / Git Bash | `*.zip` / `*.tar.gz` under `release/`, containing exactly two layers: `iot-gateway(.exe)` + `plugins/` |
+| `release.sh` / `release.bat` | Linux·macOS / Git Bash, Windows cmd | `*.zip` / `*.tar.gz` under `release/`, containing exactly two layers: `iot-gateway(.exe)` + `plugins/` |
 | `backend/Dockerfile` | Container (multi-stage build) | `/app/plugins/` inside the image, shipped with every plugin already built in |
 
 **To rebuild a single plugin** (you changed one protocol, or you want to verify locally), `go build` it inside a driver repository checkout:
@@ -255,12 +255,14 @@ Two accounts are seeded on first start: `admin` and `hand`, both with the initia
 
 ## Upgrade notes (breaking change, not a rolling upgrade)
 
-With all protocol drivers moved out of process, the **binary and the `plugins/` directory are a strictly paired set**:
+With all protocol drivers moved out of process, the **binary and the `plugins/` directory are built, tested and released as a pair**:
 
-- **Both mixed combinations break**: old binary + new plugins, and new binary + old plugins, each leave the corresponding protocols unusable (the gateway and its plugins share an inter-process contract; a plugin whose version does not match will not load properly).
-- **Replace them as a pair**: on upgrade, swap the **binary and the `plugins/` directory together** — never just one of them.
-- **Rollback is clean**: this change **touches no database state** (`migrations/` is unchanged, so `iot_protocol` and the other tables keep their structure). Swap the old binary and old `plugins/` back as a pair and you are exactly where you started.
+- **Official support is pair-for-pair replacement**: on upgrade, swap the **binary and the `plugins/` directory together** — never just one of them.
+- **There is exactly one technical gate**: a plugin's `driversdk.APIVersion` must equal the one the gateway was built against; a mismatch is rejected at handshake time, never silently misparsed. **Within the same `APIVersion`** the two halves can technically be mixed, but that is not an officially paired combination; **across `APIVersion`** the mix cannot work.
+- **Rollback is clean**: this plugin extraction **touches no database state** (`migrations/` is unchanged, so `iot_protocol` and the other tables keep their structure). Swap the old binary and old `plugins/` back as a pair and you are exactly where you started.
 - **Protocol names are unchanged**: the 12 pre-existing protocol names and type scopes keep their values, so **existing device configs, `iot_protocol` rows and frontend forms need no migration** (`ABB.RWS` and `DLT645.Serial`/`DLT645.TCP` are newly added and only affect new devices).
+
+The full version model, official release pairing matrix and upgrade rules are in [Version compatibility](docs/version-compatibility.md).
 
 **Docker deployment note**: the previous `./plugins:/app/plugins:ro` bind mount in `docker-compose.yml` would **mask the plugins built into the image** (an empty host directory means no protocols at all), so it is now commented out. If you really need to mount plugins at runtime (canary / hot upgrade), **copy the release archive's `plugins/` contents into the host directory first**, then mount it read-only.
 

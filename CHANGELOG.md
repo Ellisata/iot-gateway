@@ -4,6 +4,20 @@
 
 All notable changes to this project are documented in this file (Keep a Changelog format, SemVer versioning).
 
+## [Unreleased]
+
+### Added
+
+- **版本兼容性说明**：新增 [docs/version-compatibility.md](docs/version-compatibility.md)，明确网关与插件之间唯一的兼容判据是 `driversdk.APIVersion`，并给出官方发行配对矩阵、插件兼容区间与 `APIVersion` 进位规则。
+  **Version compatibility doc**: adds [docs/version-compatibility.md](docs/version-compatibility.md) documenting the single compatibility gate (`driversdk.APIVersion`), the official release pairing matrix, the plugin compatibility range and the `APIVersion` bump rules.
+- **发行包 `MANIFEST.json`**：`release.sh` / `release.bat` 现在在包根生成机器可读的清单，包含网关版本、目标平台、SDK 版本、`APIVersion`、`FrameMagic`、`drivers.version` 与每个插件的 sha256；现场可直接据此核对是否是官方配对组合。
+  **Release `MANIFEST.json`**: `release.sh` / `release.bat` now write a machine-readable manifest at the package root with the gateway version, target platform, SDK version, `APIVersion`, `FrameMagic`, `drivers.version` and each plugin's sha256, so field checks no longer rely on file timestamps.
+
+### Fixed
+
+- **网关身份版本与发行 tag 不一致**：`default.yaml` 里写死的 `gateway.version`（此前为 `1.0.2`）与 `v0.2.0` 发行 tag 对不上，导致 `iot_gateway.firmware_version` 与局域网发现广播的 `firmwareVersion` 都不是实际运行的版本。现在构建脚本统一以 `-X main.version=<tag>` 注入，解析优先级为 `IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> gateway.version > dev`；`gateway.version` 只在未注入版本的本地构建里生效。
+  **Gateway identity version no longer drifts from the release tag**: the hardcoded `gateway.version` in `default.yaml` (`1.0.2`) disagreed with the `v0.2.0` tag, so `iot_gateway.firmware_version` and the discovery broadcast carried the wrong version. Build scripts now inject `-X main.version=<tag>`; resolution order is `IOT_GATEWAY_VERSION > injected build version (non-dev) > gateway.version > dev`, and `gateway.version` only applies to local builds without injection.
+
 ## [0.2.0] - 2026-10-24
 
 ### Added

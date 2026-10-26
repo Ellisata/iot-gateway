@@ -19,11 +19,15 @@ func fakeHostname(name string, err error) func() (string, error) {
 	return func() (string, error) { return name, err }
 }
 
-// 清掉环境变量，防止开发机导出的 IOT_GATEWAY_* 串进用例。
+// 清掉环境变量与构建注入版本，防止开发机导出的 IOT_GATEWAY_* 或某条用例
+// 设置的构建版本串进后续用例。
 func clearGatewayEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv(configFile.EnvGatewayName, "")
 	t.Setenv(configFile.EnvGatewayVersion, "")
+	prev := configFile.BuildVersion()
+	configFile.SetBuildVersion(configFile.FallbackGatewayVersion)
+	t.Cleanup(func() { configFile.SetBuildVersion(prev) })
 }
 
 // 取唯一一行身份，顺带断言只有一行。仿 seed_test.go 的 soleUser。
@@ -92,6 +96,55 @@ func TestSeedGatewayIdentityEnvOverridesConfig(t *testing.T) {
 	}
 	if gw.FirmwareVersion != "9.9.9" {
 		t.Errorf("firmwareVersion = %q, want 环境变量胜出", gw.FirmwareVersion)
+	}
+}
+
+// 构建注入版本优先于配置文件：发行二进制不能被部署目录里残留的旧
+// gateway.version 带偏（1.0.2 与 v0.2.0 对不上的根因就在这里）。
+func TestSeedGatewayIdentityBuildVersionOverridesConfig(t *testing.T) {
+	clearGatewayEnv(t)
+	configFile.SetBuildVersion("v0.2.0")
+	db := newTestDB(t)
+
+	cfg := &configFile.Config{Gateway: configFile.GatewayConfig{Version: "1.0.2"}}
+	if err := seedGatewayIdentityWith(db, cfg, fakeHostname("test-host", nil)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if gw := soleGateway(t, db); gw.FirmwareVersion != "v0.2.0" {
+		t.Errorf("firmwareVersion = %q, want 构建注入版本 %q", gw.FirmwareVersion, "v0.2.0")
+	}
+}
+
+// 环境变量仍然高于构建注入版本 —— 现场临时覆盖是最外层的手动开关。
+func TestSeedGatewayIdentityEnvOverridesBuildVersion(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv(configFile.EnvGatewayVersion, "9.9.9")
+	configFile.SetBuildVersion("v0.2.0")
+	db := newTestDB(t)
+
+	if err := seedGatewayIdentityWith(db, &configFile.Config{}, fakeHostname("test-host", nil)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if gw := soleGateway(t, db); gw.FirmwareVersion != "9.9.9" {
+		t.Errorf("firmwareVersion = %q, want 环境变量 %q", gw.FirmwareVersion, "9.9.9")
+	}
+}
+
+// "dev" 构建版本不算注入值，本地开发时配置项仍然生效。
+func TestSeedGatewayIdentityConfigUsedWhenBuildVersionDev(t *testing.T) {
+	clearGatewayEnv(t)
+	configFile.SetBuildVersion(configFile.FallbackGatewayVersion)
+	db := newTestDB(t)
+
+	cfg := &configFile.Config{Gateway: configFile.GatewayConfig{Version: "1.2.3"}}
+	if err := seedGatewayIdentityWith(db, cfg, fakeHostname("test-host", nil)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if gw := soleGateway(t, db); gw.FirmwareVersion != "1.2.3" {
+		t.Errorf("firmwareVersion = %q, want 配置值 %q", gw.FirmwareVersion, "1.2.3")
 	}
 }
 
@@ -191,7 +244,7 @@ func TestSeedGatewayIdentityKeepsNameOnReseed(t *testing.T) {
 	}
 }
 
-// 版本以配置为准：重复播种时库内值必须跟上配置，其余字段一概不动。
+// 版本随解析结果刷新：重复播种时库内值必须跟上配置，其余字段一概不动。
 func TestSeedGatewayIdentityRefreshesVersion(t *testing.T) {
 	clearGatewayEnv(t)
 	db := newTestDB(t)

@@ -23,6 +23,7 @@ tmp/
 temp/
 
 data/
+data-backup/
 *.db
 
 # Claude Code 设置

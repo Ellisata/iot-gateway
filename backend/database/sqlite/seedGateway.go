@@ -22,13 +22,14 @@ import (
 // "dev" 与 release.sh 的 `git describe --tags ... || echo dev` 保持同一口径。
 const (
 	fallbackGatewayName    = "IoT Gateway"
-	fallbackGatewayVersion = "dev"
+	fallbackGatewayVersion = configFile.FallbackGatewayVersion
 )
 
 // seedGatewayIdentity 启动时播种并同步网关自身身份行（单行表），见 migrations/012_iot_gateway.sql。
 //
-// 行不存在则插入；已存在则**只同步 firmware_version**：版本以配置（default.yaml 的
-// gateway.version，可被 IOT_GATEWAY_VERSION 覆盖）为准，与库内值不一致就更新，
+// 行不存在则插入；已存在则**只同步 firmware_version**：版本以构建注入值
+// （-X main.version）、配置（default.yaml 的 gateway.version）与环境变量
+// IOT_GATEWAY_VERSION 的优先级链为准，与库内值不一致就更新，
 // 其余字段一概不动 —— 身份行其余部分是运维数据，让一次网关重启静默回滚运维的编辑
 // 是不可接受的，与 pluginhost/provision.go 对 iot_protocol 行的取舍同源。
 //
@@ -36,7 +37,7 @@ const (
 //   - id：永不变，它是这台网关的唯一标识；
 //   - name / description：归运维，通过「系统设置」页面改（GatewayService.UpdateGateway
 //     直接写库）；配置项 gateway.name 只参与首启播种，之后再改不生效是预期行为；
-//   - firmware_version：**归配置**，每次启动比对并刷新。它是二进制自身的属性，
+//   - firmware_version：**归构建与配置**，每次启动比对并刷新。它是二进制自身的属性，
 //     交给页面改只会让库里的值与实际运行的二进制对不上，而广播出去的 firmwareVersion
 //     正是管理平台据以判断「这台跑的是哪个版本」的字段（见 discovery/announcer.go）。
 //     与 name 的取舍刻意相反：名字是部署方给这台机器起的，配置值只是一次性的初始值；
@@ -149,15 +150,10 @@ func resolveGatewayName(cfg *configFile.Config, hostname func() (string, error))
 }
 
 // resolveGatewayVersion 解析网关软件版本，优先级由高到低：
-// 环境变量 IOT_GATEWAY_VERSION > 配置项 gateway.version > fallbackGatewayVersion。
+// 环境变量 IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> 配置项 gateway.version
+// > fallbackGatewayVersion。真源在 configFile.ResolveGatewayVersion。
 func resolveGatewayVersion(cfg *configFile.Config) string {
-	if s := os.Getenv(configFile.EnvGatewayVersion); s != "" {
-		return s
-	}
-	if cfg != nil && cfg.Gateway.Version != "" {
-		return cfg.Gateway.Version
-	}
-	return fallbackGatewayVersion
+	return configFile.ResolveGatewayVersion(cfg)
 }
 
 // gatewayPort 取网关自己的监听端口（与 main.go 绑定的是同一个值）。

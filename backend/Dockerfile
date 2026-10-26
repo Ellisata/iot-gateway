@@ -45,9 +45,13 @@ COPY backend/ ./
 # 用第一阶段的前端产物替换 web/dist(web/dist 本身已被 .dockerignore 排除,不拷贝旧产物)
 COPY --from=frontend /src/dist ./web/dist
 
+# 网关版本: docker build --build-arg VERSION=v0.2.0 ...
+# 注入 -X main.version 后二进制自描述;未注入时回退到 default.yaml 的 gateway.version。
+ARG VERSION=dev
+
 # CGO_ENABLED=0 禁用CGO,生成纯静态二进制(sqlite 用 glebarez 纯Go驱动)
 # -ldflags="-s -w" 移除调试信息,减小二进制大小
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /out/iot-gateway .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${VERSION}" -o /out/iot-gateway .
 
 # 外部协议驱动插件(进程外驱动): 按 drivers.txt + drivers.version 从模块代理拉取源码,
 # 与主二进制同平台编译。
@@ -61,8 +65,9 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /out/iot-
 RUN mkdir -p /out/plugins /tmp/driverbuild && built=0 && \
     ver="$(tr -d '[:space:]' < /src/drivers.version)" && \
     [ -n "$ver" ] || { echo "[FAIL] drivers.version 为空"; exit 1; } && \
+    expected="$(grep -cve '^[[:space:]]*$' /src/drivers.txt || true)" && \
     cd /tmp/driverbuild && GOWORK=off go mod init driverbuild >/dev/null 2>&1 && \
-    while IFS= read -r name; do \
+    while IFS= read -r name || [ -n "$name" ]; do \
         [ -n "$name" ] || continue; \
         CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOWORK=off go get \
             "github.com/Ellisata/iot-gateway-drivers/${name}@${ver}" >/dev/null || exit 1; \
@@ -73,7 +78,8 @@ RUN mkdir -p /out/plugins /tmp/driverbuild && built=0 && \
         echo "  [plugin] ${name} ${ver}"; \
         built=$((built + 1)); \
     done < /src/drivers.txt && \
-    [ "$built" -gt 0 ] || { echo "[FAIL] 没有编译出任何协议插件"; exit 1; }
+    [ "$expected" -gt 0 ] && [ "$built" -eq "$expected" ] || \
+    { echo "[FAIL] drivers.txt 列了 $expected 个插件，实际编出 $built 个"; exit 1; }
 
 # ========== 第三阶段: 运行镜像 ==========
 FROM alpine:3.23.2

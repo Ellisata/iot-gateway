@@ -41,16 +41,27 @@ jobs:
         working-directory: backend
         run: go vet ./...
 
-      # - name: go test
-      #   working-directory: backend
-      #   run: go test -count=1 -timeout 20m ./...
+      # PR 上跳过需要编译真实插件产物的集成测试（它们都会检查 testing.Short()），
+      # 插件冒烟交给下面的 modbus-plugin job；master push / 手动触发跑全量。
+      - name: go test (PR)
+        if: github.event_name == 'pull_request'
+        working-directory: backend
+        run: go test -short -count=1 -timeout 20m ./...
+
+      - name: go test
+        if: github.event_name != 'pull_request'
+        working-directory: backend
+        run: go test -count=1 -timeout 20m ./...
 
   # SDK 已有自己的仓库与 CI（含许可证边界守卫），这里不再重复跑。
   #
-  # 只跑「已发布驱动 + 宿主」的 Modbus 集成测试：这是 SDK 与核心线协议
-  # 不漂移的最短反馈。插件按 drivers.version 从模块代理安装，
-  # 因此这个 job 同时验证了「网关 HEAD ↔ 已发布驱动」的兼容性。
-  # 全量 go test 仍按上面的注释策略不阻塞 PR。
+  # PR 上的插件覆盖只有这一个冒烟 job：编译「已发布驱动 + 宿主」跑 Modbus
+  # 集成测试，是 SDK 与核心线协议不漂移的最短反馈。插件按 drivers.version
+  # 从模块代理安装，因此它同时验证了「网关 HEAD ↔ 已发布驱动」的兼容性。
+  #
+  # 其余插件（abb / dlt645 / fins / mitsubishi / omroncip / opcua / rockwellcip /
+  # s7）没有独立 job，由 go test ./... 一并覆盖：PR 上被 -short 跳过
+  # （「至少能编译」由下面的 plugin-build 守住），master push 与 backend-race 跑全量。
   modbus-plugin:
     name: Modbus plugin ↔ host
     runs-on: ubuntu-latest
@@ -67,24 +78,83 @@ jobs:
         working-directory: backend
         run: go test ./pluginhost -run 'TestModbusPlugin' -count=1 -timeout 10m
 
+  # PR 专属的「插件只编译、不跑测试」检查：drivers.txt 里每个插件都必须能在
+  # 网关 HEAD 上编译通过。它与 modbus-plugin 互补 —— 那条验已发布驱动的运行时
+  # 行为，这条只管其余 8 个插件「至少编得过」。
+  #
+  # 只在 PR 上跑：master push 有下面更宽的 build job（build.sh 为 4 个平台
+  # 编译全部插件并核对数量）。命令与 build.sh 的 build_one 内层一致
+  # （临时模块 go get + go build），改那边记得同步这里。
+  plugin-build:
+    name: Plugins (compile only, PR)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: |
+            backend/go.sum
+            drivers.version
+
+      - name: Compile all plugins (no tests)
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          ver="$(tr -d '[:space:]' < ../drivers.version)"
+          [ -n "$ver" ] || { echo "::error::drivers.version is empty"; exit 1; }
+
+          # 期望个数独立从 drivers.txt 数出来，不靠循环自增 —— 否则循环若漏读
+          # 最后一行，期望值会跟着一起少，检查永远通过。
+          expected=$(grep -cve '^[[:space:]]*$' ../drivers.txt || true)
+
+          out="$(mktemp -d)"
+          builddir="$(mktemp -d)"
+          ( cd "$builddir" && GOWORK=off go mod init driverbuild >/dev/null )
+
+          # `|| [ -n "$name" ]`：最后一行没有换行符时裸 read 会静默吞掉它。
+          while IFS= read -r name || [ -n "$name" ]; do
+            name="${name%$'\r'}"
+            [ -n "$name" ] || continue
+            echo "::group::iot-driver-${name}@${ver}"
+            ( cd "$builddir" && \
+              env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOWORK=off \
+                go get "github.com/Ellisata/iot-gateway-drivers/${name}@${ver}" >/dev/null && \
+              env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOWORK=off \
+                go build -ldflags "-s -w -X main.version=${ver}" \
+                  -o "$out/iot-driver-${name}" \
+                  "github.com/Ellisata/iot-gateway-drivers/${name}" )
+            echo "::endgroup::"
+          done < ../drivers.txt
+
+          built=$(find "$out" -maxdepth 1 -type f -name 'iot-driver-*' | wc -l | tr -d '[:space:]')
+          echo "compiled ${built}/${expected} plugins"
+          if [ "$expected" -eq 0 ] || [ "$built" -ne "$expected" ]; then
+            echo "::error::expected ${expected} plugins, got ${built}"
+            exit 1
+          fi
+
   # race 检测只在 master push / 手动触发时跑，不阻塞 PR 反馈。
   # 想彻底关掉：删除本 job 即可（其余 job 不依赖它）。
-  # backend-race:
-  #   name: Backend (Linux, race)
-  #   if: github.event_name != 'pull_request'
-  #   runs-on: ubuntu-latest
-  #   timeout-minutes: 40
-  #   steps:
-  #     - uses: actions/checkout@v4
+  backend-race:
+    name: Backend (Linux, race)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
 
-  #     - uses: actions/setup-go@v5
-  #       with:
-  #         go-version-file: backend/go.mod
-  #         cache-dependency-path: backend/go.sum
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
 
-  #     - name: go test -race
-  #       working-directory: backend
-  #       run: go test -race -count=1 -timeout 30m ./...
+      - name: go test -race
+        working-directory: backend
+        run: go test -race -count=1 -timeout 30m ./...
 
   backend-windows:
     name: Backend (Windows)
@@ -98,9 +168,16 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      # - name: go test
-      #   working-directory: backend
-      #   run: go test -count=1 -timeout 20m ./...
+      # 与 Linux backend 同口径：PR 跳过插件集成测试，master push 跑全量。
+      - name: go test (PR)
+        if: github.event_name == 'pull_request'
+        working-directory: backend
+        run: go test -short -count=1 -timeout 20m ./...
+
+      - name: go test
+        if: github.event_name != 'pull_request'
+        working-directory: backend
+        run: go test -count=1 -timeout 20m ./...
 
   frontend:
     name: Frontend

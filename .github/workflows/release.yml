@@ -9,6 +9,13 @@ on:
         description: 'Release version (e.g. v0.2.0)'
         required: true
         type: string
+      # 只验证整条构建链路（setup-go / bsdtar / npm / release.sh），不创建
+      # GitHub/Gitee Release、不建 tag。用来在不出包的前提下真跑一遍本 workflow。
+      dry_run:
+        description: 'Build bundles only; skip GitHub/Gitee publishing'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -49,6 +56,7 @@ jobs:
         run: bash ./release.sh "$VERSION"
 
       - name: Publish GitHub Release
+        if: ${{ inputs.dry_run != true }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
@@ -62,7 +70,7 @@ jobs:
       # 可选：同步到 Gitee Release。仓库 Settings → Secrets 配置 GITEE_TOKEN
       # （Gitee 私人令牌，勾选 projects 权限）后生效；失败不阻塞 GitHub Release。
       - name: Publish Gitee Release (optional)
-        if: env.GITEE_TOKEN != ''
+        if: ${{ inputs.dry_run != true && env.GITEE_TOKEN != '' }}
         continue-on-error: true
         run: |
           set -euo pipefail

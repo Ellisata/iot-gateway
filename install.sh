@@ -56,6 +56,12 @@ echo "  源二进制: $(basename "${BINARY_PATH}")"
 mkdir -p "${INSTALL_DIR}/data" "${INSTALL_DIR}/log" "${INSTALL_DIR}/plugins"
 cp -f "${BINARY_PATH}" "${INSTALL_DIR}/${BINARY_NAME}"
 chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
+# 发行包清单：网关/SDK/驱动/线协议版本 + 插件 sha256。装到安装目录后仍可核对，
+# 不必依赖解压出来的临时目录。
+if [ -f "${SCRIPT_DIR}/MANIFEST.json" ]; then
+    cp -f "${SCRIPT_DIR}/MANIFEST.json" "${INSTALL_DIR}/MANIFEST.json"
+    echo "  [OK] 已复制 MANIFEST.json"
+fi
 # 若脚本同目录存在 default.yaml,一并复制(可覆盖嵌入的默认配置,如端口/日志级别)
 if [ -f "${SCRIPT_DIR}/default.yaml" ]; then
     cp -f "${SCRIPT_DIR}/default.yaml" "${INSTALL_DIR}/default.yaml"

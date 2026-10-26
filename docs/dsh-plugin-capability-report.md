@@ -179,7 +179,7 @@ func RealtimeRoutes(r gin.IRouter, rc *controller.RealtimeController) {
 | 前端 | Vue 3 + Vite + Element Plus + Pinia + Tailwind 4 + vue-i18n | `README.md:249` |
 | 部署 | `go:embed` 单二进制；Windows 服务 / Linux systemd / Docker | `README.md:250` |
 
-> 注：`backend/configFile/configFile.go:102-105` 说明 `gateway.version` **只在首次启动写入库**，升级二进制不会刷新库内已有值。因此 live 上报的 `1.0.0` 是**首启时**的版本，未必等于当前二进制版本。库内版本与配置不一致时启动日志会打一条 WARN（`default.yaml:38-40`）。
+> 注：网关身份版本以**构建注入值**（`-X main.version`）优先，其次 `gateway.version` / `IOT_GATEWAY_VERSION`；每次启动都会与库内值比对并刷新（见 [版本兼容性](version-compatibility.md)）。下文实测里的 `1.0.0` 是采集当时二进制写入的值，不代表当前版本。
 
 ### 1.1 支持协议（全部由 `plugins/` 下的进程外插件提供）
 
@@ -294,7 +294,7 @@ sqlite:
   path: data/iot-gateway.db      # :26
 gateway:
   name: ""                       # :37  留空 → IOT_GATEWAY_NAME > 本项 > 主机名 > "IoT Gateway"
-  version: "1.0.0"               # :41  权威版本，每次启动同步进库；页面只读
+  version: ""                    # :41  仅本地构建兜底；发行版以 -X main.version 注入值为准
 discovery:
   enabled: true                  # :51
   port: 9083                     # :65  UDP
@@ -1210,7 +1210,7 @@ func buildTopics(template, deviceID string) []string {
 | `ID` | string | `id` | **网关唯一标识**（改了等于换机，故 `gateway/update` 不开放） |
 | `Name` | string | `name` | **唯一索引**；网关名称 |
 | `Port` | int | `port` | **只在首启写入**；广播发布的是**当前运行端口** `cfg.Server.Port`，不是这一列 |
-| `FirmwareVersion` | string | `firmwareVersion` | 只读，以配置（`gateway.version` / `IOT_GATEWAY_VERSION`）为准，每次启动比对并同步 |
+| `FirmwareVersion` | string | `firmwareVersion` | 只读，以构建注入版本（`-X main.version`，其次 `gateway.version` / `IOT_GATEWAY_VERSION`）为准，每次启动比对并同步 |
 | `Description` | string | `description` | |
 | `Status` | int | `status` | 默认 1 |
 | `CreatedAt` / `UpdatedAt` | string | | |
@@ -1219,7 +1219,7 @@ func buildTopics(template, deviceID string) []string {
 （`name` 是**主机名**，因 `default.yaml:37` 的 `gateway.name` 留空 → 回落到 `os.Hostname()`）
 
 > `gateway/update` **刻意只开放 `name` 与 `description`**：`id` 是网关唯一标识、
-> `firmware_version` 以配置为准（启动时自动同步，页面上改不了）、`status` 本轮不开放
+> `firmware_version` 以构建注入版本（其次配置）为准（启动时自动同步，页面上改不了）、`status` 本轮不开放
 > （`apiCatalog.md:549-551`）。
 
 ### 6.6 Alarm（报警）
@@ -1767,7 +1767,7 @@ export async function login(username: string, password: string) {
 | 2 | **默认账号数** | `README.md:154` 说初始化两个账号 `admin`、`hand` | `database/sqlite/seed.go:20-73` **只播种 `admin`**，全文件无 `hand` 字面量；live `/agentApi/users` **total=1** | **只有 `admin`**。README 有误 |
 | 3 | **`plugin.enabled` 默认值** | `configFile.go:151` 结构体注释写「默认 false」 | `default.yaml:122` 实配 `enabled: true`；live `plugin/info` 回报 `"enabled":true`；`README.md:75` 说"出厂即为 true" | **true 正确**。代码注释陈旧 |
 | 4 | **设备扫描的协议/网段来源接口** | `dto/deviceScanDto.go:12-13,21-23` 注释指 `GET /deviceScan/protocols` 与 `/subnets` | 这两个接口**不存在**；实际合并进 `capabilities` 的 `data.protocols[]` / `data.subnets[]`（`deviceScanRouter.go:24`） | 用 **`capabilities`**。注释是早期残留（`apiCatalog.md:625-637` 已记录） |
-| 5 | **版本号是否等于当前二进制** | `default.yaml:41` 写 `version: "1.0.0"` | `configFile.go:102-105` + `default.yaml:38-40`：该值**以配置为准**，每次启动比对并同步进库（`seedGateway.go` 的 `syncGatewayVersion`） | live 的 `1.0.0` 等于 `default.yaml` 的值，未必等于当前二进制（二进制版本号无处可查） |
+| 5 | **版本号是否等于当前二进制** | `default.yaml:41` 写 `version: "1.0.0"` | 本表记录改造前：版本以配置为准，未必等于二进制。**Unreleased 起已改为构建注入 `-X main.version` 优先**，二进制版本可从启动日志与发现报文核对（见 [版本兼容性](version-compatibility.md)） | 旧版本的 `1.0.0` 是配置值；新构建会自描述 |
 | 6 | **CHANGELOG 无已发布版本号** | `CHANGELOG.md:3` 声称遵循 SemVer | grep `^## \[[0-9]` **零命中**；唯一顶层节是 `## [Unreleased]`（`:7`） | **无法从 CHANGELOG 得到版本号** |
 
 ### 9.2 未找到 / 无法确认
@@ -2820,7 +2820,7 @@ DSH 侧要关联回设备必须**自己记住请求里传的 `deviceId`**。
 
 | 字段 | 值 | DSH 含义 |
 |---|---|---|
-| `firmwareVersion` | **`"1.0.0"`** | 网关上报的版本。🔵 **注意**：`default.yaml:38-40` 与 `configFile.go:102-105` 说明它**以配置为准**，每次启动比对并同步进库（`seedGateway.go` 的 `syncGatewayVersion`），所以它等于 `default.yaml` 的值、未必等于当前二进制 |
+| `firmwareVersion` | **`"1.0.0"`** | 网关上报的版本。这是改造前实测：当时以配置为准，未必等于二进制。**Unreleased 起以构建注入版本（`-X main.version`）优先**，每次启动比对并同步进库；新构建的该字段与发行 tag 一致（见 [版本兼容性](version-compatibility.md)） |
 | `port` | **`9082`** | 🔵 **只在首启写入**，不是当前运行端口（`default.yaml` 注释 + `backend/CLAUDE.md`）。当前运行端口恰好也是 9082，但**不应依赖它做断言** |
 | `id` | `94ea29ca23a94cffb279474acab664ef` | 网关唯一标识（32 位 hex，**不是** UUID v7 的 36 位带连字符格式；🔵 疑为 `utils.GenerateUUID()` 去连字符） |
 | `name` | `23VJV25B27302557` | 看起来是**主机名**（🔵 `default.yaml:37` 的 `gateway.name` 留空 → 回落到 `os.Hostname()`，与 `configFile.go:98` 的注释一致） |

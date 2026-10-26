@@ -29,6 +29,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# 构建期版本：显式 VERSION 环境变量优先，否则取最近的 git tag，无 tag 回退 dev。
+# 注入 -X main.version 后二进制自描述；未注入时网关身份回退到 default.yaml
+# 的 gateway.version（见 configFile.ResolveGatewayVersion）。
+BUILD_VERSION="${VERSION:-$(git -C "$ROOT" describe --tags --abbrev=0 2>/dev/null || echo dev)}"
+[ -n "$BUILD_VERSION" ] || BUILD_VERSION=dev
+
 TARGET="${1:-all}"
 case "$TARGET" in
   windows)    BUILD_LINUX=0; BUILD_WINDOWS=1; BUILD_ARM64=0; BUILD_ARM32=0; BUILD_NATIVE=0 ;;
@@ -81,8 +87,8 @@ build_one() { # $1=GOOS $2=GOARCH $3=output-name [$4=GOARM，仅 GOARCH=arm 需�
   [ -n "${4:-}" ] && arch="$2/$4"
 
   echo
-  echo "  Compiling $1/$arch ..."
-  env "${genv[@]}" go build -ldflags="-s -w" -o "$3" .
+  echo "  Compiling $1/$arch ... (version $BUILD_VERSION)"
+  env "${genv[@]}" go build -ldflags="-s -w -X main.version=${BUILD_VERSION}" -o "$3" .
   local size
   size=$(du -m "$3" | cut -f1)
   echo "  [OK] $3 built ($size MB)"
@@ -100,10 +106,12 @@ build_one() { # $1=GOOS $2=GOARCH $3=output-name [$4=GOARM，仅 GOARCH=arm 需�
   #
   # 用一个临时模块来解析源码：`go install` 在设置 GOBIN 时**禁止交叉编译**，
   # 而 `go build` 需要一个主模块来解析依赖与 go.sum 条目。`-o` 让产物名精确可控。
-  local ext="" built=0
+  local ext="" built=0 expected
   local pdir dir name ver buildtmp
   ver="$(tr -d '[:space:]' < "$ROOT/drivers.version")"
   [ -n "$ver" ] || { echo "  [FAIL] $ROOT/drivers.version 为空"; return 1; }
+  # 期望个数独立从 drivers.txt 数出来，不靠循环自增（否则漏读一行时期望值也跟着少）。
+  expected=$(grep -cve '^[[:space:]]*$' "$ROOT/drivers.txt" || true)
   pdir="$(plugin_dir_for "$1" "$2")"
   dir="$ROOT/backend/$pdir"
   [ "$1" = "windows" ] && ext=".exe"
@@ -111,7 +119,13 @@ build_one() { # $1=GOOS $2=GOARCH $3=output-name [$4=GOARM，仅 GOARCH=arm 需�
 
   buildtmp="$(mktemp -d)"
   ( cd "$buildtmp" && GOWORK=off go mod init driverbuild >/dev/null 2>&1 )
-  while IFS= read -r name; do
+  # `|| [ -n "$name" ]`：drivers.txt 最后一行若没有换行符，裸 read 会静默吞掉它
+  # （s7 就这么漏编过一次）。
+  while IFS= read -r name || [ -n "$name" ]; do
+    # drivers.txt 在 Windows 上可能被检出成 CRLF。不剥掉 \r 的话包名会变成 "abb\r"，
+    # 报错是 "module ...@v0.1.0 found, but does not contain package .../abb"，
+    # 看着像驱动没发布，其实是行尾。drivers.version 上面已用 tr 兜住。
+    name="${name%$'\r'}"
     [ -n "$name" ] || continue
     ( cd "$buildtmp" && \
       env "${genv[@]}" GOWORK=off go get \
@@ -125,10 +139,10 @@ build_one() { # $1=GOOS $2=GOARCH $3=output-name [$4=GOARM，仅 GOARCH=arm 需�
   done < "$ROOT/drivers.txt"
   rm -rf "$buildtmp"
 
-  # 一个插件都没编出来就是环境坏了(drivers.txt 为空,或全部安装失败)。
-  # 这里必须失败:主程序不含任何内置协议,插件目录为空 = 网关不支持任何协议。
-  if [ "$built" = "0" ]; then
-    echo "  [FAIL] $1/$2: 没有编译出任何插件 —— 网关将不支持任何协议"
+  # 编出的个数必须与 drivers.txt 的行数一致。少编一个同样是"网关缺协议"，
+  # 只是症状更隐蔽(该协议的设备静默采不到)，因此不能只守 built=0。
+  if [ "$expected" -eq 0 ] || [ "$built" -ne "$expected" ]; then
+    echo "  [FAIL] $1/$2: drivers.txt 列了 $expected 个插件，实际编出 $built 个 —— 网关将缺少协议"
     return 1
   fi
 }

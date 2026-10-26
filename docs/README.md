@@ -19,6 +19,7 @@
 | 文件 | 说明 | 语言 |
 |---|---|---|
 | [driver-plugins.md](driver-plugins.md) | 进程外协议驱动插件：编写、多协议、生命周期与自愈、热升级、安全、排错 | 中文 |
+| [version-compatibility.md](version-compatibility.md) | 网关、官方驱动与 SDK 的版本关系：唯一兼容判据、发行配对矩阵、升级规则 | 中文 |
 | [dsh-plugin-capability-report.md](dsh-plugin-capability-report.md) | 面向 DSH 插件对接的网关能力清单（含 `/agentApi/*` 只读/写接口分类，逐条附源码位置） | 中文 |
 | [images/](images/) | README 使用的界面动图与截图（中英各一套：`demo.zh.gif` / `demo.en.gif`，以及 `dashboard.zh.png` / `dashboard.en.png`） | — |
 
@@ -53,6 +54,7 @@
 | Document | Contents | Language |
 |---|---|---|
 | [Driver plugin guide](driver-plugins.md) | Out-of-process protocol plugins: authoring, multi-protocol, lifecycle & self-healing, hot upgrade, security, troubleshooting | Chinese |
+| [Version compatibility](version-compatibility.md) | Gateway / official drivers / SDK version relationship: the single compatibility gate, release pairing matrix and upgrade rules | Chinese |
 | [DSH capability report](dsh-plugin-capability-report.md) | Gateway capability inventory for DSH integration (incl. the `/agentApi/*` read/probe/write surface, with source locations) | Chinese |
 | [images/](images/) | Console demo GIFs and screenshots used by the README (one set per locale: `demo.{zh,en}.gif`, `dashboard.{zh,en}.png`) | — |
 | [README](../README.en.md) | Overview, features, protocols & channels, deployment, configuration, FAQ | English |

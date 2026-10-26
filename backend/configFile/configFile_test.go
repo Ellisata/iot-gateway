@@ -53,3 +53,58 @@ func TestConfigTagsMatchFieldNames(t *testing.T) {
 
 	walk(reflect.TypeOf(Config{}), "Config")
 }
+
+// setBuildVersionForTest 注入构建版本并在用例结束后还原，避免污染同包其它用例。
+func setBuildVersionForTest(t *testing.T, v string) {
+	t.Helper()
+	prev := BuildVersion()
+	SetBuildVersion(v)
+	t.Cleanup(func() { SetBuildVersion(prev) })
+}
+
+func cfgWithVersion(v string) *Config {
+	return &Config{Gateway: GatewayConfig{Version: v}}
+}
+
+// 环境变量是最高优先级：现场临时覆盖不能被构建注入值或配置文件压回去。
+func TestResolveGatewayVersionEnvWins(t *testing.T) {
+	t.Setenv(EnvGatewayVersion, "9.9.9")
+	setBuildVersionForTest(t, "v0.2.0")
+
+	if got := ResolveGatewayVersion(cfgWithVersion("1.0.2")); got != "9.9.9" {
+		t.Errorf("ResolveGatewayVersion = %q, want 环境变量 %q", got, "9.9.9")
+	}
+}
+
+// 发行二进制自描述：构建注入版本必须高于配置文件里可能残留的旧值。
+func TestResolveGatewayVersionBuildWinsOverConfig(t *testing.T) {
+	t.Setenv(EnvGatewayVersion, "")
+	setBuildVersionForTest(t, "v0.2.0")
+
+	if got := ResolveGatewayVersion(cfgWithVersion("1.0.2")); got != "v0.2.0" {
+		t.Errorf("ResolveGatewayVersion = %q, want 构建注入版本 %q", got, "v0.2.0")
+	}
+}
+
+// 本地 go run / 未注入 ldflags 时是 "dev"，此时配置项应生效。
+func TestResolveGatewayVersionConfigUsedWhenBuildIsDev(t *testing.T) {
+	t.Setenv(EnvGatewayVersion, "")
+	setBuildVersionForTest(t, FallbackGatewayVersion)
+
+	if got := ResolveGatewayVersion(cfgWithVersion("1.2.3")); got != "1.2.3" {
+		t.Errorf("ResolveGatewayVersion = %q, want 配置值 %q", got, "1.2.3")
+	}
+}
+
+// 三者都为空时落到 dev，而不是空串。
+func TestResolveGatewayVersionFallsBackToDev(t *testing.T) {
+	t.Setenv(EnvGatewayVersion, "")
+	setBuildVersionForTest(t, FallbackGatewayVersion)
+
+	if got := ResolveGatewayVersion(cfgWithVersion("")); got != FallbackGatewayVersion {
+		t.Errorf("ResolveGatewayVersion = %q, want %q", got, FallbackGatewayVersion)
+	}
+	if got := ResolveGatewayVersion(nil); got != FallbackGatewayVersion {
+		t.Errorf("ResolveGatewayVersion(nil) = %q, want %q", got, FallbackGatewayVersion)
+	}
+}
