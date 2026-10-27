@@ -4,19 +4,34 @@
 
 All notable changes to this project are documented in this file (Keep a Changelog format, SemVer versioning).
 
-## [Unreleased]
+## [0.3.0] - 2026-10-27
 
 ### Added
 
+- **`/agentApi` 运行开关**：新增运行期开关 `agentApi.enabled`（出厂 `false`）。`/agentApi/*` 整组路由照常注册，分组中间件按请求现读开关，关闭时整组返回 403 —— 包括清单与 `/agentApi/systemConfig/update`，因此 dsh 无法自行打开这个免鉴权调用面；在「运行开关」页开启（需二次确认）后恢复可达。采集与上报完全不受影响。
+  **`/agentApi` runtime switch**: new runtime switch `agentApi.enabled` (ships `false`). The `/agentApi/*` routes stay registered and a group middleware reads the switch per request, returning 403 group-wide while it is off — including the catalog and `/agentApi/systemConfig/update`, so dsh cannot reopen the unauthenticated surface by itself; enabling it in the Runtime Switches page (behind a confirmation dialog) restores access. Collection and reporting are unaffected.
 - **版本兼容性说明**：新增 [docs/version-compatibility.md](docs/version-compatibility.md)，明确网关与插件之间唯一的兼容判据是 `driversdk.APIVersion`，并给出官方发行配对矩阵、插件兼容区间与 `APIVersion` 进位规则。
   **Version compatibility doc**: adds [docs/version-compatibility.md](docs/version-compatibility.md) documenting the single compatibility gate (`driversdk.APIVersion`), the official release pairing matrix, the plugin compatibility range and the `APIVersion` bump rules.
 - **发行包 `MANIFEST.json`**：`release.sh` / `release.bat` 现在在包根生成机器可读的清单，包含网关版本、目标平台、SDK 版本、`APIVersion`、`FrameMagic`、`drivers.version` 与每个插件的 sha256；现场可直接据此核对是否是官方配对组合。
   **Release `MANIFEST.json`**: `release.sh` / `release.bat` now write a machine-readable manifest at the package root with the gateway version, target platform, SDK version, `APIVersion`, `FrameMagic`, `drivers.version` and each plugin's sha256, so field checks no longer rely on file timestamps.
+- **CI 工作流**：新增 GitHub Actions —— PR 上跑 `go test -short` 与插件编译，tag 推送时构建发行包并创建 GitHub / Gitee Release；`dry_run` 可空跑验证整条流水线而不发布。
+  **CI workflow**: new GitHub Actions — `go test -short` plus a plugin compile job on PRs, and release bundles published to GitHub / Gitee Releases on tag pushes; a `dry_run` mode exercises the whole pipeline without publishing.
+
+### Changed
+
+- **SDK 与官方驱动拆分为独立仓库**：驱动 SDK 迁至 [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk)（Apache-2.0），官方驱动迁至 [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers)（AGPL-3.0），新增 `LICENSING.md` 说明三仓授权模型与进程边界。网关改为以 Go module 依赖 SDK，移除 `backend/sdk` / `backend/driversrc` 子模块；发行构建按 `drivers.version` 从模块代理拉取驱动源码编译插件，`drivers.txt` 列出随包插件。`APIVersion` 仍为 4，现有插件二进制继续兼容。
+  **SDK and official drivers split into separate repositories**: the driver SDK moves to [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk) (Apache-2.0) and the official drivers to [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers) (AGPL-3.0), with a new `LICENSING.md` documenting the three-repository licensing model and process boundary. The gateway now depends on the SDK as a Go module and drops the `backend/sdk` / `backend/driversrc` submodules; release builds fetch driver sources pinned by `drivers.version` from the module proxy and compile the plugins listed in `drivers.txt`. `APIVersion` remains 4, so existing plugin binaries stay compatible.
+- **发行脚本**：新增 `release.bat` 与 `release.sh` 对齐；`.bat` 脚本统一为纯 ASCII + CRLF 并校验末行，插件编译数量与 `drivers.txt` 不一致时构建直接失败。
+  **Release scripts**: new `release.bat` mirrors `release.sh`; `.bat` scripts are pure ASCII with CRLF and final-line checks, and the build fails when the compiled plugin count disagrees with `drivers.txt`.
 
 ### Fixed
 
 - **网关身份版本与发行 tag 不一致**：`default.yaml` 里写死的 `gateway.version`（此前为 `1.0.2`）与 `v0.2.0` 发行 tag 对不上，导致 `iot_gateway.firmware_version` 与局域网发现广播的 `firmwareVersion` 都不是实际运行的版本。现在构建脚本统一以 `-X main.version=<tag>` 注入，解析优先级为 `IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> gateway.version > dev`；`gateway.version` 只在未注入版本的本地构建里生效。
   **Gateway identity version no longer drifts from the release tag**: the hardcoded `gateway.version` in `default.yaml` (`1.0.2`) disagreed with the `v0.2.0` tag, so `iot_gateway.firmware_version` and the discovery broadcast carried the wrong version. Build scripts now inject `-X main.version=<tag>`; resolution order is `IOT_GATEWAY_VERSION > injected build version (non-dev) > gateway.version > dev`, and `gateway.version` only applies to local builds without injection.
+- **日志文件名校验**：Linux 上 `filepath.Base` 不把 `\` 当分隔符，`..\default.yaml` 这类路径能绕过检查，并被报成「文件不存在」而不是「非法」。现在显式拒绝两种分隔符，与插件上传的文件名校验一致。
+  **Log file name validation**: on Linux `filepath.Base` does not treat `\` as a separator, so a path such as `..\default.yaml` slipped past the check and was reported as "not found" instead of "illegal". Both separators are now rejected explicitly, matching the plugin upload check.
+- **报警去抖窗口起点**：`lastTouch` 此前只在节流函数内部赋值，报警边沿刚写过 `last_occur_time` 之后，紧随其后的第一次失败总是绕过节流再写一次库。现在在报警边沿置位 `lastTouch`，5 秒窗口从边沿开始计算。
+  **Alarm debounce window start**: `lastTouch` was only set inside the throttle helper, so the first failure after the alarm edge always bypassed the throttle and rewrote `last_occur_time` right after the edge had written it. `lastTouch` is now set at the alarm edge, so the 5 s window starts there.
 
 ## [0.2.0] - 2026-10-24
 

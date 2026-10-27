@@ -2,7 +2,7 @@
 
 > 适用于三个仓库：网关主程序 [`iot-gateway-premium`](../README.md)、官方驱动
 > [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers)、驱动 SDK
-> [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk)。最后更新：2026-10-26。
+> [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk)。最后更新：2026-10-27。
 
 ## 1. 结论
 
@@ -22,7 +22,7 @@
 
 | 版本 | 真源 | 当前值 | 参与兼容判定 |
 |---|---|---|---|
-| 网关发行版本 | git tag；构建脚本以 `-X main.version` 注入，写入 `iot_gateway.firmware_version` 并随局域网发现广播 | `v0.2.0` | 否 |
+| 网关发行版本 | git tag；构建脚本以 `-X main.version` 注入，写入 `iot_gateway.firmware_version` 并随局域网发现广播 | `v0.3.0` | 否 |
 | 官方驱动发行版本 | 仓库根的 `drivers.version`；构建时经 `-X main.version` 写入每个插件的 `Meta.Version` | `v0.1.0` | 否 |
 | 驱动 SDK 版本 | 网关 `backend/go.mod`、驱动仓库 `go.mod` | `v0.1.0` | 否 |
 | 线协议版本 | `driversdk.APIVersion`（[SDK 源码](https://github.com/Ellisata/iot-gateway-sdk/blob/main/driversdk/meta.go)） | `4` | **是，必须相等** |
@@ -43,7 +43,8 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 
 | 网关版本 | `drivers.version` | 依赖 SDK | `APIVersion` | 插件 / 协议 | 说明 |
 |---|---|---|---|---|---|
-| v0.2.0 | v0.1.0 | v0.1.0 | 4 | 9 / 15 | 当前离线发行版 |
+| v0.2.0 | v0.1.0 | v0.1.0 | 4 | 9 / 15 | 上一发行版 |
+| v0.3.0 | v0.1.0 | v0.1.0 | 4 | 9 / 15 | 当前离线发行版 |
 
 维护规则：
 
@@ -58,7 +59,7 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 
 | 构建所用 SDK | `APIVersion` | 可加载于 | 不可加载于 |
 |---|---|---|---|
-| v0.1.x | 4 | 任意 `APIVersion = 4` 的网关（当前即 v0.2.0 及以后） | `APIVersion ≠ 4` 的网关 |
+| v0.1.x | 4 | 任意 `APIVersion = 4` 的网关（当前即 v0.3.0 及以后） | `APIVersion ≠ 4` 的网关 |
 
 补充：
 
@@ -103,7 +104,7 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 1. **网关启动日志**（启动时打印解析后的版本与插件线协议版本）：
 
    ```
-   application starting... (version v0.2.0, plugin APIVersion 4)
+   application starting... (version v0.3.0, plugin APIVersion 4)
    ```
 
 2. **插件加载日志**（每个插件一条，版本来自 `Meta.Version`）：
@@ -119,10 +120,10 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 
    ```json
    {
-     "gateway": "v0.2.0",
+     "gateway": "v0.3.0",
      "os": "windows",
      "arch": "amd64",
-     "buildTime": "2026-10-26T08:00:00Z",
+     "buildTime": "2026-10-27T08:00:00Z",
      "sdk": "v0.1.0",
      "apiVersion": 4,
      "frameMagic": "IGP2",
