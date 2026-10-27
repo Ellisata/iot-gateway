@@ -6,6 +6,7 @@ package alarm
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -129,7 +130,12 @@ func TestAlarmEngineNoDuplicateWhileOffline(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		e.ReportDevicePoll("dev-1", "dev1", false)
 	}
-	// 已离线后持续失败：不重复报警，只刷新时间戳（节流下不改动 last_occur_time）
+	// 已离线后持续失败：不重复报警，只刷新时间戳（节流下不改动 last_occur_time）。
+	//
+	// 刻意跨过 1 秒再上报：时间戳按秒存储，若第一次"持续失败"没有被节流，
+	// 它必然落进下一秒、断言必然失败。不跨秒的话，即使节流失效也会因为
+	// 两次写库落在同一秒而看不出差别（CI 上就是这么偶发挂掉的）。
+	time.Sleep(1100 * time.Millisecond)
 	e.ReportDevicePoll("dev-1", "dev1", false)
 	e.ReportDevicePoll("dev-1", "dev1", false)
 

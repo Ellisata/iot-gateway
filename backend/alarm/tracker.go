@@ -235,6 +235,11 @@ func (t *Tracker) report(targetID, targetName, detail, deviceID string, ok bool)
 		st.normal = false
 		st.reconciled = true // 该行已归本状态机管理，恢复时由 recoverLocked 清除
 		t.raiseLocked(targetID, targetName, detail, deviceID)
+		// 边沿刚刚写过 last_occur_time，以此刻作为节流窗口的起点。不置位的话，
+		// lastTouch 仍是零值，紧随其后的第一次失败必然再写一次库 —— 每个目标报警后
+		// 都多一次无意义的 UPDATE，而且「节流期间 last_occur_time 不变」会退化成
+		// 「两次上报是否落在同一秒」，CI 的 race 慢盘上跨秒就会失败。
+		st.lastTouch = time.Now()
 	}
 }
 
