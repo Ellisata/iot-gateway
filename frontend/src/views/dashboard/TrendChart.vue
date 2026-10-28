@@ -179,7 +179,7 @@
         </g>
       </svg>
 
-      <div v-if="hover" class="chart-tip" :style="{ left: `${hover.leftPct}%` }">
+      <div v-if="hover" ref="tipEl" class="chart-tip" :style="tipStyle">
         <div class="tip-time">{{ hover.timeLabel }}</div>
         <div class="tip-row">
           <i class="tip-dot is-online" aria-hidden="true" />
@@ -214,7 +214,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { parseBackendTime } from '@/utils/datetime'
 
@@ -567,12 +567,54 @@ const ariaLabel = computed(
 // ---------- 悬停 ----------
 const hover = ref(null)
 
+// 提示框自身半宽：它得夹在图表内，而写死的百分比在窄图上会溢出、
+// 在宽图上又会把提示框从柱子上推开，所以按实测宽度来
+const tipEl = ref(null)
+const tipHalf = ref(0)
+let tipObserver = null
+
+watch(
+  tipEl,
+  (el) => {
+    tipObserver?.disconnect()
+    tipObserver = null
+    if (!el) return
+    const measure = () => {
+      tipHalf.value = el.offsetWidth / 2
+    }
+    measure()
+    tipObserver = new ResizeObserver(measure)
+    tipObserver.observe(el)
+  },
+  { flush: 'post' }
+)
+
+onBeforeUnmount(() => {
+  tipObserver?.disconnect()
+})
+
+// 提示框与柱子共用一套坐标：viewBox 的 x 先换算成图表 CSS 宽度下的像素，
+// 再按自身宽度夹住 —— 中线始终压在柱子上，只在贴着两端时才内移
+const tipStyle = computed(() => {
+  const h = hover.value
+  if (!h || !h.chartWidth) return null
+  const width = h.chartWidth
+  const half = Math.min(tipHalf.value, width / 2)
+  const raw = (h.x / W) * width
+  return { left: `${Math.min(width - half, Math.max(half, raw))}px` }
+})
+
 function handleMove(event) {
   if (!buckets.value.length) return
   const rect = event.currentTarget.getBoundingClientRect()
   if (!rect.width) return
-  const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
-  const targetTs = startTs.value + spanMs.value * ratio
+  // 左右留白不属于绘图区：按整幅宽度换算，鼠标会与柱子错开一个留白，
+  // 左端偏右、右端偏左，越靠边越明显。先换成 viewBox 坐标再扣掉留白
+  const plotRatio = Math.min(
+    1,
+    Math.max(0, ((event.clientX - rect.left) * (W / rect.width) - PAD.left) / innerW)
+  )
+  const targetTs = startTs.value + spanMs.value * plotRatio
 
   let nearest = buckets.value[0]
   for (const bucket of buckets.value) {
@@ -602,7 +644,8 @@ function handleMove(event) {
     spoolDepth: nearest.spoolDepth,
     barY: THROUGH_BOTTOM - barH,
     barH,
-    leftPct: Math.min(88, Math.max(12, (xx / W) * 100)),
+    // 图表当前的 CSS 宽度：提示框按同一比例换算成像素坐标
+    chartWidth: rect.width,
     timeLabel,
   }
 }

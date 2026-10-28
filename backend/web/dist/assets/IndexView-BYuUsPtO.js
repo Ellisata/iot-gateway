@@ -1,1 +1,0 @@
-import{Ut as e,en as t}from"./vendor-DnLhphlR.js";import{t as n}from"./AlarmTable-CWdd1-Mx.js";var r={__name:`IndexView`,setup(r){return(r,i)=>(t(),e(n,{"target-type":`device`}))}};export{r as default};
