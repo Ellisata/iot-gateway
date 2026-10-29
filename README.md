@@ -27,6 +27,8 @@
 
 ## 5 分钟试用
 
+> 🌐 **在线演示**：<https://iot-gateway-demo.edwining.com/admin/dashboard> —— 演示账号 `admin / hand@123`，无需部署即可体验；请勿在演示环境录入真实业务数据。
+
 1. **下载**：从 [Gitee Releases](https://gitee.com/wang4856304/iot-gateway/releases) 或 [GitHub Releases](https://github.com/Ellisata/iot-gateway/releases) 获取对应平台发行包（Windows amd64、Linux amd64 / arm64）。
 2. **解压**：保持 `iot-gateway`（Windows 为 `iot-gateway.exe`）与 `plugins/` 目录**同层**。
 3. **运行**：

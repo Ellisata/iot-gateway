@@ -29,6 +29,8 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 
 ## Try it in 5 minutes
 
+> 🌐 **Live demo**: <https://iot-gateway-demo.edwining.com/admin/dashboard> — demo account `admin / hand@123`; try it without deploying anything. Please do not enter real business data into the demo.
+
 1. **Download** the release for your platform from [Gitee Releases](https://gitee.com/wang4856304/iot-gateway/releases) or [GitHub Releases](https://github.com/Ellisata/iot-gateway/releases) (Windows amd64, Linux amd64 / arm64).
 2. **Extract** and keep the `iot-gateway` binary and the `plugins/` directory **side by side**.
 3. **Run**:
