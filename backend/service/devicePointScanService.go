@@ -317,6 +317,8 @@ func pointSpecVO(spec driver.PointDiscoverySpec) *vo.PointSpecVO {
 	return &vo.PointSpecVO{
 		Title:                 spec.Title,
 		Description:           spec.Description,
+		TitleI18n:             spec.TitleI18n,
+		DescriptionI18n:       spec.DescriptionI18n,
 		PointFormJSON:         spec.FormJSON,
 		DefaultCommonDataType: spec.DefaultCommonDataType,
 		MaxBudgetMs:           spec.MaxBudgetMs,

@@ -92,6 +92,8 @@ func (m *Manager) PointDiscoverySpecs() []driver.ProtocolPointDiscovery {
 			}
 			spec := *p.PointDiscovery
 			spec.FormJSON = append([]byte(nil), spec.FormJSON...)
+			spec.TitleI18n = cloneStringMap(spec.TitleI18n)
+			spec.DescriptionI18n = cloneStringMap(spec.DescriptionI18n)
 			out = append(out, driver.ProtocolPointDiscovery{Protocol: p.Name, Spec: spec})
 		}
 	}

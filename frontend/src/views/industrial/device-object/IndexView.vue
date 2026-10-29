@@ -302,7 +302,7 @@
 
       <!-- ======== 第二步：协议配置 ======== -->
       <div v-show="currentStep === 2">
-        <el-form label-width="100px" label-position="right">
+        <el-form :label-width="protocolFormLabelWidth" label-position="right">
           <!-- 协议选择（使用公共组件） -->
           <el-form-item
             :label="t('deviceObject.protocol')"
@@ -335,10 +335,11 @@
             <!-- form-create 动态渲染（:key 绑定协议名，切换时强制重建） -->
             <div class="dynamic-form-wrapper">
               <form-create
-                :key="formData.protocol || 'empty'"
+                :key="`${formData.protocol || 'empty'}-${fcLocale}`"
                 ref="fcRef"
-                :rule="fcRule"
-                :option="fcOption"
+                :rule="localizedFcRule"
+                :option="localizedFcOption"
+                :locale="fcLocale"
                 @mounted="handleFcReady"
               />
             </div>
@@ -420,9 +421,11 @@ import { getProtocolById } from '@/api/modules/protocol'
 import ProtocolSelector from '@/components/ProtocolSelector.vue'
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
 import { useExcelImport } from '@/composables/useExcelImport'
+import { formCreateLocaleName, localizeDynamicFormRules } from '@/i18n/dynamicFormText'
+import { dynamicFormLabelWidthForRules } from '@/i18n/localizedText'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 // ---------- 路由 ----------
 const router = useRouter()
@@ -598,6 +601,31 @@ const fcOption = ref({
   resetBtn: false,
 })
 
+// 插件声明的 formJson 若带了 options.language（`{{$t.key}}` 形式的文案）按当前语言解析；
+// 写死中文的旧插件表单再由存量词典兜底。
+const localizedFcRule = computed(() =>
+  localizeDynamicFormRules(fcRule.value, locale.value, fcOption.value.language),
+)
+const fcLocale = computed(() => formCreateLocaleName(locale.value))
+// 英文标签比中文长，沿用插件的 125px 会折行；但给固定 230px 又会让短标签的协议
+// （Device port 只要 ~75px）整张表单往右推。这里按当前协议的实际标题实测宽度，
+// 第二步外层 el-form 的 label 列跟着同一个宽度走，否则动态表单与协议选择器错列。
+const protocolLabelWidth = computed(() =>
+  dynamicFormLabelWidthForRules(
+    localizedFcRule.value,
+    locale.value,
+    fcOption.value?.form?.labelWidth || '100px',
+  ),
+)
+const localizedFcOption = computed(() => ({
+  ...fcOption.value,
+  form: {
+    ...(fcOption.value.form || {}),
+    labelWidth: protocolLabelWidth.value,
+  },
+}))
+const protocolFormLabelWidth = computed(() => protocolLabelWidth.value)
+
 /** form-create 渲染完成后获取 API 实例 */
 function handleFcReady($f) {
   fcApi.value = $f
@@ -605,6 +633,8 @@ function handleFcReady($f) {
 
 /** 协议选中回调：加载 formJson 并渲染动态表单 */
 function handleProtocolSelect(row) {
+  // 用户主动换协议时丢弃上次编辑带出的旧配置，避免回填到新协议的同名字段
+  if (row.id !== formData.protocolId) formData.protocolJson = ''
   formData.protocol = row.name
   formData.protocolId = row.id
   handleProtocolChange(row.id)
@@ -653,15 +683,42 @@ async function handleProtocolChange(protocolId) {
       }
 
       // formJson 结构：{ rule: [...], option/options: {...} }
+      let rules = null
       if (parsed?.rule && Array.isArray(parsed.rule)) {
-        fcRule.value = parsed.rule
+        rules = parsed.rule
       } else if (Array.isArray(parsed)) {
         // 兼容纯数组格式
-        fcRule.value = parsed
+        rules = parsed
       } else {
         ElMessage.warning(t('deviceObject.protocolFormInvalid'))
         return
       }
+
+      // 编辑模式：把已保存的协议配置直接写进 rule.value，随规则一起装载。
+      // 不能用 fcApi.setValue 回填——form-create 的规则是异步装载的，
+      // 字段注册前调用会静默落空（首次从第一步进入第二步时必然如此）。
+      if (isEdit.value && formData.protocolJson) {
+        try {
+          const configData =
+            typeof formData.protocolJson === 'string'
+              ? JSON.parse(formData.protocolJson)
+              : formData.protocolJson
+          if (typeof configData === 'object' && configData !== null) {
+            // 只回填当前 rule 中存在的字段，避免脏数据带进表单
+            rules = rules.map((item) =>
+              item?.field && Object.prototype.hasOwnProperty.call(configData, item.field)
+                ? { ...item, value: configData[item.field] }
+                : item,
+            )
+          }
+        } catch {
+          // 回填失败不阻塞，按协议默认值渲染
+        }
+        // 回显数据只消费一次，切换协议时不应复用
+        formData.protocolJson = ''
+      }
+
+      fcRule.value = rules
 
       // 合并全局选项（兼容 option 和 options 两种字段名）
       const opts = parsed?.options || parsed?.option
@@ -669,6 +726,8 @@ async function handleProtocolChange(protocolId) {
         fcOption.value = {
           ...fcOption.value,
           ...opts,
+          // language 必须跟着当前协议走，不能沿用上一个协议的多语言表
+          language: opts.language || {},
           // 合并插件选项后仍强制关掉内置按钮（见 fcOption 的声明）
           submitBtn: false,
           resetBtn: false,
@@ -677,34 +736,6 @@ async function handleProtocolChange(protocolId) {
             ...(opts.form || {}),
           },
         }
-      }
-
-      // 编辑模式：如果有已有的协议配置数据，回填到 form-create（仅首次加载）
-      if (isEdit.value && formData.protocolJson) {
-        await nextTick()
-        if (fcApi.value) {
-          try {
-            const configData =
-              typeof formData.protocolJson === 'string'
-                ? JSON.parse(formData.protocolJson)
-                : formData.protocolJson
-            if (typeof configData === 'object' && configData !== null) {
-              // 只回填当前 rule 中存在的字段，避免脏数据残留
-              const validFields = new Set(
-                fcRule.value.map(item => item.field).filter(Boolean)
-              )
-              Object.entries(configData).forEach(([field, value]) => {
-                if (validFields.has(field)) {
-                  fcApi.value.setValue(field, value)
-                }
-              })
-            }
-          } catch {
-            // 回填失败不阻塞
-          }
-        }
-        // 回填完成后清除，避免切换协议时错误回填旧数据
-        formData.protocolJson = ''
       }
     }
   } catch (err) {
@@ -728,7 +759,7 @@ async function nextStep() {
   // 编辑模式：如果已有协议，自动加载动态表单
   if (isEdit.value && formData.protocolId && fcRule.value.length === 0) {
     await nextTick()
-    handleProtocolChange(formData.protocolId)
+    await handleProtocolChange(formData.protocolId)
   }
 }
 
@@ -764,7 +795,9 @@ async function handleEdit(row) {
 
   formData.id = row.id
   formData.name = row.name
-  formData.protocol = row.protocol ?? ''
+  // 列表/详情接口回传的协议字段是 protocolName，没有 protocol；
+  // 取错字段会让 protocolSelected 为 false，第二步的协议参数区整块不渲染
+  formData.protocol = row.protocolName ?? ''
   formData.description = row.description ?? ''
   formData.status = row.status ?? 1
 
@@ -773,8 +806,7 @@ async function handleEdit(row) {
     const detail = await getDeviceObjectById(row.id)
     formData.protocolJson = detail?.protocolJson ?? ''
     formData.protocolId = detail?.protocolId ?? ''
-    // 列表接口返回的 protocol 可能是 ID，用详情接口的协议名称覆盖
-    if (detail?.protocol) formData.protocol = detail.protocol
+    if (detail?.protocolName) formData.protocol = detail.protocolName
   } catch (err) {
     formData.protocolJson = ''
     formData.protocolId = ''

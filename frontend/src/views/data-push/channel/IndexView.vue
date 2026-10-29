@@ -237,11 +237,15 @@
           >
             {{ t('channel.noConnectConfig') }}
           </p>
+          <!-- key 带上 locale：表单文案在创建实例时就固定了，切语言必须重建；
+               v-model 保住重建前已填的值 -->
           <form-create
             v-else
-            :key="dynamicFormKey"
-            :rule="dynamicFormRule"
-            :option="dynamicFormOptions"
+            v-model="dynamicFormValues"
+            :key="`${dynamicFormKey}-${locale}`"
+            :rule="localizedDynamicFormRule"
+            :option="localizedDynamicFormOptions"
+            :locale="fcLocale"
             @mounted="handleDynamicFormMounted"
           />
         </div>
@@ -371,6 +375,8 @@ import ChannelSelector from '@/components/ChannelSelector.vue'
 import MappingEditor from '@/components/pushMapping/MappingEditor.vue'
 import ScriptEditor from '@/components/pushMapping/ScriptEditor.vue'
 import { usePushChannelTypes } from '@/composables/usePushChannelTypes'
+import { formCreateLocaleName, localizeDynamicFormRules } from '@/i18n/dynamicFormText'
+import { dynamicFormLabelWidth } from '@/i18n/localizedText'
 import {
   MappingValidationError,
   createEmptyState,
@@ -381,7 +387,7 @@ import {
 import { DEFAULT_ENCODE_SCRIPT } from '@/utils/pushScripts'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const { load: loadChannelTypes, metaOf } = usePushChannelTypes()
 
 // ---------- 查询表单 ----------
@@ -775,7 +781,31 @@ const formRules = {
 const dynamicFormKey = ref(0)
 const dynamicFormApi = ref(null)
 const dynamicFormRule = ref([])
+// form-create 的双向绑定值：切语言重建实例时用它保住已填内容
+const dynamicFormValues = ref({})
 const dynamicFormOptions = ref({})
+// 表单自带的 options.language（设计器「多语言」面板产出）优先；
+// 早期写死中文的表单再由存量词典兜底。原始 rule 保持不变，回填/收集字段仍以它为准。
+const localizedDynamicFormRule = computed(() =>
+  localizeDynamicFormRules(
+    dynamicFormRule.value,
+    locale.value,
+    dynamicFormOptions.value.language,
+  ),
+)
+// form-create 按字符串精确匹配 options.language 的键（zh-cn / en）
+const fcLocale = computed(() => formCreateLocaleName(locale.value))
+// 英文标签更长（"Additional advertised hosts"），沿用表单声明的 125px 会折行
+const localizedDynamicFormOptions = computed(() => {
+  const base = dynamicFormOptions.value?.form?.labelWidth || '125px'
+  return {
+    ...dynamicFormOptions.value,
+    form: {
+      ...(dynamicFormOptions.value.form || {}),
+      labelWidth: dynamicFormLabelWidth(base, locale.value, '220px'),
+    },
+  }
+})
 const dynamicFormLoading = ref(false)
 // 编辑模式回填数据：通道详情接口返回的 configJson
 const dynamicFormPrefill = ref(null)
@@ -829,6 +859,8 @@ async function loadDynamicForm(type, prefillConfig) {
   dynamicFormRule.value = []
   dynamicFormOptions.value = {}
   dynamicFormApi.value = null
+  // 换通道类型时清掉旧值，避免同名字段把上一条通道的内容带进新表单
+  dynamicFormValues.value = {}
   dynamicFormPrefill.value = prefillConfig ?? null
   if (!type) return
 
@@ -861,12 +893,16 @@ async function loadDynamicForm(type, prefillConfig) {
 
 /**
  * form-create 渲染完成后获取 API 实例（v-model 绑的是表单数据，不能用它调 validate/formData）
- * 编辑模式：用通道详情的 configJson 回填动态表单值（与设备对象的 setValue 回填方式一致）
+ * 编辑模式：用通道详情的 configJson 回填动态表单值。
+ * 必须在 mounted 里回填：form-create 的规则是异步装载的，字段注册前
+ * 调 setValue 会静默落空（设备对象页曾因此回显不出来）。
  */
 function handleDynamicFormMounted($f) {
   dynamicFormApi.value = $f
   const prefill = dynamicFormPrefill.value
   if (!prefill) return
+  // 只回填一次：切换语言也会重建实例，重复回填会把用户未保存的修改冲掉
+  dynamicFormPrefill.value = null
   let configData
   try {
     configData = typeof prefill === 'string' ? JSON.parse(prefill) : prefill

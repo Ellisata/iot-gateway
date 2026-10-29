@@ -264,10 +264,14 @@
             <p v-if="isEdit && formData.hasSecret" class="webhook-secret-hint">
               {{ t('alarmWebhook.secretKeepHint') }}
             </p>
+            <!-- key 带上 locale：表单文案在创建实例时就固定了，切语言必须重建；
+                 v-model 保住重建前已填的值 -->
             <form-create
-              :key="dynamicFormKey"
-              :rule="dynamicFormRule"
-              :option="dynamicFormOptions"
+              v-model="dynamicFormValues"
+              :key="`${dynamicFormKey}-${locale}`"
+              :rule="localizedDynamicFormRule"
+              :option="localizedDynamicFormOptions"
+              :locale="fcLocale"
               @mounted="handleDynamicFormMounted"
             />
             <!-- 留空=保持原值，那「清空密钥」就需要一个显式出口，否则密钥一旦设过就再也去不掉 -->
@@ -377,11 +381,13 @@ import {
 } from '@/api/modules/alarmWebhook'
 import AlarmWebhookTypeSelector from '@/components/AlarmWebhookTypeSelector.vue'
 import { webhookTypeLabel } from '@/utils/alarmWebhookType'
+import { formCreateLocaleName, localizeDynamicFormRules } from '@/i18n/dynamicFormText'
+import { dynamicFormLabelWidth } from '@/i18n/localizedText'
 import { useI18n } from 'vue-i18n'
 
 defineOptions({ name: 'AlarmWebhookIndexView' })
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 // ---------- 查询表单 ----------
 const queryForm = reactive({
@@ -471,7 +477,31 @@ const formRules = {
 const dynamicFormKey = ref(0)
 const dynamicFormApi = ref(null)
 const dynamicFormRule = ref([])
+// form-create 的双向绑定值：切语言重建实例时用它保住已填内容
+const dynamicFormValues = ref({})
 const dynamicFormOptions = ref({})
+// 表单自带的 options.language（设计器「多语言」面板产出）优先；
+// 早期写死中文的表单再由存量词典兜底。原始 rule 保持不变，回填/收集字段仍以它为准。
+const localizedDynamicFormRule = computed(() =>
+  localizeDynamicFormRules(
+    dynamicFormRule.value,
+    locale.value,
+    dynamicFormOptions.value.language,
+  ),
+)
+// form-create 按字符串精确匹配 options.language 的键（zh-cn / en）
+const fcLocale = computed(() => formCreateLocaleName(locale.value))
+// 英文标签更长（"Signing secret" / "@ User open_id"），沿用 125px 会折行
+const localizedDynamicFormOptions = computed(() => {
+  const base = dynamicFormOptions.value?.form?.labelWidth || '125px'
+  return {
+    ...dynamicFormOptions.value,
+    form: {
+      ...(dynamicFormOptions.value.form || {}),
+      labelWidth: dynamicFormLabelWidth(base, locale.value, '190px'),
+    },
+  }
+})
 const dynamicFormLoading = ref(false)
 const dynamicFormPrefill = ref(null)
 // 请求序号：忽略过期响应，避免快速切换类型时旧表单覆盖新结果
@@ -533,6 +563,8 @@ async function loadDynamicForm(type, prefillConfig) {
   dynamicFormRule.value = []
   dynamicFormOptions.value = {}
   dynamicFormApi.value = null
+  // 换类型时清掉旧值，避免同名字段把上一类通知的内容带进新表单
+  dynamicFormValues.value = {}
   dynamicFormPrefill.value = prefillConfig ?? null
   if (!type) return
 
@@ -565,6 +597,8 @@ function handleDynamicFormMounted($f) {
   dynamicFormApi.value = $f
   const prefill = dynamicFormPrefill.value
   if (!prefill) return
+  // 只回填一次：切换语言也会重建实例，重复回填会把用户未保存的修改冲掉
+  dynamicFormPrefill.value = null
   let configData
   try {
     configData = typeof prefill === 'string' ? JSON.parse(prefill) : prefill

@@ -153,10 +153,11 @@
                设备页的协议参数表单（device-object/IndexView.vue）是同一个写法。 -->
           <div v-if="fcRule.length" class="dynamic-form-wrapper">
             <form-create
-              :key="form.protocol || 'empty'"
+              :key="`${form.protocol || 'empty'}-${fcLocale}`"
               ref="fcRef"
-              :rule="fcRule"
-              :option="fcOption"
+              :rule="localizedFcRule"
+              :option="localizedFcOption"
+              :locale="fcLocale"
               @mounted="handleFcReady"
             />
           </div>
@@ -459,6 +460,8 @@ import {
 } from '@tabler/icons-vue'
 
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
+import { formCreateLocaleName, localizeDynamicFormRules } from '@/i18n/dynamicFormText'
+import { dynamicFormLabelWidth, resolveLocalizedText } from '@/i18n/localizedText'
 import { usePagedRows } from '@/composables/usePagedRows'
 import {
   cancelScan,
@@ -468,7 +471,7 @@ import {
   startScan,
 } from '@/api/modules/deviceScan'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 // 轮询间隔与上限。上限是防御性的：任务若因某种原因停在 running（后端 bug），
 // 无限轮询会一直占着这个页面。
@@ -495,6 +498,23 @@ const fcRule = ref([])
 const fcOption = ref({
   form: { labelWidth: '110px', labelPosition: 'right' },
 })
+// 插件表单可用 `{{$t.key}}` + options.language 携带译文；旧的中文字面量走存量词典兜底
+const localizedFcRule = computed(() =>
+  localizeDynamicFormRules(fcRule.value, locale.value, fcOption.value.language),
+)
+const fcLocale = computed(() => formCreateLocaleName(locale.value))
+// 英文标签比中文长（"Per-target timeout (ms)"），沿用插件的 125px 会折成两行。
+// 这里只改动态表单的 label 列宽；外层 el-form 的 formLabelWidth 跟着同一个值走。
+const localizedFcOption = computed(() => {
+  const base = fcOption.value?.form?.labelWidth || '110px'
+  return {
+    ...fcOption.value,
+    form: {
+      ...(fcOption.value.form || {}),
+      labelWidth: dynamicFormLabelWidth(base, locale.value, '200px'),
+    },
+  }
+})
 
 const tableRef = ref(null)
 const selectedRows = ref([])
@@ -515,7 +535,15 @@ let pollTimer = null
 let pollStartedAt = 0
 
 // ---------- 派生 ----------
-const protocols = computed(() => caps.value?.protocols ?? [])
+// 插件声明的标题/描述是普通字符串，译文在同级 titleI18n / descriptionI18n 里；
+// 在这里统一取词，模板与其余取值逻辑都不用感知语言。
+const protocols = computed(() =>
+  (caps.value?.protocols ?? []).map((p) => ({
+    ...p,
+    title: resolveLocalizedText(p.title, p.titleI18n, locale.value),
+    description: resolveLocalizedText(p.description, p.descriptionI18n, locale.value),
+  })),
+)
 const subnets = computed(() => caps.value?.subnets ?? [])
 const devices = computed(() => job.value?.devices ?? [])
 const scanErrors = computed(() => job.value?.errors ?? [])
@@ -525,7 +553,7 @@ const currentProtocol = computed(
 // 页面的 label 列宽必须与插件为动态表单声明的 labelWidth 一致：动态表单不套
 // el-form-item、与协议/网段/端口 共用同一条 label 列（见模板里那段注释），
 // 取两个不同的宽度就会让扫描参数的控件错开一列。插件没声明时用 el-form 常规值。
-const formLabelWidth = computed(() => fcOption.value?.form?.labelWidth || '110px')
+const formLabelWidth = computed(() => localizedFcOption.value.form.labelWidth)
 const scanning = computed(() => job.value?.state === 'running')
 const canStart = computed(
   () => !!caps.value?.enabled
@@ -662,6 +690,8 @@ async function renderScanForm() {
     fcOption.value = {
       ...fcOption.value,
       ...opts,
+      // language 必须跟着当前协议走，不能沿用上一个协议的多语言表
+      language: opts.language || {},
       form: { ...fcOption.value.form, ...(opts.form || {}) },
     }
   }

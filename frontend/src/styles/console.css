@@ -878,6 +878,33 @@
   }
 }
 
+/* ==========================================================================
+   动态表单字段的 info 说明（form-create 渲染的 el-popover）
+   --------------------------------------------------------------------------
+   form-create 把 rule.info 渲染成带 content 的 el-popover（默认 150px 宽）。
+   插件的说明往往是一整段话，150px 会折成一条又高又窄的竖条，悬浮时几乎盖住
+   半张表单。这里统一放宽成一张可读的说明卡；`.el-popover--plain` 只在设置了
+   content 时出现，页面里手写的 slot popover（如「地址怎么写」）不受影响。
+   图标紧贴标题，留 4px 气口。 */
+.el-popover.el-popover--plain {
+  width: 360px !important;
+  max-width: calc(100vw - 32px);
+  font-size: 12.5px;
+  line-height: 1.62;
+}
+
+.fc-form-title > .el-icon {
+  margin-right: 6px;
+}
+
+/* el-input-number 的步进按钮悬停时，Element Plus 会把整个输入框描成「聚焦蓝」，
+   看起来像点进了输入框；而悬停输入框本体只是浅灰描边。这里统一成同一种浅灰，
+   避免两个相邻的数字控件（端口 / 超时）一碰箭头就闪蓝框。聚焦态不受影响。 */
+.el-input-number__increase:hover ~ .el-input:not(.is-disabled) .el-input__wrapper,
+.el-input-number__decrease:hover ~ .el-input:not(.is-disabled) .el-input__wrapper {
+  box-shadow: 0 0 0 1px var(--el-input-hover-border-color) inset;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .iot-enter,
   .iot-pill.is-live .iot-pill-dot {

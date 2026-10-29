@@ -62,10 +62,25 @@ func (m *Manager) DiscoverySpecs() []driver.ProtocolDiscovery {
 			}
 			spec := *p.Discovery
 			spec.FormJSON = append([]byte(nil), spec.FormJSON...)
+			spec.TitleI18n = cloneStringMap(spec.TitleI18n)
+			spec.DescriptionI18n = cloneStringMap(spec.DescriptionI18n)
 			out = append(out, driver.ProtocolDiscovery{Protocol: p.Name, Spec: spec})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Protocol < out[j].Protocol })
+	return out
+}
+
+// cloneStringMap 复制插件声明的可选译文，保证返回给调用方的 spec 与插件 meta
+// 不共享底层 map（与 FormJSON 的副本同一条理由）。
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
 	return out
 }
 

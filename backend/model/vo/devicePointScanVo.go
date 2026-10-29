@@ -18,6 +18,10 @@ type PointSpecVO struct {
 	// Description 该协议扫描行为的说明。**这段话是用户理解本功能性质的主要来源**
 	//（"列出读得到的地址"而不是"设备的点位表"），前端必须原样显示。
 	Description string `json:"description,omitempty"`
+	// TitleI18n / DescriptionI18n 可选的按语言覆盖文案（键 zh-cn / en）。
+	// 缺省语言由前端回退 Title / Description，旧插件不带这两个字段时行为不变。
+	TitleI18n       map[string]string `json:"titleI18n,omitempty"`
+	DescriptionI18n map[string]string `json:"descriptionI18n,omitempty"`
 	// PointFormJSON 扫描选项表单（form-create schema），前端用 <form-create> 渲染。
 	PointFormJSON json.RawMessage `json:"pointFormJson,omitempty"`
 	// DefaultCommonDataType 结果里类型的默认值，必须是该协议 TypeMap 的**键**

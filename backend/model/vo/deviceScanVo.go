@@ -23,6 +23,10 @@ type ScanProtocolVO struct {
 	Title string `json:"title"`
 	// Description 该协议扫描行为的说明（插件声明）。
 	Description string `json:"description,omitempty"`
+	// TitleI18n / DescriptionI18n 可选的按语言覆盖文案（键 zh-cn / en）。
+	// 缺省语言由前端回退 Title / Description，旧插件不带这两个字段时行为不变。
+	TitleI18n       map[string]string `json:"titleI18n,omitempty"`
+	DescriptionI18n map[string]string `json:"descriptionI18n,omitempty"`
 	// DefaultPort 插件声明的默认端口，前端用它回填端口输入框。
 	DefaultPort int `json:"defaultPort"`
 	// TargetMode unicast / broadcast / both，前端据此提示"该协议靠广播发现"。

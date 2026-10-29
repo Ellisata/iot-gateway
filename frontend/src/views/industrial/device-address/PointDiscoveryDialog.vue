@@ -59,10 +59,11 @@
            扫描页（device-scan/IndexView.vue）是同一个写法，改动请两边一起改。 -->
       <div v-if="fcRule.length" class="dynamic-form-wrapper">
         <form-create
-          :key="formKey"
+          :key="`${formKey}-${fcLocale}`"
           ref="fcRef"
-          :rule="fcRule"
-          :option="fcOption"
+          :rule="localizedFcRule"
+          :option="localizedFcOption"
+          :locale="fcLocale"
           @mounted="handleFcReady"
         />
       </div>
@@ -344,6 +345,8 @@ import {
 } from '@tabler/icons-vue'
 
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
+import { formCreateLocaleName, localizeDynamicFormRules } from '@/i18n/dynamicFormText'
+import { dynamicFormLabelWidth, resolveLocalizedText } from '@/i18n/localizedText'
 import { usePagedRows } from '@/composables/usePagedRows'
 import { useScanFrequencyOptions } from '@/composables/useScanFrequencyOptions'
 import { createAddressesFromScan, discoverPoints, getPointCapability } from '@/api/modules/deviceScan'
@@ -357,11 +360,20 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'created'])
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 // ---------- 能力 ----------
 const capability = ref(null)
-const spec = computed(() => capability.value?.spec ?? null)
+const spec = computed(() => {
+  const s = capability.value?.spec
+  if (!s) return null
+  return {
+    ...s,
+    // 标题与说明是插件声明的普通字符串，译文在同级 i18n map 里
+    title: resolveLocalizedText(s.title, s.titleI18n, locale.value),
+    description: resolveLocalizedText(s.description, s.descriptionI18n, locale.value),
+  }
+})
 
 // ---------- 参数表单 ----------
 const fcRef = ref(null)
@@ -378,6 +390,23 @@ const fcRule = ref([])
 // 重渲染），而这个弹窗每次打开都重渲染、协议却可能没变，所以 key 必须按次数自增。
 const formKey = ref(0)
 const fcOption = ref({ form: { labelWidth: '110px', labelPosition: 'right' } })
+// 插件表单可用 `{{$t.key}}` + options.language 携带译文；旧的中文字面量走存量词典兜底
+const localizedFcRule = computed(() =>
+  localizeDynamicFormRules(fcRule.value, locale.value, fcOption.value.language),
+)
+const fcLocale = computed(() => formCreateLocaleName(locale.value))
+// 英文标签更长（"Additional data identifiers"），沿用插件的 125px 会折行；
+// 中文保持原宽度，英文给一个够放最长标签的固定宽度
+const localizedFcOption = computed(() => {
+  const base = fcOption.value?.form?.labelWidth || '110px'
+  return {
+    ...fcOption.value,
+    form: {
+      ...(fcOption.value.form || {}),
+      labelWidth: dynamicFormLabelWidth(base, locale.value, '230px'),
+    },
+  }
+})
 
 // ---------- 结果 ----------
 const scanning = ref(false)
@@ -583,6 +612,8 @@ async function renderPointForm() {
     fcOption.value = {
       ...fcOption.value,
       ...opts,
+      // language 必须跟着当前协议走，不能沿用上一个协议的多语言表
+      language: opts.language || {},
       form: { ...fcOption.value.form, ...(opts.form || {}) },
     }
   }

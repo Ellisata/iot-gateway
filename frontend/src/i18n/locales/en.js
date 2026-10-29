@@ -1335,6 +1335,17 @@ export default {
     loadFailed: 'Failed to load protocol form config',
   },
 
+  // ---------- Form designer i18n ----------
+  formI18n: {
+    migrate: 'Enable i18n',
+    title: 'Enable i18n',
+    confirm:
+      'Turn every literal Chinese title/info/option label into a language key. Built-in texts get an English translation automatically; fill the rest in the "Languages" panel. Nothing is saved until you press Save.',
+    done: 'i18n keys created — review and save',
+    nothing: 'Nothing to convert',
+    hint: 'Use the language icon next to Title/Info to attach a field to the language table',
+  },
+
   // ---------- Selector components ----------
   selector: {
     rowHint: 'Click any row to select that protocol.',

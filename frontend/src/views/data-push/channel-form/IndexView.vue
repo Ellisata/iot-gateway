@@ -28,6 +28,11 @@
           />
         </div>
         <div class="iot-toolbar-actions">
+          <el-tooltip :content="t('formI18n.hint')" placement="bottom">
+            <el-button :icon="Language" @click="handleMigrateI18n">
+              {{ t('formI18n.migrate') }}
+            </el-button>
+          </el-tooltip>
           <el-button
             type="primary"
             :icon="Check"
@@ -44,7 +49,8 @@
         <fc-designer
           ref="designerRef"
           height="100%"
-          :config="{ fieldReadonly: false }"
+          :config="designerConfig"
+          :locale="designerLocale"
         />
         <!-- 加载遮罩 -->
         <div v-if="formLoading" class="loading-mask">
@@ -58,16 +64,23 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { IconCheck as Check, IconLoader2 as Loading } from '@tabler/icons-vue'
-import { ElMessage } from 'element-plus'
+import {
+  IconCheck as Check,
+  IconLanguage as Language,
+  IconLoader2 as Loading,
+} from '@tabler/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getPushChannelFormByName,
   createPushChannelForm,
 } from '@/api/modules/pushChannelForm'
 import ChannelSelector from '@/components/ChannelSelector.vue'
+import { useDesignerLocale } from '@/composables/useDesignerLocale'
+import { migrateDynamicFormRulesToLanguage } from '@/utils/dynamicFormMigration'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
+const { designerLocale, designerConfig } = useDesignerLocale()
 
 defineOptions({ name: 'DataPushChannelForm' })
 
@@ -148,6 +161,41 @@ async function handleChannelChange(name) {
   } finally {
     formLoading.value = false
   }
+}
+
+/**
+ * 把当前表单里的中文字面量抽成多语言 Key（不自动保存）。
+ * 存量表单是早期迁移写死的中文；不转换的话，运维改一个字英文界面就退回中文。
+ */
+async function handleMigrateI18n() {
+  if (!designerRef.value) return
+  let options = {}
+  try {
+    options = JSON.parse(designerRef.value.getOptionsJson() || '{}')
+  } catch {
+    // 选项解析失败时按空对象处理，规则仍可迁移
+  }
+  const { rules, language } = migrateDynamicFormRulesToLanguage(
+    designerRef.value.getRule(),
+    options.language,
+  )
+  const count = Object.keys(language['zh-cn'] || {}).length - Object.keys(options.language?.['zh-cn'] || {}).length
+  if (count <= 0) {
+    ElMessage.info(t('formI18n.nothing'))
+    return
+  }
+  try {
+    await ElMessageBox.confirm(t('formI18n.confirm'), t('formI18n.title'), {
+      type: 'info',
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
+    })
+  } catch {
+    return
+  }
+  designerRef.value.setRule(rules)
+  designerRef.value.setOptions({ ...options, language })
+  ElMessage.success(t('formI18n.done'))
 }
 
 /** 保存表单 */

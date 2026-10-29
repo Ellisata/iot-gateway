@@ -79,13 +79,15 @@ func (s *DeviceScanService) Capabilities(ctx context.Context) (*vo.ScanCapabilit
 
 	for _, pd := range s.engine.Specs() {
 		out.Protocols = append(out.Protocols, vo.ScanProtocolVO{
-			Name:         pd.Protocol,
-			ProtocolID:   idByName[pd.Protocol],
-			Title:        pd.Spec.Title,
-			Description:  pd.Spec.Description,
-			DefaultPort:  pd.Spec.DefaultPort,
-			TargetMode:   string(pd.Spec.TargetMode),
-			ScanFormJSON: pd.Spec.FormJSON,
+			Name:            pd.Protocol,
+			ProtocolID:      idByName[pd.Protocol],
+			Title:           pd.Spec.Title,
+			Description:     pd.Spec.Description,
+			TitleI18n:       pd.Spec.TitleI18n,
+			DescriptionI18n: pd.Spec.DescriptionI18n,
+			DefaultPort:     pd.Spec.DefaultPort,
+			TargetMode:      string(pd.Spec.TargetMode),
+			ScanFormJSON:    pd.Spec.FormJSON,
 		})
 	}
 	for _, sn := range s.engine.Subnets() {
