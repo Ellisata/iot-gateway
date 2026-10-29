@@ -1054,6 +1054,19 @@ export default {
     deleteSuccess: 'Deleted successfully',
     deleteConfirm: 'Are you sure to delete subscription "{name}"?',
     deleteTitle: 'Delete Confirmation',
+    // Recent messages (read-only observability)
+    viewRecent: 'View recent messages',
+    recentTitle: 'Recent messages · {name}',
+    recentHint: 'Keeps the latest 100 messages in memory, refreshes every 2s; cleared on restart or reconnect',
+    recentEmpty: 'No messages received yet',
+    recentEmptyHint: 'Messages appear here once the subscription receives payloads',
+    recentInactive: 'Subscription is not running (starting or reconnecting), no messages available yet',
+    recentRetained: 'Retained',
+    recentOversized: 'Over 1 MiB, not parsed',
+    recentSize: '{size} bytes',
+    recentTruncated: 'Payload preview truncated, {size} bytes total',
+    recentCopied: 'Payload copied',
+    recentLoadFailed: 'Failed to load recent messages',
   },
 
   subscriptionDevicePoint: {

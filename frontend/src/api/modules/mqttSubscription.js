@@ -207,3 +207,23 @@ export function getSubscriptionStatus() {
     return res.data
   })
 }
+
+/**
+ * 查询某个订阅最近收到的报文（新→旧，仅内存）
+ * @param {{ id: string, limit?: number }} params
+ */
+export function getSubscriptionRecentMessages(params) {
+  return request({
+    url: '/mqttSubscription/recentMessages',
+    method: 'get',
+    params,
+    // 抽屉打开时 2 秒轮询：失败不弹全局错误，保留上一轮数据。
+    silent: true,
+  }).then((res) => {
+    // 与状态接口同一套 silent 信封还原规则（见上）。
+    if (res?.code !== '0') {
+      throw new Error(res?.msg || 'failed to load recent mqtt subscription messages')
+    }
+    return res.data
+  })
+}

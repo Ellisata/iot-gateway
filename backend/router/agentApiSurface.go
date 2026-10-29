@@ -437,6 +437,15 @@ var agentApiSurface = map[string]SurfaceEntry{
 		Params: argNone(),
 		Note:   "各订阅的连接状态与收包/入库计数（只在内存中）",
 	},
+	"GET /mqttSubscription/recentMessages": {
+		Access: AccessRead,
+		Params: argQuery(dto.RecentMqttSubscriptionMessagesDTO{}, map[string]string{
+			"id":    "订阅 ID（status 接口返回的 id；停用/未加载的订阅返回 active=false）",
+			"limit": "返回条数，省略 = 全部；最大 100",
+		}),
+		Note: "**响应 payload 是外部 MQTT 报文原文预览（最多 2 KiB）**，可能含敏感数据；" +
+			"仅内存，每订阅保留最近 100 条，重建订阅（连接参数变化）后清空",
+	},
 	"POST /mqttSubscription/createMqttSubscription": {
 		Access: AccessWrite,
 		Params: argBody(dto.CreateMqttSubscriptionDTO{}, map[string]string{

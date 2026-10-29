@@ -4,6 +4,7 @@
 package subscribe
 
 import (
+	"bytes"
 	"sync"
 	"testing"
 	"time"
@@ -15,13 +16,14 @@ import (
 
 // fakeMessage 最小 mqtt.Message 实现，用于在没有 broker 的情况下驱动 onMessage。
 type fakeMessage struct {
-	topic   string
-	payload []byte
+	topic    string
+	payload  []byte
+	retained bool
 }
 
 func (m fakeMessage) Duplicate() bool   { return false }
 func (m fakeMessage) Qos() byte         { return 1 }
-func (m fakeMessage) Retained() bool    { return false }
+func (m fakeMessage) Retained() bool    { return m.retained }
 func (m fakeMessage) Topic() string     { return m.topic }
 func (m fakeMessage) MessageID() uint16 { return 1 }
 func (m fakeMessage) Payload() []byte   { return m.payload }
@@ -205,6 +207,106 @@ func TestEnqueueDropsOldestWhenFull(t *testing.T) {
 	}
 	if sub.pending.Load() != 1 {
 		t.Errorf("pending = %d, want 1 (dropped message must be subtracted)", sub.pending.Load())
+	}
+}
+
+func TestSubscriberRecordsRecentMessages(t *testing.T) {
+	sub, _, _ := newTestSubscriber(t, `{
+		"fields": {
+			"deviceId":        {"source": "path", "value": "deviceId"},
+			"deviceAddressId": {"source": "path", "value": "tagId"},
+			"value":           {"source": "path", "value": "value"}
+		}
+	}`)
+
+	feed(t, sub, fakeMessage{topic: "factory/a", payload: []byte(`{"x":1}`)})
+	feed(t, sub, fakeMessage{topic: "factory/b", payload: []byte(`{"y":2}`), retained: true})
+
+	msgs := sub.recentMessages()
+	if len(msgs) != 2 {
+		t.Fatalf("recent messages = %d, want 2", len(msgs))
+	}
+	// 新→旧
+	if msgs[0].Topic != "factory/b" || msgs[1].Topic != "factory/a" {
+		t.Errorf("recent order = %q,%q, want factory/b,factory/a", msgs[0].Topic, msgs[1].Topic)
+	}
+	if msgs[0].Seq <= msgs[1].Seq {
+		t.Errorf("seq should increase: %d,%d", msgs[1].Seq, msgs[0].Seq)
+	}
+	if !msgs[0].Retained || msgs[1].Retained {
+		t.Errorf("retained flags = %v,%v, want true,false", msgs[0].Retained, msgs[1].Retained)
+	}
+	if msgs[0].QoS != 1 {
+		t.Errorf("qos = %d, want 1", msgs[0].QoS)
+	}
+	if msgs[0].Payload != `{"y":2}` || msgs[0].Size != len(`{"y":2}`) {
+		t.Errorf("payload = %q size=%d", msgs[0].Payload, msgs[0].Size)
+	}
+	if msgs[0].Truncated || msgs[0].Oversized {
+		t.Errorf("truncated/oversized = %v/%v, want false/false", msgs[0].Truncated, msgs[0].Oversized)
+	}
+}
+
+func TestSubscriberRecordsOversizedMessage(t *testing.T) {
+	sub, _, _ := newTestSubscriber(t, `{
+		"fields": {
+			"deviceId":        {"source": "path", "value": "deviceId"},
+			"deviceAddressId": {"source": "path", "value": "tagId"},
+			"value":           {"source": "path", "value": "value"}
+		}
+	}`)
+
+	big := bytes.Repeat([]byte("a"), parser.DefaultMaxPayloadBytes+1)
+	feed(t, sub, fakeMessage{topic: "factory/big", payload: big})
+
+	msgs := sub.recentMessages()
+	if len(msgs) != 1 {
+		t.Fatalf("recent messages = %d, want 1", len(msgs))
+	}
+	if !msgs[0].Oversized || !msgs[0].Truncated {
+		t.Errorf("oversized/truncated = %v/%v, want true/true", msgs[0].Oversized, msgs[0].Truncated)
+	}
+	if msgs[0].Size != len(big) {
+		t.Errorf("size = %d, want %d", msgs[0].Size, len(big))
+	}
+	if len(msgs[0].Payload) != recentPayloadPreviewBytes {
+		t.Errorf("preview bytes = %d, want %d", len(msgs[0].Payload), recentPayloadPreviewBytes)
+	}
+	if sub.errors.Load() != 1 {
+		t.Errorf("errors = %d, want 1 (oversized still counted as before)", sub.errors.Load())
+	}
+}
+
+func TestSubscriberRecentMessagesSurviveParserSwap(t *testing.T) {
+	sub, _, _ := newTestSubscriber(t, `{
+		"fields": {
+			"deviceId":        {"source": "path", "value": "deviceId"},
+			"deviceAddressId": {"source": "path", "value": "tagId"},
+			"value":           {"source": "path", "value": "value"}
+		}
+	}`)
+	feed(t, sub, fakeMessage{topic: "t", payload: []byte(`{"deviceId":"d1","tagId":"a1","value":"v1"}`)})
+
+	before := sub.recentMessages()
+	next, err := parseSubscription(&po.MqttSubscription{
+		ID:          "sub-1",
+		Name:        "test",
+		Broker:      "127.0.0.1",
+		Port:        "1883",
+		Topic:       "factory/+/telemetry",
+		QoS:         1,
+		MappingJSON: `{"fields":{"deviceId":{"source":"path","value":"deviceId"},"deviceAddressId":{"source":"path","value":"tagId"},"value":{"source":"template","value":"v2-{value}"}}}`,
+	})
+	if err != nil {
+		t.Fatalf("parseSubscription(next): %v", err)
+	}
+	if err := sub.swapParser(next.prs, next.parserSig); err != nil {
+		t.Fatalf("swapParser: %v", err)
+	}
+
+	after := sub.recentMessages()
+	if len(after) != len(before) || after[0].Seq != before[0].Seq {
+		t.Fatalf("recent messages changed after parser swap: before=%+v after=%+v", before, after)
 	}
 }
 

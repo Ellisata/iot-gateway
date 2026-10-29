@@ -1044,6 +1044,19 @@ export default {
     deleteSuccess: '删除成功',
     deleteConfirm: '确定要删除订阅「{name}」吗？',
     deleteTitle: '删除确认',
+    // 最近报文（只读观测）
+    viewRecent: '查看最近报文',
+    recentTitle: '最近报文 · {name}',
+    recentHint: '仅内存保留最近 100 条，每 2 秒自动刷新；重启网关或重建连接后清空',
+    recentEmpty: '还没有收到报文',
+    recentEmptyHint: '订阅已连接并收到报文后会出现在这里',
+    recentInactive: '订阅当前未运行（可能正在启动或重连），暂时没有报文',
+    recentRetained: '保留消息',
+    recentOversized: '超过 1 MiB，未解析',
+    recentSize: '{size} 字节',
+    recentTruncated: '载荷预览已截断，原始 {size} 字节',
+    recentCopied: '报文已复制',
+    recentLoadFailed: '获取最近报文失败',
   },
 
   subscriptionDevicePoint: {

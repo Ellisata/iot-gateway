@@ -59,6 +59,15 @@ type PageMqttSubscriptionDTO struct {
 	Status *int   `form:"status"`
 }
 
+// RecentMqttSubscriptionMessagesDTO 查询某个订阅最近收到的报文。
+//
+// ID 是订阅主键（GET /mqttSubscription/status 返回的 id），不是名称。
+// Limit 省略 = 返回全部；上限与 subscribe 包的环形缓冲大小保持一致。
+type RecentMqttSubscriptionMessagesDTO struct {
+	ID    string `form:"id"    binding:"required"`
+	Limit int    `form:"limit" binding:"omitempty,min=1,max=100"`
+}
+
 // PageMqttSubscriptionDevicePointDTO 订阅设备/点位信息分页查询。
 //
 // 数据来自订阅报文转换后的元信息索引（mqtt_subscription_device_point），

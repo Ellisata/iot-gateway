@@ -49,6 +49,31 @@ type MqttSubscriptionStatusVO struct {
 	Error       string `json:"error"`
 }
 
+// MqttSubscriptionRecentMessagesVO 某个订阅最近收到的报文（新→旧）。
+//
+// Active 表示该订阅当前是否在管理器里。启用了但尚未加载/正在热加载时用它区分，
+// 比返回「订阅不存在」更准确；前端据此显示「订阅当前未运行」。
+type MqttSubscriptionRecentMessagesVO struct {
+	Active   bool                              `json:"active"`
+	Messages []MqttSubscriptionRecentMessageVO `json:"messages"`
+}
+
+// MqttSubscriptionRecentMessageVO 一条最近收到的订阅报文。
+//
+// Payload 是预览文本（最多 2 KiB），不是完整载荷；Size 是原始字节数。
+// ReceivedAt 的秒级精度与 Status 一致，Seq 用于区分同一秒内到达的报文。
+type MqttSubscriptionRecentMessageVO struct {
+	Seq        uint64 `json:"seq"`
+	Topic      string `json:"topic"`
+	Payload    string `json:"payload"`
+	Size       int    `json:"size"`
+	Truncated  bool   `json:"truncated"`
+	Oversized  bool   `json:"oversized"`
+	ReceivedAt string `json:"receivedAt"`
+	QoS        int    `json:"qos"`
+	Retained   bool   `json:"retained"`
+}
+
 // MqttSubscriptionDevicePointVO 订阅设备/点位信息。
 //
 // 一行 = 订阅报文里出现过的一个点位及其设备元信息（自然键 deviceId + deviceAddressId）。

@@ -411,3 +411,31 @@ func TestMqttSubscriptionPreview(t *testing.T) {
 		t.Errorf("bad preview count = %d, want 0", bad.Count)
 	}
 }
+
+func TestMqttSubscriptionRecentMessagesNilManager(t *testing.T) {
+	svc := NewMqttSubscriptionService(nil, nil)
+	got := svc.MqttSubscriptionRecentMessages(&dto.RecentMqttSubscriptionMessagesDTO{ID: "any"})
+	if got == nil {
+		t.Fatal("result should not be nil")
+	}
+	if got.Active {
+		t.Error("active = true, want false")
+	}
+	if got.Messages == nil || len(got.Messages) != 0 {
+		t.Errorf("messages = %v, want empty non-nil slice", got.Messages)
+	}
+}
+
+func TestMqttSubscriptionRecentMessagesInactiveSubscription(t *testing.T) {
+	svc := newTestSubscriptionService(t) // manager 未 Start，任何 id 都不在管理器中
+	got := svc.MqttSubscriptionRecentMessages(&dto.RecentMqttSubscriptionMessagesDTO{ID: "missing", Limit: 10})
+	if got == nil {
+		t.Fatal("result should not be nil")
+	}
+	if got.Active {
+		t.Error("active = true, want false for unmanaged subscription")
+	}
+	if got.Messages == nil || len(got.Messages) != 0 {
+		t.Errorf("messages = %v, want empty non-nil slice", got.Messages)
+	}
+}

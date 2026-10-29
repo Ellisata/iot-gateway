@@ -178,6 +178,13 @@
   绝不阻塞回调);独立 worker 串行消费,批 ≤256,解析后投递。
   `SetOrderMatters(true)` 保证脚本的跨报文状态按到达顺序。`Stop()` 顺序:
   断开 → 关队列 → 等 worker 排空 → 关闭解析器 → 停止点位落库器。
+- **最近报文(只读观测)**:每个订阅在内存里保留最近 100 条收包快照
+  ([subscribe/recentMessages.go](subscribe/recentMessages.go)),`onMessage` 在大小检查**之前**记录,
+  因此解析失败、队列满丢弃、超 1 MiB 未解析的报文都能看到。载荷只存 2 KiB 预览
+  (按 UTF-8 边界截断)+ 原始字节数,不复制完整报文。挂在 `subscriber` 上:
+  只换解析器时历史保留,连接参数变化重建订阅时清空;不落库、不新增迁移。
+  接口 `GET /mqttSubscription/recentMessages?id=&limit=`,订阅不在管理器里时返回
+  `active=false`(而不是报错);`/agentApi` 镜像会暴露报文原文,已在 surface 的 Note 标注。
 - **签名拆分**:`connSig`(broker/port/clientId/账号/topic/qos)变化才重建 paho;
   `parserSig`(类型 + 配置原文)变化只**原地替换解析器**,不断开 MQTT。
   未变化的订阅不构造解析器(脚本编译不便宜)。状态计数含 `messages/records/errors/skipped/dropped`。

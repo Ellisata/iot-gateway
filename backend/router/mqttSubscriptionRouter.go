@@ -29,5 +29,6 @@ func MqttSubscriptionRoutes(r gin.IRouter, mc *controller.MqttSubscriptionContro
 		sub.POST("/testConnectivity", mc.TestMqttSubscription)
 		sub.POST("/preview", mc.PreviewMqttSubscription)
 		sub.GET("/status", mc.MqttSubscriptionStatus)
+		sub.GET("/recentMessages", mc.MqttSubscriptionRecentMessages)
 	}
 }

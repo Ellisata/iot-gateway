@@ -4,7 +4,7 @@
 -->
 
 <template>
-  <div class="iot-page">
+  <div class="iot-page mqtt-sub-page">
     <!-- 页头：与工业物联网 / 数据推送各页同一套层级；右侧是自动刷新提示与订阅数 -->
     <header class="iot-head iot-enter">
       <div>
@@ -126,9 +126,21 @@
           width="160"
           class-name="iot-col-time"
         />
-        <el-table-column :label="t('common.action')" width="110" align="center" fixed="right">
+        <el-table-column :label="t('common.action')" width="150" align="center" fixed="right">
           <template #default="{ row }">
             <div class="iot-row-actions">
+              <!-- 只有启用中的订阅才在管理器里，停用行点开只会得到空列表 -->
+              <el-tooltip v-if="row.status === 1" :content="t('subscription.viewRecent')" placement="top">
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="History"
+                  :aria-label="t('subscription.viewRecent')"
+                  @click="handleViewRecent(row)"
+                />
+              </el-tooltip>
               <el-tooltip :content="t('common.edit')" placement="top">
                 <el-button
                   class="iot-row-btn"
@@ -874,6 +886,64 @@
         <el-button type="primary" :loading="submitting" @click="handleSubmit">{{ t('common.confirm') }}</el-button>
       </template>
     </el-dialog>
+
+    <!-- 最近报文抽屉：只读观测，打开时每 2 秒轮询，关闭即停 -->
+    <el-drawer
+      v-model="recentDrawerVisible"
+      class="mqtt-recent-drawer"
+      size="70%"
+      destroy-on-close
+      :title="t('subscription.recentTitle', { name: recentSubscription?.name || '' })"
+    >
+      <div class="recent-toolbar">
+        <span class="recent-hint">{{ t('subscription.recentHint') }}</span>
+        <el-button :icon="Refresh" :loading="recentLoading" @click="fetchRecent(true)">
+          {{ t('common.refresh') }}
+        </el-button>
+      </div>
+
+      <div class="recent-body">
+        <div v-if="recentError" class="iot-notice is-warning">
+          <p class="iot-notice-text">{{ recentError }}</p>
+        </div>
+        <div v-else-if="recentLoaded && !recentActive" class="iot-notice is-info">
+          <p class="iot-notice-text">{{ t('subscription.recentInactive') }}</p>
+        </div>
+
+        <div v-if="recentMessages.length" class="recent-list">
+          <article v-for="msg in recentMessages" :key="msg.seq" class="recent-item">
+            <header class="recent-item-head">
+              <span class="recent-time iot-mono">{{ msg.receivedAt }}</span>
+              <span class="iot-chip">QoS {{ msg.qos }}</span>
+              <span v-if="msg.retained" class="iot-pill is-blue">{{ t('subscription.recentRetained') }}</span>
+              <span v-if="msg.oversized" class="iot-pill is-rose">{{ t('subscription.recentOversized') }}</span>
+              <span class="recent-size">{{ t('subscription.recentSize', { size: msg.size }) }}</span>
+              <el-tooltip :content="t('common.copy')" placement="top">
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="CopyDocument"
+                  :aria-label="t('common.copy')"
+                  @click="copyRecentPayload(msg)"
+                />
+              </el-tooltip>
+            </header>
+            <div class="recent-topic iot-mono" :title="msg.topic">{{ msg.topic }}</div>
+            <pre class="iot-code recent-payload">{{ msg.payload }}</pre>
+            <p v-if="msg.truncated" class="recent-truncated">
+              {{ t('subscription.recentTruncated', { size: msg.size }) }}
+            </p>
+          </article>
+        </div>
+
+        <div v-else-if="!recentLoading && recentLoaded && recentActive" class="iot-empty recent-empty">
+          <p class="iot-empty-title">{{ t('subscription.recentEmpty') }}</p>
+          <p class="iot-empty-hint">{{ t('subscription.recentEmptyHint') }}</p>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -888,7 +958,9 @@ import {
   IconCheck as Check,
   IconChevronRight as Right,
   IconCode as Code,
+  IconCopy as CopyDocument,
   IconEye as Eye,
+  IconHistory as History,
   IconInfoCircle as InfoCircle,
   IconMessage as Message,
   IconPencil as EditPen,
@@ -911,6 +983,7 @@ import {
   testSubscriptionConnectivity,
   previewSubscriptionMapping,
   getSubscriptionStatus,
+  getSubscriptionRecentMessages,
 } from '@/api/modules/mqttSubscription'
 
 const { t } = useI18n()
@@ -1162,6 +1235,85 @@ async function fetchStatus() {
   } catch {
     // 状态查询失败不打扰用户（列表本身仍然可用）
   }
+}
+
+// ---------- 最近报文抽屉 ----------
+const recentDrawerVisible = ref(false)
+const recentSubscription = ref(null)
+const recentMessages = ref([])
+const recentActive = ref(false)
+const recentLoaded = ref(false)
+const recentLoading = ref(false)
+const recentError = ref('')
+let recentTimer = null
+let recentInFlight = false
+
+function stopRecentTimer() {
+  if (recentTimer) {
+    clearInterval(recentTimer)
+    recentTimer = null
+  }
+}
+
+async function fetchRecent(showLoading = false) {
+  const sub = recentSubscription.value
+  if (!sub || recentInFlight) return
+  // 后台标签页不轮询；手动刷新（showLoading）不受影响
+  if (!showLoading && document.hidden) return
+
+  recentInFlight = true
+  if (showLoading) recentLoading.value = true
+  try {
+    const data = await getSubscriptionRecentMessages({ id: sub.id, limit: 100 })
+    recentActive.value = Boolean(data?.active)
+    recentMessages.value = data?.messages ?? []
+    recentError.value = ''
+  } catch (err) {
+    // 首次加载失败要提示；轮询失败保留上一轮数据，避免抽屉反复闪烁
+    if (showLoading) {
+      console.error('获取最近报文失败', err)
+      recentError.value = t('subscription.recentLoadFailed')
+    }
+  } finally {
+    recentLoaded.value = true
+    recentInFlight = false
+    if (showLoading) recentLoading.value = false
+  }
+}
+
+function handleViewRecent(row) {
+  recentSubscription.value = row
+  recentMessages.value = []
+  recentActive.value = false
+  recentLoaded.value = false
+  recentError.value = ''
+  recentDrawerVisible.value = true
+  fetchRecent(true)
+  stopRecentTimer()
+  recentTimer = setInterval(() => fetchRecent(false), 2000)
+}
+
+watch(recentDrawerVisible, (open) => {
+  if (!open) stopRecentTimer()
+})
+
+async function copyRecentPayload(msg) {
+  const text = msg?.payload
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    // 非安全上下文（http + 局域网 IP）没有 clipboard API，退回临时 textarea
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  }
+  ElMessage.success(t('subscription.recentCopied'))
 }
 
 function handleSearch() {
@@ -1925,6 +2077,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (statusTimer) clearInterval(statusTimer)
+  stopRecentTimer()
 })
 </script>
 
@@ -2588,6 +2741,100 @@ onBeforeUnmount(() => {
 .filter-row :deep(.el-select__wrapper) {
   border-radius: 7px;
   box-shadow: 0 0 0 1px var(--line) inset;
+}
+
+/* ---------- 最近报文抽屉 ---------- */
+/* 抽屉被 teleport 到 body，Element 自身的 header/body 元素不带作用域标记，用 :global 定位 */
+:global(.mqtt-recent-drawer .el-drawer__header) {
+  margin-bottom: 0;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+:global(.mqtt-recent-drawer .el-drawer__body) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+}
+
+.recent-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface);
+}
+
+.recent-hint {
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+.recent-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px;
+}
+
+.recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.recent-item {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.recent-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.recent-time {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.recent-size {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+.recent-topic {
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  word-break: break-all;
+}
+
+.recent-payload {
+  max-height: 240px;
+  margin: 0;
+}
+
+.recent-truncated {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--amber-6, #d97706);
+}
+
+.recent-empty {
+  margin: auto 0;
 }
 
 @media (max-width: 860px) {

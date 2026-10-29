@@ -75,6 +75,9 @@ type subscriber struct {
 	lastErr     atomic.Value // string
 	lastMessage atomic.Value // string
 
+	// recent 最近收到的报文环形缓冲：收包协程写、HTTP 读，仅内存。
+	recent *recentMessageRing
+
 	queue       chan parser.Message
 	queueMu     sync.RWMutex
 	queueClosed bool
@@ -95,6 +98,7 @@ func newSubscriber(cfg *subscription, sink Sink, info devicePointSink) *subscrib
 		info:       info,
 		prs:        cfg.prs,
 		parserSig:  cfg.parserSig,
+		recent:     newRecentMessageRing(recentMessageRingSize),
 		queue:      make(chan parser.Message, subscriptionQueueSize),
 		workerDone: make(chan struct{}),
 	}
@@ -230,7 +234,13 @@ func (s *subscriber) onMessage(_ mqtt.Client, msg mqtt.Message) {
 	s.messages.Add(1)
 
 	payload := msg.Payload()
-	if len(payload) > parser.DefaultMaxPayloadBytes {
+	receivedAt := time.Now()
+	oversized := len(payload) > parser.DefaultMaxPayloadBytes
+
+	// 收包即记录：即使接下来因超限 / 解析失败 / 队列满被丢弃，也能在页面上看到。
+	s.recordRecent(msg, payload, receivedAt, oversized)
+
+	if oversized {
 		s.errors.Add(1)
 		s.setErr(fmt.Sprintf("报文 %d 字节，超过上限 %d", len(payload), parser.DefaultMaxPayloadBytes))
 		logger.Warn("mqtt subscription %q: topic %s 报文过大（%d 字节），已丢弃",
@@ -245,11 +255,30 @@ func (s *subscriber) onMessage(_ mqtt.Client, msg mqtt.Message) {
 	s.enqueue(parser.Message{
 		Topic:      msg.Topic(),
 		Payload:    buf,
-		ReceivedAt: time.Now(),
+		ReceivedAt: receivedAt,
 		QoS:        msg.Qos(),
 		Retained:   msg.Retained(),
 	})
 }
+
+// recordRecent 保存一条最近报文快照。运行在 paho 收包协程中：
+// 只做一次至多 2 KiB 的预览拷贝与一次环形写入，不阻塞、不写库。
+func (s *subscriber) recordRecent(msg mqtt.Message, payload []byte, at time.Time, oversized bool) {
+	preview, truncated := previewPayload(payload)
+	s.recent.add(RecentMessage{
+		Topic:      msg.Topic(),
+		Payload:    preview,
+		Size:       len(payload),
+		Truncated:  truncated,
+		Oversized:  oversized,
+		ReceivedAt: at,
+		QoS:        msg.Qos(),
+		Retained:   msg.Retained(),
+	})
+}
+
+// recentMessages 返回该订阅最近收到的报文（新→旧）。
+func (s *subscriber) recentMessages() []RecentMessage { return s.recent.snapshot() }
 
 // enqueue 非阻塞入队。队列满时丢最旧的一条并计数 —— 遥测优先保新鲜度，
 // 绝不把 paho 收包协程卡住（会反过来把整个 broker 会话的 QoS 流控拖死）。

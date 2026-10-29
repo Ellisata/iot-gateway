@@ -174,6 +174,24 @@ func (m *Manager) Status() []Status {
 	return out
 }
 
+// RecentMessages 返回某个订阅最近收到的报文（新→旧，仅内存）。
+//
+// 第二个返回值表示该订阅当前是否在管理中：停用 / 删除 / 管理器未加载时返回 false，
+// 与 Status() 里「不在列表里」的口径一致。manager 为 nil（单元测试）时同样返回 false。
+func (m *Manager) RecentMessages(id string) ([]RecentMessage, bool) {
+	if m == nil {
+		return nil, false
+	}
+	m.mu.RLock()
+	s, ok := m.subs[id]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	// 先释放 manager 锁再取快照：recent 的锁是叶子锁，不与其他锁嵌套。
+	return s.recentMessages(), true
+}
+
 // refresh 重建订阅列表并原子替换，未变化的订阅保留运行实例。
 func (m *Manager) refresh() {
 	rows, err := m.loadSubscriptions()

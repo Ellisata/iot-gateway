@@ -244,3 +244,14 @@ func (ctr *MqttSubscriptionController) PreviewMqttSubscription(c *gin.Context) {
 func (ctr *MqttSubscriptionController) MqttSubscriptionStatus(c *gin.Context) {
 	c.JSON(200, response.Success(ctr.service.MqttSubscriptionStatus()))
 }
+
+// MqttSubscriptionRecentMessages 查询某个订阅最近收到的报文
+func (ctr *MqttSubscriptionController) MqttSubscriptionRecentMessages(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.RecentMqttSubscriptionMessagesDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(ctr.service.MqttSubscriptionRecentMessages(&req)))
+}

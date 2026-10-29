@@ -426,6 +426,43 @@ func (s *MqttSubscriptionService) MqttSubscriptionStatus() []vo.MqttSubscription
 	return out
 }
 
+// MqttSubscriptionRecentMessages 返回某个订阅最近收到的报文（新→旧，仅内存）。
+//
+// 订阅不在管理器里（停用/未加载）时返回 Active=false 的空列表，而不是报错：
+// 这是观测接口，前端据 Active 显示「订阅当前未运行」。manager 为 nil（单元测试）
+// 时与 MqttSubscriptionStatus 一样按空处理。
+func (s *MqttSubscriptionService) MqttSubscriptionRecentMessages(req *dto.RecentMqttSubscriptionMessagesDTO) *vo.MqttSubscriptionRecentMessagesVO {
+	out := &vo.MqttSubscriptionRecentMessagesVO{
+		Messages: []vo.MqttSubscriptionRecentMessageVO{},
+	}
+	if s.manager == nil {
+		return out
+	}
+	msgs, active := s.manager.RecentMessages(req.ID)
+	out.Active = active
+	if !active {
+		return out
+	}
+	if req.Limit > 0 && req.Limit < len(msgs) {
+		msgs = msgs[:req.Limit]
+	}
+	out.Messages = make([]vo.MqttSubscriptionRecentMessageVO, len(msgs))
+	for i, m := range msgs {
+		out.Messages[i] = vo.MqttSubscriptionRecentMessageVO{
+			Seq:        m.Seq,
+			Topic:      m.Topic,
+			Payload:    m.Payload,
+			Size:       m.Size,
+			Truncated:  m.Truncated,
+			Oversized:  m.Oversized,
+			ReceivedAt: m.ReceivedAt.Format("2006-01-02 15:04:05"),
+			QoS:        int(m.QoS),
+			Retained:   m.Retained,
+		}
+	}
+	return out
+}
+
 func toMqttSubscriptionVO(row *po.MqttSubscription) *vo.MqttSubscriptionVO {
 	parserType := normalizeParserType(row.ParserType)
 	var parserConfig json.RawMessage
