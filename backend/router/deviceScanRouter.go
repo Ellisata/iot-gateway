@@ -23,6 +23,7 @@ func DeviceScanRoutes(r gin.IRouter, dsc *controller.DeviceScanController) {
 	{
 		scan.GET("/capabilities", dsc.Capabilities)
 		scan.POST("/start", dsc.Start)
+		scan.POST("/continue", dsc.Continue)
 		scan.GET("/status", dsc.Status)
 		scan.POST("/cancel", dsc.Cancel)
 		scan.POST("/createDevices", dsc.CreateDevices)

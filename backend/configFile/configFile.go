@@ -166,12 +166,13 @@ type DeviceScanConfig struct {
 	// 每个在飞探测在插件里占一个 goroutine 与一条到目标的连接。
 	MaxConcurrentProbes int `mapstructure:"maxConcurrentProbes"`
 
-	// MaxTargets 单次扫描的目标数上限（默认 1024，上限 65536）。
+	// MaxTargets **单批**扫描的目标数上限（默认 1024，上限 65536）。超出时只扫
+	// 前一批，剩余地址由用户点「继续扫描」沿用同一个任务接着扫。
 	//
 	// 存在的意义是防手滑：一个 /16 展开是 65534 个目标，配上 1.5s 的拨号超时
 	// 就是按小时计的扫描。**截断不是静默的** —— 任务快照里带 requestedTargets /
-	// plannedTargets / truncated，前端必须把这个事实显示出来，否则用户会从
-	// "没扫到设备"得出"这个网段没有设备"的错误结论。
+	// plannedTargets / remainingTargets / truncated，前端必须把这个事实显示出来，
+	// 否则用户会从"没扫到设备"得出"这个网段没有设备"的错误结论。
 	MaxTargets int `mapstructure:"maxTargets"`
 
 	// JobTTLMinutes 扫描结束后任务与其结果的保留时长（默认 10 分钟）。

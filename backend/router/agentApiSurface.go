@@ -669,7 +669,14 @@ var agentApiSurface = map[string]SurfaceEntry{
 			"subnets":  "要扫的网段（CIDR），**只能取 capabilities 的 subnets**；空 = 全部本机网段",
 			"port":     "覆盖协议默认端口；0 或省略 = 用默认端口",
 		}),
-		Note: "**扫本机网段**，重且慢；同一时刻只允许一个任务（否则 40022）",
+		Note: "**扫本机网段**，重且慢；同一时刻只允许一个任务（否则 40022）。" +
+			"目标数超过单批上限时只扫前一批，快照里 truncated=true、remainingTargets>0",
+	},
+	"POST /deviceScan/continue": {
+		Access: AccessProbe,
+		Params: argBody(dto.ContinueDeviceScanDTO{}, nil),
+		Note: "续扫**同一任务**的下一批目标；任务 id 不变，已发现的结果保留。" +
+			"只传 jobId —— 协议/选项/网段必须沿用第一批，重传会让两批目标错位",
 	},
 	"POST /deviceScan/cancel": {
 		Access: AccessProbe,

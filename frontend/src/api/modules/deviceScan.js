@@ -29,13 +29,35 @@ export function getScanCapabilities() {
  *
  * @param {{protocol:string, options?:object, subnets?:string[], port?:number}} data
  * subnets 只能取自 getScanCapabilities 返回的网段（后端会拒绝其它 CIDR）。
- * @returns {Promise<object>} 任务快照（同 getScanStatus）
+ * @returns {Promise<object>} 任务快照（同 getScanStatus）。目标数超过单批上限时
+ * `truncated=true`，剩下的地址要调 continueScan 接着扫。
  */
 export function startScan(data) {
   return request({
     url: '/deviceScan/start',
     method: 'post',
     data,
+  })
+}
+
+/**
+ * 续扫当前任务的下一批目标。
+ *
+ * 目标数超过单批上限（deviceScan.maxTargets）时，startScan 只扫前一批，快照里
+ * `truncated=true`、`remainingTargets>0`。点「继续扫描」调这里：**任务 id 不变**，
+ * 已发现的结果保留，服务端把目标换成下一批后继续跑。
+ *
+ * 只传 jobId —— 协议/选项/网段/端口必须沿用第一批（服务端持有），重传会让
+ * 两批的目标列表错位。上一批的在飞探测还没收尾时返回"已有扫描任务在运行"。
+ *
+ * @param {string} jobId
+ * @returns {Promise<object>} 任务快照（同 getScanStatus）
+ */
+export function continueScan(jobId) {
+  return request({
+    url: '/deviceScan/continue',
+    method: 'post',
+    data: { jobId },
   })
 }
 

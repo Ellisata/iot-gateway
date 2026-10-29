@@ -45,19 +45,27 @@ type Snapshot struct {
 	// Reason 失败或取消的原因，仅终态非空。
 	Reason string `json:"reason,omitempty"`
 
-	// Requested 用户所选网段展开后的目标总数（不受上限影响）。
+	// Requested 用户所选网段展开后的目标总数（不受单批上限影响）。
 	Requested int `json:"requestedTargets"`
-	// Planned 本次实际会扫的目标数（上限截断后）。
+	// Planned **本批**实际会扫的目标数（单批上限截断后）。
+	// 续扫后它是新一批的数量，不是累计值 —— 累计进度看 ScannedTotal。
 	Planned int `json:"plannedTargets"`
-	// Truncated 为 true 表示只扫了前 Planned 个，前端**必须**把这件事显示出来。
+	// Truncated 为 true 表示还有未扫的目标（Remaining > 0），前端应当提供
+	// "继续扫描"入口。**这件事必须显示出来** —— 否则用户会从"没扫到设备"
+	// 得出"这个网段没有设备"的错误结论。
 	Truncated bool `json:"truncated"`
+	// Remaining 尚未扫描的目标数（Requested - 已规划的累计数）。0 表示已扫完。
+	Remaining int `json:"remainingTargets"`
 
-	// Total 等于 Planned，单独给出是为了前端的进度条不必做除法。
+	// Total 本批的目标数（等于 Planned），单独给出是为了前端的进度条不必做除法。
 	Total int `json:"total"`
-	// Scanned 已完成探测的目标数。**进度以它为准**，不是以 Found 为准：
+	// Scanned **本批**已完成探测的目标数。进度条以它为准，不是以 Found 为准：
 	// 广播型协议一个目标可能一次产出几十台设备，用设备数算进度会跳变。
 	Scanned int `json:"scanned"`
-	// Found 已发现的设备数（含同一个 IP 的多台，如多个站号）。
+	// ScannedTotal 本次扫描累计已完成的目标数（各批之和）。前端用它显示
+	// "已扫描 X / 共 Requested 个"；同一地址被重扫（取消后续扫）时只算一次。
+	ScannedTotal int `json:"scannedTotal"`
+	// Found 已发现的设备数（含同一个 IP 的多台，如多个站号），跨批次累计。
 	Found int `json:"found"`
 
 	// ElapsedMs 已耗时（运行中）或总耗时（终态）。
@@ -82,38 +90,56 @@ type Snapshot struct {
 // job 一次扫描任务。
 //
 // 字段分两类，同步要求不同：
-//   - 规划期写入、之后**只读**的（id/protocol/options/port/targets/requested/
-//     planned/truncated/startedAt/estimateMaxMs）—— 并发读安全；
-//   - 运行期被 worker 改写的（state/reason/scanned/devices/errors/endedAt）
+//   - 规划期写入、之后**只读**的（id/protocol/options/port/subnets/targetMode/
+//     budgetMs/startedAt）—— 并发读安全；
+//   - 每批开始时与运行期被改写的（targets/requested/planned/offset/batchStart/
+//     truncated/estimateMaxMs/state/reason/scannedInBatch/devices/errors/endedAt）
 //     —— 一律在 Engine.mu 下读写。
+//
+// 分批续扫（Engine.Continue）只改第二类：同一任务跨批次保留 devices/errors/seen，
+// 因此前端拿到的结果下标在续扫前后始终有效，建库时不需知道结果来自哪一批。
 type job struct {
 	id       string
 	protocol string
 	options  json.RawMessage
 	port     int
-
-	requested int
-	planned   int
-	truncated bool
-	targets   []driver.ScanTarget
+	// subnets 规划时选中的网段。续扫按**同一份**输入重新展开，而不是重新枚举
+	// 网卡 —— 网络在扫描过程中变化时，列表中途换掉会让批次交界处漏扫/重扫。
+	subnets    []SubnetInfo
+	targetMode driver.TargetMode
+	// budgetMs 插件为单目标探测声明的预算，用于估算每一批的最坏耗时。
+	budgetMs  int
 	startedAt time.Time
-	// estimateMaxMs 见 Snapshot 的同名字段。
+
+	// requested 整个扫描的目标总数（虚拟列表长度）。
+	// planned 当前批次的目标数（= len(targets)）。
+	// offset 当前批次之后的下一批起点（虚拟列表序号）。
+	// batchStart 当前批次的起点（虚拟列表序号）。
+	requested  int
+	planned    int
+	offset     int
+	batchStart int
+	truncated  bool
+	targets    []driver.ScanTarget
+	// estimateMaxMs 当前批次的最坏耗时估算，见 Snapshot 的同名字段。
 	estimateMaxMs int
 
-	// ctx/cancel 控制本次任务的全部在飞探测。
+	// ctx/cancel 控制**当前批次**的全部在飞探测。续扫会换一对新的。
 	ctx    context.Context
 	cancel context.CancelFunc
-	// doneCh 全部 worker 退出后关闭，供 Stop 等待。
+	// doneCh 当前批次的 worker 全部退出后关闭，供 Stop/Continue 等待。
 	doneCh chan struct{}
 
 	// 以下字段在 Engine.mu 下读写。
-	state   JobState
-	reason  string
-	scanned int
-	devices []driver.DiscoveredDevice
-	errors  []TargetError
-	endedAt time.Time
-	// seen 已接受设备的去重键（见 acceptDevice），同样在 Engine.mu 下读写。
+	state  JobState
+	reason string
+	// scannedInBatch 本批已完成探测数。累计值 = batchStart + scannedInBatch
+	// （同一地址被重扫时只按它在新一批里的位置计一次）。
+	scannedInBatch int
+	devices        []driver.DiscoveredDevice
+	errors         []TargetError
+	endedAt        time.Time
+	// seen 已接受设备的去重键（见 acceptDevice），跨批次保留。
 	seen map[string]struct{}
 }
 
@@ -157,6 +183,17 @@ func (j *job) acceptDevice(dev driver.DiscoveredDevice) bool {
 // 带清单时**空清单也分配**（`make([]T, 0, n)` 而不是留 nil）：nil 是"这一份没带
 // 清单"的标记，用它表示"扫了但没有结果"会让调用方分不清两种情况。
 func (j *job) snapshot(now time.Time, includeResults bool) *Snapshot {
+	remaining := j.requested - j.offset
+	// 取消会留下**本批未扫完**的目标：offset 已经越过这一批，但它们确实没被扫过。
+	// 续扫会从批首重扫整批（完成顺序与目标顺序无关，无法精确续在中间），所以
+	// 这里把它们计入"未扫描"，否则最后一批被取消后前端不会给出"继续扫描"入口。
+	canceledMidBatch := j.state == JobCanceled && j.scannedInBatch < j.planned
+	if canceledMidBatch {
+		remaining += j.planned - j.scannedInBatch
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
 	s := &Snapshot{
 		JobID:         j.id,
 		Protocol:      j.protocol,
@@ -164,9 +201,11 @@ func (j *job) snapshot(now time.Time, includeResults bool) *Snapshot {
 		Reason:        j.reason,
 		Requested:     j.requested,
 		Planned:       j.planned,
-		Truncated:     j.truncated,
+		Truncated:     j.truncated || (canceledMidBatch && remaining > 0),
+		Remaining:     remaining,
 		Total:         j.planned,
-		Scanned:       j.scanned,
+		Scanned:       j.scannedInBatch,
+		ScannedTotal:  j.batchStart + j.scannedInBatch,
 		Found:         len(j.devices),
 		EstimateMaxMs: j.estimateMaxMs,
 		StartedAt:     formatTime(j.startedAt),

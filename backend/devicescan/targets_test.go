@@ -221,3 +221,96 @@ func TestBroadcastable(t *testing.T) {
 		}
 	}
 }
+
+// ==================== 分批续扫（expandTargetsPage） ====================
+
+// TestExpandTargetsPageCoversWholeListOnce 逐页取完必须与整段展开逐字相同：
+// 不重、不漏、顺序一致。续扫的**全部正确性**都压在这条上 —— 批次交界处少一个
+// 地址只会表现为"某台设备扫不到"，不报任何错。
+func TestExpandTargetsPageCoversWholeListOnce(t *testing.T) {
+	full, requested, _ := expandTargets(testSubnets(), 502, 1024, driver.TargetModeUnicast)
+	if requested != testHosts {
+		t.Fatalf("requested = %d，期望 %d", requested, testHosts)
+	}
+
+	var got []string
+	offset := 0
+	for pages := 0; ; pages++ {
+		if pages > 10 {
+			t.Fatal("分页没有收敛")
+		}
+		page, req, next, truncated := expandTargetsPage(
+			testSubnets(), 502, 2, offset, driver.TargetModeUnicast)
+		if req != requested {
+			t.Fatalf("第 %d 页 requested = %d，期望 %d", pages, req, requested)
+		}
+		for _, tg := range page {
+			got = append(got, tg.Host)
+		}
+		if next <= offset {
+			t.Fatalf("第 %d 页的 nextOffset 没有前进：offset=%d next=%d", pages, offset, next)
+		}
+		offset = next
+		if !truncated {
+			if offset != requested {
+				t.Fatalf("末页 nextOffset = %d，期望 %d", offset, requested)
+			}
+			break
+		}
+	}
+
+	if len(got) != len(full) {
+		t.Fatalf("分页取到 %d 个目标，整段展开 %d 个", len(got), len(full))
+	}
+	for i := range full {
+		if got[i] != full[i].Host {
+			t.Fatalf("第 %d 个目标 = %q，整段展开是 %q —— 顺序或分页边界漂移", i, got[i], full[i].Host)
+		}
+	}
+}
+
+// TestExpandTargetsPageKeepsBroadcastOnFirstPage 广播目标只出现在第一批。
+//
+// 广播目标排在虚拟列表最前，续扫从它之后开始。若第二页又产出一次广播，
+// 用户会看到同一批设备被探测两遍（结果虽被去重，时间却白花）。
+func TestExpandTargetsPageKeepsBroadcastOnFirstPage(t *testing.T) {
+	first, requested, next, truncated := expandTargetsPage(
+		testSubnets(), 44818, 1, 0, driver.TargetModeBoth)
+	if requested != testHosts+1 {
+		t.Fatalf("requested = %d，期望 %d（6 个主机 + 1 个广播）", requested, testHosts+1)
+	}
+	if !truncated || len(first) != 1 || !first[0].Broadcast {
+		t.Fatalf("第一页应只有那个广播目标，实际 %+v", first)
+	}
+
+	second, _, _, truncated := expandTargetsPage(
+		testSubnets(), 44818, 1024, next, driver.TargetModeBoth)
+	if truncated {
+		t.Fatal("第二批之后不该还有目标")
+	}
+	if len(second) != testHosts {
+		t.Fatalf("第二批有 %d 个目标，期望 %d", len(second), testHosts)
+	}
+	for _, tg := range second {
+		if tg.Broadcast {
+			t.Fatalf("广播目标在第二批又出现了：%+v", tg)
+		}
+	}
+}
+
+// TestExpandTargetsPageOffsetBeyondEnd offset 越过末尾时返回空页，且不误报"还有剩余"。
+// 前端正常不会这么调；但续扫是 HTTP 入口，越界必须收敛成一个空页而不是 panic 或
+// 一个永远为真的 truncated。
+func TestExpandTargetsPageOffsetBeyondEnd(t *testing.T) {
+	targets, requested, next, truncated := expandTargetsPage(
+		testSubnets(), 502, 10, 100, driver.TargetModeUnicast)
+	if len(targets) != 0 {
+		t.Fatalf("越界 offset 应返回空页，实际 %+v", targets)
+	}
+	if next != requested {
+		t.Fatalf("nextOffset = %d，期望收敛到 %d", next, requested)
+	}
+	if truncated {
+		t.Fatal("offset 已越过末尾，不该报告还有剩余")
+	}
+}

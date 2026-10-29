@@ -780,3 +780,160 @@ func TestDedupDropsSameDeviceFromTwoTargets(t *testing.T) {
 		t.Errorf("scanned = %d，期望 %d", done.Scanned, testHosts+1)
 	}
 }
+
+// ==================== 分批续扫 ====================
+
+// TestContinueScansRemainingTargetsInSameJob 单批上限只扫前 N 个时，续扫把剩下的
+// 目标扫完，且**结果落在同一个任务里**（jobId 不变、设备清单累计）。
+//
+// 这是分批续扫的核心承诺：建库接口按 snap.Devices[index] 定位，任务一换，
+// 前面几批扫到的结果就从服务端消失了。
+func TestContinueScansRemainingTargetsInSameJob(t *testing.T) {
+	f := newFixture(t, &configFile.Config{DeviceScan: configFile.DeviceScanConfig{
+		Enabled: true, MaxTargets: 3,
+	}}, 1000)
+	f.prober.devices = 1 // 每个目标产出一台设备，用来断言结果跨批累计
+
+	first := submit(t, f.engine, SubmitRequest{Protocol: testProtocol})
+	if first.Planned != 3 || !first.Truncated || first.Remaining != testHosts-3 {
+		t.Fatalf("第一批 planned=%d truncated=%v remaining=%d，期望 3/true/%d",
+			first.Planned, first.Truncated, first.Remaining, testHosts-3)
+	}
+	f.waitState(t, first.JobID, JobDone)
+
+	second, err := f.engine.Continue(first.JobID)
+	if err != nil {
+		t.Fatalf("Continue 失败: %v", err)
+	}
+	if second.JobID != first.JobID {
+		t.Fatalf("续扫换了任务 id：%s → %s", first.JobID, second.JobID)
+	}
+	if second.State != JobRunning {
+		t.Fatalf("续扫后状态 = %s，期望 running", second.State)
+	}
+	if second.Planned != testHosts-3 || second.Remaining != 0 || second.Truncated {
+		t.Fatalf("第二批 planned=%d remaining=%d truncated=%v，期望 %d/0/false",
+			second.Planned, second.Remaining, second.Truncated, testHosts-3)
+	}
+
+	done := f.waitState(t, first.JobID, JobDone)
+	if done.Scanned != testHosts-3 || done.ScannedTotal != testHosts || done.Total != testHosts-3 {
+		t.Errorf("scanned=%d scannedTotal=%d total=%d，期望 %d/%d/%d",
+			done.Scanned, done.ScannedTotal, done.Total,
+			testHosts-3, testHosts, testHosts-3)
+	}
+	if done.Found != testHosts {
+		t.Errorf("found = %d，期望 %d —— 结果必须跨批次累计", done.Found, testHosts)
+	}
+
+	// 两批合起来恰好覆盖 6 个主机地址，不重不漏。
+	seen := map[string]bool{}
+	for _, c := range f.prober.calls {
+		if seen[c.Host] {
+			t.Errorf("目标 %s 被探测了两次", c.Host)
+		}
+		seen[c.Host] = true
+	}
+	if len(seen) != testHosts {
+		t.Errorf("两批共探测 %d 个不同地址，期望 %d", len(seen), testHosts)
+	}
+}
+
+// TestContinueAtEndIsIdempotent 已扫完的任务再续扫是幂等的空操作。
+func TestContinueAtEndIsIdempotent(t *testing.T) {
+	f := newFixture(t, nil, 1000)
+	first := submit(t, f.engine, SubmitRequest{Protocol: testProtocol})
+	f.waitState(t, first.JobID, JobDone)
+	before := f.prober.callCount()
+
+	snap, err := f.engine.Continue(first.JobID)
+	if err != nil {
+		t.Fatalf("已扫完时 Continue 应幂等成功: %v", err)
+	}
+	if snap.JobID != first.JobID || snap.State != JobDone || snap.Remaining != 0 {
+		t.Fatalf("幂等返回的快照不对: %+v", snap)
+	}
+	if got := f.prober.callCount(); got != before {
+		t.Errorf("幂等续扫又发了 %d 次探测", got-before)
+	}
+}
+
+// TestContinueRejectedWhileRunning 上一批还在跑时不能续扫。
+func TestContinueRejectedWhileRunning(t *testing.T) {
+	f := newFixture(t, nil, 1000)
+	f.prober.gate = make(chan struct{})
+	defer close(f.prober.gate)
+
+	snap := submit(t, f.engine, SubmitRequest{Protocol: testProtocol})
+	if _, err := f.engine.Continue(snap.JobID); !errors.Is(err, ErrBusy) {
+		t.Fatalf("运行中续扫应返回 ErrBusy，实际 %v", err)
+	}
+	if _, err := f.engine.Continue("scan-nope"); !errors.Is(err, ErrJobNotFound) {
+		t.Fatalf("未知任务应返回 ErrJobNotFound，实际 %v", err)
+	}
+}
+
+// TestContinueAfterCancelRescansCurrentBatch 取消后续扫必须从**当前批的起点**重来。
+//
+// 取消时并发探测完成到哪一步无法确定（完成顺序与目标顺序无关），所以不能从
+// "下一批"接着扫 —— 那会静默跳过本批未完成的一半。重扫整批的重复结果由
+// acceptDevice 去重，代价只是多几次探测。
+func TestContinueAfterCancelRescansCurrentBatch(t *testing.T) {
+	f := newFixture(t, &configFile.Config{DeviceScan: configFile.DeviceScanConfig{
+		Enabled: true, MaxTargets: 3,
+	}}, 1000)
+	f.prober.gate = make(chan struct{})
+
+	snap := submit(t, f.engine, SubmitRequest{Protocol: testProtocol})
+
+	// 精确放行一个探测：制造"本批只扫了一部分"的稳定状态。
+	f.prober.gate <- struct{}{}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got, err := f.engine.Progress(snap.JobID)
+		if err == nil && got.Scanned >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("等第一个目标扫完超时")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	if err := f.engine.Cancel(snap.JobID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	canceled := f.waitState(t, snap.JobID, JobCanceled)
+	// 未扫的 5 个 = 本批剩下 2 个 + 下一批 3 个。
+	if canceled.Remaining != testHosts-1 {
+		t.Fatalf("取消后 remaining = %d，期望 %d", canceled.Remaining, testHosts-1)
+	}
+	if !canceled.Truncated {
+		t.Fatal("取消留下未扫的目标时必须报告 truncated，否则前端不会给出继续入口")
+	}
+
+	close(f.prober.gate) // 之后所有探测立即放行（含旧批仍在收尾的那些）
+	second, err := f.engine.Continue(snap.JobID)
+	if err != nil {
+		t.Fatalf("Continue: %v", err)
+	}
+	if second.Planned != 3 {
+		t.Fatalf("续扫 planned = %d，期望从批首重扫 3 个目标", second.Planned)
+	}
+	f.waitState(t, snap.JobID, JobDone)
+
+	// 取消发生在第一批；重扫把第一批补完整后，再续一次才能覆盖第二批。
+	if _, err := f.engine.Continue(snap.JobID); err != nil {
+		t.Fatalf("第二次 Continue: %v", err)
+	}
+	f.waitState(t, snap.JobID, JobDone)
+
+	seen := map[string]bool{}
+	for _, c := range f.prober.calls {
+		seen[c.Host] = true
+	}
+	if len(seen) != testHosts {
+		t.Errorf("重扫后共覆盖 %d 个地址，期望 %d（不能因为取消而漏掉本批后半段）",
+			len(seen), testHosts)
+	}
+}

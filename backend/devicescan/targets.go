@@ -111,7 +111,17 @@ func subnetOnes(cidr string) (int, bool) {
 // 地址本身或全 1，发出去要么无人应答、要么打到别的网段上。
 func broadcastable(ones int) bool { return ones >= 1 && ones <= 30 }
 
-// expandTargets 把网段展开成本次扫描的目标列表，最多 maxTargets 个。
+// expandTargets 把网段展开成**第一批**目标列表，最多 maxTargets 个。
+//
+// 是 expandTargetsPage 在 offset=0 时的薄包装，保留给只关心第一批的调用方与
+// 既有测试。续扫走 expandTargetsPage —— 两处必须是同一次展开的不同切片，
+// 各写一份就会在批次交界处漏掉或重复地址，而这种错误只会表现为"某台设备扫不到"。
+func expandTargets(subnets []SubnetInfo, port int, maxTargets int, mode driver.TargetMode) (targets []driver.ScanTarget, requested int, truncated bool) {
+	targets, requested, nextOffset, _ := expandTargetsPage(subnets, port, maxTargets, 0, mode)
+	return targets, requested, nextOffset < requested
+}
+
+// expandTargetsPage 展开虚拟目标列表里 [offset, offset+limit) 这一段。
 //
 // 产出什么目标由插件的 TargetMode 决定（见 driver.TargetMode）：
 //
@@ -124,22 +134,28 @@ func broadcastable(ones int) bool { return ones >= 1 && ones <= 30 }
 // 应答单播），而广播一次就能拿回整个网段的答案。反之 S7/Modbus 这类没有发现
 // 报文的协议只能逐主机拨号 —— 所以这件事必须由插件说、网关照做，不能取其一。
 //
-// 返回 requested 是展开前的目标总数（不受上限影响），truncated 表示被截断。
-// 两者都要回给前端：静默截断会让用户从"没扫到设备"得出"这个网段没有设备"的
-// 错误结论，而实际原因是上限只扫了前 1024 个地址。
+// 虚拟列表的次序是固定的：**广播目标在前**（按网段顺序），然后是各网段的逐主机
+// 地址。offset/limit 数的是**目标序号**（广播也计入），因此同一组网段 + 同一模式
+// 下任何一次调用的第 N 个目标都相同 —— 这是分批续扫不会漏扫/重扫的前提。
+//
+// 返回 requested 是展开前的目标总数（不受 limit 影响），nextOffset 是下一批的
+// 起点（= offset + len(targets)，不超过 requested），truncated 表示还有未扫的
+// 目标。三者都要回给前端：静默截断会让用户从"没扫到设备"得出"这个网段没有
+// 设备"的错误结论，而实际原因只是单批上限只扫了前 1024 个地址。
 //
 // 单播展开只排除网络地址与广播地址（它们不是主机）。**本机地址照扫** ——
 // 与网关同机的设备是真实存在的（网关与 PLC 仿真器同机调试、边缘一体机上
 // 另跑着采集服务），而"静默跳过某一个地址"恰恰会让用户从"没扫到"得出
 // "那里没有设备"的错误结论，代价却只是多一次探测。
-func expandTargets(subnets []SubnetInfo, port int, maxTargets int, mode driver.TargetMode) (targets []driver.ScanTarget, requested int, truncated bool) {
+func expandTargetsPage(subnets []SubnetInfo, port int, limit, offset int,
+	mode driver.TargetMode) (targets []driver.ScanTarget, requested, nextOffset int, truncated bool) {
 	mode = normalizeTargetMode(mode)
 	wantUnicast := mode == driver.TargetModeUnicast || mode == driver.TargetModeBoth
 	wantBroadcast := mode == driver.TargetModeBroadcast || mode == driver.TargetModeBoth
 
-	// 先单独算一遍总量：它**不受上限影响**，是前端渲染"只扫了前 N 个"的依据。
-	// 不能边展开边累加 —— 一旦触顶就跳出循环，后面那些没走到（却确实存在于
-	// 用户所选网段里）的目标数就漏掉了，提示出来的数字比实际小。
+	// 先单独算一遍总量：它**不受 limit 影响**，是前端渲染"还有 N 个未扫"的依据。
+	// 不能边展开边累加 —— 一旦本批装满就跳出循环，后面那些没走到（却确实存在
+	// 于用户所选网段里）的目标数就漏掉了，提示出来的数字比实际小。
 	for _, s := range subnets {
 		ones, ok := subnetOnes(s.CIDR)
 		if !ok {
@@ -155,20 +171,41 @@ func expandTargets(subnets []SubnetInfo, port int, maxTargets int, mode driver.T
 		}
 	}
 
-	capped := false
+	if offset < 0 {
+		offset = 0
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	if limit == 0 {
+		return nil, requested, offset, offset < requested
+	}
+
+	// idx 是虚拟列表里下一个目标的序号；只有落在 [offset, offset+limit) 里的
+	// 才物化成 ScanTarget。这样 /16 续扫到最后一页时也不会先物化六万个字符串。
+	idx := 0
+	full := false
+	emit := func(t driver.ScanTarget) {
+		if idx >= offset && len(targets) < limit {
+			targets = append(targets, t)
+		}
+		idx++
+		if len(targets) >= limit {
+			full = true
+		}
+	}
 
 	// 广播目标**先**产出，这个顺序是有意的两件事：
 	//
 	//  ① 广播目标一个就覆盖整个网段，把它排在两百多个逐主机目标之后，
-	//     一个大网段触顶（maxTargets）时就可能永远轮不到它 —— 而它恰恰是
-	//     最廉价、最可能先出结果的那一个。前端因此能立刻看到"扫到了什么"，
-	//     而不是先等一堆不可达地址各跑满一次超时；
+	//     一个大网段触顶时就可能永远轮不到它 —— 而它恰恰是最廉价、最可能
+	//     先出结果的那一个。前端因此能立刻看到"扫到了什么"，而不是先等一堆
+	//     不可达地址各跑满一次超时；
 	//  ② ScanTarget.LocalIP 是广播的源地址绑定（多网卡机器上不绑就只会从
 	//     默认路由那张网卡出去，一台设备也发现不了，见 driver.ScanTarget）。
-	if wantBroadcast {
+	if wantBroadcast && !full {
 		for _, s := range subnets {
-			if len(targets) >= maxTargets {
-				capped = true
+			if full {
 				break
 			}
 			ones, ok := subnetOnes(s.CIDR)
@@ -183,7 +220,7 @@ func expandTargets(subnets []SubnetInfo, port int, maxTargets int, mode driver.T
 			if bcast == nil {
 				continue
 			}
-			targets = append(targets, driver.ScanTarget{
+			emit(driver.ScanTarget{
 				Host:      bcast.String(),
 				Port:      port,
 				LocalIP:   s.LocalIP,
@@ -193,36 +230,38 @@ func expandTargets(subnets []SubnetInfo, port int, maxTargets int, mode driver.T
 		}
 	}
 
-	if !wantUnicast || capped {
-		return targets, requested, capped
-	}
-
-expand:
-	for _, s := range subnets {
-		_, ipNet, err := net.ParseCIDR(s.CIDR)
-		if err != nil {
-			continue
-		}
-		bcast := broadcastOf(ipNet.IP, ipNet.Mask)
-
-		// 逐地址累加而不是先物化整个网段再截断：/16 展开是六万多个字符串，
-		// 而默认上限只有 1024。
-		ip := nextIP(ipNet.IP)
-		for ipNet.Contains(ip) && (bcast == nil || !ip.Equal(bcast)) {
-			if len(targets) >= maxTargets {
-				capped = true
-				break expand
+	if wantUnicast && !full {
+	expand:
+		for _, s := range subnets {
+			_, ipNet, err := net.ParseCIDR(s.CIDR)
+			if err != nil {
+				continue
 			}
-			targets = append(targets, driver.ScanTarget{
-				Host:    ip.String(),
-				Port:    port,
-				LocalIP: s.LocalIP,
-				Subnet:  s.CIDR,
-			})
-			ip = nextIP(ip)
+			bcast := broadcastOf(ipNet.IP, ipNet.Mask)
+
+			// 逐地址累加而不是先物化整个网段再截断：/16 展开是六万多个字符串，
+			// 而默认单批上限只有 1024。
+			ip := nextIP(ipNet.IP)
+			for ipNet.Contains(ip) && (bcast == nil || !ip.Equal(bcast)) {
+				emit(driver.ScanTarget{
+					Host:    ip.String(),
+					Port:    port,
+					LocalIP: s.LocalIP,
+					Subnet:  s.CIDR,
+				})
+				if full {
+					break expand
+				}
+				ip = nextIP(ip)
+			}
 		}
 	}
-	return targets, requested, capped
+
+	nextOffset = offset + len(targets)
+	if nextOffset > requested {
+		nextOffset = requested
+	}
+	return targets, requested, nextOffset, nextOffset < requested
 }
 
 // broadcastOf 计算子网广播地址（ip | ^mask）。掩码长度不是 4 时返回 nil。

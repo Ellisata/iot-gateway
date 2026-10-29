@@ -80,6 +80,27 @@ func (ctr *DeviceScanController) Status(c *gin.Context) {
 	c.JSON(200, response.Success(data))
 }
 
+// Continue 续扫当前任务的下一批目标。
+//
+// 与 Start 同样**登记即返回**：扫完一批后用户点"继续扫描"，前端拿到新快照
+// 后照常轮询 jobId（任务 id 不变，已发现的结果保留）。
+func (ctr *DeviceScanController) Continue(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req dto.ContinueDeviceScanDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+
+	data, err := ctr.deviceScanService.Continue(ctx, req.JobID)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
 // Cancel 取消扫描。
 func (ctr *DeviceScanController) Cancel(c *gin.Context) {
 	ctx := c.Request.Context()

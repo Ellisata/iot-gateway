@@ -50,6 +50,15 @@ type CancelDeviceScanDTO struct {
 	JobID string `json:"jobId" binding:"required"`
 }
 
+// ContinueDeviceScanDTO 续扫当前任务的下一批目标。
+//
+// 只传任务 id，不重传协议/选项/网段/端口：续扫必须与第一批**同一份规划**
+// 展开，否则前后两批的目标列表会错位（漏扫或重扫）。任务还在内存里，
+// 那些参数都在服务端。
+type ContinueDeviceScanDTO struct {
+	JobID string `json:"jobId" binding:"required"`
+}
+
 // CreateDevicesFromScanDTO 把勾选的扫描结果批量建成设备。
 type CreateDevicesFromScanDTO struct {
 	// JobID 结果所属的扫描任务。服务端**只认自己持有的那份结果**：

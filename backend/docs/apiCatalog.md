@@ -134,12 +134,13 @@ GET /agentApi/__surface        # 无需任何凭据
 | `POST /agentApi/device/testDeviceConnection` | POST | 不改状态，但真实连一次 PLC |
 | `POST /agentApi/alarmWebhook/testSend` | POST | 不改状态，但**真的往钉钉/飞书发一条消息** |
 
-`probe` 这 8 条是全部清单里最容易被误判的一组，完整列出：
+`probe` 这 9 条是全部清单里最容易被误判的一组，完整列出：
 
 | 接口 | 代价 |
 | ---- | ---- |
 | `POST /agentApi/alarmWebhook/testSend` | 真的对外发消息，群里会有人看见 |
 | `POST /agentApi/deviceScan/start` | 扫本机网段，重且慢，同时只允许一个任务 |
+| `POST /agentApi/deviceScan/continue` | 接着扫同一任务的下一批，重且慢，同一时刻只允许一个任务 |
 | `POST /agentApi/deviceScan/discoverPoints` | 同步阻塞最长约 7s，且占用该设备的采集会话锁 |
 | `POST /agentApi/deviceScan/cancel` | 取消在跑的扫描 |
 | `POST /agentApi/device/testDeviceConnection` | 真实连接一次 PLC |
@@ -413,7 +414,8 @@ Agent 调用前应先获得用户明确意图。
 | POST | `/device/testDeviceConnection` | 真实连接一次 PLC（超时受限于设备） | `protocolName`*, `protocolJson`* | `data: null` |
 | POST | `/pushChannel/testConnectivity` | 真实连接下游（MQTT/HTTP 等），不保存配置；HTTP 只验证 TCP/TLS 可达 | `type`*, `configJson`*；`name` 为旧客户端兼容字段 | `data: null` |
 | POST | `/pushChannel/testSend` | ⚠️ **真的向配置的下游发送一条样例数据**，不保存配置 | `type`*, `configJson`* | `PushChannelTestSendVO` |
-| POST | `/deviceScan/start` | **全网段扫描**，重且慢，同一时刻只允许一个任务 | `protocol`*, `options`, `subnets`, `port` | `ScanJobVO` |
+| POST | `/deviceScan/start` | **全网段扫描**，重且慢，同一时刻只允许一个任务；超过单批上限时只扫第一批（`truncated=true`） | `protocol`*, `options`, `subnets`, `port` | `ScanJobVO` |
+| POST | `/deviceScan/continue` | 续扫**同一任务**的下一批（`jobId` 不变、结果累计）；重且慢 | `jobId`* | `ScanJobVO` |
 | POST | `/deviceScan/cancel` | 取消在跑的扫描 | `jobId`* | `data: null` |
 | POST | `/deviceScan/discoverPoints` | **同步 HTTP**，复用设备采集会话，最长 7 秒 | `deviceId`*, `options` | `PointScanResultVO` |
 | POST | `/alarmWebhook/testSend` | ⚠️ **真的发送一条报警消息到钉钉/企微/飞书** | 见 §4 说明 | `data: null` |

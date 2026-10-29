@@ -282,21 +282,11 @@ func (e *Engine) plan(req SubmitRequest, now time.Time) (*job, error) {
 	}
 	// 目标的形状由插件的 TargetMode 决定：广播型协议（EtherNet/IP 的 ListIdentity、
 	// FINS/UDP 的节点查询）要的是各网段的子网广播地址，不是两百多个主机地址。
-	// 见 expandTargets 的说明 —— 这个字段曾经被声明、被校验、却没有被使用。
-	targets, requested, truncated := expandTargets(selected, port, e.maxTargets, spec.TargetMode)
+	// 见 expandTargetsPage 的说明 —— 这个字段曾经被声明、被校验、却没有被使用。
+	targets, requested, nextOffset, truncated := expandTargetsPage(
+		selected, port, e.maxTargets, 0, spec.TargetMode)
 	if len(targets) == 0 {
 		return nil, ErrNoTargets
-	}
-
-	// 最坏耗时的上界：全部目标走满插件的单目标预算，且并发度用满。
-	estimate := requested
-	if truncated {
-		estimate = len(targets)
-	}
-	estimateMs := 0
-	if e.maxConcurrent > 0 {
-		batches := (estimate + e.maxConcurrent - 1) / e.maxConcurrent
-		estimateMs = batches * spec.MaxBudgetMs
 	}
 
 	return &job{
@@ -304,14 +294,29 @@ func (e *Engine) plan(req SubmitRequest, now time.Time) (*job, error) {
 		protocol:      req.Protocol,
 		options:       req.Options,
 		port:          port,
+		subnets:       selected,
+		targetMode:    spec.TargetMode,
+		budgetMs:      spec.MaxBudgetMs,
+		startedAt:     now,
 		requested:     requested,
 		planned:       len(targets),
+		offset:        nextOffset,
+		batchStart:    0,
 		truncated:     truncated,
 		targets:       targets,
-		startedAt:     now,
-		estimateMaxMs: estimateMs,
+		estimateMaxMs: estimateMaxMsOf(len(targets), e.maxConcurrent, spec.MaxBudgetMs),
 		seen:          make(map[string]struct{}, 16),
 	}, nil
+}
+
+// estimateMaxMsOf 估算一批目标的最坏耗时：全部目标走满插件的单目标预算、
+// 且并发度用满。是**上界**而非期望（不可达的目标才会走满拨号超时）。
+func estimateMaxMsOf(n, maxConcurrent, budgetMs int) int {
+	if n <= 0 || maxConcurrent <= 0 || budgetMs <= 0 {
+		return 0
+	}
+	batches := (n + maxConcurrent - 1) / maxConcurrent
+	return batches * budgetMs
 }
 
 // specOf 在插件声明的能力里查这个协议。
@@ -373,7 +378,7 @@ func (e *Engine) probeOne(j *job, target driver.ScanTarget) {
 	if j.ctx.Err() != nil {
 		return
 	}
-	j.scanned++
+	j.scannedInBatch++
 
 	if err != nil {
 		j.errors = append(j.errors, TargetError{Host: target.Host, Reason: err.Error()})
@@ -447,6 +452,117 @@ func (e *Engine) statusLocked(jobID string, now time.Time, includeResults bool) 
 		return nil, ErrJobNotFound
 	}
 	return e.job.snapshot(now, includeResults), nil
+}
+
+// Continue 续扫当前任务的下一批目标。
+//
+// **沿用同一个 job**：已发现的设备、探测失败明细与设备去重表都保留，只把目标
+// 换成虚拟列表里的下一段。这样前端扫完多批之后仍能一次性勾选建设备 ——
+// CreateDevices 依赖的 snap.Devices[index] 在全过程里始终指向同一份清单。
+//
+// 取消后续扫会从**当前批的起点**重扫，而不是从下一批开始：取消时并发探测完成
+// 到哪一步无法确定（与目标顺序无关），重扫整批比漏掉一段安全；重复发现的设备
+// 由 acceptDevice 去重，代价只是多几次探测。
+//
+// 已是最后一批时幂等返回当前快照（前端此时不该再显示"继续"按钮）。
+func (e *Engine) Continue(jobID string) (*Snapshot, error) {
+	if !e.Enabled() {
+		return nil, ErrDisabled
+	}
+
+	// 第一段：校验并取到上一批的结束信号。**不能持锁等待** —— run 收尾时的
+	// finish 需要 Engine.mu，持锁等就是死锁。
+	e.mu.Lock()
+	if e.stopped {
+		e.mu.Unlock()
+		return nil, ErrDisabled
+	}
+	j := e.job
+	if j == nil || j.id != jobID {
+		e.mu.Unlock()
+		return nil, ErrJobNotFound
+	}
+	now := e.now()
+	if j.expired(now, e.ttl) {
+		e.job = nil
+		e.mu.Unlock()
+		return nil, ErrJobNotFound
+	}
+	if !j.terminal() {
+		e.mu.Unlock()
+		return nil, ErrBusy
+	}
+	done := j.doneCh
+	e.mu.Unlock()
+
+	// 取消是**立刻返回**的，在飞探测可能还在收尾。等它们退出再换批次：
+	// 否则旧 worker 会拿新批次的 ctx/计数继续写结果，把进度与终态搅乱。
+	// 有上限，与 Stop 同一取舍 —— 一个卡住的插件不能把续扫请求挂死。
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(stopWait):
+			return nil, ErrBusy
+		}
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// 等待期间别的请求可能已经换了任务（Submit）或抢先续扫了一轮。
+	if e.stopped {
+		return nil, ErrDisabled
+	}
+	if e.job != j {
+		return nil, ErrJobNotFound
+	}
+	if !j.terminal() {
+		return nil, ErrBusy
+	}
+	now = e.now()
+	if j.expired(now, e.ttl) {
+		e.job = nil
+		return nil, ErrJobNotFound
+	}
+
+	// 与 job.snapshot 的 Remaining 同口径：取消留下的本批未扫部分也算"还要扫"。
+	remaining := j.requested - j.offset
+	canceledMidBatch := j.state == JobCanceled && j.scannedInBatch < j.planned
+	if canceledMidBatch {
+		remaining += j.planned - j.scannedInBatch
+	}
+	if remaining <= 0 {
+		return j.snapshot(now, true), nil
+	}
+
+	start := j.offset
+	if canceledMidBatch {
+		start = j.batchStart
+	}
+	targets, requested, nextOffset, truncated := expandTargetsPage(
+		j.subnets, j.port, e.maxTargets, start, j.targetMode)
+	if len(targets) == 0 {
+		return nil, ErrNoTargets
+	}
+
+	j.batchStart = start
+	j.requested = requested
+	j.offset = nextOffset
+	j.planned = len(targets)
+	j.targets = targets
+	j.truncated = truncated
+	j.scannedInBatch = 0
+	j.estimateMaxMs = estimateMaxMsOf(len(targets), e.maxConcurrent, j.budgetMs)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	j.ctx, j.cancel = ctx, cancel
+	j.doneCh = make(chan struct{})
+	j.state = JobRunning
+	j.reason = ""
+	j.endedAt = time.Time{}
+
+	go e.run(j)
+	return j.snapshot(now, true), nil
 }
 
 // Cancel 取消任务。已结束的任务取消是幂等的成功（用户的意图已达成）。

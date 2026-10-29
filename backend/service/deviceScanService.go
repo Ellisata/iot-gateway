@@ -137,6 +137,19 @@ func (s *DeviceScanService) Status(ctx context.Context, jobID string, withDevice
 	return scanJobVO(snap), nil
 }
 
+// Continue 续扫当前任务的下一批目标。
+//
+// 与 Start 的区别只是"不新建任务"：协议、选项、网段、端口与已发现的结果都在
+// 服务端持有，客户端只需要任务 id。同一时刻仍只允许一个任务在跑（续扫时若上一批
+// 在飞探测还没收尾，返回"已有扫描任务在运行"）。
+func (s *DeviceScanService) Continue(ctx context.Context, jobID string) (*vo.ScanJobVO, error) {
+	snap, err := s.engine.Continue(jobID)
+	if err != nil {
+		return nil, scanError(err)
+	}
+	return scanJobVO(snap), nil
+}
+
 // Cancel 取消扫描任务。已结束的任务取消是幂等的成功。
 func (s *DeviceScanService) Cancel(ctx context.Context, jobID string) error {
 	if err := s.engine.Cancel(jobID); err != nil {
@@ -414,8 +427,10 @@ func scanJobVO(snap *devicescan.Snapshot) *vo.ScanJobVO {
 		RequestedTargets: snap.Requested,
 		PlannedTargets:   snap.Planned,
 		Truncated:        snap.Truncated,
+		RemainingTargets: snap.Remaining,
 		Total:            snap.Total,
 		Scanned:          snap.Scanned,
+		ScannedTotal:     snap.ScannedTotal,
 		Found:            snap.Found,
 		ElapsedMs:        snap.ElapsedMs,
 		EstimateMaxMs:    snap.EstimateMaxMs,

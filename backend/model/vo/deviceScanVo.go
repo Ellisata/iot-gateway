@@ -86,17 +86,24 @@ type ScanJobVO struct {
 	State  string `json:"state"`
 	Reason string `json:"reason,omitempty"`
 
-	// RequestedTargets 所选网段展开后的目标总数（不受上限影响）。
+	// RequestedTargets 所选网段展开后的目标总数（不受单批上限影响）。
 	RequestedTargets int `json:"requestedTargets"`
-	// PlannedTargets 实际会扫的目标数（上限截断后）。
+	// PlannedTargets **本批**实际会扫的目标数（单批上限截断后）。
+	// 续扫后它是新一批的数量，不是累计值。
 	PlannedTargets int `json:"plannedTargets"`
-	// Truncated 为 true 表示只扫了前 PlannedTargets 个。**前端必须把这件事
-	// 显示出来** —— 否则用户会从"没扫到设备"得出"这个网段没有设备"的错误结论。
+	// Truncated 为 true 表示还有未扫的目标，前端必须显示出来并提供"继续扫描"。
+	// 否则用户会从"没扫到设备"得出"这个网段没有设备"的错误结论。
 	Truncated bool `json:"truncated"`
+	// RemainingTargets 尚未扫描的目标数，0 表示整个网段已扫完。
+	RemainingTargets int `json:"remainingTargets"`
 
+	// Total 本批目标数；Scanned 本批已完成数 —— 进度条用这两个。
 	Total   int `json:"total"`
 	Scanned int `json:"scanned"`
-	Found   int `json:"found"`
+	// ScannedTotal 本次扫描累计完成的目标数（跨批次），配 RequestedTargets
+	// 显示"已扫描 X / 共 Y 个地址"。
+	ScannedTotal int `json:"scannedTotal"`
+	Found        int `json:"found"`
 
 	ElapsedMs int `json:"elapsedMs"`
 	// EstimateMaxMs 最坏耗时的上界估算（全部目标走满插件预算）。

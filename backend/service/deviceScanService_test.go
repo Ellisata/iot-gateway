@@ -218,6 +218,15 @@ func TestScanStatusUnknownJobReportsBusinessCode(t *testing.T) {
 	assertBusinessCode(t, err, enums.DeviceScanJobNotFoundEnum.GetCode())
 }
 
+// TestScanContinueUnknownJobReportsBusinessCode 续扫与查询共用同一套错误映射：
+// 任务过期/不存在时前端要停止轮询并提示重新扫描，而不是把"无此任务"显示成网络错误。
+func TestScanContinueUnknownJobReportsBusinessCode(t *testing.T) {
+	svc, _ := newScanFixture(t, nil, nil)
+
+	_, err := svc.Continue(context.Background(), "scan-404")
+	assertBusinessCode(t, err, enums.DeviceScanJobNotFoundEnum.GetCode())
+}
+
 // TestScanProgressOmitsDevices 轻量快照（withDevices=false）**必须把 Devices 与
 // Errors 留成 nil**，而不是空数组。
 //

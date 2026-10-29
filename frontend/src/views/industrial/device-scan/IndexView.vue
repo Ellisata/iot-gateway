@@ -68,6 +68,18 @@
           <el-button v-if="scanning" :loading="canceling" @click="handleCancel">
             {{ t('deviceScan.cancel') }}
           </el-button>
+          <!-- 单批上限之外的地址靠这里接着扫：任务 id 与已发现的结果都不变，
+               所以它紧挨着"重新扫描"，而不是藏进进度面板。 -->
+          <el-button
+            v-if="canContinue"
+            type="primary"
+            plain
+            :icon="Radar"
+            :loading="continuing"
+            @click="handleContinue"
+          >
+            {{ t('deviceScan.continueScan', { n: job.remainingTargets }) }}
+          </el-button>
           <el-button
             type="primary"
             :icon="Radar"
@@ -178,7 +190,15 @@
           <p class="toolbar-title">{{ t('deviceScan.progressTitle') }}</p>
         </div>
         <div class="progress-meta">
+          <!-- 进度条与第一个读数都是**本批**的；分多批扫时再补一个累计读数，
+               否则用户点了一次"继续扫描"后会觉得已扫数凭空归零。 -->
           <span class="meta-item">{{ t('deviceScan.scanned', { done: job.scanned, total: job.total }) }}</span>
+          <template v-if="job.requestedTargets > job.total">
+            <span class="meta-sep" aria-hidden="true" />
+            <span class="meta-item is-muted">
+              {{ t('deviceScan.scannedOverall', { done: job.scannedTotal, total: job.requestedTargets }) }}
+            </span>
+          </template>
           <span class="meta-sep" aria-hidden="true" />
           <span class="meta-item">{{ t('deviceScan.foundCount', { n: job.found }) }}</span>
           <span class="meta-sep" aria-hidden="true" />
@@ -195,13 +215,18 @@
 
         <p v-if="job.reason" class="progress-reason">{{ job.reason }}</p>
 
-        <!-- 截断必须说出来：否则用户会从"没扫到设备"得出"这个网段没有设备"的错误结论 -->
+        <!-- 截断必须说出来：否则用户会从"没扫到设备"得出"这个网段没有设备"的错误结论。
+             文案只说事实，动作由工具条上的「继续扫描」承担（口径见 handleContinue）。 -->
         <div v-if="job.truncated" class="notice is-warning is-inline">
           <span class="notice-mark" aria-hidden="true">
             <el-icon><AlertTriangle /></el-icon>
           </span>
           <p class="notice-text">
-            {{ t('deviceScan.truncated', { requested: job.requestedTargets, planned: job.plannedTargets }) }}
+            {{ t('deviceScan.truncated', {
+              requested: job.requestedTargets,
+              scanned: job.scannedTotal,
+              remaining: job.remainingTargets,
+            }) }}
           </p>
         </div>
 
@@ -465,6 +490,7 @@ import { dynamicFormLabelWidth, resolveLocalizedText } from '@/i18n/localizedTex
 import { usePagedRows } from '@/composables/usePagedRows'
 import {
   cancelScan,
+  continueScan,
   createDevicesFromScan,
   getScanCapabilities,
   getScanStatus,
@@ -482,6 +508,7 @@ const POLL_MAX_MS = 30 * 60 * 1000
 const caps = ref(null)
 const job = ref(null)
 const starting = ref(false)
+const continuing = ref(false)
 const canceling = ref(false)
 const creating = ref(false)
 const jobExpired = ref(false)
@@ -559,7 +586,18 @@ const canStart = computed(
   () => !!caps.value?.enabled
     && !!form.protocol
     && form.subnets.length > 0
-    && !starting.value,
+    && !starting.value
+    && !continuing.value,
+)
+// 还有未扫的地址 → 工具条上出现「继续扫描」。只在任务终态出现：运行中按它
+// 只会拿到"已有扫描任务在运行"。
+const canContinue = computed(
+  () => !!job.value
+    && !scanning.value
+    && job.value.truncated
+    && (job.value.remainingTargets ?? 0) > 0
+    && !starting.value
+    && !continuing.value,
 )
 // 页头计数：还没有任务时显示占位符 —— "0 台"会被误读成"这个网段没有设备"
 const displayFound = computed(() =>
@@ -738,6 +776,28 @@ async function handleStart() {
     // 拦截器已提示（无网段、协议不支持、已有任务等都由后端给出可执行的原因）
   } finally {
     starting.value = false
+  }
+}
+
+/**
+ * 续扫下一批目标。**任务不换、结果不清**：service 端用同一个 jobId 把目标换成
+ * 虚拟列表的下一段，已发现的设备与失败明细原样保留 —— 因此这里不能走
+ * handleStart 那套"清空勾选、回第一页"的收尾。
+ *
+ * 工具条上的按钮已由 canContinue 拦住运行态；这里再判一次是为了兜住
+ * "点下去的同时上一批刚被取消、在飞探测还在收尾"的窗口（后端会回 busy）。
+ */
+async function handleContinue() {
+  if (!canContinue.value) return
+  continuing.value = true
+  try {
+    const snap = await continueScan(job.value.jobId)
+    applySnapshot(snap)
+    startPolling(snap.jobId)
+  } catch {
+    // 拦截器已提示（任务过期、上一批仍在收尾等都由后端给出可执行的原因）
+  } finally {
+    continuing.value = false
   }
 }
 
