@@ -336,7 +336,11 @@
             {{ t('channel.previewHint') }}
           </span>
         </div>
-        <pre v-if="!requiresMapping && previewText" class="mapping-preview">{{ previewText }}</pre>
+        <pre
+          v-if="!requiresMapping && previewText"
+          ref="payloadPreviewRef"
+          class="mapping-preview"
+        >{{ previewText }}</pre>
       </div>
 
       <template #footer>
@@ -490,6 +494,7 @@ const scriptEditorRef = ref(null)
 const previewing = ref(false)
 const autoPreviewing = ref(false)
 const previewResult = ref(null)
+const payloadPreviewRef = ref(null)
 const testSending = ref(false)
 const detailLoading = ref(false)
 const mappingTouched = ref(false)
@@ -1056,6 +1061,15 @@ async function handleTestConnectivity() {
 }
 
 // ---------- 载荷预览 / 测试发送 ----------
+/** 无编辑器的格式（native-json 等）预览结果直接追加在按钮下方：
+ *  对话框 body 已经滚到底时新内容仍在可视区外，看起来像「点了没反应」，
+ *  结果渲染出来后把它滚进视野。 */
+function revealPayloadPreview() {
+  nextTick(() => {
+    payloadPreviewRef.value?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  })
+}
+
 async function handlePreview() {
   cancelAutoPreview()
   previewRequestId.value += 1
@@ -1099,7 +1113,10 @@ async function handlePreview() {
       type: formData.type,
       configJson,
     })
-    if (manualPreviewId.value === requestId) previewResult.value = res
+    if (manualPreviewId.value === requestId) {
+      previewResult.value = res
+      revealPayloadPreview()
+    }
   } catch {
     // 全局拦截器已提示
   } finally {
