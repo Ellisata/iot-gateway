@@ -237,10 +237,12 @@
           >
             {{ t('channel.noConnectConfig') }}
           </p>
-          <!-- key 带上 locale：表单文案在创建实例时就固定了，切语言必须重建；
+          <!-- 只渲染表单本身（v-else-if 而不是 v-else）：加载中不要先挂一个
+               空规则的表单实例，否则它会触发一次假的 mounted 并清掉回填数据。
+               key 带上 locale：表单文案在创建实例时就固定了，切语言必须重建；
                v-model 保住重建前已填的值 -->
           <form-create
-            v-else
+            v-else-if="dynamicFormRule.length"
             v-model="dynamicFormValues"
             :key="`${dynamicFormKey}-${locale}`"
             :rule="localizedDynamicFormRule"
@@ -807,8 +809,6 @@ const localizedDynamicFormOptions = computed(() => {
   }
 })
 const dynamicFormLoading = ref(false)
-// 编辑模式回填数据：通道详情接口返回的 configJson
-const dynamicFormPrefill = ref(null)
 // 请求序号：用于忽略过期请求，避免快速切换名称 / 关闭弹框时旧响应覆盖新结果
 const dynamicFormRequestId = ref(0)
 // 测试连接中标记
@@ -849,6 +849,25 @@ function normalizeFormConfig(res) {
 }
 
 /**
+ * 从 configJson 中挑出当前表单声明了的字段。
+ * 编辑回显只取这些字段，避免 format / mapping 这类非表单键混进 v-model
+ * （form-create 会把多余的 modelValue 键一并收进 formData）。
+ */
+function pickPrefillValues(prefill, rule) {
+  let data = prefill
+  for (let i = 0; i < 3 && typeof data === 'string'; i += 1) {
+    data = safeParseJSON(data)
+  }
+  if (!data || typeof data !== 'object') return {}
+  const fields = new Set(rule.map((item) => item.field).filter(Boolean))
+  const out = {}
+  Object.entries(data).forEach(([field, value]) => {
+    if (fields.has(field)) out[field] = value
+  })
+  return out
+}
+
+/**
  * 按通道类型加载连接配置表单
  * @param {string} type - 通道类型（mqtt/http/tdengine-v3...）
  * @param {Object} [prefillConfig] - 编辑时传入 configJson（通道详情接口），用于回填已有填写值
@@ -861,7 +880,6 @@ async function loadDynamicForm(type, prefillConfig) {
   dynamicFormApi.value = null
   // 换通道类型时清掉旧值，避免同名字段把上一条通道的内容带进新表单
   dynamicFormValues.value = {}
-  dynamicFormPrefill.value = prefillConfig ?? null
   if (!type) return
 
   dynamicFormLoading.value = true
@@ -871,13 +889,18 @@ async function loadDynamicForm(type, prefillConfig) {
     if (requestId !== dynamicFormRequestId.value) return
     const config = normalizeFormConfig(res)
     if (config?.rule?.length) {
+      // 编辑回显必须在表单实例创建前把值交给 v-model：form-create 建实例时
+      // 会把 modelValue 当作字段初值。mounted 之后再 setValue 是行不通的 ——
+      // 多语言会把 rule 复制成普通对象，form-create 对非响应式规则上的
+      // setValue 只改内部 formData，不会更新已经渲染出来的控件。
+      dynamicFormValues.value = pickPrefillValues(prefillConfig, config.rule)
       dynamicFormRule.value = config.rule
       dynamicFormOptions.value = {
         ...(config.options || {}),
         submitBtn: false,
         resetBtn: false,
       }
-      // 更换通道名称时强制重建表单实例，触发 mounted 事件以回填编辑值
+      // 更换通道名称时强制重建表单实例
       dynamicFormKey.value += 1
     }
   } catch (err) {
@@ -891,34 +914,9 @@ async function loadDynamicForm(type, prefillConfig) {
   }
 }
 
-/**
- * form-create 渲染完成后获取 API 实例（v-model 绑的是表单数据，不能用它调 validate/formData）
- * 编辑模式：用通道详情的 configJson 回填动态表单值。
- * 必须在 mounted 里回填：form-create 的规则是异步装载的，字段注册前
- * 调 setValue 会静默落空（设备对象页曾因此回显不出来）。
- */
+/** form-create 渲染完成后获取 API 实例（v-model 绑的是表单数据，不能用它调 validate/formData） */
 function handleDynamicFormMounted($f) {
   dynamicFormApi.value = $f
-  const prefill = dynamicFormPrefill.value
-  if (!prefill) return
-  // 只回填一次：切换语言也会重建实例，重复回填会把用户未保存的修改冲掉
-  dynamicFormPrefill.value = null
-  let configData
-  try {
-    configData = typeof prefill === 'string' ? JSON.parse(prefill) : prefill
-  } catch {
-    return
-  }
-  if (typeof configData !== 'object' || configData === null) return
-  // 只回填当前 rule 中存在的字段，避免脏数据残留
-  const validFields = new Set(
-    dynamicFormRule.value.map((item) => item.field).filter(Boolean)
-  )
-  Object.entries(configData).forEach(([field, value]) => {
-    if (validFields.has(field)) {
-      $f.setValue(field, value)
-    }
-  })
 }
 
 /** 类型选择回调：加载该类型的连接配置表单，并重置载荷格式。 */

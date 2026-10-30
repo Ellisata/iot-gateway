@@ -259,7 +259,9 @@
           >
             {{ t('alarmWebhook.noNotifyConfig') }}
           </p>
-          <template v-else>
+          <!-- 只渲染表单本身（v-else-if 而不是 v-else）：加载中不要先挂一个
+               空规则的表单实例，否则它会触发一次假的 mounted -->
+          <template v-else-if="dynamicFormRule.length">
             <!-- 密钥不回显，编辑时留空即保持原值；这条提示否则会被误解为「已清空」 -->
             <p v-if="isEdit && formData.hasSecret" class="webhook-secret-hint">
               {{ t('alarmWebhook.secretKeepHint') }}
@@ -503,7 +505,6 @@ const localizedDynamicFormOptions = computed(() => {
   }
 })
 const dynamicFormLoading = ref(false)
-const dynamicFormPrefill = ref(null)
 // 请求序号：忽略过期响应，避免快速切换类型时旧表单覆盖新结果
 const dynamicFormRequestId = ref(0)
 const testing = ref(false)
@@ -553,6 +554,25 @@ const dynamicFields = computed(() =>
 /** 该类型的表单是否含密钥字段（决定要不要显示「清除密钥」） */
 const hasSecretField = computed(() => dynamicFields.value.includes('secret'))
 
+/** 从已保存配置中挑出当前表单声明了的字段，作为回显值 */
+function pickPrefillValues(prefill, rule) {
+  let data = prefill
+  for (let i = 0; i < 3 && typeof data === 'string'; i += 1) {
+    try {
+      data = JSON.parse(data)
+    } catch {
+      return {}
+    }
+  }
+  if (!data || typeof data !== 'object') return {}
+  const fields = new Set(rule.map((item) => item.field).filter(Boolean))
+  const out = {}
+  Object.entries(data).forEach(([field, value]) => {
+    if (fields.has(field)) out[field] = value
+  })
+  return out
+}
+
 /**
  * 按类型加载通知配置表单
  * @param {string} type - Webhook 类型
@@ -565,7 +585,6 @@ async function loadDynamicForm(type, prefillConfig) {
   dynamicFormApi.value = null
   // 换类型时清掉旧值，避免同名字段把上一类通知的内容带进新表单
   dynamicFormValues.value = {}
-  dynamicFormPrefill.value = prefillConfig ?? null
   if (!type) return
 
   dynamicFormLoading.value = true
@@ -574,13 +593,18 @@ async function loadDynamicForm(type, prefillConfig) {
     if (requestId !== dynamicFormRequestId.value) return
     const config = normalizeFormConfig(res)
     if (config?.rule?.length) {
+      // 回显必须在表单实例创建前把值交给 v-model：form-create 建实例时
+      // 会把 modelValue 当作字段初值。mounted 之后再 setValue 是行不通的 ——
+      // 多语言会把 rule 复制成普通对象，form-create 对非响应式规则上的
+      // setValue 只改内部 formData，不会更新已经渲染出来的控件。
+      dynamicFormValues.value = pickPrefillValues(prefillConfig, config.rule)
       dynamicFormRule.value = config.rule
       dynamicFormOptions.value = {
         ...(config.options || {}),
         submitBtn: false,
         resetBtn: false,
       }
-      // 换类型时强制重建表单实例，触发 mounted 回填
+      // 换类型时强制重建表单实例
       dynamicFormKey.value += 1
     }
   } catch {
@@ -592,26 +616,9 @@ async function loadDynamicForm(type, prefillConfig) {
   }
 }
 
-/** form-create 渲染完成后取 API 实例，并回填已保存的配置值 */
+/** form-create 渲染完成后取 API 实例（v-model 绑的是表单数据，不能用它调 validate/formData） */
 function handleDynamicFormMounted($f) {
   dynamicFormApi.value = $f
-  const prefill = dynamicFormPrefill.value
-  if (!prefill) return
-  // 只回填一次：切换语言也会重建实例，重复回填会把用户未保存的修改冲掉
-  dynamicFormPrefill.value = null
-  let configData
-  try {
-    configData = typeof prefill === 'string' ? JSON.parse(prefill) : prefill
-  } catch {
-    return
-  }
-  if (typeof configData !== 'object' || configData === null) return
-  const validFields = new Set(dynamicFields.value)
-  Object.entries(configData).forEach(([field, value]) => {
-    if (validFields.has(field)) {
-      $f.setValue(field, value)
-    }
-  })
 }
 
 function handleTypeSelect() {
