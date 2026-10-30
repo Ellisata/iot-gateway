@@ -286,6 +286,10 @@ const endTs = computed(() => {
 })
 const lastTs = computed(() => parsed.value[parsed.value.length - 1]?.ts ?? 0)
 const spanMs = computed(() => endTs.value - startTs.value)
+// 提示框可以声称到的最晚时刻：最后一个采样点覆盖到它的下一个间隔。
+// 不能直接用 endTs —— 横轴终点就是最后一个采样点本身，减去采集窗口那一个
+// 间隔后，最后一个桶会收在它之前，把最新那一分钟丢掉
+const labelEndTs = computed(() => lastTs.value + Math.max(1, props.intervalSec) * 1000)
 const withDate = computed(() => spanMs.value > 12 * 3600 * 1000)
 
 const lastRate = computed(() => {
@@ -371,26 +375,50 @@ const buckets = computed(() => {
     prevTs = point.ts
   }
 
-  return list.map((b, order) => ({
-    order,
-    gapBefore: b.gapBefore,
-    ts: b.tsSum / b.samples,
-    fromTs: b.firstTs,
-    toTs: b.lastTs + intervalMs,
-    samples: b.samples,
-    rate: b.rateCount ? Math.round(b.rateSum / b.rateCount) : null,
-    rateMin: b.rateMin,
-    rateMax: b.rateMax,
-    // 平均每分钟点数：桶宽变了，纵轴口径仍是「点/分」
-    points: b.pointsSum / b.samples,
-    badPoints: b.badSum / b.samples,
-    badTotal: b.badSum,
-    // 悬停展示用桶内最后一个点的瞬时状态（队列/积压本来就是仪表值）
-    online: b.last.online,
-    collected: b.last.collected,
-    queueDepth: b.last.queueDepth,
-    spoolDepth: b.last.spoolDepth,
-  }))
+  // 桶的起止时间按桶边界给，不按桶里首尾采样点：柱子视觉上代表的就是整段桶宽，
+  // 提示框写的范围得和柱子对得上。也让单点桶和多点桶用同一种时间格式 ——
+  // 旧实现里 1 分钟桶因采样抖动挤进两个点会写「09:26–09:27」，只落一个点却
+  // 只写「09:28」，同一排柱子两种写法，读起来像少了半分钟
+  return list.map((b, order) => {
+    const nominalStart = b.index * width
+    const nominalEnd = nominalStart + width
+    const next = list[order + 1]
+    // 断档两侧的桶只声明自己实际覆盖的那一段：断档后的桶从第一个采样点起算，
+    // 断档前的桶收在最后一个采样点的下一个间隔 —— 否则它们会替空窗里没采到的
+    // 时间作证，也可能让同一个时间段出现两根柱子
+    const afterGap = b.gapBefore
+    const beforeGap = next?.gapBefore === true
+    // 首尾桶再分别夹到实际数据窗口
+    const coverageFrom = Math.max(afterGap ? b.firstTs : nominalStart, startTs.value)
+    const coverageTo = Math.min(beforeGap ? b.lastTs + intervalMs : nominalEnd, labelEndTs.value)
+    // 采样点的时间戳是它统计窗口的**结束**时刻（采集侧每分钟在整分 tick 上
+    // 取出并清零计数器），即一个点统计的是它前一个间隔内的采集量。
+    // 提示框写的是这段采集量对应的采集时间，所以整体左移一个间隔：
+    // 时间戳 09:26 的点算的是 09:25–09:26 采到的点数
+    const fromTs = coverageFrom - intervalMs
+    const toTs = Math.max(fromTs, coverageTo - intervalMs)
+
+    return {
+      order,
+      gapBefore: b.gapBefore,
+      ts: b.tsSum / b.samples,
+      fromTs,
+      toTs,
+      samples: b.samples,
+      rate: b.rateCount ? Math.round(b.rateSum / b.rateCount) : null,
+      rateMin: b.rateMin,
+      rateMax: b.rateMax,
+      // 平均每分钟点数：桶宽变了，纵轴口径仍是「点/分」
+      points: b.pointsSum / b.samples,
+      badPoints: b.badSum / b.samples,
+      badTotal: b.badSum,
+      // 悬停展示用桶内最后一个点的瞬时状态（队列/积压本来就是仪表值）
+      online: b.last.online,
+      collected: b.last.collected,
+      queueDepth: b.last.queueDepth,
+      spoolDepth: b.last.spoolDepth,
+    }
+  })
 })
 
 const rateSegments = computed(() => {
@@ -624,11 +652,10 @@ function handleMove(event) {
   const xx = x(nearest.ts)
   const barH =
     nearest.points > 0 ? Math.max(1, (nearest.points / pointsMax.value) * THROUGH_H) : 0
-  // 合并过的桶显示时间段，单点仍显示到分钟
-  const timeLabel =
-    nearest.samples > 1
-      ? rangeLabel(nearest.fromTs, nearest.toTs)
-      : axisLabel(new Date(nearest.fromTs))
+  // 一律给时间段：柱子代表的是桶宽，单点桶也照同一格式写，
+  // 不再让相邻两根柱子一个写「09:26–09:27」一个只写「09:28」。
+  // fromTs/toTs 已是采集窗口（见 buckets 里的左移），不是采样点时间戳
+  const timeLabel = rangeLabel(nearest.fromTs, nearest.toTs)
 
   hover.value = {
     x: xx,
