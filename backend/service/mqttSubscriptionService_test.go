@@ -57,7 +57,7 @@ func newMqttSubscriptionTestDB(t *testing.T) *gorm.DB {
 func newTestSubscriptionService(t *testing.T) *MqttSubscriptionService {
 	t.Helper()
 	db := newMqttSubscriptionTestDB(t)
-	return NewMqttSubscriptionService(db, subscribe.NewManager(db, nil))
+	return NewMqttSubscriptionService(db, subscribe.NewManager(db, nil, nil))
 }
 
 func appErrorCode(t *testing.T, err error) string {

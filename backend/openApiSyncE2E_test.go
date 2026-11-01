@@ -16,6 +16,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
+	"iot-gateway/configFile"
 	"iot-gateway/controller"
 	"iot-gateway/middleware"
 	"iot-gateway/model/dto"
@@ -78,12 +79,14 @@ func TestOpenApiSyncDevicePointsEndToEnd(t *testing.T) {
 	}
 	apiKey := secrets[0].Key
 
-	// 只挂开放接口这一组，不必拉起整个应用
+	// 只挂开放接口这一组，不必拉起整个应用。
+	// 本用例只走同步查询，控制服务传零值依赖即可（不会触发写入）。
+	controlSvc := service.NewControlService(db, nil, nil, &configFile.Config{}, nil)
 	openApiCtrl := controller.NewOpenApiController(service.NewOpenApiService(
 		service.NewDeviceService(db, nil, nil),
 		service.NewDeviceAddressService(db, nil),
 		service.NewAlarmService(db),
-	))
+	), controlSvc)
 	engine := gin.New()
 	router.OpenApiRoutes(engine, secretSvc, openApiCtrl)
 

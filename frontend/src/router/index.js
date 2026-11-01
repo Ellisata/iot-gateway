@@ -153,6 +153,13 @@ const routes = [
         component: () => import('@/views/logs/IndexView.vue'),
         meta: { titleKey: 'menu.logFile', icon: 'Tickets', roles: ['admin'] },
       },
+      // ---- 控制下发审计 ----
+      {
+        path: 'control/log',
+        name: 'ControlLog',
+        component: () => import('@/views/control/audit/IndexView.vue'),
+        meta: { titleKey: 'menu.controlLog', icon: 'History', roles: ['admin'] },
+      },
       // ---- 密钥管理路由 ----
       {
         path: 'secret/api-key',

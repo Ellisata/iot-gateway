@@ -111,6 +111,19 @@ var specs = []Spec{
 		Mode: ApplyHotRead,
 		Base: func(c *configFile.Config) bool { return c.AgentApi.Enabled },
 	},
+	{
+		Key:           KeyControlEnabled,
+		Type:          ValueTypeBool,
+		Group:         "control",
+		GroupLabelKey: "runtimeConfig.groups.control",
+		LabelKey:      "runtimeConfig.fields.controlEnabled.label",
+		DescKey:       "runtimeConfig.fields.controlEnabled.hint",
+		// ControlService 每次请求现读开关：Web / OpenAPI / MQTT 控制主题的
+		// 写路径都汇聚到 ControlService.Write，不需要启停组件。关闭后立即
+		// 拒绝新的下发，正在执行的那一批不受影响。
+		Mode: ApplyHotRead,
+		Base: func(c *configFile.Config) bool { return c.Control.Enabled },
+	},
 }
 
 // All 返回注册表的副本，调用方不得依赖修改它来影响运行时。

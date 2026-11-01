@@ -30,6 +30,8 @@ const AgentApiPrefix = "/agentApi"
 //   - POST /agentApi/user/createUser、PUT /agentApi/user/password
 //   - POST /agentApi/systemConfig/update —— 改全局运行开关（可关闭局域网发现、
 //     设备扫描、变化才推送，或让插件在下次重启后全部失效）
+//   - POST /agentApi/control/write —— **直接写 PLC 点位**，可动作现场设备
+//    （仍需 control.enabled + 协议 Writable + 点位 W 权限三层同时满足）
 //
 // 因此默认关闭，开启的前提只有两个：网关部署在隔离的工业内网，或 dsh 与网关
 // 同机。**若网关会暴露到不可信网络，本开关必须保持关闭**；确有远程调用需求时，
@@ -75,6 +77,7 @@ func AgentApiRoutes(
 	dsc *controller.DeviceScanController,
 	scc *controller.SystemConfigController,
 	dbc *controller.DashboardController,
+	ctrl *controller.ControlController,
 ) {
 	g := r.Group(AgentApiPrefix)
 	// 整组的总开关（agentApi.enabled，出厂 false）。放在最前面：任何一条
@@ -96,6 +99,9 @@ func AgentApiRoutes(
 		// 采集与实时值
 		CollectionRoutes(g, cc)
 		RealtimeRoutes(g, rc)
+
+		// 控制下发（高风险管理动作；分类表里是 write，dsh 必须先向用户确认）
+		ControlRoutes(g, ctrl)
 
 		// 大盘聚合（只读）
 		DashboardRoutes(g, dbc)

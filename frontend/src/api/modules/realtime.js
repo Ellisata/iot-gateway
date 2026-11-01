@@ -14,6 +14,8 @@ import request from '@/api'
  * @param {number} params.page - 页码（从 1 开始）
  * @param {number} params.size - 每页条数
  * @param {string} [params.name] - 按点位名或说明模糊搜索（可选）
+ * @param {string[]} [params.addressIds] - 只取这些点位（可选）。给了就忽略 page/size，
+ *   供点位配置页按当前页的十几行精确取实时值；仍限定在 deviceObjectId 之下
  * @returns {Promise<{deviceId:string, deviceName:string, protocolName:string,
  *   online:boolean, collecting:boolean, collectorRunning:boolean,
  *   lastSuccessTime:string, serverTime:string,
@@ -28,6 +30,8 @@ export function getRealtimeSnapshot(params = {}) {
       page: params.page,
       size: params.size,
       name: params.name || undefined,
+      // 后端按英文逗号解析；空数组不传，保持普通分页查询的 URL 干净
+      addressIds: params.addressIds?.length ? params.addressIds.join(',') : undefined,
     },
     // 轮询失败（设备掉线、采集未启动）由页面自身用状态条与提示语呈现。
     // 不静默的话，每次轮询失败都会弹一个全局错误提示，秒级刷新下会刷满屏幕。

@@ -36,4 +36,8 @@ const (
 	// KeyAgentApiEnabled dsh（AI Agent）免鉴权调用面 /agentApi 的总开关。
 	// 出厂关闭：整个分组无凭据校验，且含删除设备、上传插件等写操作。
 	KeyAgentApiEnabled Key = "agentApi.enabled"
+
+	// KeyControlEnabled 控制下发（写 PLC 点位）总开关。
+	// 出厂关闭：写点位会改变现场设备状态，与只读采集是完全不同的风险面。
+	KeyControlEnabled Key = "control.enabled"
 )

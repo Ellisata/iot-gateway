@@ -1,0 +1,1 @@
+import{Yt as e,on as t}from"./vendor-BpM3aY0S.js";import{t as n}from"./AlarmTable-DwnhJmol.js";var r={__name:`IndexView`,setup(r){return(r,i)=>(t(),e(n,{"target-type":`point`}))}};export{r as default};

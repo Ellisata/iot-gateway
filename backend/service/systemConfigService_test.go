@@ -50,6 +50,7 @@ func newSystemConfigService(t *testing.T) (*SystemConfigService, *runtimecfg.Man
 		// 出厂默认是 false，这里显式置 true 只是为了让「初始值都为 true」这条
 		// 断言保持简单；默认值本身由 default.yaml 与 registry 的 Base 决定。
 		AgentApi: configFile.AgentApiConfig{Enabled: true},
+		Control:  configFile.ControlConfig{Enabled: true},
 	}
 	mgr := runtimecfg.NewManager(newSystemConfigTestDB(t), cfg)
 	return NewSystemConfigService(mgr), mgr
@@ -62,8 +63,8 @@ func TestSystemConfigServiceList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(got.Groups) != 5 {
-		t.Fatalf("分组数 = %d，want 5", len(got.Groups))
+	if len(got.Groups) != 6 {
+		t.Fatalf("分组数 = %d，want 6", len(got.Groups))
 	}
 	for _, g := range got.Groups {
 		if len(g.Fields) != 1 {

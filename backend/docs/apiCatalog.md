@@ -372,7 +372,7 @@ Agent 不应在无用户意图时自行调用。
 | GET | `/deviceAddress/getDeviceAddressById/:id` | 按 ID 查点位 | 路径 `id` | `DeviceAddressVO` |
 | GET | `/deviceAddress/importDeviceAddressTemplate` | 下载点位导入模板 | — | **xlsx 文件流** |
 | GET | `/collection/status` | 采集引擎状态 | — | `CollectionStatusVO` |
-| GET | `/realtime/snapshot` | 设备实时数据快照 | `page`*, `size`*, `deviceId`*, `name` | `RealtimeSnapshotVO` |
+| GET | `/realtime/snapshot` | 设备实时数据快照（`addressIds` 逗号分隔时只返回这些点位；`page`/`size` 仍需携带但被忽略） | `page`*, `size`*, `deviceId`*, `name`, `addressIds` | `RealtimeSnapshotVO` |
 | GET | `/protocol/pageProtocol` | 协议分页 | `page`*, `size`*, `name` | `PageVo<ProtocolVO>` |
 | GET | `/protocol/getProtocolById/:id` | 按 ID 查协议 | 路径 `id` | `ProtocolVO` |
 | GET | `/protocol/getProtocolByName` | 按名查协议 | Query `name` | `ProtocolVO` |

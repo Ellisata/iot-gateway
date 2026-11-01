@@ -91,6 +91,13 @@
           width="160"
           class-name="iot-col-time"
         />
+        <!-- 热升级插件会刷新这一列，是「该协议的插件已换代」的观察点 -->
+        <el-table-column
+          prop="updatedAt"
+          :label="t('common.updatedAt')"
+          width="160"
+          class-name="iot-col-time"
+        />
         <el-table-column :label="t('common.action')" width="140" align="center" fixed="right">
           <template #default="{ row }">
             <div class="iot-row-actions">

@@ -10,15 +10,17 @@ import "encoding/json"
 // MappingJSON 与 ParserConfig 互斥：builtin 用 mappingJson，其余解析方式用
 // parserConfig。binding 不强制 mappingJson，由服务层按 parserType 校验。
 type CreateMqttSubscriptionDTO struct {
-	Name         string          `json:"name"         binding:"required,min=1,max=100"`
-	Description  string          `json:"description"`
-	Broker       string          `json:"broker"       binding:"required,min=1,max=200"`
-	Port         string          `json:"port"`
-	ClientID     string          `json:"clientId"`
-	Username     string          `json:"username"`
-	Password     string          `json:"password"`
-	Topic        string          `json:"topic"        binding:"required,min=1,max=500"`
-	QoS          int             `json:"qos"`
+	Name        string `json:"name"         binding:"required,min=1,max=100"`
+	Description string `json:"description"`
+	Broker      string `json:"broker"       binding:"required,min=1,max=200"`
+	Port        string `json:"port"`
+	ClientID    string `json:"clientId"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	Topic       string `json:"topic"        binding:"required,min=1,max=500"`
+	QoS         int    `json:"qos"`
+	// ControlTopic 控制下发主题；为空 = 不做下行控制。
+	ControlTopic string          `json:"controlTopic" binding:"omitempty,max=500"`
 	ParserType   string          `json:"parserType"`
 	ParserConfig json.RawMessage `json:"parserConfig"`
 	MappingJSON  json.RawMessage `json:"mappingJson"`
@@ -32,16 +34,19 @@ type CreateMqttSubscriptionDTO struct {
 //
 // parserConfig/mappingJson 为空表示沿用原值（列表页只改启停时不必回传整份配置）。
 type UpdateMqttSubscriptionDTO struct {
-	ID           string          `json:"id"           binding:"required"`
-	Name         string          `json:"name"         binding:"required,min=1,max=100"`
-	Description  string          `json:"description"`
-	Broker       string          `json:"broker"       binding:"required,min=1,max=200"`
-	Port         string          `json:"port"`
-	ClientID     string          `json:"clientId"`
-	Username     string          `json:"username"`
-	Password     string          `json:"password"`
-	Topic        string          `json:"topic"        binding:"required,min=1,max=500"`
-	QoS          int             `json:"qos"`
+	ID          string `json:"id"           binding:"required"`
+	Name        string `json:"name"         binding:"required,min=1,max=100"`
+	Description string `json:"description"`
+	Broker      string `json:"broker"       binding:"required,min=1,max=200"`
+	Port        string `json:"port"`
+	ClientID    string `json:"clientId"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	Topic       string `json:"topic"        binding:"required,min=1,max=500"`
+	QoS         int    `json:"qos"`
+	// ControlTopic 控制下发主题；空串 = 清空（与 parserConfig 的"空 = 沿用"不同，
+	// 列表页只改启停时会回传整份表单，空串就是要关掉下行控制）。
+	ControlTopic string          `json:"controlTopic" binding:"omitempty,max=500"`
 	ParserType   string          `json:"parserType"`
 	ParserConfig json.RawMessage `json:"parserConfig"`
 	MappingJSON  json.RawMessage `json:"mappingJson"`

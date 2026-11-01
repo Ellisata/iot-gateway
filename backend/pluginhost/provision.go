@@ -92,6 +92,28 @@ func (m *Manager) provisionProtocol(proto driversdk.Protocol, meta driversdk.Met
 	return nil
 }
 
+// touchProtocolRows 把插件声明的协议行的 updated_at 刷成当前时间。
+//
+// **只在热升级成功后调用**（见 upgrade），不放进 provisionProtocol：
+// 后者每次启动都会跑，放进去会让每次重启都把全部协议行标成"刚更新过"，
+// 这个字段就失去意义了。
+//
+// 它不改动行内容 —— provision 的「只插入、只补空、绝不覆盖」策略不变，
+// 运维改过的 description / form_json 依然不会被回滚。updated_at 在这里的
+// 含义是「插件最后一次向这一行供给的时间」，供运维判断某协议背后的插件
+// 是否已经换代（尤其是表单没被采纳时，需要手动「恢复默认表单」）。
+//
+// 供给被关闭或协议行尚不存在时，受影响行数为 0，不算错误。
+func (m *Manager) touchProtocolRows(meta driversdk.Meta) error {
+	names := protocolNameList(meta)
+	if len(names) == 0 {
+		return nil
+	}
+	return m.db.Model(&po.IotProtocol{}).
+		Where("name IN ?", names).
+		Update("updated_at", time.Now().Format("2006-01-02 15:04:05")).Error
+}
+
 func (m *Manager) insertProtocol(proto driversdk.Protocol, meta driversdk.Meta) error {
 	formJSON := "{}"
 	if len(proto.FormJSON) > 0 {
@@ -146,6 +168,26 @@ func (m *Manager) PluginProtocolForm(name string) ([]byte, error) {
 		}
 	}
 	return nil, ErrProtocolNotProvisioned
+}
+
+// ProtocolWritable 报告已加载插件是否把协议 name 声明为支持控制下发。
+//
+// 这是接口层的**能力开关**：不声明 Writable 的协议不开放写接口，即使点位的
+// rw_permission 是 RW。真正的执行与否仍以采集引擎里那个驱动实例是否实现
+// driver.Writer 为准；这里只用于尽早给出可读的拒绝理由与前端按钮显隐。
+// 插件未加载时返回 false（保守拒绝）。
+func (m *Manager) ProtocolWritable(name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, lp := range m.plugins {
+		for _, p := range lp.meta.Protocols {
+			if p.Name == name {
+				return p.Writable
+			}
+		}
+	}
+	return false
 }
 
 func isBlankForm(form string) bool {

@@ -14,7 +14,7 @@ func TestManagerRecentMessagesNilManager(t *testing.T) {
 }
 
 func TestManagerRecentMessagesUnknownID(t *testing.T) {
-	m := NewManager(nil, nil)
+	m := NewManager(nil, nil, nil)
 	msgs, ok := m.RecentMessages("missing")
 	if ok || msgs != nil {
 		t.Fatalf("unknown id = (%v,%v), want (nil,false)", msgs, ok)
@@ -32,7 +32,7 @@ func TestManagerRecentMessagesActive(t *testing.T) {
 	feed(t, sub, fakeMessage{topic: "factory/a", payload: []byte(`{"deviceId":"d1","tagId":"a1","value":1}`)})
 
 	// 单协程测试：直接注入管理器持有的订阅实例，不需要加锁。
-	m := NewManager(nil, nil)
+	m := NewManager(nil, nil, nil)
 	m.subs[sub.cfg.id] = sub
 
 	msgs, ok := m.RecentMessages(sub.cfg.id)

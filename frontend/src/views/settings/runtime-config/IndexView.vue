@@ -145,9 +145,10 @@ const displayOverride = computed(() => (loading.value ? '—' : overrideCount.va
 // 重启后不支持任何协议。打开方向不需要确认 —— 恢复能力不该有摩擦。
 const CONFIRM_ON_DISABLE = new Set(['discovery.enabled', 'plugin.enabled'])
 
-// /agentApi 的风险方向相反：危险的是「打开」—— 打开后整组免鉴权且含
-// 删除设备、上传插件等写操作。关闭方向反而是在收紧，不需要摩擦。
-const CONFIRM_ON_ENABLE = new Set(['agentApi.enabled'])
+// /agentApi 与 control 的风险方向相反：危险的是「打开」—— 前者打开后整组
+// 免鉴权且含删除设备、上传插件等写操作，后者打开后可以直接改变现场设备状态。
+// 关闭方向反而是在收紧，不需要摩擦。
+const CONFIRM_ON_ENABLE = new Set(['agentApi.enabled', 'control.enabled'])
 
 function boolText(value) {
   return value ? t('common.enabled') : t('common.disabled')
@@ -169,9 +170,15 @@ function beforeToggle(field) {
     if (!CONFIRM_ON_ENABLE.has(field.key)) {
       return true
     }
+    if (field.key === 'agentApi.enabled') {
+      return confirmAction(
+        t('runtimeConfig.confirm.agentApiTitle'),
+        t('runtimeConfig.confirm.agentApiMessage'),
+      )
+    }
     return confirmAction(
-      t('runtimeConfig.confirm.agentApiTitle'),
-      t('runtimeConfig.confirm.agentApiMessage'),
+      t('runtimeConfig.confirm.controlTitle'),
+      t('runtimeConfig.confirm.controlMessage'),
     )
   }
   if (!CONFIRM_ON_DISABLE.has(field.key)) {

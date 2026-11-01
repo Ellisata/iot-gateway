@@ -360,6 +360,13 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 		for i := range addrs {
 			addr := &addrs[i]
 
+			// 只写点位（rw_permission=W）只参与控制下发，不进入采集调度：
+			// 驱动契约里没有权限字段，读它只会在设备侧报错、把整台设备拖入退避/离线，
+			// 也会让「只写」这个语义自相矛盾。实时页据 collected=false 显示「不采集」。
+			if addr.RwPermission == "W" {
+				continue
+			}
+
 			// data_type 是写入时派生的协议内部类型名缓存，可能因协议类型注册名变更、
 			// 旧数据或外部改库而漂移。加载时统一回退修正（data_type 仍可解析则保留原值），
 			// 修正结果回写库自愈，避免采集时驱动解码失败、寄存器/字数算错或类型码错取。

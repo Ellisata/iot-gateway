@@ -2,7 +2,8 @@
 # 运行期配置覆盖：本文件是**默认值**。
 #
 # 其中 discovery.enabled / deviceScan.enabled / push.changeOnly / plugin.enabled /
-# agentApi.enabled 可在管理端「运行开关」页面动态修改：修改结果写入 SQLite 的 system_config 表，
+# agentApi.enabled / control.enabled 可在管理端「运行开关」页面动态修改：
+# 修改结果写入 SQLite 的 system_config 表，
 # 优先级高于本文件，重启后仍然有效；页面「恢复默认」删除覆盖值，回到这里。
 # 未登记在 runtimecfg 注册表里的配置项仍只在本文件维护，改动需要重启。
 # 完整契约（生效方式、更新事务、新增开关的步骤）见 specs/runtime-config.md。
@@ -180,6 +181,9 @@ plugin:
   # read 超时必须大于 protocolJSON 里配置的协议自身超时，否则网关会放弃插件
   # 仍在执行的调用，重试会在慢速串行总线上堆积。大批量点位建议再放大。
   readTimeoutMs: 60000
+  # 控制下发超时。写入可能排在一次在途 Read 之后（插件按会话串行化），
+  # 不能比协议单帧超时还短；也不宜接近 readTimeoutMs。
+  writeTimeoutMs: 15000
   restartMinDelayMs: 1000      # 崩溃重启退避下限（毫秒）
   restartMaxDelayMs: 30000     # 崩溃重启退避上限（毫秒）
   maxRestarts: 10              # 连续失败上限，超过后停止监管
@@ -216,3 +220,27 @@ plugin:
 # 自己把自己重新打开。
 agentApi:
   enabled: false
+
+# ============================================================================
+# 控制下发（写 PLC 点位）
+# ============================================================================
+# 与 discovery / deviceScan / plugin 的"接进来就能用"相反：写点位会改变现场
+# 设备状态，误下发可能直接动作一台泵、一条产线。出厂模板为关闭，现场按需打开。
+#
+# 打开后仍需同时满足三层条件才会真正下发：
+#   1. 该协议插件在 describe 里声明了 Writable=true；
+#   2. 点位 device_address.rw_permission 含 W（W 或 RW）；
+#   3. 设备当前在采集任务里且链路在线（写路径不触发重连）。
+#
+# 可在管理端「运行开关」页动态切换（热读：下一个请求即生效，无需重启）；
+# 这里只是默认值。
+control:
+  enabled: true
+
+  # 单台设备每分钟最多下发的点位数（一次写 10 个点消耗 10 个配额）。
+  # 0 = 不限制。默认 60。
+  maxWritesPerMinute: 60
+
+  # 单个点位每分钟最多写入次数。0 = 不限制。默认 20。
+  # 与设备级限制同时生效，任一超限即整批拒绝。
+  maxWritesPerPointPerMinute: 20

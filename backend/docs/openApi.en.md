@@ -1,7 +1,7 @@
 # IoT Gateway Public API Documentation
 
 > This document is intended for **third-party system developers**, describing how to query device data via the gateway public API (`/openApi/*`).
-> All endpoints are read-only queries; no write operations are provided.
+> Except for **4.8 Control Write**, all endpoints are read-only queries. 4.8 changes the physical device state; make sure you have operational authorization before calling it.
 
 ## Version History
 
@@ -12,6 +12,7 @@
 | v1.2 | 2026-10-09 | Added: full sync of devices and points (4.5, **cursor paging**, returns a batch of devices each with all of its points); point objects gain `createdAt`/`updatedAt` (applies to both 4.4 and 4.5); §3.3 notes cursor paging | - |
 | v1.3 | 2026-10-09 | Added: device reliability statistics (4.6), point abnormality top-N (4.7) — alarm-based availability and abnormality rankings, for cross-gateway aggregation | - |
 | v1.4 | 2026-10-10 | 4.6 unit change: `availability` goes from a 0~1 fraction to a **percentage (0~100)** rounded to two decimals; `downSeconds` / `mttrSeconds` are now rounded to whole seconds | ⚠️ Yes (the `availability` unit changed — callers integrated against the 0~1 form must parse a percentage instead) |
+| v1.5 | 2026-10-31 | Added 4.8 Control Write (write PLC points). **The only public endpoint that changes the physical device state**; gated by `control.enabled`, protocol `Writable`, and point `W` permission | - |
 
 ## Compatibility Commitment
 
@@ -111,7 +112,9 @@ Note that an empty string `""` for the device's `lastSuccessTime` means **no suc
 
 ### 3.5 Idempotency and Call Frequency
 
-- All public API endpoints are idempotent read-only queries;
+- Except for 4.8, all public API endpoints are idempotent read-only queries;
+- 4.8 uses `requestId` for idempotency: repeating the same value returns the first result without writing the PLC again;
+- Control writes are rate-limited per device and per point; exceeding the limit returns `40038`, so back off and retry;
 - Choose `size` as needed and paginate sequentially for full traversal; avoid high-frequency polling — for most scenarios polling every 5~30 seconds is sufficient.
 
 ## 4. API Reference
@@ -646,6 +649,87 @@ curl -H "X-Api-Key: your-app-key" \
 }
 ```
 
+### 4.8 Control Write (write PLC points)
+
+> ⚠️ This is the **only public endpoint that changes the physical device state**.
+> The caller must have operational authorization and confirm with the operator that the
+> device is safe to control before each write.
+
+**Request**
+
+```
+POST /openApi/control/write
+X-Api-Key: <AppKey>
+Content-Type: application/json
+```
+
+```json
+{
+  "deviceId": "a1b2c3d4e5f6",
+  "requestId": "b6f0b0c6-4d7e-4b6a-9f3a-2f6f1c0a9d11",
+  "verify": true,
+  "items": [
+    { "deviceAddressId": "addr-1", "value": "42" }
+  ]
+}
+```
+
+| Field | Required | Description |
+| ----- | -------- | ----------- |
+| `deviceId` | Yes | Target device id |
+| `requestId` | Recommended | Idempotency key. Repeating the same value returns the first result without writing again; required for MQTT/retry scenarios |
+| `verify` | No | `true` reads the point back after writing (only for points with read permission) |
+| `items[].deviceAddressId` | Yes | **Point id, not a PLC address**; must belong to the device, be enabled, and have `W` in `rw_permission` |
+| `items[].value` | Yes | Target value as a string; the plugin encodes it according to the point data type (bool accepts `true`/`false`/`1`/`0`) |
+
+At most 50 points per request. **Batched writes are not transactional**: each point returns its own result.
+
+**Preconditions** (any failure rejects the request before touching the device):
+
+1. `control.enabled=true`;
+2. The protocol plugin declares `Writable`;
+3. The point `rw_permission` contains `W`;
+4. The device is in the active collection task and its link is up (this API does not trigger a reconnect);
+5. The per-device/per-point write rate limits are not exceeded.
+
+**Response**
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": {
+    "requestId": "b6f0b0c6-4d7e-4b6a-9f3a-2f6f1c0a9d11",
+    "deviceId": "a1b2c3d4e5f6",
+    "deviceName": "PLC-1",
+    "protocolName": "ModBus.TCP",
+    "duplicate": false,
+    "results": [
+      {
+        "addressId": "addr-1",
+        "addressName": "40001",
+        "addressLabel": "Temperature",
+        "dataType": "int16",
+        "rwPermission": "RW",
+        "value": "42",
+        "resultValue": "42",
+        "readbackValue": "42",
+        "verified": true,
+        "ok": true,
+        "code": 0,
+        "message": ""
+      }
+    ]
+  },
+  "serverTime": "2026-10-31 10:30:00"
+}
+```
+
+- `results[].code`: `0` success, `1` invalid address, `2` read-only, `3` invalid value, `4` unsupported, `5` device rejected, `6` link failure / state unknown;
+- `duplicate=true` means the `requestId` was already processed and nothing was written again;
+- After a link failure the batch state may be unknown; read the points back or confirm on site before retrying.
+
 ## 5. Error Code Reference
 
 The error codes the public API may return are listed below (the complete list is in this section; other internal error codes never appear in public APIs):
@@ -656,6 +740,14 @@ The error codes the public API may return are listed below (the complete list is
 | `70003` | 401 | Public API key is empty | The `X-Api-Key` header is missing; check the request construction |
 | `70004` | 401 | Public API key invalid | Key is wrong or has been deleted; contact the administrator |
 | `PARAM_ERROR` | 200 | Parameter validation failed | Fix the request parameters per msg (msg looks like `参数校验失败: size max`) |
+| `40031` | 200 | Control writes are disabled | Ask the administrator to check `control.enabled` |
+| `40032` | 200 | Protocol does not support control writes | The plugin does not declare `Writable`; read-only |
+| `40033` | 200 | Point is not writable | `rw_permission` must be `W` or `RW` |
+| `40034` | 200 | Point not found or not on this device | Check `deviceAddressId` and `deviceId` |
+| `40035` | 200 | Device is not collecting or is offline | Retry after the device is online |
+| `40036` | 200 | Invalid control write parameters | Fix per msg (duplicate point, >50 items, bad time format, …) |
+| `40037` | 200 | Control write failed (link error, state unknown) | Read back / verify on site before retrying with a new `requestId` |
+| `40038` | 200 | Control writes are too frequent | Back off per the device/point rate limit and retry |
 | `-1` | 200 | System error | Retry later; if persistent, contact the administrator and check gateway logs |
 
 ## 6. FAQ

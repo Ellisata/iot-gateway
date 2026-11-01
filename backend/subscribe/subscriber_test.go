@@ -5,12 +5,15 @@ package subscribe
 
 import (
 	"bytes"
+	"context"
 	"sync"
 	"testing"
 	"time"
 
 	"iot-gateway/collector"
+	"iot-gateway/model/dto"
 	"iot-gateway/model/po"
+	"iot-gateway/model/vo"
 	"iot-gateway/parser"
 )
 
@@ -80,7 +83,7 @@ func newTestSubscriber(t *testing.T, mappingJSON string) (*subscriber, *fakeSink
 	}
 	sink := &fakeSink{}
 	info := &fakeInfoSink{}
-	sub := newSubscriber(cfg, sink, info)
+	sub := newSubscriber(cfg, sink, info, nil)
 	t.Cleanup(sub.stop)
 	return sub, sink, info
 }
@@ -323,5 +326,144 @@ func TestBrokerURL(t *testing.T) {
 		if got := cfg.brokerURL(); got != tc.want {
 			t.Errorf("brokerURL(%q,%q) = %q, want %q", tc.broker, tc.port, got, tc.want)
 		}
+	}
+}
+
+// ==================== 下行控制 ====================
+
+type fakeControlWriter struct {
+	mu      sync.Mutex
+	reqs    []*dto.ControlDTO
+	sources []string
+	err     error
+	written chan struct{}
+	once    sync.Once
+}
+
+func (f *fakeControlWriter) Write(_ context.Context, req *dto.ControlDTO, source, _ string) (*vo.ControlResultVO, error) {
+	f.mu.Lock()
+	f.reqs = append(f.reqs, req)
+	f.sources = append(f.sources, source)
+	f.mu.Unlock()
+	if f.written != nil {
+		f.once.Do(func() { close(f.written) })
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := &vo.ControlResultVO{Results: make([]vo.ControlItemResultVO, len(req.Items))}
+	for i, it := range req.Items {
+		out.Results[i] = vo.ControlItemResultVO{AddressID: it.DeviceAddressID, OK: true}
+	}
+	return out, nil
+}
+
+func (f *fakeControlWriter) snapshot() []*dto.ControlDTO {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*dto.ControlDTO(nil), f.reqs...)
+}
+
+func newControlTestSubscriber(t *testing.T, ctrl ControlWriter) *subscriber {
+	t.Helper()
+	cfg, err := parseSubscriptionWith(&po.MqttSubscription{
+		ID:           "sub-ctl",
+		Name:         "ctrl-test",
+		Broker:       "127.0.0.1",
+		Port:         "1883",
+		Topic:        "factory/+/telemetry",
+		QoS:          1,
+		ControlTopic: "factory/control",
+		MappingJSON:  "{}",
+	}, false)
+	if err != nil {
+		t.Fatalf("parseSubscriptionWith: %v", err)
+	}
+	sub := newSubscriber(cfg, nil, nil, ctrl)
+	t.Cleanup(sub.stop)
+	return sub
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("2s 内未等到 %s", what)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestSubscriberControlWrite(t *testing.T) {
+	ctrl := &fakeControlWriter{written: make(chan struct{})}
+	sub := newControlTestSubscriber(t, ctrl)
+
+	sub.onControlMessage(nil, fakeMessage{
+		topic:   "factory/control",
+		payload: []byte(`{"deviceId":"d1","requestId":"r1","verify":true,"items":[{"deviceAddressId":"a1","value":"42"}]}`),
+	})
+
+	select {
+	case <-ctrl.written:
+	case <-time.After(2 * time.Second):
+		t.Fatal("控制服务未被调用")
+	}
+	reqs := ctrl.snapshot()
+	if len(reqs) != 1 {
+		t.Fatalf("控制服务收到 %d 条，期望 1", len(reqs))
+	}
+	got := reqs[0]
+	if got.DeviceID != "d1" || got.RequestID != "r1" || !got.Verify ||
+		len(got.Items) != 1 || got.Items[0].DeviceAddressID != "a1" || got.Items[0].Value != "42" {
+		t.Fatalf("控制请求 = %+v", got)
+	}
+	if len(ctrl.sources) != 1 || ctrl.sources[0] != "mqtt" {
+		t.Errorf("source = %v，期望 mqtt", ctrl.sources)
+	}
+}
+
+func TestSubscriberControlSinglePointShorthand(t *testing.T) {
+	ctrl := &fakeControlWriter{written: make(chan struct{})}
+	sub := newControlTestSubscriber(t, ctrl)
+
+	sub.onControlMessage(nil, fakeMessage{
+		topic:   "factory/control",
+		payload: []byte(`{"deviceId":"d1","requestId":"r2","addressId":"a1","value":"7"}`),
+	})
+	select {
+	case <-ctrl.written:
+	case <-time.After(2 * time.Second):
+		t.Fatal("控制服务未被调用")
+	}
+	reqs := ctrl.snapshot()
+	if len(reqs) != 1 || len(reqs[0].Items) != 1 ||
+		reqs[0].Items[0].DeviceAddressID != "a1" || reqs[0].Items[0].Value != "7" {
+		t.Fatalf("单点简写解析不正确: %+v", reqs)
+	}
+}
+
+func TestSubscriberControlRequiresRequestID(t *testing.T) {
+	ctrl := &fakeControlWriter{written: make(chan struct{})}
+	sub := newControlTestSubscriber(t, ctrl)
+
+	sub.onControlMessage(nil, fakeMessage{
+		topic:   "factory/control",
+		payload: []byte(`{"deviceId":"d1","addressId":"a1","value":"1"}`),
+	})
+	waitFor(t, "errors 计数", func() bool { return sub.errors.Load() > 0 })
+	if len(ctrl.snapshot()) != 0 {
+		t.Error("缺少 requestId 时不应调用控制服务")
+	}
+}
+
+func TestSubscriberControlInvalidJSON(t *testing.T) {
+	ctrl := &fakeControlWriter{written: make(chan struct{})}
+	sub := newControlTestSubscriber(t, ctrl)
+
+	sub.onControlMessage(nil, fakeMessage{topic: "factory/control", payload: []byte(`{bad`)})
+	waitFor(t, "errors 计数", func() bool { return sub.errors.Load() > 0 })
+	if len(ctrl.snapshot()) != 0 {
+		t.Error("非法 JSON 不应调用控制服务")
 	}
 }

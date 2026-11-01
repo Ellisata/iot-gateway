@@ -27,6 +27,7 @@ func TestOpenApiRoutesRegistered(t *testing.T) {
 		"GET /openApi/device/sync",
 		"GET /openApi/alarm/deviceReliability",
 		"GET /openApi/alarm/pointAbnormal",
+		"POST /openApi/control/write",
 	}
 	for _, key := range want {
 		if !routes[key] {

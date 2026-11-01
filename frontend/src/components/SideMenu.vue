@@ -147,6 +147,18 @@
         </el-menu-item>
       </el-sub-menu>
 
+      <!-- 控制下发审计 -->
+      <el-sub-menu v-if="userStore.isAdmin" index="/control">
+        <template #title>
+          <el-icon><MenuIcon name="control" /></el-icon>
+          <span>{{ t('menu.control') }}</span>
+        </template>
+        <el-menu-item index="/control/log">
+          <el-icon><MenuIcon name="controlLog" /></el-icon>
+          <template #title>{{ t('menu.controlLog') }}</template>
+        </el-menu-item>
+      </el-sub-menu>
+
       <!-- 密钥管理 -->
       <el-sub-menu v-if="userStore.isAdmin" index="/secret">
         <template #title>

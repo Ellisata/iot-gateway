@@ -32,19 +32,20 @@ var errConnectTimeout = errors.New("连接超时")
 
 // Status 单个订阅的运行状态快照。
 type Status struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Broker      string `json:"broker"`
-	Topic       string `json:"topic"`
-	Running     bool   `json:"running"`
-	Connected   bool   `json:"connected"`
-	Messages    uint64 `json:"messages"`
-	Records     uint64 `json:"records"`
-	Errors      uint64 `json:"errors"`
-	Skipped     uint64 `json:"skipped"` // 报文内被跳过的记录数
-	Dropped     uint64 `json:"dropped"` // 队列满时丢弃的报文数
-	LastMessage string `json:"lastMessageTime"`
-	Error       string `json:"error"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Broker       string `json:"broker"`
+	Topic        string `json:"topic"`
+	ControlTopic string `json:"controlTopic"`
+	Running      bool   `json:"running"`
+	Connected    bool   `json:"connected"`
+	Messages     uint64 `json:"messages"`
+	Records      uint64 `json:"records"`
+	Errors       uint64 `json:"errors"`
+	Skipped      uint64 `json:"skipped"` // 报文内被跳过的记录数
+	Dropped      uint64 `json:"dropped"` // 队列满时丢弃的报文数
+	LastMessage  string `json:"lastMessageTime"`
+	Error        string `json:"error"`
 }
 
 // Manager 订阅管理器。
@@ -54,6 +55,8 @@ type Status struct {
 type Manager struct {
 	db   *gorm.DB
 	sink Sink
+	// ctrl 控制下发出口，可为 nil（未启用控制 / 单元测试）。
+	ctrl ControlWriter
 	// points 订阅数据中的设备/点位元信息索引，与记录投递共用一个生命周期。
 	points *devicePointStore
 
@@ -67,10 +70,14 @@ type Manager struct {
 }
 
 // NewManager 创建订阅管理器。
-func NewManager(db *gorm.DB, sink Sink) *Manager {
+//
+// ctrl 可为 nil：没有控制服务时数据采集照常，只会在收到 controlTopic 报文时
+// 记一条错误（不会 panic）。
+func NewManager(db *gorm.DB, sink Sink, ctrl ControlWriter) *Manager {
 	return &Manager{
 		db:     db,
 		sink:   sink,
+		ctrl:   ctrl,
 		points: newDevicePointStore(db),
 		subs:   make(map[string]*subscriber),
 	}
@@ -155,19 +162,20 @@ func (m *Manager) Status() []Status {
 	out := make([]Status, 0, len(m.subs))
 	for _, s := range m.subs {
 		out = append(out, Status{
-			ID:          s.cfg.id,
-			Name:        s.cfg.name,
-			Broker:      s.cfg.endpoint(),
-			Topic:       s.cfg.topic,
-			Running:     s.running.Load(),
-			Connected:   s.connected.Load(),
-			Messages:    s.messages.Load(),
-			Records:     s.records.Load(),
-			Errors:      s.errors.Load(),
-			Skipped:     s.skipped.Load(),
-			Dropped:     s.dropped.Load(),
-			LastMessage: s.lastMessageTime(),
-			Error:       s.lastError(),
+			ID:           s.cfg.id,
+			Name:         s.cfg.name,
+			Broker:       s.cfg.endpoint(),
+			Topic:        s.cfg.topic,
+			ControlTopic: s.cfg.controlTopic,
+			Running:      s.running.Load(),
+			Connected:    s.connected.Load(),
+			Messages:     s.messages.Load(),
+			Records:      s.records.Load(),
+			Errors:       s.errors.Load(),
+			Skipped:      s.skipped.Load(),
+			Dropped:      s.dropped.Load(),
+			LastMessage:  s.lastMessageTime(),
+			Error:        s.lastError(),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -239,7 +247,7 @@ func (m *Manager) refresh() {
 				cfg.name, cfg.id, err)
 			continue
 		}
-		s := newSubscriber(cfg, m.sink, m.points)
+		s := newSubscriber(cfg, m.sink, m.points, m.ctrl)
 		newMap[id] = s
 		go s.start() // 建连可能阻塞（broker 不可达时更明显），不阻塞管理器
 		if old, ok := m.subs[id]; ok {
@@ -329,13 +337,14 @@ func (m *Manager) loadChecksum() uint64 {
 		Password     string
 		Topic        string
 		QoS          int
+		ControlTopic string
 		MappingJSON  string
 		ParserType   string
 		ParserConfig string
 	}
 	var rows []row
 	if err := m.db.Model(&po.MqttSubscription{}).
-		Select("id, broker, port, client_id, username, password, topic, qos, mapping_json, parser_type, parser_config").
+		Select("id, broker, port, client_id, username, password, topic, qos, control_topic, mapping_json, parser_type, parser_config").
 		Where("status = 1").
 		Order("id").
 		Find(&rows).Error; err != nil {
@@ -360,6 +369,8 @@ func (m *Manager) loadChecksum() uint64 {
 		io.WriteString(h, r.Topic)
 		io.WriteString(h, "|")
 		fmt.Fprintf(h, "%d", r.QoS)
+		io.WriteString(h, "|")
+		io.WriteString(h, r.ControlTopic)
 		io.WriteString(h, "|")
 		io.WriteString(h, r.MappingJSON)
 		io.WriteString(h, "|")

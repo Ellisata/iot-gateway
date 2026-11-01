@@ -80,6 +80,8 @@ const ICONS = {
   notification: IconSpeakerphone,
   logs: IconNotebook,
   logFile: IconFileText,
+  control: IconToggleRight,
+  controlLog: IconHistory,
   secret: IconKey,
   apiKey: IconTag,
   gateway: IconServer,

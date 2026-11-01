@@ -697,6 +697,60 @@ Modbus 的取舍（为什么必须用 IEC `%MW` 而不是传统 `40001` 风格�
 **也可以两种都不声明**（`Omron.CIP` 就只有一个 `Discovery`）—— 见
 [specs/point-discovery.md](../backend/specs/point-discovery.md) §3 的"两种合法的少声明"。
 
+### 2.8 声明控制下发能力（Writable）
+
+写能力是**可选**的，`driver.Driver` 接口没有变。需要写点位的协议额外实现
+`driver.Writer`，并在 `Meta.Protocols[].Writable` 里声明；两者缺一，`Serve` 启动即失败
+（与「声明了 Discovery 就必须有 prober」同一条校验）。
+
+```go
+// 驱动必须实现：
+func (d *myDriver) Write(reqs []driver.WriteRequest) ([]driver.WriteResult, error)
+
+// 插件 meta 里声明：
+driversdk.Protocol{
+    Name:     "Acme.PLC",
+    Writable: true,
+}
+
+// 值解析与编码在插件内完成（网关侧 DataType.Encode 为 nil，拿不到编码函数）：
+dt, ok := lookupType(req.DataType)
+val, err := parseByKind(dt.Kind, req.Value)
+raw, err := dt.Encode(val, parseByteOrder(cfg.ByteOrder))
+```
+
+契约要点：
+
+- `WriteRequest` 只带点位 id、协议地址、内部类型名与字符串值；**编码由插件按自己的
+  类型表完成**，不要用 `json.Unmarshal` 解析数字（会丢 int64/uint64 精度）。
+- **单点失败进 `WriteResult.Code`，只有链路级失败才返回 error**。批量写不是事务：
+  逐点返回结果，链路失败时调用方应把整批视为状态未知并回读确认。
+- `WriteResult` 必须与 `reqs` 按 `DeviceAddressID` 一一对应，每个 id 恰好出现一次。
+  网关会像校验 Read 结果一样校验这一点，错位会直接报错。
+- 写必须复用当前会话（串口独占、PLC 单连接限制）。插件侧 `handleWrite` 与 Read
+  共用会话锁；驱动内部若做「读字节 → 改位 → 写回」的位写，必须保证整个过程连续。
+- 只读区（Modbus 3x/1x、S7 输入区）必须返回 `WriteCodeNotWritable`；值无法按类型
+  编码返回 `WriteCodeBadValue`；不要为了"让调用成功"而静默截断或重试。
+- 写路径**不触发重连**：网关只在设备已有活连接时下发，设备离线返回
+  `collector.ErrDeviceOffline`，由采集侧恢复连接。
+
+目前官方插件的实现情况：
+
+| 插件 | 写服务 / 可写范围 | 备注 |
+|---|---|---|
+| Modbus TCP/RTU | FC05/06/16 | 线圈 0x、保持寄存器 4x |
+| Siemens.S7 | gos7 区域写 | DB / M / Q；I 只读；位地址读-改-写 |
+| Mitsubishi.MC.* | 0x1401 | 位设备位写、字设备字写；字设备 bool 读-改-写 |
+| Omron.FINS.* | 0x0102 | CIO / WR / HR / DM，支持位写入 |
+| Omron.CIP | 0x4D | Write Service for Variables |
+| Rockwell.CIP | 0x4D | Write Tag；STRING 暂不支持 |
+
+OPC UA、ABB RWS、DL/T 645 目前只读。各插件对 STRING 等动态长度类型的写支持
+以该插件 CHANGELOG 为准（多数尚未实现编码）。
+
+网关侧还有独立的三层开关：`control.enabled`（出厂 false）、协议 `Writable`、
+点位 `rw_permission` 含 `W`。任何一层不满足都不会下发。审计写入 `control_log` 表。
+
 ## 3. 必须遵守的约定
 
 ### 3.1 `Scope` 沿用原值，但不得与另一个插件撞名
@@ -913,6 +967,7 @@ func (d *yourDriver) MatchConnection(protocolJSON string) bool
 | `handshakeTimeoutMs` | `10000` | `describe` 握手超时。 |
 | `connectTimeoutMs` | `30000` | `connect` / `ping` 超时。 |
 | `readTimeoutMs` | `60000` | `read` 超时。**必须大于 `protocolJSON` 里配置的协议自身超时**，否则网关会放弃插件仍在执行的调用，重试会在慢速串行总线上堆积。 |
+| `writeTimeoutMs` | `15000` | 控制下发超时。写入可能排在一次在途 Read 之后（插件按会话串行化），不能比协议单帧超时还短；也不宜接近 `readTimeoutMs`。 |
 | `restartMinDelayMs` / `restartMaxDelayMs` | `1000` / `30000` | 崩溃重启的退避区间。 |
 | `maxRestarts` | `10` | 连续失败上限，超过后停止监管。 |
 | `disableProtocolRowProvisioning` | `false` | 关闭「依据插件 `describe` 自动维护 `iot_protocol` 行」。 |
@@ -957,6 +1012,55 @@ func (d *yourDriver) MatchConnection(protocolJSON string) bool
 > （回落到嵌进二进制的默认值，即 `plugin.enabled=true` 与 `plugin.dir=plugins`），
 > 日志里也不会有任何提示 —— 而此时若 cwd 与安装目录并非同一个地方，
 > `plugins/` 会被解析到另一个位置，表现就是「插件莫名其妙全没了」。
+
+### `control` 段（控制下发 / 写 PLC 点位）
+
+出厂**关闭**。写点位会改变现场设备状态，与"读采集"是完全不同的风险面。
+
+```yaml
+control:
+  enabled: false
+  maxWritesPerMinute: 60        # 单设备每分钟最多下发的点位数；0 = 不限制
+  maxWritesPerPointPerMinute: 20 # 单点位每分钟最多写入次数；0 = 不限制
+```
+
+打开后仍需同时满足三层条件才会真正下发：
+
+1. 协议插件在 `describe` 里声明了 `Writable: true`（见 §2.8）；
+2. 点位 `device_address.rw_permission` 含 `W`（`W` 或 `RW`）；
+3. 设备当前在采集任务里且链路在线（写路径**不触发重连**）。
+
+限流是固定一分钟窗口，按**实际点位数**扣减（一次写 10 个点消耗 10 个设备配额），
+任一维度超限时整批拒绝（不会出现半批已写、半批被限流的中间态）。实现见
+`service/controlRateLimit.go`。
+
+接口入口：
+
+| 入口 | 鉴权 | source |
+|---|---|---|
+| `POST /control/write` | JWT | `web` |
+| `POST /agentApi/control/write` | 无（受 `agentApi.enabled` 总开关） | `agent` |
+| `POST /openApi/control/write` | `X-Api-Key` | `openapi` |
+| MQTT 订阅的 `controlTopic` | broker 凭据 | `mqtt` |
+
+只接受点位 id，不接受原始 PLC 地址；单次最多 50 个点。`requestId` 用于幂等：
+相同值重复调用返回首次结果，不重复下发；并发相同 `requestId` 会由进程内 inflight
+表收敛为一次执行。`verify=true` 时写后回读校验（只对有读权限的点生效）。
+每次下发都落 `control_log` 审计表，可用 `GET /control/pageControlLog` 分页查询，
+管理端「控制管理 → 控制下发审计」页面也读取同一接口。
+
+MQTT 下行报文（订阅配置里的「控制下行 Topic」）约定：
+
+```json
+{"deviceId":"...","requestId":"...","verify":true,
+ "items":[{"deviceAddressId":"...","value":"42"}]}
+```
+
+单点简写：`{"deviceId":"...","requestId":"...","addressId":"...","value":"42"}`。
+**`requestId` 必填**：MQTT QoS1 会重投，没有幂等键就无法阻止重复写 PLC；缺少时
+该报文被拒绝并计入订阅错误数。控制指令走订阅内独立的有界队列，不阻塞数据解析。
+
+当前只在启动时读取，修改后需重启网关。
 
 ---
 

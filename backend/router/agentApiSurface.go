@@ -239,10 +239,47 @@ var agentApiSurface = map[string]SurfaceEntry{
 	"GET /realtime/snapshot": {
 		Access: AccessRead,
 		Params: argQuery(dto.RealtimeSnapshotDTO{}, map[string]string{
-			"deviceId": "要查哪台设备的实时值",
-			"name":     "点位名或说明（模糊匹配）",
+			"deviceId":   "要查哪台设备的实时值",
+			"name":       "点位名或说明（模糊匹配）",
+			"addressIds": "可选，逗号分隔的点位 ID；给了就只返回这些点位（page/size 仍需携带但被忽略）",
 		}),
 		Note: "取的是**内存中的最新值**（秒级轮询用），不是点位定义",
+	},
+
+	// ==================== 控制下发 ====================
+	"GET /control/capability": {
+		Access: AccessRead,
+		Params: argQuery(dto.ControlCapabilityDTO{}, map[string]string{
+			"deviceId": "要查询的设备 id",
+		}),
+		Note: "只回答「能不能写」，不产生任何设备动作；控制总开关关闭时 writable=false",
+	},
+	"POST /control/write": {
+		Access: AccessWrite,
+		Params: argBody(dto.ControlDTO{}, map[string]string{
+			"deviceId":                "目标设备 id",
+			"requestId":               "幂等键；相同值重复调用返回首次结果，不重复下发。建议每次操作生成一个 UUID",
+			"verify":                  "true 时写后回读校验（仅对有读权限的点有效）",
+			"items[].deviceAddressId": "点位 id（**不是** PLC 地址）；必须属于 deviceId、启用且 rw_permission 含 W",
+			"items[].value":           "目标值的字符串形式；按点位的数据类型由插件编码（bool 可用 true/false/1/0）",
+		}),
+		Note: "**真实改变现场设备状态**，必须先向用户确认。批量写不是事务，逐点返回结果；写链路错误时状态未知，应回读确认",
+	},
+	"GET /control/pageControlLog": {
+		Access: AccessRead,
+		Params: argQuery(dto.PageControlLogDTO{}, map[string]string{
+			"deviceId":  "按设备过滤",
+			"addressId": "按点位过滤",
+			"source":    "web / openapi / mqtt / agent",
+			"operator":  "操作者（模糊）",
+			"requestId": "按幂等键精确查询",
+			"name":      "设备名/点位名/点位说明（模糊）",
+			"code":      "按结果码过滤；0 = 成功",
+			"verified":  "1 只看已回读确认，0 只看未确认",
+			"startTime": "起始时间，格式 YYYY-MM-DD HH:mm:ss（含）",
+			"endTime":   "结束时间，格式 YYYY-MM-DD HH:mm:ss（含）",
+		}),
+		Note: "只读审计记录。每条记录对应一次点位写入；批量请求会产生多行",
 	},
 
 	// ==================== 大盘聚合 ====================
