@@ -114,11 +114,11 @@ func TestMigration025ThingModelSchema(t *testing.T) {
 	// 迁移被记入 schema_migrations，且重复执行幂等。
 	var applied int64
 	if err := db.Raw("SELECT COUNT(*) FROM schema_migrations WHERE version = ?",
-		"025_thing_model.sql").Scan(&applied).Error; err != nil {
+		"027_thing_model.sql").Scan(&applied).Error; err != nil {
 		t.Fatalf("query schema_migrations: %v", err)
 	}
 	if applied != 1 {
-		t.Fatalf("025_thing_model.sql 未被记入 schema_migrations，实际 %d 条", applied)
+		t.Fatalf("027_thing_model.sql 未被记入 schema_migrations，实际 %d 条", applied)
 	}
 	if err := runMigrations(db); err != nil {
 		t.Fatalf("重复执行迁移应幂等，实际报错：%v", err)

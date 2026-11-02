@@ -394,10 +394,12 @@
 - `default.yaml` 是**默认值**的唯一真源;[runtimecfg/](runtimecfg/) 在它之上叠加
   SQLite `system_config` 表里的覆盖值(页面 / `/systemConfig/*` 写入),优先级更高、
   重启后保留。「恢复默认」= 删除覆盖行,不是把默认值写进表。
-- 首批登记 5 个开关:`discovery.enabled`、`deviceScan.enabled`、`push.changeOnly`、
-  `agentApi.enabled`(立即生效,组件从 `runtimecfg.Reader` 现读),
+- 首批登记 6 个开关:`discovery.enabled`、`deviceScan.enabled`、`push.changeOnly`、
+  `agentApi.enabled`、`control.enabled`(立即生效,组件从 `runtimecfg.Reader` 现读),
   `plugin.enabled`(重启生效,插件管理器在构造时冻结 —— `Stop` 是终态的)。
-- `agentApi.enabled` **出厂 false**,与其余开关方向相反:它控制整组免鉴权的
+- `agentApi.enabled` 与 `control.enabled` **出厂 false**,与其余开关方向相反:
+  `control.enabled` 控制写 PLC 点位(出厂关闭,打开前还需协议 `Writable` 与点位 W 权限)。
+  `agentApi.enabled` 控制整组免鉴权的
   `/agentApi` 镜像(含删设备、上传插件)。路由始终注册(gin 启动后不可增删),
   由 [middleware/agentApiSwitchMiddleware.go](middleware/agentApiSwitchMiddleware.go)
   按请求现读开关,关闭时整组 403 —— 包括清单与 `/agentApi/systemConfig/update`,

@@ -371,6 +371,7 @@ push:
 |---|---|
 | [驱动插件指南](docs/driver-plugins.md) | 进程外协议插件的开发、生命周期、安全与排错（新增协议必读） |
 | [驱动 SDK](https://github.com/Ellisata/iot-gateway-sdk) | Apache-2.0 的独立驱动开发套件（第三方 / 闭源驱动）；见 [LICENSING.md](LICENSING.md) |
+| [版本兼容性](docs/version-compatibility.md) | 网关 / 官方驱动 / SDK 的发行配对矩阵、`APIVersion` 判据与升级回滚规则 |
 | [技术规范](backend/specs/README.md) | 分层架构、目录结构、开发规范等 |
 | [推送载荷契约](backend/specs/push-payload.md) | 外发数据的字段语义与解析约定（[EN](backend/specs/push-payload.en.md)） |
 | [订阅解析器规范](backend/specs/parser-plugins.md) | 内置映射 DSL 与 goja 脚本的契约、限制与热加载语义 |

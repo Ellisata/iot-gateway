@@ -6,6 +6,69 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
+## [0.5.0] - 2026-11-02
+
+### 新增
+
+- **控制下发（写 PLC 点位）**：新增驱动 Writer 与插件远程写路径，受 `control.enabled` 运行开关、协议 `Writable`、点位 `rw_permission` 含 W 三层约束，只复用在线链路、不触发重连。入口为 `POST /openApi/control/write`、`/agentApi/control/write` 与 MQTT 订阅的 `controlTopic`。写入审计落新表 `control_log`（迁移 `025_control_log.sql`），控制台新增审计页，支持设备级（默认 60 点/分钟）与点位级（默认 20 次/分钟）限流；新增插件配置 `plugin.writeTimeoutMs`。
+- **物模型管理与设备/点位绑定**：新增物模型属性 CRUD（迁移 `027_thing_model.sql`），设备可绑定物模型、点位可绑定属性；采集记录携带 `thingModelCode` / `propertyCode`，在 InfluxDB v3、TDengine v3 与 JSON 载荷中作为标签输出并纳入变化检测。属性 `access_mode` 生效：只写属性不再采集，只读属性拒绝控制写入（`40039`）；实时点位改为最新在上排序。
+- **大网段分批续扫**：`deviceScan.maxTargets` 改为单批上限，超出时先扫一批并在快照返回 `remainingTargets` / `scannedTotal`；新增 `POST /deviceScan/continue` 沿用同一任务、已发现设备与去重集合继续扫描，中断的批次会重扫。扫描页新增「继续扫描（剩余 N）」与总数显示。
+- **MQTT 订阅最近报文**：每条订阅在内存保留最近 100 条原始报文，通过 `GET /mqttSubscription/recentMessages` 返回；订阅页新增轮询抽屉，展示主题、2 KiB 载荷预览与 QoS / retained / 超大标记，未解析或丢弃的报文同样可见。
+
+### 变更
+
+- SDK 升级到 v0.3.0（testkit v0.2.0），`drivers.version` 同步为 v0.3.0。
+- 补充驱动插件文档（[docs/driver-plugins.md](docs/driver-plugins.md)），README 增加在线演示环境链接。
+
+### 修复
+
+- **编辑通道 / Webhook 时动态表单不回显**：规则加载完成后再渲染表单，并通过 `v-model` 预填保存值，避免加载阶段的空表单吞掉一次性回填。
+- **载荷预览不可见**：原生 JSON 预览渲染后自动滚动到可视区。
+- **大盘趋势 tooltip 区间**：单点桶与多点桶统一采集窗口格式，区间与柱体、断点对齐。
+
+### Added
+
+- **Control writes (PLC point write)**: adds the driver Writer and pluginhost remote
+  write path, gated by the `control.enabled` runtime switch, protocol `Writable`
+  and point `rw_permission` containing W; writes reuse the live link and never
+  trigger a reconnect. Entry points are `POST /openApi/control/write`,
+  `/agentApi/control/write` and MQTT subscription `controlTopic`. Writes are
+  audited in the new `control_log` table (migration `025_control_log.sql`) with a
+  console audit page and per-device (default 60 points/min) and per-point
+  (default 20/min) rate limits; new plugin option `plugin.writeTimeoutMs`.
+- **Thing model management and device/point binding**: thing model properties get
+  CRUD (migration `027_thing_model.sql`); devices bind to a model and points to
+  properties. Collected records carry `thingModelCode` / `propertyCode` as tags in
+  InfluxDB v3, TDengine v3 and JSON payloads and include them in change detection.
+  Property `access_mode` is enforced: write-only-bound points are no longer
+  collected and writes to read-only properties return `40039`; the realtime point
+  list now orders newest first.
+- **Resumable large-subnet scans**: `deviceScan.maxTargets` now caps a single
+  batch; oversize scans report `remainingTargets` / `scannedTotal` in the
+  snapshot, and `POST /deviceScan/continue` resumes the same job, found devices
+  and dedup set, re-scanning a batch cancelled mid-flight. The scan page adds a
+  "Continue scan (N left)" action and an overall count.
+- **Recent MQTT messages**: each subscription keeps its last 100 raw messages in
+  memory behind `GET /mqttSubscription/recentMessages`; the subscription page
+  gains a polling drawer showing topic, a 2 KiB payload preview and
+  QoS/retained/oversized markers, including unparsed or dropped messages.
+
+### Changed
+
+- SDK bumped to v0.3.0 (testkit v0.2.0) and `drivers.version` to v0.3.0.
+- Expanded the driver plugin documentation
+  ([docs/driver-plugins.md](docs/driver-plugins.md)); READMEs link the live demo.
+
+### Fixed
+
+- **Dynamic forms did not echo values when editing channels / webhooks**: the form
+  now renders after the rule loads and prefills saved values through `v-model`,
+  so the loading-phase empty form no longer consumes the one-shot prefill.
+- **Payload preview appeared to do nothing**: the native JSON preview scrolls
+  into view once rendered.
+- **Dashboard trend tooltip ranges**: single-point buckets use the same
+  collection-window format as multi-point ones, aligned with bars and gap edges.
+
 ## [0.4.0] - 2026-10-29
 
 ### 新增

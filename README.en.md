@@ -382,6 +382,7 @@ Bug reports, documentation, new protocol drivers and push channels are all welco
 |---|---|
 | [Driver plugin guide](docs/driver-plugins.md) (中文) | Developing, lifecycle, security and troubleshooting for out-of-process protocol plugins — required reading before adding a protocol |
 | [Driver SDK](https://github.com/Ellisata/iot-gateway-sdk) | Apache-2.0 SDK for third-party and proprietary drivers; see [LICENSING.md](LICENSING.md) |
+| [Version compatibility](docs/version-compatibility.md) (中文) | Release pairing matrix for gateway / official drivers / SDK, the `APIVersion` gate, and upgrade/rollback rules |
 | [Engineering specs](backend/specs/README.md) (中文) | Layering, directory layout, coding standards, etc. |
 | [Push payload contract](backend/specs/push-payload.en.md) | Field semantics and parsing conventions for pushed data |
 | [Subscription parser spec](backend/specs/parser-plugins.md) (中文) | Contract, limits and hot-reload semantics for the built-in mapping DSL and goja scripts |
