@@ -4,17 +4,21 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 
 	"iot-gateway/appError"
 	"iot-gateway/constants"
 	"iot-gateway/enums"
+	"iot-gateway/excelutil"
 	"iot-gateway/model/dto"
 	"iot-gateway/model/po"
 	"iot-gateway/model/vo"
@@ -29,14 +33,17 @@ var (
 	thingModelIdentifierPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
 )
 
-// 属性可用的数据类型类别与读写模式。binding 已覆盖 JSON 入口，
-// 这里再判一次是为了服务层被直接调用时也守住同一套取值。
+// 属性可用的读写模式。binding 已覆盖 JSON 入口，这里再判一次是为了服务层
+// 被直接调用时也守住同一套取值。数据类型类别是跨领域的 driver.KindXxx，
+// 与订阅设备/点位共用 deviceKindCodes（见 deviceKind.go）。
 var (
-	thingModelKinds = map[string]struct{}{
-		"bool": {}, "int": {}, "uint": {}, "float": {}, "string": {}, "time": {},
-	}
-	thingModelAccessModes = map[string]struct{}{
-		"R": {}, "W": {}, "RW": {},
+	thingModelAccessModeCodes = []string{"R", "W", "RW"}
+	thingModelAccessModes     = stringSet(thingModelAccessModeCodes)
+
+	// 模板下拉展示名。与前端 zh-CN 的 thingModel.access.* 文案保持一致；
+	// 模板由后端生成，拿不到前端 i18n，**改一处须同步另一处**。
+	thingModelAccessModeDisplayNames = map[string]string{
+		"R": "只读", "W": "只写", "RW": "读写",
 	}
 )
 
@@ -353,6 +360,121 @@ func (s *ThingModelService) ListThingModels(ctx context.Context) ([]vo.ThingMode
 	return out, nil
 }
 
+// thingModelImportHeaders 物模型导入模板表头（顺序即列序）。
+var thingModelImportHeaders = []string{"模型标识", "名称", "分类", "版本", "描述"}
+
+// ImportThingModels 从 Excel(.xlsx) 批量导入物模型。
+//
+// 模型标识与名称都要求唯一（与单条创建同口径），重复行跳过并记录原因；
+// 分类列接受模板下拉项「传感器（sensor）」、中文名「传感器」或 code「sensor」
+// （code 忽略大小写），留空表示未分类。其余行部分导入并返回汇总。
+func (s *ThingModelService) ImportThingModels(ctx context.Context, data []byte) (*vo.ExcelImportResultVO, error) {
+	var rows []po.ThingModel
+	if err := s.sqliteDB.WithContext(ctx).Select("code", "name").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	existingCodes := make(map[string]bool, len(rows))
+	existingNames := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		existingCodes[r.Code] = true
+		existingNames[r.Name] = true
+	}
+
+	seenCodes := make(map[string]bool)
+	seenNames := make(map[string]bool)
+	now := nowString()
+	return excelutil.Import(ctx, s.sqliteDB, data, excelutil.Options[po.ThingModel]{
+		Headers: thingModelImportHeaders,
+		Cols:    len(thingModelImportHeaders),
+		DupMsg:  enums.ThingModelExistsEnum.GetMessage(),
+		Label: func(row []string) string {
+			return importRowLabel(excelutil.Cell(row, 0), excelutil.Cell(row, 1))
+		},
+		Parse: func(row []string) (*po.ThingModel, string, string) {
+			code := excelutil.Cell(row, 0)
+			name := excelutil.Cell(row, 1)
+			category, categoryOK := constants.ParseThingModelCategory(excelutil.Cell(row, 2))
+			version := excelutil.Cell(row, 3)
+			desc := excelutil.Cell(row, 4)
+
+			if !categoryOK {
+				return nil, code, "分类须为下拉选项（如「传感器（sensor）」）或留空"
+			}
+			if reason := validateThingModelImportRow(code, name, category, version, existingNames, seenNames); reason != "" {
+				return nil, code, reason
+			}
+			if existingCodes[code] || seenCodes[code] {
+				return nil, code, enums.ThingModelExistsEnum.GetMessage()
+			}
+			if version == "" {
+				version = "1.0.0"
+			}
+			seenCodes[code] = true
+			seenNames[name] = true
+			return &po.ThingModel{
+				Code:        code,
+				Name:        name,
+				Category:    category,
+				Version:     version,
+				Description: desc,
+				Status:      1,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}, code, ""
+		},
+	})
+}
+
+// validateThingModelImportRow 校验单行物模型导入数据（纯函数）。
+// 返回 "" 表示通过；名称重复在这里一并拦截（标识重复由调用方按去重表判断）。
+func validateThingModelImportRow(code, name, category, version string, existingNames, seenNames map[string]bool) string {
+	if code == "" {
+		return "模型标识为空"
+	}
+	if !thingModelCodePattern.MatchString(code) {
+		return "模型标识不合法（字母开头，仅字母数字下划线短横线，最多64位）"
+	}
+	if name == "" {
+		return "名称为空"
+	}
+	if utf8.RuneCountInString(name) > 100 {
+		return "名称不能超过100个字符"
+	}
+	if existingNames[name] || seenNames[name] {
+		return enums.ThingModelExistsEnum.GetMessage()
+	}
+	if !constants.IsValidThingModelCategory(category) {
+		return "分类须为 sensor/meter/actuator/robot/plc/other 或留空"
+	}
+	if utf8.RuneCountInString(version) > 32 {
+		return "版本号不能超过32个字符"
+	}
+	return ""
+}
+
+// GenerateThingModelImportTemplate 生成物模型导入模板（.xlsx）。
+// 分类列带下拉选择，取值与 constants.ThingModelCategoryCodes 保持一致。
+func (s *ThingModelService) GenerateThingModelImportTemplate() (*bytes.Buffer, error) {
+	return excelutil.BuildTemplateWithLists(
+		thingModelImportHeaders,
+		[]string{"th_sensor", "温湿度传感器", "传感器（sensor）", "1.0.0", "示例数据，可删除或覆盖"},
+		[]float64{20, 24, 12, 10, 40},
+		[]excelutil.ListValidation{{
+			Col:     2,
+			Options: constants.ThingModelCategoryTemplateOptions(),
+			Prompt:  "请选择分类；留空表示未分类",
+		}},
+	)
+}
+
+// importRowLabel 导入失败明细里展示的标识：优先名称，名称缺失时退回标识。
+func importRowLabel(code, name string) string {
+	if name != "" {
+		return name
+	}
+	return code
+}
+
 // ==================== 物模型属性 ====================
 
 // ListThingModelProperties 列出某模型下的全部属性（按 sort_order 升序）
@@ -562,6 +684,156 @@ func (s *ThingModelService) DeleteThingModelProperty(ctx context.Context, id str
 	})
 }
 
+// thingModelPropertyImportHeaders 物模型属性导入模板表头（顺序即列序）。
+var thingModelPropertyImportHeaders = []string{"属性标识", "名称", "数据类型", "读写模式", "单位", "排序", "描述"}
+
+// ImportThingModelProperties 从 Excel(.xlsx) 批量导入指定模型下的属性。
+//
+// 属性标识符在模型内唯一（与单条创建同口径），重复行跳过并记录原因；
+// 数据类型/读写模式接受模板下拉项「浮点（float）」「只读（R）」、中文名或 code
+// （code 忽略大小写）。排序留空时按模型内最大值 +10 顺延；其余行部分导入。
+func (s *ThingModelService) ImportThingModelProperties(ctx context.Context, modelID string, data []byte) (*vo.ExcelImportResultVO, error) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return nil, thingModelErr(enums.ParamValidEnum)
+	}
+	var model po.ThingModel
+	if err := s.sqliteDB.WithContext(ctx).Where("id = ?", modelID).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, thingModelErr(enums.ThingModelNotExistsEnum)
+		}
+		return nil, err
+	}
+
+	var identifiers []string
+	if err := s.sqliteDB.WithContext(ctx).Model(&po.ThingModelProperty{}).
+		Where("model_id = ?", modelID).Pluck("identifier", &identifiers).Error; err != nil {
+		return nil, err
+	}
+	existing := make(map[string]bool, len(identifiers))
+	for _, id := range identifiers {
+		existing[id] = true
+	}
+
+	var maxSortOrder int
+	if err := s.sqliteDB.WithContext(ctx).Model(&po.ThingModelProperty{}).
+		Where("model_id = ?", modelID).
+		Select("COALESCE(MAX(sort_order), 0)").
+		Scan(&maxSortOrder).Error; err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]bool)
+	autoSort := maxSortOrder + 10
+	now := nowString()
+	return excelutil.Import(ctx, s.sqliteDB, data, excelutil.Options[po.ThingModelProperty]{
+		Headers: thingModelPropertyImportHeaders,
+		Cols:    len(thingModelPropertyImportHeaders),
+		DupMsg:  enums.ThingModelPropertyExistsEnum.GetMessage(),
+		Label: func(row []string) string {
+			return importRowLabel(excelutil.Cell(row, 0), excelutil.Cell(row, 1))
+		},
+		Parse: func(row []string) (*po.ThingModelProperty, string, string) {
+			identifier := excelutil.Cell(row, 0)
+			name := excelutil.Cell(row, 1)
+			kindRaw := excelutil.Cell(row, 2)
+			accessRaw := excelutil.Cell(row, 3)
+			unit := excelutil.Cell(row, 4)
+			sortRaw := excelutil.Cell(row, 5)
+			desc := excelutil.Cell(row, 6)
+
+			kind, accessMode, reason := validateThingModelPropertyImportRow(
+				identifier, name, kindRaw, accessRaw, unit, desc, existing, seen,
+			)
+			if reason != "" {
+				return nil, identifier, reason
+			}
+			sortOrder := autoSort
+			if sortRaw == "" {
+				autoSort += 10
+			} else {
+				parsed, err := strconv.Atoi(sortRaw)
+				if err != nil || parsed < 0 {
+					return nil, identifier, "排序须为非负整数"
+				}
+				sortOrder = parsed
+			}
+			seen[identifier] = true
+			return &po.ThingModelProperty{
+				ModelID:     modelID,
+				Identifier:  identifier,
+				Name:        name,
+				Kind:        kind,
+				AccessMode:  accessMode,
+				Unit:        unit,
+				Description: desc,
+				SortOrder:   sortOrder,
+				Status:      1,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}, identifier, ""
+		},
+	})
+}
+
+// validateThingModelPropertyImportRow 校验单行属性导入数据（纯函数），
+// 并把数据类型/读写模式归一回内部 code。返回的 reason 为 "" 表示通过；
+// 标识符重复也在这里一并拦截。
+func validateThingModelPropertyImportRow(identifier, name, kindRaw, accessRaw, unit, desc string, existing, seen map[string]bool) (kind, accessMode, reason string) {
+	if identifier == "" {
+		return "", "", "属性标识为空"
+	}
+	if !thingModelIdentifierPattern.MatchString(identifier) {
+		return "", "", "属性标识符不合法（字母开头，仅字母数字下划线，最多64位）"
+	}
+	if existing[identifier] || seen[identifier] {
+		return "", "", enums.ThingModelPropertyExistsEnum.GetMessage()
+	}
+	if name == "" {
+		return "", "", "名称为空"
+	}
+	if utf8.RuneCountInString(name) > 100 {
+		return "", "", "名称不能超过100个字符"
+	}
+	kind, kindOK := constants.ParseEnumValue(kindRaw, deviceKindCodes, deviceKindDisplayNames)
+	if !kindOK {
+		return "", "", "数据类型须为下拉选项（如「浮点（float）」）"
+	}
+	accessMode, accessOK := constants.ParseEnumValue(accessRaw, thingModelAccessModeCodes, thingModelAccessModeDisplayNames)
+	if !accessOK {
+		return "", "", "读写模式须为下拉选项（如「只读（R）」）"
+	}
+	if utf8.RuneCountInString(unit) > 32 {
+		return "", "", "单位不能超过32个字符"
+	}
+	if utf8.RuneCountInString(desc) > 500 {
+		return "", "", "描述不能超过500个字符"
+	}
+	return kind, accessMode, ""
+}
+
+// GenerateThingModelPropertyImportTemplate 生成物模型属性导入模板（.xlsx）。
+// 数据类型/读写模式两列带下拉选择，形如「浮点（float）」「只读（R）」。
+func (s *ThingModelService) GenerateThingModelPropertyImportTemplate() (*bytes.Buffer, error) {
+	return excelutil.BuildTemplateWithLists(
+		thingModelPropertyImportHeaders,
+		[]string{"temperature", "温度", "浮点（float）", "只读（R）", "℃", "10", "示例数据，可删除或覆盖"},
+		[]float64{18, 20, 12, 12, 10, 8, 36},
+		[]excelutil.ListValidation{
+			{
+				Col:     2,
+				Options: constants.BuildEnumOptions(deviceKindCodes, deviceKindDisplayNames),
+				Prompt:  "请选择数据类型",
+			},
+			{
+				Col:     3,
+				Options: constants.BuildEnumOptions(thingModelAccessModeCodes, thingModelAccessModeDisplayNames),
+				Prompt:  "请选择读写模式",
+			},
+		},
+	)
+}
+
 func toThingModelPropertyVO(p po.ThingModelProperty) vo.ThingModelPropertyVO {
 	return vo.ThingModelPropertyVO{
 		ID:          p.ID,
@@ -580,7 +852,7 @@ func toThingModelPropertyVO(p po.ThingModelProperty) vo.ThingModelPropertyVO {
 }
 
 func isThingModelKind(kind string) bool {
-	_, ok := thingModelKinds[kind]
+	_, ok := deviceKinds[kind]
 	return ok
 }
 

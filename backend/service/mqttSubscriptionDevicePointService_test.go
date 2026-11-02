@@ -307,7 +307,7 @@ func TestMqttSubscriptionDevicePointImportUpsert(t *testing.T) {
 	data := buildDevicePointXlsx(t, [][]string{
 		{"设备ID", "点位ID", "设备名称", "点位标签", "类型"},
 		{"d1", "a1", "新名称", "新标签", "float"},
-		{"d2", "a2", "电表2", "功率", "int"},
+		{"d2", "a2", "电表2", "功率", "有符号整数（int）"},
 		{"d1", "a1", "重复行", "", ""},
 		{"", "a3", "缺设备ID", "", ""},
 	})
@@ -341,6 +341,9 @@ func TestMqttSubscriptionDevicePointImportUpsert(t *testing.T) {
 	}
 	if rows[1].DeviceID != "d2" || rows[1].Source != po.MqttSubscriptionDevicePointSourceManual {
 		t.Errorf("new row = %+v, want d2/manual", rows[1])
+	}
+	if rows[1].Kind != "int" {
+		t.Errorf("可读类型写法应归一到 int, got %q", rows[1].Kind)
 	}
 
 	// 表头不对时整体报错，而不是逐行失败。
@@ -378,6 +381,20 @@ func TestMqttSubscriptionDevicePointImportTemplate(t *testing.T) {
 		if i >= len(rows[0]) || rows[0][i] != h {
 			t.Fatalf("header[%d] = %q, want %q (row=%v)", i, cellAt(rows[0], i), h, rows[0])
 		}
+	}
+
+	// 「类型」列带可读下拉：布尔（bool）/浮点（float）……
+	dvs, err := f.GetDataValidations(f.GetSheetName(0))
+	if err != nil {
+		t.Fatalf("get validations: %v", err)
+	}
+	if len(dvs) != 1 {
+		t.Fatalf("下拉数 = %d，期望 1", len(dvs))
+	}
+	if !strings.HasPrefix(dvs[0].Sqref, "E2:E") ||
+		!strings.Contains(dvs[0].Formula1, "浮点（float）") ||
+		!strings.Contains(dvs[0].Formula1, "布尔（bool）") {
+		t.Fatalf("类型列下拉不符合预期：%+v", dvs[0])
 	}
 }
 

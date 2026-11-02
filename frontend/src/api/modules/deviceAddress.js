@@ -145,12 +145,14 @@ export function importDeviceAddresses(file, deviceId) {
 
 /**
  * 下载设备地址导入模板（.xlsx，六列：名称/标签/通用数据类型/读写权限/扫描频率/描述）
+ * @param {string} [deviceId] 设备 ID；传了按该设备的协议生成数据类型下拉
  * @returns {Promise<Blob>}
  */
-export function downloadDeviceAddressTemplate() {
+export function downloadDeviceAddressTemplate(deviceId) {
   return request({
     url: '/deviceAddress/importDeviceAddressTemplate',
     method: 'get',
+    params: { deviceId: deviceId || undefined },
     responseType: 'blob',
   })
 }

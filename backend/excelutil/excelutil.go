@@ -34,6 +34,9 @@ type Options[T any] struct {
 	Cols int
 	// DupMsg 名称重复（库内或文件内）时的失败原因
 	DupMsg string
+	// Label 失败明细里展示的行标识。为空时退回 Parse 返回的去重 key。
+	// 去重 key 需要唯一（如属性标识符），但给人看的通常是名称 —— 两者不是一回事。
+	Label func(row []string) string
 	// Parse 单行解析回调
 	Parse RowFunc[T]
 }
@@ -78,16 +81,22 @@ func Import[T any](ctx context.Context, db *gorm.DB, data []byte, opt Options[T]
 			result.Total++
 
 			record, key, reason := opt.Parse(row)
+			name := key
+			if opt.Label != nil {
+				if label := opt.Label(row); label != "" {
+					name = label
+				}
+			}
 			if reason != "" {
-				result.Errors = append(result.Errors, vo.ExcelImportErrorVO{Row: excelRow, Name: key, Reason: reason})
+				result.Errors = append(result.Errors, vo.ExcelImportErrorVO{Row: excelRow, Name: name, Reason: reason})
 				continue
 			}
 			if existing[key] || seen[key] {
-				result.Errors = append(result.Errors, vo.ExcelImportErrorVO{Row: excelRow, Name: key, Reason: opt.DupMsg})
+				result.Errors = append(result.Errors, vo.ExcelImportErrorVO{Row: excelRow, Name: name, Reason: opt.DupMsg})
 				continue
 			}
 			if err := tx.Create(record).Error; err != nil {
-				result.Errors = append(result.Errors, vo.ExcelImportErrorVO{Row: excelRow, Name: key, Reason: "入库失败：" + err.Error()})
+				result.Errors = append(result.Errors, vo.ExcelImportErrorVO{Row: excelRow, Name: name, Reason: "入库失败：" + err.Error()})
 				continue
 			}
 			existing[key] = true
@@ -152,8 +161,29 @@ func isBlank(row []string, cols int) bool {
 	return true
 }
 
+// ListValidation 为模板某一列附加下拉选择（Excel 数据验证）。
+// Col 是 0 起的列下标；校验作用于第 2 行起的 templateValidationRows 行。
+type ListValidation struct {
+	Col     int
+	Options []string
+	// Prompt 输入提示（可选）。留空则不显示提示气泡。
+	Prompt string
+	// AllowCustom 允许手工输入下拉项以外的值。默认为 false（严格）：
+	// 取值必须来自下拉项，适合固定枚举。协议扩展类型这类无法穷举的列应置 true。
+	AllowCustom bool
+}
+
+// templateValidationRows 下拉校验覆盖的数据行数（从第 2 行开始）。
+// 与模板的 1000 行预留空间一致，避免用户往下填几行就失去下拉。
+const templateValidationRows = 1000
+
 // BuildTemplate 生成带表头 + 示例行 + 冻结首行的导入模板（.xlsx）。
 func BuildTemplate(headers, example []string, widths []float64) (*bytes.Buffer, error) {
+	return BuildTemplateWithLists(headers, example, widths, nil)
+}
+
+// BuildTemplateWithLists 与 BuildTemplate 相同，并给指定列加下拉选择。
+func BuildTemplateWithLists(headers, example []string, widths []float64, lists []ListValidation) (*bytes.Buffer, error) {
 	f := excelize.NewFile()
 	defer f.Close()
 	sheet := f.GetSheetName(0)
@@ -208,6 +238,31 @@ func BuildTemplate(headers, example []string, widths []float64) (*bytes.Buffer, 
 	// 冻结首行
 	if err := f.SetPanes(sheet, &excelize.Panes{Freeze: true, YSplit: 1, TopLeftCell: "A2"}); err != nil {
 		return nil, err
+	}
+
+	// 列下拉选择：用户从固定枚举里选，避免手填出模板不认识的取值。
+	for _, lv := range lists {
+		if lv.Col < 0 || lv.Col >= len(headers) {
+			return nil, fmt.Errorf("下拉列下标越界：%d", lv.Col)
+		}
+		col, err := excelize.ColumnNumberToName(lv.Col + 1)
+		if err != nil {
+			return nil, err
+		}
+		dv := excelize.NewDataValidation(true)
+		dv.Sqref = fmt.Sprintf("%s2:%s%d", col, col, templateValidationRows+1)
+		if err := dv.SetDropList(lv.Options); err != nil {
+			return nil, err
+		}
+		if !lv.AllowCustom {
+			dv.SetError(excelize.DataValidationErrorStyleStop, "取值不合法", "请从下拉列表中选择")
+		}
+		if lv.Prompt != "" {
+			dv.SetInput("请选择", lv.Prompt)
+		}
+		if err := f.AddDataValidation(sheet, dv); err != nil {
+			return nil, err
+		}
 	}
 
 	var buf bytes.Buffer

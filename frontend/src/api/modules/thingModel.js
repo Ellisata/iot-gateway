@@ -178,3 +178,59 @@ export function deleteThingModelProperty(id) {
     method: 'get',
   })
 }
+
+/**
+ * 批量导入物模型（Excel .xlsx）
+ * @param {File} file - 选择的 Excel 文件
+ * @returns {Promise<{total:number, success:number, failed:number, errors:Array<{row:number, name:string, reason:string}>}>}
+ */
+export function importThingModels(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request({
+    url: '/thingModel/importThingModel',
+    method: 'post',
+    data: formData,
+  })
+}
+
+/**
+ * 下载物模型导入模板（.xlsx，五列：模型标识/名称/分类/版本/描述）
+ * @returns {Promise<Blob>}
+ */
+export function downloadThingModelTemplate() {
+  return request({
+    url: '/thingModel/importThingModelTemplate',
+    method: 'get',
+    responseType: 'blob',
+  })
+}
+
+/**
+ * 批量导入物模型属性（Excel .xlsx）
+ * @param {File} file - 选择的 Excel 文件
+ * @param {string} modelId - 所属物模型 ID
+ * @returns {Promise<{total:number, success:number, failed:number, errors:Array<{row:number, name:string, reason:string}>}>}
+ */
+export function importThingModelProperties(file, modelId) {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('modelId', modelId)
+  return request({
+    url: '/thingModel/importThingModelProperty',
+    method: 'post',
+    data: formData,
+  })
+}
+
+/**
+ * 下载物模型属性导入模板（.xlsx，七列：属性标识/名称/数据类型/读写模式/单位/排序/描述）
+ * @returns {Promise<Blob>}
+ */
+export function downloadThingModelPropertyTemplate() {
+  return request({
+    url: '/thingModel/importThingModelPropertyTemplate',
+    method: 'get',
+    responseType: 'blob',
+  })
+}

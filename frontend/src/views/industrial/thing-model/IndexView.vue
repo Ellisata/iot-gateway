@@ -55,9 +55,22 @@
           <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
         </div>
         <div class="iot-toolbar-actions">
+          <el-button :icon="Download" @click="handleModelTemplateDownload">
+            {{ t('common.downloadTemplate') }}
+          </el-button>
+          <el-button :icon="Upload" :loading="modelImporting" @click="handleModelImport">
+            {{ t('common.import') }}
+          </el-button>
           <el-button type="primary" :icon="Plus" @click="handleAdd">
             {{ t('thingModel.add') }}
           </el-button>
+          <input
+            ref="modelFileInputRef"
+            type="file"
+            accept=".xlsx"
+            class="hidden"
+            @change="handleModelFileChange"
+          />
         </div>
       </div>
 
@@ -286,9 +299,24 @@
       <div class="thing-drawer-body">
         <div class="thing-drawer-head">
           <p class="thing-drawer-sub">{{ t('thingModel.propertiesSubtitle') }}</p>
-          <el-button type="primary" :icon="Plus" @click="handleAddProperty">
-            {{ t('thingModel.addProperty') }}
-          </el-button>
+          <div class="thing-drawer-actions">
+            <el-button :icon="Download" @click="handlePropertyTemplateDownload">
+              {{ t('common.downloadTemplate') }}
+            </el-button>
+            <el-button :icon="Upload" :loading="propertyImporting" @click="handlePropertyImport">
+              {{ t('common.import') }}
+            </el-button>
+            <el-button type="primary" :icon="Plus" @click="handleAddProperty">
+              {{ t('thingModel.addProperty') }}
+            </el-button>
+            <input
+              ref="propertyFileInputRef"
+              type="file"
+              accept=".xlsx"
+              class="hidden"
+              @change="handlePropertyFileChange"
+            />
+          </div>
         </div>
 
         <el-table
@@ -498,6 +526,12 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <ImportResultDialog v-model:visible="modelImportResultVisible" :result="modelImportResult" />
+    <ImportResultDialog
+      v-model:visible="propertyImportResultVisible"
+      :result="propertyImportResult"
+    />
   </div>
 </template>
 
@@ -507,22 +541,30 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   IconBox as Box,
+  IconDownload as Download,
   IconEdit as EditPen,
   IconListDetails as ListDetails,
   IconPlus as Plus,
   IconSearch as Search,
   IconTrash as Delete,
+  IconUpload as Upload,
 } from '@tabler/icons-vue'
 import {
   createThingModel,
   createThingModelProperty,
   deleteThingModel,
   deleteThingModelProperty,
+  downloadThingModelPropertyTemplate,
+  downloadThingModelTemplate,
   getThingModelList,
+  importThingModelProperties,
+  importThingModels,
   pageThingModelProperties,
   updateThingModel,
   updateThingModelProperty,
 } from '@/api/modules/thingModel'
+import ImportResultDialog from '@/components/ImportResultDialog.vue'
+import { useExcelImport } from '@/composables/useExcelImport'
 
 const { t } = useI18n()
 
@@ -951,6 +993,40 @@ async function handleDeleteProperty(row) {
   }
 }
 
+// ---------- Excel 导入 / 模板下载 ----------
+const {
+  fileInputRef: modelFileInputRef,
+  importing: modelImporting,
+  importResultVisible: modelImportResultVisible,
+  importResult: modelImportResult,
+  handleImport: handleModelImport,
+  handleFileChange: handleModelFileChange,
+  handleDownloadTemplate: handleModelTemplateDownload,
+} = useExcelImport({
+  importFn: (file) => importThingModels(file),
+  downloadFn: downloadThingModelTemplate,
+  templateName: () => t('thingModel.importModelTemplateName'),
+  refresh: fetchList,
+})
+
+const {
+  fileInputRef: propertyFileInputRef,
+  importing: propertyImporting,
+  importResultVisible: propertyImportResultVisible,
+  importResult: propertyImportResult,
+  handleImport: handlePropertyImport,
+  handleFileChange: handlePropertyFileChange,
+  handleDownloadTemplate: handlePropertyTemplateDownload,
+} = useExcelImport({
+  importFn: (file) => importThingModelProperties(file, currentModel.value?.id),
+  downloadFn: downloadThingModelPropertyTemplate,
+  templateName: () => t('thingModel.importPropertyTemplateName'),
+  refresh: async () => {
+    await fetchProperties()
+    fetchList()
+  },
+})
+
 onMounted(fetchList)
 </script>
 
@@ -974,7 +1050,19 @@ onMounted(fetchList)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+
+.thing-drawer-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.thing-drawer-actions :deep(.hidden) {
+  display: none;
 }
 
 .thing-drawer-sub {

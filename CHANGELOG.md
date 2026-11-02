@@ -6,6 +6,25 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
+## [未发布]
+
+### 新增
+
+- **物模型与属性 Excel 导入**：新增物模型、物模型属性的模板下载与批量导入接口（`GET /thingModel/importThingModelTemplate` 等），页面提供「下载模板 / 导入」按钮。模板中的分类、数据类型、读写模式列改为「中文名（code）」下拉，导入接受 code、中文名或组合写法（code 忽略大小写）。物模型按标识与名称去重，属性在模型内按标识符去重；逐行校验、部分导入并返回失败明细。设备地址导入模板支持传 `deviceId`，按该设备协议生成数据类型下拉。
+
+### Added
+
+- **Excel import for thing models and properties**: adds template download and
+  bulk import endpoints for thing models and their properties
+  (`GET /thingModel/importThingModelTemplate` etc.) plus "Download template" /
+  "Import" actions in the console. Category, data-type and access-mode columns
+  in the templates become "label (code)" dropdowns; imports accept a code, a
+  display name, or the combined form (code is case-insensitive). Thing models
+  are deduped by code and name, properties by identifier within a model; rows
+  are validated individually, valid rows are imported and failures are
+  reported. The device-address import template now accepts `deviceId` to scope
+  data-type dropdowns to that device's protocol.
+
 ## [0.5.0] - 2026-11-02
 
 ### 新增

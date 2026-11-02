@@ -3,6 +3,8 @@
 
 package constants
 
+import "strings"
+
 // 物模型分类 code。
 //
 // 分类是产品内置的固定枚举，**不建字典表**：thing_model.category 只存 code，
@@ -38,10 +40,33 @@ func IsValidThingModelCategory(code string) bool {
 	if code == ThingModelCategoryUnset {
 		return true
 	}
-	for _, c := range ThingModelCategoryCodes {
-		if c == code {
-			return true
-		}
+	return containsCode(ThingModelCategoryCodes, code)
+}
+
+// ThingModelCategoryDisplayNames 分类 code → 中文展示名，仅供 Excel 导入模板使用。
+//
+// 页面上的分类名仍由前端 i18n（thingModel.category.<code>）提供；这里是模板里
+// 唯一的可读名来源 —— 模板由后端生成，拿不到前端文案。**改一处须同步另一处**。
+var ThingModelCategoryDisplayNames = map[string]string{
+	ThingModelCategorySensor:   "传感器",
+	ThingModelCategoryMeter:    "仪表",
+	ThingModelCategoryActuator: "执行器",
+	ThingModelCategoryRobot:    "机器人",
+	ThingModelCategoryPLC:      "PLC / 控制器",
+	ThingModelCategoryOther:    "其他",
+}
+
+// ThingModelCategoryTemplateOptions 导入模板的下拉项，形如「传感器（sensor）」。
+func ThingModelCategoryTemplateOptions() []string {
+	return BuildEnumOptions(ThingModelCategoryCodes, ThingModelCategoryDisplayNames)
+}
+
+// ParseThingModelCategory 解析导入文件里的分类取值，返回归一后的 code。
+// 接受：空串（未分类）、code（忽略大小写）、中文展示名、「展示名（code）」组合。
+// ok 为 false 表示无法识别。
+func ParseThingModelCategory(raw string) (code string, ok bool) {
+	if strings.TrimSpace(raw) == "" {
+		return ThingModelCategoryUnset, true
 	}
-	return false
+	return ParseEnumValue(raw, ThingModelCategoryCodes, ThingModelCategoryDisplayNames)
 }

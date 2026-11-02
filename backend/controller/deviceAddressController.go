@@ -133,10 +133,11 @@ func (ctr *DeviceAddressController) ImportDeviceAddress(c *gin.Context) {
 	c.JSON(200, response.Success(result))
 }
 
-// ImportDeviceAddressTemplate 下载设备地址导入模板（.xlsx）
+// ImportDeviceAddressTemplate 下载设备地址导入模板（.xlsx）。
+// deviceId 可选：传了按该设备的协议给出数据类型下拉。
 func (ctr *DeviceAddressController) ImportDeviceAddressTemplate(c *gin.Context) {
 	ctx := c.Request.Context()
-	buf, err := ctr.deviceAddressService.GenerateDeviceAddressImportTemplate()
+	buf, err := ctr.deviceAddressService.GenerateDeviceAddressImportTemplate(ctx, c.Query("deviceId"))
 	if err != nil {
 		c.JSON(200, appError.HandleErrorCtx(ctx, err))
 		return

@@ -13,8 +13,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/appError"
+	"iot-gateway/constants"
 	"iot-gateway/enums"
 	"iot-gateway/excelutil"
 	"iot-gateway/model/dto"
@@ -27,16 +27,6 @@ const devicePointTimeLayout = "2006-01-02 15:04:05"
 
 // 导入模板列：前 5 列强校验，与订阅映射里的身份字段 + 元信息字段一一对应。
 var devicePointImportHeaders = []string{"设备ID", "点位ID", "设备名称", "点位标签", "类型"}
-
-// 手工维护允许的类型类别。空值表示"未知"，自动上报的推断值不受此限制。
-var devicePointKinds = map[string]bool{
-	driver.KindBool:   true,
-	driver.KindInt:    true,
-	driver.KindUInt:   true,
-	driver.KindFloat:  true,
-	driver.KindString: true,
-	driver.KindTime:   true,
-}
 
 // devicePointFields 校验并归一后的可入库字段。
 type devicePointFields struct {
@@ -59,6 +49,13 @@ func normalizeDevicePointFields(deviceID, addressID, name, label, kind, existing
 		label:     strings.TrimSpace(label),
 		kind:      strings.ToLower(strings.TrimSpace(kind)),
 	}
+	// 导入模板/接口都接受「浮点（float）」、中文名或 code；接口仍以 code 为主，
+	// 归一在这里做，保证落库始终是 driver.KindXxx。
+	if f.kind != "" {
+		if code, ok := constants.ParseEnumValue(kind, deviceKindCodes, deviceKindDisplayNames); ok {
+			f.kind = code
+		}
+	}
 	switch {
 	case f.deviceID == "":
 		return f, "设备ID为空"
@@ -73,9 +70,11 @@ func normalizeDevicePointFields(deviceID, addressID, name, label, kind, existing
 	case utf8.RuneCountInString(f.label) > 100:
 		return f, "点位标签不能超过100个字符"
 	}
-	if f.kind != "" && !devicePointKinds[f.kind] &&
-		f.kind != strings.ToLower(strings.TrimSpace(existingKind)) {
-		return f, "类型须为 bool/int/uint/float/string/time 之一"
+	if f.kind != "" {
+		_, known := deviceKinds[f.kind]
+		if !known && f.kind != strings.ToLower(strings.TrimSpace(existingKind)) {
+			return f, "类型须为下拉选项（如「浮点（float）」）或留空"
+		}
 	}
 	return f, ""
 }
@@ -344,10 +343,16 @@ func (s *MqttSubscriptionService) ImportMqttSubscriptionDevicePoints(ctx context
 }
 
 // GenerateMqttSubscriptionDevicePointImportTemplate 生成导入模板（.xlsx）。
+// 「类型」列是六种标准数据类型类别，带可读下拉；留空表示未知。
 func (s *MqttSubscriptionService) GenerateMqttSubscriptionDevicePointImportTemplate() (*bytes.Buffer, error) {
-	return excelutil.BuildTemplate(
+	return excelutil.BuildTemplateWithLists(
 		devicePointImportHeaders,
-		[]string{"d1", "a1", "电表1", "A相电流", "float"},
-		[]float64{18, 18, 24, 24, 14},
+		[]string{"d1", "a1", "电表1", "A相电流", "浮点（float）"},
+		[]float64{18, 18, 24, 24, 18},
+		[]excelutil.ListValidation{{
+			Col:     4,
+			Options: constants.BuildEnumOptions(deviceKindCodes, deviceKindDisplayNames),
+			Prompt:  "请选择类型类别；留空表示未知",
+		}},
 	)
 }

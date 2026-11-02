@@ -19,11 +19,15 @@ func ThingModelRoutes(r gin.IRouter, tc *controller.ThingModelController) {
 		g.GET("/getThingModelById/:id", tc.GetThingModelByID)
 		g.GET("/pageThingModel", tc.PageThingModel)
 		g.GET("/listThingModels", tc.ListThingModels)
+		g.POST("/importThingModel", tc.ImportThingModel)
+		g.GET("/importThingModelTemplate", tc.ImportThingModelTemplate)
 
 		g.GET("/listThingModelProperties", tc.ListThingModelProperties)
 		g.GET("/pageThingModelProperties", tc.PageThingModelProperties)
 		g.POST("/createThingModelProperty", tc.CreateThingModelProperty)
 		g.POST("/updateThingModelProperty", tc.UpdateThingModelProperty)
 		g.GET("/deleteThingModelProperty/:id", tc.DeleteThingModelProperty)
+		g.POST("/importThingModelProperty", tc.ImportThingModelProperty)
+		g.GET("/importThingModelPropertyTemplate", tc.ImportThingModelPropertyTemplate)
 	}
 }

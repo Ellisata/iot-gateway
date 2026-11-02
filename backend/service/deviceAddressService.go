@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/appError"
+	"iot-gateway/constants"
 	"iot-gateway/enums"
 	"iot-gateway/excelutil"
 	"iot-gateway/logger"
@@ -745,6 +747,74 @@ func (s *DeviceAddressService) resolveDataType(protocolName, commonType string) 
 
 // ==================== Excel 批量导入设备地址 ====================
 
+// 设备地址导入模板的枚举与可读名。
+//
+// 模板由后端生成，拿不到前端 i18n；读写权限的中文名与
+// 前端 deviceAddress 的读写权限文案保持一致，改一处须同步另一处。
+var (
+	deviceAddressRWPermissionCodes        = []string{"R", "W", "RW"}
+	deviceAddressRWPermissionDisplayNames = map[string]string{
+		"R": "只读", "W": "只写", "RW": "读写",
+	}
+	// 通用数据类型（driver.CommonDataTypes）的中文名。协议扩展类型没有通用
+	// 中文名，模板里直接显示 code（见 constants.BuildEnumOptions）。
+	commonDataTypeDisplayNames = map[string]string{
+		driver.TypeBoolean: "布尔",
+		driver.TypeDate:    "日期",
+		driver.TypeString:  "字符串",
+		driver.TypeByte:    "字节",
+		driver.TypeChar:    "字符",
+		driver.TypeShort:   "短整型",
+		driver.TypeWord:    "字",
+		driver.TypeDWord:   "双字",
+		driver.TypeLong:    "长整型",
+		driver.TypeFloat:   "单精度浮点",
+		driver.TypeDouble:  "双精度浮点",
+		driver.TypeBCD:     "BCD 码",
+		driver.TypeLBCD:    "LBCD 码",
+	}
+
+	// 扫描频率没有固定枚举，模板用「常用值下拉 + 允许手工输入」：
+	// 括号里的秒数给人看，导入时取开头数字，纯数字写法照常可用。
+	deviceAddressScanFrequencyOptions = []string{
+		"200（0.2 秒）",
+		"500（0.5 秒）",
+		"1000（1 秒，默认）",
+		"2000（2 秒）",
+		"5000（5 秒）",
+		"10000（10 秒）",
+		"30000（30 秒）",
+		"60000（1 分钟）",
+	}
+
+	scanFrequencyPattern = regexp.MustCompile(`^(-?\d+)\s*(?:[（(].*[）)])?$`)
+)
+
+// parseScanFrequency 解析扫描频率单元格：`500` 与 `500（0.5 秒）` 都接受。
+func parseScanFrequency(raw string) (int, bool) {
+	m := scanFrequencyPattern.FindStringSubmatch(strings.TrimSpace(raw))
+	if m == nil {
+		return 0, false
+	}
+	freq, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0, false
+	}
+	return freq, true
+}
+
+// deviceAddressTypeCodes 某协议可用于点位配置的通用类型名（common + extended）。
+// 插件尚未加载时 AvailableTypes 返回空，回退到内置 CommonDataTypes，
+// 否则模板会得到一列空下拉。
+func deviceAddressTypeCodes(protocolName string) []string {
+	common, extended := driver.AvailableTypes(driver.ScopeOf(protocolName))
+	out := append(append([]string(nil), common...), extended...)
+	if len(out) == 0 {
+		out = append(out, driver.CommonDataTypes...)
+	}
+	return out
+}
+
 // ImportDeviceAddresses 从 Excel(.xlsx) 批量导入指定设备下的地址点位。
 // 模板六列：名称 / 标签 / 通用数据类型 / 读写权限 / 扫描频率 / 描述。
 // 按当前设备的协议将通用数据类型映射为协议内部类型；字段不合法或协议不支持该类型时跳过该行，
@@ -759,6 +829,7 @@ func (s *DeviceAddressService) ImportDeviceAddresses(ctx context.Context, device
 		return nil, err
 	}
 	protocolName := s.getProtocolName(ctx, device.ProtocolID)
+	typeCodes := deviceAddressTypeCodes(protocolName)
 
 	// 预加载该设备已有地址名，用于去重
 	var names []string
@@ -775,14 +846,28 @@ func (s *DeviceAddressService) ImportDeviceAddresses(ctx context.Context, device
 		Parse: func(row []string) (*po.DeviceAddress, string, string) {
 			name := excelutil.Cell(row, 0)
 			label := excelutil.Cell(row, 1)
-			commonType := excelutil.Cell(row, 2)
-			rwPermission := excelutil.Cell(row, 3)
+			commonTypeRaw := excelutil.Cell(row, 2)
+			rwRaw := excelutil.Cell(row, 3)
 			scanFreq := excelutil.Cell(row, 4)
 			desc := excelutil.Cell(row, 5)
-			reason, frequency := validateAddressImportRow(name, label, commonType, rwPermission, scanFreq)
+			reason, frequency := validateAddressImportRow(name, label, commonTypeRaw, rwRaw, scanFreq)
 			if reason != "" {
 				return nil, name, reason
 			}
+
+			// 数据类型接受模板下拉项「单精度浮点（Float）」、中文名或 code。
+			// 无法识别时保留原值，交给 LookupDataType 报「协议不支持」，与旧的
+			// 纯 code 写法保持同一类错误。
+			commonType := strings.TrimSpace(commonTypeRaw)
+			if code, ok := constants.ParseEnumValue(commonTypeRaw, typeCodes, commonDataTypeDisplayNames); ok {
+				commonType = code
+			}
+			// 读写权限同样接受「只读（R）」/「只读」/「R」三种写法。
+			rwPermission, ok := constants.ParseEnumValue(rwRaw, deviceAddressRWPermissionCodes, deviceAddressRWPermissionDisplayNames)
+			if !ok {
+				return nil, name, "读写权限须为 R/W/RW（或 只读/只写/读写）"
+			}
+
 			// 通用数据类型 → 协议内部类型（与单条创建走同一套映射）
 			internal, ok := driver.LookupDataType(protocolName, commonType)
 			if !ok {
@@ -824,15 +909,15 @@ func validateAddressImportRow(name, label, commonType, rwPermission, scanFreq st
 	if commonType == "" {
 		return "通用数据类型为空", 0
 	}
-	if rwPermission != "R" && rwPermission != "W" && rwPermission != "RW" {
-		return "读写权限须为 R/W/RW", 0
+	if _, ok := constants.ParseEnumValue(rwPermission, deviceAddressRWPermissionCodes, deviceAddressRWPermissionDisplayNames); !ok {
+		return "读写权限须为 R/W/RW（或 只读/只写/读写）", 0
 	}
 	if scanFreq == "" {
 		return "", 1000
 	}
-	freq, err := strconv.Atoi(scanFreq)
-	if err != nil {
-		return "扫描频率格式不正确", 0
+	freq, ok := parseScanFrequency(scanFreq)
+	if !ok {
+		return "扫描频率格式不正确（填毫秒整数，或从下拉选择）", 0
 	}
 	if freq <= 0 {
 		return "", 1000
@@ -842,10 +927,52 @@ func validateAddressImportRow(name, label, commonType, rwPermission, scanFreq st
 
 // GenerateDeviceAddressImportTemplate 生成设备地址导入模板（.xlsx）：
 // 表头「名称/标签/通用数据类型/读写权限/扫描频率/描述」+ 示例行 + 冻结首行。
-func (s *DeviceAddressService) GenerateDeviceAddressImportTemplate() (*bytes.Buffer, error) {
-	return excelutil.BuildTemplate(
+//
+// deviceID 非空时按该设备的协议给出数据类型下拉（common + 扩展类型），
+// 否则回退到通用类型清单并允许手工填写扩展类型。
+// 读写权限是固定枚举，始终严格下拉。
+func (s *DeviceAddressService) GenerateDeviceAddressImportTemplate(ctx context.Context, deviceID string) (*bytes.Buffer, error) {
+	typeCodes := []string(nil)
+	typesComplete := false
+	if deviceID = strings.TrimSpace(deviceID); deviceID != "" {
+		var device po.Device
+		if err := s.sqliteDB.WithContext(ctx).Where("id = ?", deviceID).First(&device).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, appError.NewAppErrorCtx(enums.DeviceNotExistsEnum.GetCode(), enums.DeviceNotExistsEnum.GetMessage(), enums.DeviceNotExistsEnum.GetMsgKey())
+			}
+			return nil, err
+		}
+		protocolName := s.getProtocolName(ctx, device.ProtocolID)
+		common, extended := driver.AvailableTypes(driver.ScopeOf(protocolName))
+		typeCodes = append(append([]string(nil), common...), extended...)
+		typesComplete = len(typeCodes) > 0
+	}
+	if len(typeCodes) == 0 {
+		typeCodes = append(typeCodes, driver.CommonDataTypes...)
+	}
+
+	return excelutil.BuildTemplateWithLists(
 		[]string{"名称", "标签", "通用数据类型", "读写权限", "扫描频率", "描述"},
-		[]string{"D0", "车间温度", "Float", "R", "1000", "示例数据，可删除或覆盖"},
-		[]float64{24, 24, 18, 14, 14, 36},
+		[]string{"D0", "车间温度", "单精度浮点（Float）", "只读（R）", "1000（1 秒，默认）", "示例数据，可删除或覆盖"},
+		[]float64{24, 24, 22, 16, 18, 36},
+		[]excelutil.ListValidation{
+			{
+				Col:         2,
+				Options:     constants.BuildEnumOptions(typeCodes, commonDataTypeDisplayNames),
+				Prompt:      "请选择该协议支持的数据类型；扩展类型可手工填写",
+				AllowCustom: !typesComplete,
+			},
+			{
+				Col:     3,
+				Options: constants.BuildEnumOptions(deviceAddressRWPermissionCodes, deviceAddressRWPermissionDisplayNames),
+				Prompt:  "请选择读写权限",
+			},
+			{
+				Col:         4,
+				Options:     deviceAddressScanFrequencyOptions,
+				Prompt:      "请选择常用扫描频率（毫秒），也可直接输入正整数",
+				AllowCustom: true,
+			},
+		},
 	)
 }

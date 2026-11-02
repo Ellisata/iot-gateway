@@ -52,10 +52,13 @@ func TestValidateAddressImportRow(t *testing.T) {
 	}{
 		{caseName: "合法行默认频率", name: "温度", label: "车间温度", commonType: "Float", rwPermission: "R", scanFreq: "", wantReason: "", wantFreq: 1000},
 		{caseName: "合法行指定频率", name: "温度", label: "车间温度", commonType: "Float", rwPermission: "RW", scanFreq: "500", wantReason: "", wantFreq: 500},
+		{caseName: "读写权限组合写法", name: "温度", label: "车间温度", commonType: "单精度浮点（Float）", rwPermission: "读写（RW）", scanFreq: "", wantReason: "", wantFreq: 1000},
+		{caseName: "读写权限中文名", name: "温度", label: "车间温度", commonType: "Float", rwPermission: "只读", scanFreq: "", wantReason: "", wantFreq: 1000},
 		{caseName: "名称为空", name: "", label: "车间温度", commonType: "Float", rwPermission: "R", scanFreq: "1000", wantReason: "名称为空"},
 		{caseName: "标签为空", name: "温度", label: "", commonType: "Float", rwPermission: "R", scanFreq: "1000", wantReason: "标签为空"},
 		{caseName: "通用数据类型为空", name: "温度", label: "车间温度", commonType: "", rwPermission: "R", scanFreq: "1000", wantReason: "通用数据类型为空"},
 		{caseName: "读写权限非法", name: "温度", label: "车间温度", commonType: "Float", rwPermission: "X", scanFreq: "1000", wantReason: "读写权限须为"},
+		{caseName: "扫描频率带可读单位", name: "温度", label: "车间温度", commonType: "Float", rwPermission: "R", scanFreq: "1000（1 秒，默认）", wantReason: "", wantFreq: 1000},
 		{caseName: "扫描频率非数字", name: "温度", label: "车间温度", commonType: "Float", rwPermission: "R", scanFreq: "abc", wantReason: "扫描频率格式不正确"},
 		{caseName: "扫描频率<=0按默认", name: "温度", label: "车间温度", commonType: "Float", rwPermission: "R", scanFreq: "0", wantReason: "", wantFreq: 1000},
 	}
@@ -111,14 +114,14 @@ func TestImportDeviceAddresses(t *testing.T) {
 	}
 	rows := [][6]string{
 		{"温度", "车间温度", "Float", "R", "1000", "描述1"},
-		{"湿度", "车间湿度", "UnknownType", "R", "1000", ""}, // 协议不支持该类型 → 失败
-		{"压力", "车间压力", "Short", "RW", "500", ""},       // 成功
-		{"温度", "车间温度2", "Float", "R", "1000", ""},      // 文件内重名 → 失败
-		{"", "车间", "Float", "R", "1000", ""},           // 名称为空 → 失败
-		{"电流", "车间电流", "Float", "X", "1000", ""},       // 读写权限非法 → 失败
-		{"电压", "车间电压", "Float", "R", "abc", ""},        // 扫描频率非数字 → 失败
-		{"转速", "车间转速", "Float", "R", "200", "描述8"},     // 成功
-		{"", "", "", "", "", ""},                       // 全空行 → 跳过
+		{"湿度", "车间湿度", "UnknownType", "R", "1000", ""},      // 协议不支持该类型 → 失败
+		{"压力", "车间压力", "Short", "读写（RW）", "500（0.5 秒）", ""}, // 成功：权限与频率都用可读写法
+		{"温度", "车间温度2", "Float", "R", "1000", ""},           // 文件内重名 → 失败
+		{"", "车间", "Float", "R", "1000", ""},                // 名称为空 → 失败
+		{"电流", "车间电流", "Float", "X", "1000", ""},            // 读写权限非法 → 失败
+		{"电压", "车间电压", "Float", "R", "abc", ""},             // 扫描频率非数字 → 失败
+		{"转速", "车间转速", "单精度浮点（Float）", "只读", "200", "描述8"},  // 成功：类型与权限都用可读写法
+		{"", "", "", "", "", ""},                            // 全空行 → 跳过
 	}
 	for i, r := range rows {
 		for j, v := range r {
@@ -156,8 +159,8 @@ func TestImportDeviceAddresses(t *testing.T) {
 		"协议不支持该数据类型：UnknownType",
 		"设备地址名称已存在",
 		"名称为空",
-		"读写权限须为 R/W/RW",
-		"扫描频率格式不正确",
+		"读写权限须为 R/W/RW（或 只读/只写/读写）",
+		"扫描频率格式不正确（填毫秒整数，或从下拉选择）",
 	} {
 		if !reasonSet[want] {
 			t.Errorf("失败明细缺少原因 %q, 实际 %+v", want, result.Errors)
@@ -179,11 +182,11 @@ func TestImportDeviceAddresses(t *testing.T) {
 	if a := mapping["温度"]; a.DataType != "float32" || a.RwPermission != "R" || a.ScanFrequency != 1000 || a.CommonDataType != "Float" {
 		t.Errorf("温度地址落库异常: %+v", a)
 	}
-	if a := mapping["压力"]; a.DataType != "int16" || a.RwPermission != "RW" || a.ScanFrequency != 500 {
+	if a := mapping["压力"]; a.DataType != "int16" || a.RwPermission != "RW" || a.ScanFrequency != 500 || a.CommonDataType != "Short" {
 		t.Errorf("压力地址落库异常: %+v", a)
 	}
-	if a := mapping["转速"]; a.DataType != "float32" || a.ScanFrequency != 200 {
-		t.Errorf("转速地址落库异常: %+v", a)
+	if a := mapping["转速"]; a.DataType != "float32" || a.ScanFrequency != 200 || a.CommonDataType != "Float" || a.RwPermission != "R" {
+		t.Errorf("转速地址落库异常（可读写法应归一为 code）: %+v", a)
 	}
 
 	// 再次导入同文件 → 全部失败
@@ -215,10 +218,11 @@ func TestImportDeviceAddressesDeviceNotFound(t *testing.T) {
 	}
 }
 
-// TestGenerateDeviceAddressImportTemplate 验证地址导入模板：可重新打开、表头正确、含示例行。
+// TestGenerateDeviceAddressImportTemplate 验证地址导入模板：可重新打开、表头正确、
+// 含示例行，且数据类型/读写权限两列带可读下拉。
 func TestGenerateDeviceAddressImportTemplate(t *testing.T) {
 	svc := &DeviceAddressService{}
-	buf, err := svc.GenerateDeviceAddressImportTemplate()
+	buf, err := svc.GenerateDeviceAddressImportTemplate(context.Background(), "")
 	if err != nil {
 		t.Fatalf("GenerateDeviceAddressImportTemplate: %v", err)
 	}
@@ -237,5 +241,61 @@ func TestGenerateDeviceAddressImportTemplate(t *testing.T) {
 	}
 	if rows[0][0] != "名称" || rows[0][1] != "标签" || rows[0][2] != "通用数据类型" || rows[0][3] != "读写权限" || rows[0][4] != "扫描频率" || rows[0][5] != "描述" {
 		t.Errorf("表头 = %v", rows[0])
+	}
+
+	dvs, err := f.GetDataValidations(sheet)
+	if err != nil {
+		t.Fatalf("get validations: %v", err)
+	}
+	if len(dvs) != 3 {
+		t.Fatalf("下拉数 = %d，期望 3", len(dvs))
+	}
+	if !strings.HasPrefix(dvs[0].Sqref, "C2:C") ||
+		!strings.Contains(dvs[0].Formula1, "单精度浮点（Float）") ||
+		!strings.Contains(dvs[0].Formula1, "布尔（Boolean）") {
+		t.Fatalf("通用数据类型列下拉不符合预期：%+v", dvs[0])
+	}
+	if !strings.HasPrefix(dvs[1].Sqref, "D2:D") ||
+		!strings.Contains(dvs[1].Formula1, "只读（R）") ||
+		!strings.Contains(dvs[1].Formula1, "读写（RW）") {
+		t.Fatalf("读写权限列下拉不符合预期：%+v", dvs[1])
+	}
+	if !strings.HasPrefix(dvs[2].Sqref, "E2:E") ||
+		!strings.Contains(dvs[2].Formula1, "1000（1 秒") {
+		t.Fatalf("扫描频率列下拉不符合预期：%+v", dvs[2])
+	}
+	if dvs[2].ShowErrorMessage {
+		t.Errorf("扫描频率应允许手工输入下拉项以外的正整数")
+	}
+}
+
+// TestGenerateDeviceAddressImportTemplateByProtocol 传 deviceId 时按协议给出
+// 通用 + 扩展类型；未传时回退到通用列表，因此前者的下拉项更多。
+func TestGenerateDeviceAddressImportTemplateByProtocol(t *testing.T) {
+	drivertest.EnsureSyntheticProtocol()
+	db := newDeviceAddressImportTestDB(t)
+	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: drivertest.TestProtocol}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&po.Device{ID: "dev-1", Name: "测试设备", ProtocolID: "proto-1", ProtocolJSON: "{}", Status: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := &DeviceAddressService{sqliteDB: db}
+	buf, err := svc.GenerateDeviceAddressImportTemplate(context.Background(), "dev-1")
+	if err != nil {
+		t.Fatalf("GenerateDeviceAddressImportTemplate: %v", err)
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatalf("reopen template: %v", err)
+	}
+	defer f.Close()
+	dvs, err := f.GetDataValidations(f.GetSheetName(0))
+	if err != nil || len(dvs) != 3 {
+		t.Fatalf("下拉 = %+v, err = %v", dvs, err)
+	}
+	// 合成协议声明了扩展类型 Int/Real，应出现在类型下拉里。
+	if !strings.Contains(dvs[0].Formula1, "Int") || !strings.Contains(dvs[0].Formula1, "Real") {
+		t.Fatalf("类型下拉缺少协议扩展类型：%+v", dvs[0])
 	}
 }

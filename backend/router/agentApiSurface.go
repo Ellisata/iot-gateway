@@ -176,7 +176,7 @@ var agentApiSurface = map[string]SurfaceEntry{
 	"GET /deviceAddress/getDeviceAddressById/:id": {Access: AccessRead, Params: argNone()},
 	"GET /deviceAddress/importDeviceAddressTemplate": {
 		Access: AccessRead,
-		Params: argNone(),
+		Params: args(argQueryStr("deviceId", false, "可选；传了按该设备的协议给出数据类型下拉")),
 		Note:   "返回 .xlsx 文件流，不是 JSON 信封",
 	},
 	"POST /deviceAddress/createDeviceAddress": {
@@ -222,7 +222,7 @@ var agentApiSurface = map[string]SurfaceEntry{
 			argFile("file", ".xlsx 文件"),
 			argFormStr("deviceId", true, "这些点位挂在哪台设备下（普通表单字段，不是文件）"),
 		),
-		Note: "multipart 上传，**没有 JSON 请求体**",
+		Note: "multipart 上传，**没有 JSON 请求体**；通用数据类型接受「单精度浮点（Float）」/中文名/code，读写权限接受「只读（R）」/只读/R，扫描频率接受 500 或 500（0.5 秒）",
 	},
 
 	// ==================== 物模型 ====================
@@ -235,6 +235,16 @@ var agentApiSurface = map[string]SurfaceEntry{
 	},
 	"GET /thingModel/getThingModelById/:id": {Access: AccessRead, Params: argNone()},
 	"GET /thingModel/listThingModels":       {Access: AccessRead, Params: argNone()},
+	"GET /thingModel/importThingModelTemplate": {
+		Access: AccessRead,
+		Params: argNone(),
+		Note:   "返回 .xlsx 文件流，不是 JSON 信封",
+	},
+	"POST /thingModel/importThingModel": {
+		Access: AccessWrite,
+		Params: args(argFile("file", ".xlsx 文件")),
+		Note:   "multipart 上传，**没有 JSON 请求体**；按模型标识与名称双重去重。分类接受模板下拉项「传感器（sensor）」、中文名或 code（忽略大小写），留空 = 未分类",
+	},
 	"POST /thingModel/createThingModel": {
 		Access: AccessWrite,
 		Params: argBody(dto.CreateThingModelDTO{}, map[string]string{
@@ -286,6 +296,19 @@ var agentApiSurface = map[string]SurfaceEntry{
 		Access: AccessWrite,
 		Params: argNone(),
 		Note:   "**用 GET 实现**。属性被点位绑定时拒绝删除",
+	},
+	"GET /thingModel/importThingModelPropertyTemplate": {
+		Access: AccessRead,
+		Params: argNone(),
+		Note:   "返回 .xlsx 文件流，不是 JSON 信封",
+	},
+	"POST /thingModel/importThingModelProperty": {
+		Access: AccessWrite,
+		Params: args(
+			argFile("file", ".xlsx 文件"),
+			argFormStr("modelId", true, "属性挂到哪个物模型下（普通表单字段，不是文件）"),
+		),
+		Note: "multipart 上传，**没有 JSON 请求体**；属性标识符在模型内去重。数据类型/读写模式接受模板下拉项「浮点（float）」「只读（R）」、中文名或 code",
 	},
 
 	// ==================== 采集控制 ====================
@@ -480,7 +503,7 @@ var agentApiSurface = map[string]SurfaceEntry{
 	"POST /mqttSubscription/importMqttSubscriptionDevicePoint": {
 		Access: AccessWrite,
 		Params: args(argFile("file", ".xlsx 文件")),
-		Note:   "multipart 上传，**没有 JSON 请求体**。按设备ID+点位ID upsert：已存在则覆盖元信息，导入行标记为 manual，后续订阅报文不再覆盖",
+		Note:   "multipart 上传，**没有 JSON 请求体**。按设备ID+点位ID upsert：已存在则覆盖元信息，导入行标记为 manual，后续订阅报文不再覆盖。类型列接受「浮点（float）」/中文名/code，留空表示未知",
 	},
 	"POST /mqttSubscription/createMqttSubscriptionDevicePoint": {
 		Access: AccessWrite,

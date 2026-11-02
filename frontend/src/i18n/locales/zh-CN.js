@@ -358,6 +358,8 @@ export default {
     propertyUpdateSuccess: '属性已保存',
     deletePropertyConfirm: '确定删除属性「{name}」吗？删除后不可恢复。',
     propertyDeleteSuccess: '属性已删除',
+    importModelTemplateName: '物模型导入模板.xlsx',
+    importPropertyTemplateName: '物模型属性导入模板.xlsx',
     category: {
       none: '未分类',
       sensor: '传感器',

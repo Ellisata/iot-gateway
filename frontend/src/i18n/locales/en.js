@@ -358,6 +358,8 @@ export default {
     propertyUpdateSuccess: 'Property saved',
     deletePropertyConfirm: 'Delete property "{name}"? This cannot be undone.',
     propertyDeleteSuccess: 'Property deleted',
+    importModelTemplateName: 'thing-model-import-template.xlsx',
+    importPropertyTemplateName: 'thing-model-property-import-template.xlsx',
     category: {
       none: 'Uncategorized',
       sensor: 'Sensor',

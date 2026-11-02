@@ -605,7 +605,7 @@ const {
   handleDownloadTemplate,
 } = useExcelImport({
   importFn: (file) => importDeviceAddresses(file, deviceObjectId),
-  downloadFn: downloadDeviceAddressTemplate,
+  downloadFn: () => downloadDeviceAddressTemplate(deviceObjectId),
   templateName: () => t('deviceAddress.importTemplateName'),
   refresh: fetchList,
 })

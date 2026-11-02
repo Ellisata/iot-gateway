@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"iot-gateway/appError"
+	"iot-gateway/enums"
 	"iot-gateway/model/dto"
 	"iot-gateway/response"
 	"iot-gateway/service"
@@ -165,4 +166,67 @@ func (ctr *ThingModelController) DeleteThingModelProperty(c *gin.Context) {
 		return
 	}
 	c.JSON(200, response.Success(nil))
+}
+
+// ImportThingModel 批量导入物模型（Excel .xlsx，上传字段名 file）
+func (ctr *ThingModelController) ImportThingModel(c *gin.Context) {
+	ctx := c.Request.Context()
+	data, err := readXlsxUpload(c, "file")
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	result, err := ctr.thingModelService.ImportThingModels(ctx, data)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(result))
+}
+
+// ImportThingModelTemplate 下载物模型导入模板（.xlsx）
+func (ctr *ThingModelController) ImportThingModelTemplate(c *gin.Context) {
+	ctx := c.Request.Context()
+	buf, err := ctr.thingModelService.GenerateThingModelImportTemplate()
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", `attachment; filename="thing-model-import-template.xlsx"`)
+	c.Data(200, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
+}
+
+// ImportThingModelProperty 批量导入物模型属性（Excel .xlsx，上传字段名 file，modelId 指定所属模型）
+func (ctr *ThingModelController) ImportThingModelProperty(c *gin.Context) {
+	ctx := c.Request.Context()
+	modelID := c.PostForm("modelId")
+	if modelID == "" {
+		c.JSON(200, appError.HandleErrorCtx(ctx, appError.NewAppError(enums.ParamValidEnum.GetCode(), "缺少参数 modelId")))
+		return
+	}
+	data, err := readXlsxUpload(c, "file")
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	result, err := ctr.thingModelService.ImportThingModelProperties(ctx, modelID, data)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(result))
+}
+
+// ImportThingModelPropertyTemplate 下载物模型属性导入模板（.xlsx）
+func (ctr *ThingModelController) ImportThingModelPropertyTemplate(c *gin.Context) {
+	ctx := c.Request.Context()
+	buf, err := ctr.thingModelService.GenerateThingModelPropertyImportTemplate()
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", `attachment; filename="thing-model-property-import-template.xlsx"`)
+	c.Data(200, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
 }

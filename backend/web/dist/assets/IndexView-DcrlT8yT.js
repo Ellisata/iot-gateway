@@ -1,1 +1,0 @@
-import{Zt as e,cn as t}from"./vendor-jiqYaFUe.js";import{t as n}from"./AlarmTable-BL3akllE.js";var r={__name:`IndexView`,setup(r){return(r,i)=>(t(),e(n,{"target-type":`device`}))}};export{r as default};
