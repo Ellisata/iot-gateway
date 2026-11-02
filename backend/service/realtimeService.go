@@ -106,9 +106,10 @@ func (s *RealtimeService) GetDeviceSnapshot(ctx context.Context, req *dto.Realti
 	}
 
 	var addrs []po.DeviceAddress
-	// 排序必须带 id 兜底：created_at 只精确到秒，同秒创建的点位仅按它排序时
-	// 次序不确定，前端在轮询中翻页会看到重复或漏行。id 为 UUIDv7（时间有序），可作稳定次序。
-	query := db.Order("created_at ASC, id ASC")
+	// 与设备点位配置页同一顺序（新增在前）。排序必须带 id 兜底：created_at 只精确到秒，
+	// 同秒创建的点位仅按它排序时次序不确定，前端在轮询中翻页会看到重复或漏行。
+	// id 为 UUIDv7（时间有序），同秒内按 id DESC 即创建先后倒序。
+	query := db.Order("created_at DESC, id DESC")
 	if len(addressIDs) == 0 {
 		query = query.Offset((req.Page - 1) * req.Size).Limit(req.Size)
 	}
@@ -128,22 +129,34 @@ func (s *RealtimeService) GetDeviceSnapshot(ctx context.Context, req *dto.Realti
 		ids[i] = addrs[i].ID
 	}
 	values := s.store.Lookup(req.DeviceID, ids)
+	propertyModes, err := s.propertyAccessModes(ctx, addrs)
+	if err != nil {
+		return nil, err
+	}
 
 	now := time.Now()
 	records := make([]vo.RealtimePointVO, len(addrs))
 	for i, a := range addrs {
 		item := vo.RealtimePointVO{
-			AddressID:      a.ID,
-			Name:           a.Name,
-			Label:          a.Label,
-			DataType:       a.DataType,
-			CommonDataType: a.CommonDataType,
-			RwPermission:   a.RwPermission,
-			ScanFrequency:  a.ScanFrequency,
+			AddressID:          a.ID,
+			Name:               a.Name,
+			Label:              a.Label,
+			DataType:           a.DataType,
+			CommonDataType:     a.CommonDataType,
+			RwPermission:       a.RwPermission,
+			PropertyAccessMode: propertyModes[a.PropertyID],
+			ScanFrequency:      a.ScanFrequency,
 		}
-		// 只写点位不参与采集：快照里可能残留「改成 W 之前」采到的旧值，
+		// 只写点位与只写属性都不参与采集：快照里可能残留收紧之前采到的旧值，
 		// 直接忽略，否则前端会把一个不再轮询的点位显示成看似正常的实时值。
-		if a.RwPermission != "W" {
+		// 属性行缺失（悬空绑定）时按可读处理，与采集侧的判定保持一致。
+		propertyReadable := true
+		if a.PropertyID != "" {
+			if mode, ok := propertyModes[a.PropertyID]; ok && !strings.Contains(mode, "R") {
+				propertyReadable = false
+			}
+		}
+		if a.RwPermission != "W" && propertyReadable {
 			if p, ok := values[a.ID]; ok {
 				item.Value = p.Value
 				item.Quality = p.Quality
@@ -169,6 +182,39 @@ func (s *RealtimeService) GetDeviceSnapshot(ctx context.Context, req *dto.Realti
 		Total:            total,
 		Records:          records,
 	}, nil
+}
+
+// propertyAccessModes 批量取点位绑定的物模型属性读写模式（propertyID -> R/W/RW）。
+//
+// 只服务展示与写入口显隐；未绑定属性的点位不出现在 map 里（取值为空串）。
+// 属性行缺失时同样留空 —— 写入的真校验在 ControlService，这里不做二次拦截。
+func (s *RealtimeService) propertyAccessModes(ctx context.Context, addrs []po.DeviceAddress) (map[string]string, error) {
+	ids := make([]string, 0, len(addrs))
+	seen := make(map[string]struct{}, len(addrs))
+	for _, a := range addrs {
+		if a.PropertyID == "" {
+			continue
+		}
+		if _, ok := seen[a.PropertyID]; ok {
+			continue
+		}
+		seen[a.PropertyID] = struct{}{}
+		ids = append(ids, a.PropertyID)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	var props []po.ThingModelProperty
+	if err := s.sqliteDB.WithContext(ctx).Select("id", "access_mode").
+		Where("id IN ?", ids).Find(&props).Error; err != nil {
+		return nil, err
+	}
+	modes := make(map[string]string, len(props))
+	for _, p := range props {
+		modes[p.ID] = p.AccessMode
+	}
+	return modes, nil
 }
 
 // isStale 判断一个值是否已过期：距上次更新超过 staleGraceFactor 个采集周期。

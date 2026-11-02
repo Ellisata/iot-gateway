@@ -348,12 +348,11 @@ onMounted(fetchList)
   width: 120px;
 }
 
-/* 动作按钮推到整行最右侧，避免紧贴日期控件 */
+/* 动作按钮紧跟日期控件之后，不再推到行尾 */
 .audit-actions {
   display: flex;
   flex: 0 0 auto;
   gap: 8px;
-  margin-left: auto;
 }
 
 /* 只显示到分（「YYYY-MM-DD HH:mm」）。13px 字号下每段约 103px，

@@ -595,7 +595,10 @@ func (s *DeviceAddressService) PageDeviceAddress(ctx context.Context, req *dto.P
 
 	var addrs []po.DeviceAddress
 	offset := (req.Page - 1) * req.Size
-	if err := db.Offset(offset).Limit(req.Size).Order("created_at DESC").Find(&addrs).Error; err != nil {
+	// 与实时监控页同一顺序（新增在前）。排序必须带 id 兜底：created_at 只精确到
+	// 秒，点扫/批量导入常在同一秒写入多行，只按 created_at 排序时翻页会重复或漏行。
+	if err := db.Offset(offset).Limit(req.Size).
+		Order("created_at DESC, id DESC").Find(&addrs).Error; err != nil {
 		return nil, err
 	}
 
@@ -699,7 +702,7 @@ func (s *DeviceAddressService) enrichAddressVOs(ctx context.Context, records []v
 	}
 
 	var props []po.ThingModelProperty
-	if err := s.sqliteDB.WithContext(ctx).Select("id", "identifier", "name").
+	if err := s.sqliteDB.WithContext(ctx).Select("id", "identifier", "name", "access_mode").
 		Where("id IN ?", ids).Find(&props).Error; err != nil {
 		return err
 	}
@@ -711,6 +714,7 @@ func (s *DeviceAddressService) enrichAddressVOs(ctx context.Context, records []v
 		if p, ok := byID[records[i].PropertyID]; ok {
 			records[i].PropertyIdentifier = p.Identifier
 			records[i].PropertyName = p.Name
+			records[i].PropertyAccessMode = p.AccessMode
 		}
 	}
 	return nil

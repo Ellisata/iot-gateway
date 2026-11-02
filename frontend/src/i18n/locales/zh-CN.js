@@ -399,6 +399,7 @@ export default {
     property: '物模型属性',
     propertyPlaceholder: '不绑定属性（可选）',
     propertyHint: '只列出与当前数据类型、读写模式兼容的属性。',
+    propertyWriteonlyHint: '该属性为只写：点位不会进入采集，实时值与历史数据会一直为空。',
     // 数据类型类别（Kind）映射：属性过滤与报警比较符都按类别判定，给用户一个可查的对照表
     kindMapTitle: '数据类型映射',
     kindMapHint: '物模型属性与报警比较符都按类别匹配；时间类型不支持条件报警。',
@@ -473,7 +474,7 @@ export default {
     readonlyShort: 'R（只读）',
     writeonlyShort: 'W（只写）',
     readwriteShort: 'RW（读写）',
-    writeonlyHint: '只写点位只下发、不采集，实时值与历史数据会一直为空，这是预期行为。',
+    writeonlyHint: '只写点位（或绑定了只写属性的点位）只下发、不采集，实时值与历史数据会一直为空，这是预期行为。',
     writeonlyNoValue: '不采集',
     descMaxLength: '描述不能超过 200 个字符',
     // 报警条件。比较符按数据类型的类别取（数值=区间/大小比较，布尔=真值，文本=等于/属于集合），
@@ -1644,6 +1645,7 @@ export default {
     checking: '正在检查控制能力…',
     disabled: '控制下发未启用',
     pointNotWritable: '该点位没有写权限',
+    propertyNotWritable: '该点位绑定的物模型属性为只读',
     reason: {
       disabled: '控制下发未启用（control.enabled=false）',
       device_disabled: '设备已停用',

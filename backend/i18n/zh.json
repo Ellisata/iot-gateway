@@ -49,6 +49,7 @@
     "err.control_param_invalid": "控制下发参数不合法",
     "err.control_write_failed": "控制下发失败（链路错误，写入状态未知）",
     "err.control_rate_limited": "控制下发过于频繁，请稍后再试",
+    "err.control_property_not_writable": "该点位绑定的物模型属性为只读",
     "collection.start.failed": "开始采集失败",
     "collection.stop.failed": "停止采集失败",
     "err.create_failed": "创建失败",

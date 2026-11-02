@@ -82,3 +82,84 @@ func TestNewGatewayTaskSkipsWriteOnlyPoints(t *testing.T) {
 		}
 	}
 }
+
+// TestNewGatewayTaskSkipsWriteOnlyPropertyPoints 物模型属性是读取上界：
+// 「RW 点位 + W 属性」是合法绑定（点位覆盖属性），但业务语义只写，不得进入采集调度。
+// 绑定 RW 属性或未绑定属性的点位必须照常采集。
+func TestNewGatewayTaskSkipsWriteOnlyPropertyPoints(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "writeonly-property.db")
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxIdleConns(1)
+		sqlDB.SetMaxOpenConns(1)
+		t.Cleanup(func() { sqlDB.Close() })
+	}
+	for _, m := range []interface{}{&po.Device{}, &po.DeviceAddress{}, &po.IotProtocol{},
+		&po.ThingModel{}, &po.ThingModelProperty{}} {
+		if err := db.AutoMigrate(m); err != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+	}
+
+	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: drivertest.TestProtocol}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&po.ThingModel{ID: "m1", Code: "tm1", Name: "模型1", Status: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&po.Device{
+		ID:           "dev-1",
+		Name:         "dev1",
+		ProtocolID:   "proto-1",
+		ProtocolJSON: "{}",
+		ModelID:      "m1",
+		Status:       1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	props := []po.ThingModelProperty{
+		{ID: "prop-w", ModelID: "m1", Identifier: "cmd", Name: "命令", Kind: "int", AccessMode: "W", Status: 1},
+		{ID: "prop-rw", ModelID: "m1", Identifier: "speed", Name: "转速", Kind: "int", AccessMode: "RW", Status: 1},
+	}
+	for i := range props {
+		if err := db.Create(&props[i]).Error; err != nil {
+			t.Fatalf("create property %s: %v", props[i].ID, err)
+		}
+	}
+
+	addrs := []po.DeviceAddress{
+		{ID: "a-prop-w", DeviceID: "dev-1", Name: "40001", DataType: "int16", RwPermission: "RW", PropertyID: "prop-w", ScanFrequency: 1000, Status: 1},
+		{ID: "a-prop-rw", DeviceID: "dev-1", Name: "40002", DataType: "int16", RwPermission: "RW", PropertyID: "prop-rw", ScanFrequency: 1000, Status: 1},
+		{ID: "a-unbound", DeviceID: "dev-1", Name: "40003", DataType: "int16", RwPermission: "RW", ScanFrequency: 1000, Status: 1},
+	}
+	for i := range addrs {
+		if err := db.Create(&addrs[i]).Error; err != nil {
+			t.Fatalf("create address %s: %v", addrs[i].ID, err)
+		}
+	}
+
+	task, err := newGatewayTask(db, mockSink{}, workerPool.NewWorkerPool(2, 16), nil, nil, nil)
+	if err != nil {
+		t.Fatalf("newGatewayTask: %v", err)
+	}
+
+	var got []string
+	for _, g := range task.groups {
+		for _, addr := range g.addrGroups["dev-1"] {
+			got = append(got, addr.ID)
+		}
+	}
+	sort.Strings(got)
+	want := []string{"a-prop-rw", "a-unbound"}
+	if len(got) != len(want) {
+		t.Fatalf("采集点位 = %v, want %v（只写属性点位不应进入调度）", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("采集点位 = %v, want %v（只写属性点位不应进入调度）", got, want)
+		}
+	}
+}

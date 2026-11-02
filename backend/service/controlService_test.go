@@ -92,7 +92,8 @@ func newControlTestServiceWithPolicy(t *testing.T, enabled bool, policy runtimec
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&po.Device{}, &po.DeviceAddress{}, &po.IotProtocol{}, &po.ControlLog{}); err != nil {
+	if err := db.AutoMigrate(&po.Device{}, &po.DeviceAddress{}, &po.IotProtocol{}, &po.ControlLog{},
+		&po.ThingModelProperty{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	runner := &fakeControlRunner{}
@@ -196,6 +197,62 @@ func TestControlRejectsReadOnlyPoint(t *testing.T) {
 	assertControlCode(t, err, enums.ControlAddressNotWritableEnum.GetCode())
 	if runner.writeCalls != 0 {
 		t.Error("只读点位不应调用驱动")
+	}
+}
+
+// TestControlPropertyAccessIsUpperBound 物模型属性是写入能力的硬上界：
+// 「RW 点位 + R 属性」是合法绑定（点位覆盖属性），但业务语义只读，写入必须拒绝。
+// 未绑定属性、属性为 W/RW 时仍按点位 rw_permission 放行。
+func TestControlPropertyAccessIsUpperBound(t *testing.T) {
+	cases := []struct {
+		name       string
+		mode       string // 空串 = 不插入属性行，模拟悬空 property_id
+		wantReject bool
+	}{
+		{name: "只读属性拒绝写入", mode: "R", wantReject: true},
+		{name: "只写属性允许写入", mode: "W"},
+		{name: "读写属性允许写入", mode: "RW"},
+		{name: "属性悬空保守拒绝", mode: "", wantReject: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, runner, _, db := newControlTestService(t, true)
+			seedControlDevice(t, db)
+
+			if tc.mode != "" {
+				if err := db.Create(&po.ThingModelProperty{
+					ID: "prop-1", ModelID: "m1", Identifier: "temperature", Name: "温度",
+					Kind: "int", AccessMode: tc.mode, Status: 1,
+				}).Error; err != nil {
+					t.Fatalf("seed property: %v", err)
+				}
+			}
+			if err := db.Model(&po.DeviceAddress{}).Where("id = ?", "a-rw").
+				Update("property_id", "prop-1").Error; err != nil {
+				t.Fatalf("bind property: %v", err)
+			}
+			runner.writeResult = []driver.WriteResult{{DeviceAddressID: "a-rw", Code: driver.WriteCodeOK, Value: "1"}}
+
+			_, err := svc.Write(context.Background(), &dto.ControlDTO{
+				DeviceID: "d1",
+				Items:    []dto.ControlItemDTO{{DeviceAddressID: "a-rw", Value: "1"}},
+			}, "test", "tester")
+
+			if tc.wantReject {
+				assertControlCode(t, err, enums.ControlPropertyNotWritableEnum.GetCode())
+				if runner.calls() != 0 {
+					t.Error("属性不允许写时不应调用驱动")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("属性 %s 应允许写入: %v", tc.mode, err)
+			}
+			if runner.calls() != 1 {
+				t.Errorf("驱动写入次数 = %d，期望 1", runner.calls())
+			}
+		})
 	}
 }
 

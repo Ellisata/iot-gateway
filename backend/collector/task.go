@@ -6,6 +6,7 @@ package collector
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -379,6 +380,17 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 			// 也会让「只写」这个语义自相矛盾。实时页据 collected=false 显示「不采集」。
 			if addr.RwPermission == "W" {
 				continue
+			}
+
+			// 绑定的物模型属性是读取能力的硬上界：属性 access_mode 不含 R 时，
+			// 即使点位物理可读（rw_permission=RW）也不采集、不推送。绑定校验允许
+			// 「RW 点位 + W 属性」（点位覆盖属性），业务语义只写，与只写点位同理。
+			// 只在绑定有效（属性属于设备所绑模型）时收紧；悬空/跨模型绑定维持原行为。
+			if addr.PropertyID != "" {
+				if p, ok := propCodes[addr.PropertyID]; ok && p.modelID == dev.ModelID &&
+					!strings.Contains(p.accessMode, "R") {
+					continue
+				}
 			}
 
 			// data_type 是写入时派生的协议内部类型名缓存，可能因协议类型注册名变更、
@@ -970,19 +982,22 @@ func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, result
 	return records
 }
 
-// propertyCode 物模型属性编码（identifier）+ 所属模型 ID。
-// 带上 model_id 是为了在任务构建时再核一次「点位绑定的属性确实属于设备所绑的模型」。
+// propertyCode 物模型属性编码（identifier）+ 所属模型 ID + 读写模式。
+// 带上 model_id 是为了在任务构建时再核一次「点位绑定的属性确实属于设备所绑的模型」；
+// accessMode 决定该点位是否进入采集调度（不含 R 即只写属性，不采集）。
 type propertyCode struct {
-	modelID string
-	code    string
+	modelID    string
+	code       string
+	accessMode string
 }
 
 // loadThingModelCodes 预加载设备物模型编码（deviceID -> thing_model.code）与
-// 属性编码（propertyID -> thing_model_property.identifier），供 toRecords 随记录下发。
+// 属性编码/读写模式（propertyID -> thing_model_property），前者供 toRecords 随
+// 记录下发，后者供任务构建时判断点位是否进入采集（只写属性不采集）。
 //
 // 物模型是**可选绑定**：没绑定就没有编码（记录里是空串）。两张表缺失或查询失败
-// 只记一条警告并返回空表 —— 这两个字段只是推送载荷的附加维度，不该让整台设备
-// 因此停采（单测库与早期版本库不一定有这两张表）。
+// 只记一条警告并返回空表 —— 此时不做属性侧收紧（与历史行为一致），也不该让整台
+// 设备因此停采（单测库与早期版本库不一定有这两张表）。
 //
 // 查询按设备所绑模型一次取回（而不是按点位 IN 上千个属性 ID），避免拼出超长
 // SQL；物模型数量本就远小于点位数。
@@ -1022,13 +1037,13 @@ func loadThingModelCodes(db *gorm.DB, devices []po.Device) (map[string]string, m
 	}
 
 	var props []po.ThingModelProperty
-	if err := db.Select("id", "model_id", "identifier").
+	if err := db.Select("id", "model_id", "identifier", "access_mode").
 		Where("model_id IN ?", modelIDs).Find(&props).Error; err != nil {
 		logger.Warn("collector: load thing model properties failed, records will omit propertyCode: %v", err)
 		return deviceCodes, propCodes
 	}
 	for _, p := range props {
-		propCodes[p.ID] = propertyCode{modelID: p.ModelID, code: p.Identifier}
+		propCodes[p.ID] = propertyCode{modelID: p.ModelID, code: p.Identifier, accessMode: p.AccessMode}
 	}
 	return deviceCodes, propCodes
 }

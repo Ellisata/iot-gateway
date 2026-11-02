@@ -35,7 +35,8 @@ func newRealtimeTestDB(t *testing.T) *gorm.DB {
 		sqlDB.SetMaxOpenConns(1)
 		t.Cleanup(func() { sqlDB.Close() })
 	}
-	if err := db.AutoMigrate(&po.Device{}, &po.IotProtocol{}, &po.DeviceAddress{}); err != nil {
+	if err := db.AutoMigrate(&po.Device{}, &po.IotProtocol{}, &po.DeviceAddress{},
+		&po.ThingModelProperty{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
@@ -112,6 +113,62 @@ const testCreatedAt = "2026-09-22 10:00:00"
 
 // 点位清单以库中 status=1 的点位为准，值从内存快照按点位 ID 对齐；
 // 库里已停用的点位不得出现，快照里没有的点位也要占位返回（collected=false）。
+// TestRealtimeSnapshotSuppressesWriteOnlyProperty 属性 access_mode=W 是读取上界：
+// 绑定它的 RW 点位不采集，快照必须忽略内存里可能残留的旧值，并把属性模式透传给前端
+// （前端据此显示「只写点位」而非「等待采集」）。
+func TestRealtimeSnapshotSuppressesWriteOnlyProperty(t *testing.T) {
+	db := newRealtimeTestDB(t)
+	if err := db.Create(&po.ThingModelProperty{
+		ID: "p-w", ModelID: "m1", Identifier: "cmd", Name: "命令", Kind: "int", AccessMode: "W", Status: 1,
+	}).Error; err != nil {
+		t.Fatalf("seed write-only property: %v", err)
+	}
+	if err := db.Create(&po.ThingModelProperty{
+		ID: "p-rw", ModelID: "m1", Identifier: "speed", Name: "转速", Kind: "float", AccessMode: "RW", Status: 1,
+	}).Error; err != nil {
+		t.Fatalf("seed read-write property: %v", err)
+	}
+
+	aW := addr("a-prop-w", "cmd", "命令", 1)
+	aW.RwPermission = "RW"
+	aW.PropertyID = "p-w"
+	aRW := addr("a-prop-rw", "speed", "转速", 1)
+	aRW.RwPermission = "RW"
+	aRW.PropertyID = "p-rw"
+	seedRealtimeDevice(t, db, "d1", "p1", testCreatedAt, []po.DeviceAddress{aW, aRW})
+
+	svc, store := newRealtimeTestService(t, db)
+	store.PushRecords([]collector.CollectedRecord{
+		{DeviceID: "d1", DeviceAddressID: "a-prop-w", Value: "1", DataType: "int"},
+		{DeviceID: "d1", DeviceAddressID: "a-prop-rw", Value: "1200", DataType: "float"},
+	})
+
+	got, err := svc.GetDeviceSnapshot(context.Background(), req("d1", 1, 50, ""))
+	if err != nil {
+		t.Fatalf("GetDeviceSnapshot: %v", err)
+	}
+	byID := make(map[string]int, len(got.Records))
+	for i, r := range got.Records {
+		byID[r.AddressID] = i
+	}
+
+	w := got.Records[byID["a-prop-w"]]
+	if w.Collected || w.Value != "" {
+		t.Errorf("只写属性点位不应取到值：collected=%v value=%q", w.Collected, w.Value)
+	}
+	if w.PropertyAccessMode != "W" {
+		t.Errorf("propertyAccessMode = %q, want W", w.PropertyAccessMode)
+	}
+
+	rw := got.Records[byID["a-prop-rw"]]
+	if !rw.Collected || rw.Value != "1200" {
+		t.Errorf("读写属性点位应正常采集：collected=%v value=%q", rw.Collected, rw.Value)
+	}
+	if rw.PropertyAccessMode != "RW" {
+		t.Errorf("propertyAccessMode = %q, want RW", rw.PropertyAccessMode)
+	}
+}
+
 func TestRealtimeSnapshotAlignsPointsAndValues(t *testing.T) {
 	db := newRealtimeTestDB(t)
 	seedRealtimeDevice(t, db, "d1", "p1", testCreatedAt, []po.DeviceAddress{
@@ -234,7 +291,8 @@ func TestRealtimeSnapshotNameFilterMatchesNameOrLabel(t *testing.T) {
 		{name: "按说明命中", keyword: "温度", wantTotal: 1, wantIDs: []string{"a1"}},
 		{name: "按点位名命中", keyword: "press", wantTotal: 1, wantIDs: []string{"a2"}},
 		{name: "无命中", keyword: "zzz", wantTotal: 0, wantIDs: nil},
-		{name: "空关键字返回全部", keyword: "", wantTotal: 2, wantIDs: []string{"a1", "a2"}},
+		// 同秒创建时按 id DESC（新增在前），与设备点位配置页一致。
+		{name: "空关键字返回全部", keyword: "", wantTotal: 2, wantIDs: []string{"a2", "a1"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -328,7 +386,7 @@ func TestRealtimeSnapshotAddressIDsFilter(t *testing.T) {
 }
 
 // 分页边界：所有点位 created_at 相同（同一秒创建）时，翻页不得出现重复或漏行。
-// 这条守的是 SQL 里的 "created_at ASC, id ASC" —— 只按 created_at 排序时
+// 这条守的是 SQL 里的 "created_at DESC, id DESC" —— 只按 created_at 排序时
 // 同秒点位的次序由 SQLite 自由决定，翻页结果就不稳定。
 func TestRealtimeSnapshotPaginationStableWithinSameSecond(t *testing.T) {
 	db := newRealtimeTestDB(t)
@@ -365,6 +423,10 @@ func TestRealtimeSnapshotPaginationStableWithinSameSecond(t *testing.T) {
 		if n != 1 {
 			t.Errorf("点位 %s 被取到 %d 次，want 1", id, n)
 		}
+	}
+	// 同秒内按 id DESC：与设备点位配置页统一为「新增在前」。
+	if want := "a5,a4,a3,a2,a1"; strings.Join(order, ",") != want {
+		t.Errorf("顺序 = %v, want %s", order, want)
 	}
 }
 

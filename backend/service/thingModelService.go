@@ -42,8 +42,9 @@ var (
 
 // ThingModelService 设备物模型服务。
 //
-// 物模型是协议无关的语义模板，不参与采集/推送执行；本服务只维护模板本身，
-// 设备绑定与点位绑定在各自的 service 里校验。
+// 物模型是协议无关的语义模板；本服务只维护模板本身，设备绑定与点位绑定在
+// 各自的 service 里校验。属性的 access_mode 不在这里执行，但它是读写能力的
+// 硬上界：采集侧（collector）与写入侧（ControlService）按它收紧点位权限。
 type ThingModelService struct {
 	sqliteDB *gorm.DB
 }

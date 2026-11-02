@@ -327,10 +327,10 @@ var agentApiSurface = map[string]SurfaceEntry{
 			"deviceId":                "目标设备 id",
 			"requestId":               "幂等键；相同值重复调用返回首次结果，不重复下发。建议每次操作生成一个 UUID",
 			"verify":                  "true 时写后回读校验（仅对有读权限的点有效）",
-			"items[].deviceAddressId": "点位 id（**不是** PLC 地址）；必须属于 deviceId、启用且 rw_permission 含 W",
+			"items[].deviceAddressId": "点位 id（**不是** PLC 地址）；必须属于 deviceId、启用、rw_permission 含 W，且绑定的物模型属性 access_mode 也含 W",
 			"items[].value":           "目标值的字符串形式；按点位的数据类型由插件编码（bool 可用 true/false/1/0）",
 		}),
-		Note: "**真实改变现场设备状态**，必须先向用户确认。批量写不是事务，逐点返回结果；写链路错误时状态未知，应回读确认",
+		Note: "**真实改变现场设备状态**，必须先向用户确认。批量写不是事务，逐点返回结果；写链路错误时状态未知，应回读确认。绑定了只读物模型属性的点位会被拒绝（40039）",
 	},
 	"GET /control/pageControlLog": {
 		Access: AccessRead,

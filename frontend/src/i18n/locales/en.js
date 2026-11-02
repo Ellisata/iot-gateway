@@ -399,6 +399,7 @@ export default {
     property: 'Thing Model Property',
     propertyPlaceholder: 'No property (optional)',
     propertyHint: 'Only properties compatible with the selected data type and access mode are listed.',
+    propertyWriteonlyHint: 'This property is write-only: the point is not polled, so live and historical values stay empty.',
     // Data-type kind mapping: property filtering and alarm operators are matched by kind
     kindMapTitle: 'Data type mapping',
     kindMapHint: 'Thing model properties and alarm operators are matched by kind; time types do not support conditional alarms.',
@@ -474,7 +475,7 @@ export default {
     readonlyShort: 'R (Read Only)',
     writeonlyShort: 'W (Write Only)',
     readwriteShort: 'RW (Read/Write)',
-    writeonlyHint: 'Write-only points are written but never polled, so live and historical values stay empty by design.',
+    writeonlyHint: 'Write-only points (or points bound to a write-only property) are written but never polled, so live and historical values stay empty by design.',
     writeonlyNoValue: 'Not polled',
     descMaxLength: 'Description cannot exceed 200 characters',
     // Alarm condition. Operators depend on the data type's kind (numeric = range/compare,
@@ -1656,6 +1657,7 @@ export default {
     checking: 'Checking control capability…',
     disabled: 'Control writes are disabled',
     pointNotWritable: 'This point is not writable',
+    propertyNotWritable: 'The thing-model property bound to this point is read-only',
     reason: {
       disabled: 'Control writes are disabled (control.enabled=false)',
       device_disabled: 'Device is disabled',

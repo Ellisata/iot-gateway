@@ -49,6 +49,7 @@
     "err.control_param_invalid": "Invalid control write parameters",
     "err.control_write_failed": "Control write failed (link error; the write state is unknown)",
     "err.control_rate_limited": "Control writes are too frequent; please retry later",
+    "err.control_property_not_writable": "The thing-model property bound to this point is read-only",
     "collection.start.failed": "Failed to start collection",
     "collection.stop.failed": "Failed to stop collection",
     "err.create_failed": "Create failed",

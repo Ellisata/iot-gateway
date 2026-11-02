@@ -49,9 +49,13 @@ type WritableSource interface {
 
 // ControlService 控制下发服务。
 //
-// 职责边界：这里只做**网关侧**的授权与编排（总开关、设备/点位归属、rw_permission、
-// 协议能力、幂等、审计、可选回读）；值解析与协议编码全部在插件进程内完成，
-// 网关不碰 PLC 字节。
+// 职责边界：这里只做**网关侧**的授权与编排（总开关、设备/点位归属、点位
+// rw_permission 与物模型属性 access_mode、协议能力、幂等、审计、可选回读）；
+// 值解析与协议编码全部在插件进程内完成，网关不碰 PLC 字节。
+//
+// 写权限是**点位与属性的交集**：rw_permission 是设备物理能力，access_mode 是
+// 业务语义上界；两者都含 W 才允许写入。绑定校验只保证前者覆盖后者，因此
+// 「RW 点位 + R 属性」是合法绑定，但写入要在这里拒绝。
 type ControlService struct {
 	db      *gorm.DB
 	engine  ControlRunner
@@ -465,6 +469,13 @@ func (s *ControlService) validateItems(ctx context.Context, deviceID string, ite
 		byID[a.ID] = a
 	}
 
+	// 物模型属性是写入能力的硬上界。绑定校验允许「RW 点位 + R 属性」（点位覆盖
+	// 属性），这类点位物理可写但业务语义只读，写入必须拒绝 —— 否则开放接口与
+	// 控制台都能绕过物模型声明改值。
+	if err := s.ensurePropertiesWritable(ctx, rows); err != nil {
+		return nil, nil, err
+	}
+
 	ordered := make([]po.DeviceAddress, 0, len(ids))
 	for _, id := range ids {
 		a, ok := byID[id]
@@ -474,6 +485,54 @@ func (s *ControlService) validateItems(ctx context.Context, deviceID string, ite
 		ordered = append(ordered, a)
 	}
 	return byID, ordered, nil
+}
+
+// ensurePropertiesWritable 拒绝绑定到只读物模型属性的点位。
+//
+// 未绑定属性的点位不受影响：没有业务语义声明时，写权限只由 rw_permission 决定。
+// 属性行缺失（外部改库、悬空 property_id）时无法自证可写，保守拒绝。
+func (s *ControlService) ensurePropertiesWritable(ctx context.Context, addrs []po.DeviceAddress) error {
+	ids := make([]string, 0, len(addrs))
+	seen := make(map[string]struct{}, len(addrs))
+	for _, a := range addrs {
+		if a.PropertyID == "" {
+			continue
+		}
+		if _, ok := seen[a.PropertyID]; ok {
+			continue
+		}
+		seen[a.PropertyID] = struct{}{}
+		ids = append(ids, a.PropertyID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	var props []po.ThingModelProperty
+	if err := s.db.WithContext(ctx).Select("id", "access_mode").
+		Where("id IN ?", ids).Find(&props).Error; err != nil {
+		return err
+	}
+	modeByID := make(map[string]string, len(props))
+	for _, p := range props {
+		modeByID[p.ID] = p.AccessMode
+	}
+
+	for _, a := range addrs {
+		if a.PropertyID == "" {
+			continue
+		}
+		mode, ok := modeByID[a.PropertyID]
+		if !ok {
+			return controlErrMsg(enums.ControlPropertyNotWritableEnum,
+				fmt.Sprintf("点位 %s 绑定的物模型属性不存在，无法确认写权限", a.Name))
+		}
+		if !strings.Contains(mode, "W") {
+			return controlErrMsg(enums.ControlPropertyNotWritableEnum,
+				fmt.Sprintf("点位 %s 绑定的物模型属性为只读", a.Name))
+		}
+	}
+	return nil
 }
 
 func (s *ControlService) loadDevice(ctx context.Context, deviceID string) (*po.Device, error) {

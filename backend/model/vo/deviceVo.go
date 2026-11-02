@@ -50,6 +50,9 @@ type DeviceAddressVO struct {
 	PropertyID         string `json:"propertyId"`
 	PropertyIdentifier string `json:"propertyIdentifier"`
 	PropertyName       string `json:"propertyName"`
+	// PropertyAccessMode 绑定属性的读写模式（R/W/RW，未绑定为空串）。
+	// 属性不含 R 时点位不进入采集，列表页据此显示「不采集」而不是「等待采集」。
+	PropertyAccessMode string `json:"propertyAccessMode"`
 	Name               string `json:"name"`
 	Label              string `json:"label"` // 地址 name 的中文说明（如温度、电流）
 	CommonDataType     string `json:"commonDataType"`

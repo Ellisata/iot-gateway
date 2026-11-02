@@ -12,7 +12,8 @@ import (
 // ControlRoutes 控制下发路由。
 //
 // write 是**高风险管理动作**：无论前端是否二次确认，服务端都必须独立校验
-// 总开关、协议能力与点位 rw_permission（见 service.ControlService）。
+// 总开关、协议能力、点位 rw_permission 与物模型属性 access_mode
+// （见 service.ControlService）。
 func ControlRoutes(r gin.IRouter, cc *controller.ControlController) {
 	g := r.Group("/control")
 	{

@@ -15,7 +15,11 @@ type RealtimePointVO struct {
 	DataType       string `json:"dataType"`
 	CommonDataType string `json:"commonDataType"`
 	RwPermission   string `json:"rwPermission"`
-	ScanFrequency  int    `json:"scanFrequency"`
+	// PropertyAccessMode 绑定的物模型属性读写模式（R/W/RW；未绑定属性为空串）。
+	// 写入能力是它与 rwPermission 的交集：属性为 R 时点位即使 RW 也不能写，
+	// 前端据此隐藏写入口（最终仍由 ControlService 拒绝）。
+	PropertyAccessMode string `json:"propertyAccessMode"`
+	ScanFrequency      int    `json:"scanFrequency"`
 	// Quality 采集质量码（driver.QualityXxx：类别在高 2 位、成因在低 6 位）。
 	// 前端据此把"为什么坏"显示给操作工，而不是只给一个裸的 0。
 	Quality   int    `json:"quality"`

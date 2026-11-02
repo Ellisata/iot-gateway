@@ -186,8 +186,8 @@
           </template>
           <template #default="{ row }">
             <span v-if="row.status !== 1" class="iot-cell-muted">—</span>
-            <!-- 只写点位不参与采集：别显示成「等待采集」—— 那是 R/RW 还没轮询到的状态 -->
-            <div v-else-if="row.rwPermission === 'W'" class="live-pending">
+            <!-- 只写点位 / 只写属性不参与采集：别显示成「等待采集」—— 那是可读点位还没轮询到的状态 -->
+            <div v-else-if="isReadSuppressed(row)" class="live-pending">
               <el-tooltip :content="t('deviceAddress.writeonlyHint')" placement="top">
                 <span class="iot-cell-muted iot-hint" tabindex="0">
                   {{ t('deviceAddress.writeonlyNoValue') }}
@@ -224,16 +224,16 @@
         </el-table-column>
         <el-table-column :label="t('deviceAddress.rwPermission')" width="110" align="center">
           <template #default="{ row }">
-            <!-- 只写点位不参与采集，值永远为空：胶囊加虚线下划线，悬停说明这是预期而非故障 -->
+            <!-- 只写点位 / 只写属性不参与采集，值永远为空：胶囊加虚线下划线，悬停说明这是预期而非故障 -->
             <el-tooltip
-              :disabled="row.rwPermission !== 'W'"
+              :disabled="!isReadSuppressed(row)"
               :content="t('deviceAddress.writeonlyHint')"
               placement="top"
             >
               <span
                 class="iot-pill"
-                :class="[rwClass(row.rwPermission), row.rwPermission === 'W' ? 'iot-hint' : '']"
-                :tabindex="row.rwPermission === 'W' ? 0 : undefined"
+                :class="[rwClass(row.rwPermission), isReadSuppressed(row) ? 'iot-hint' : '']"
+                :tabindex="isReadSuppressed(row) ? 0 : undefined"
               >
                 {{ rwLabel(row.rwPermission) }}
               </span>
@@ -729,6 +729,14 @@ function rwLabel(permission) {
     W: t('deviceAddress.writeonly'),
     RW: t('deviceAddress.readwrite'),
   }[permission] || permission || '—'
+}
+
+// 有效读能力 = 点位含 R 且绑定属性为空或含 R；任一不满足即「永不采集」。
+// 「RW 点位 + W 属性」是合法绑定，但业务语义只写，实时值同样永远为空。
+function isReadSuppressed(row) {
+  if (!String(row?.rwPermission || '').includes('R')) return true
+  const mode = String(row?.propertyAccessMode || '')
+  return mode !== '' && !mode.includes('R')
 }
 
 // ---------- 初始化 ----------

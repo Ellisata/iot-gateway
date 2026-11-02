@@ -100,6 +100,9 @@ var (
 	ControlParamInvalidEnum        = NewBusinessEnum("40036", "控制下发参数不合法", "err.control_param_invalid")
 	ControlWriteFailedEnum         = NewBusinessEnum("40037", "控制下发失败（链路错误，写入状态未知）", "err.control_write_failed")
 	ControlRateLimitedEnum         = NewBusinessEnum("40038", "控制下发过于频繁，请稍后再试", "err.control_rate_limited")
+	// 物模型属性是写入能力的硬上界：点位物理可写（rw_permission 含 W）不代表
+	// 业务语义允许写（属性 access_mode 为 R）。两者都允许才是真的可写。
+	ControlPropertyNotWritableEnum = NewBusinessEnum("40039", "该点位绑定的物模型属性为只读", "err.control_property_not_writable")
 
 	// 局域网设备扫描发现相关错误码。
 	//

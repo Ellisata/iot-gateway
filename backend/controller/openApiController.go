@@ -15,7 +15,7 @@ import (
 // OpenApiController 开放接口控制器（供外部系统凭密钥调用）。
 //
 // 除控制下发外均为只读查询。控制下发仍受 control.enabled、协议 Writable、
-// 点位 W 权限三层约束，见 service.ControlService。
+// 点位 rw_permission 与物模型属性 access_mode 四层约束，见 service.ControlService。
 type OpenApiController struct {
 	openApiService *service.OpenApiService
 	controlService *service.ControlService
@@ -141,7 +141,8 @@ func (ctr *OpenApiController) PointAbnormal(c *gin.Context) {
 // WriteControl 对外控制下发。
 //
 // 这是开放接口里**唯一会改变现场设备状态**的端点。仍受 control.enabled、
-// 协议 Writable、点位 rw_permission 三层约束；审计 source 记为 "openapi"。
+// 协议 Writable、点位 rw_permission 与物模型属性 access_mode 约束；审计 source
+// 记为 "openapi"。
 // X-Api-Key 中间件只做存在性校验，不注入操作者名称，因此 operator 固定为
 // "openapi"（不记录密钥本身，避免审计表泄露凭据）。
 func (ctr *OpenApiController) WriteControl(c *gin.Context) {

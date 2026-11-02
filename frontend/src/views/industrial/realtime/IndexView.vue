@@ -167,9 +167,9 @@
               :key="`${row.addressId}|${row.value}`"
               class="iot-value-flash"
             >{{ row.value }}</span>
-            <!-- 只写点位永远不会被采集：不能和「尚未采到」共用同一个 —，否则会被当成采集故障 -->
+            <!-- 只写点位 / 只写属性永远不会被采集：不能和「尚未采到」共用同一个 —，否则会被当成采集故障 -->
             <el-tooltip
-              v-else-if="row.rwPermission === 'W'"
+              v-else-if="isReadSuppressed(row)"
               :content="t('deviceAddress.writeonlyHint')"
               placement="top"
             >
@@ -603,10 +603,26 @@ async function fetchCapability() {
   }
 }
 
+// 有效读能力 = 点位含 R 且绑定属性为空或含 R；任一不满足即「永不采集」。
+// 「RW 点位 + W 属性」是合法绑定，但业务语义只写，实时值同样永远为空。
+function isReadSuppressed(row) {
+  if (!String(row?.rwPermission || '').includes('R')) return true
+  const mode = String(row?.propertyAccessMode || '')
+  return mode !== '' && !mode.includes('R')
+}
+
+// 物模型属性是写入能力的硬上界：未绑定（空串）时只看点位权限，
+// 绑定时必须属性 accessMode 也含 W（R 属性即使点位 RW 也只能读）。
+function propertyAllowsWrite(row) {
+  const mode = String(row?.propertyAccessMode || '')
+  return mode === '' || mode.includes('W')
+}
+
 function canWritePoint(row) {
   return (
     capability.value?.writable === true &&
-    String(row?.rwPermission || '').includes('W')
+    String(row?.rwPermission || '').includes('W') &&
+    propertyAllowsWrite(row)
   )
 }
 
@@ -616,6 +632,9 @@ function writeDisabledReason(row) {
   if (!capability.value.enabled) return t('control.disabled')
   if (!capability.value.writable) {
     return t(`control.reason.${capability.value.reason || 'protocol_not_writable'}`)
+  }
+  if (String(row?.rwPermission || '').includes('W') && !propertyAllowsWrite(row)) {
+    return t('control.propertyNotWritable')
   }
   return t('control.pointNotWritable')
 }

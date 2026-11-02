@@ -168,6 +168,9 @@
         <div class="iot-form-hint is-block">
           {{ deviceModelId ? t('deviceAddress.propertyHint') : t('deviceAddress.noModelBound') }}
         </div>
+        <div v-if="selectedPropertyReadSuppressed" class="iot-form-hint is-block">
+          {{ t('deviceAddress.propertyWriteonlyHint') }}
+        </div>
       </el-form-item>
 
       <el-form-item :label="t('deviceAddress.scanFrequency')" prop="scanFrequency">
@@ -580,6 +583,14 @@ const compatiblePropertyOptions = computed(() => {
     if (formData.rwPermission && !accessCovers(formData.rwPermission, p.accessMode)) return false
     return true
   })
+})
+
+// 选中的属性为只写（access_mode 不含 R）时，即使点位 RW 也不会进入采集。
+// 与后端 collection/ControlService 的判定同一口径，提前把后果说清楚。
+const selectedPropertyReadSuppressed = computed(() => {
+  const p = propertyOptionsAll.value.find((x) => x.id === formData.propertyId)
+  const mode = String(p?.accessMode || '')
+  return mode !== '' && !mode.includes('R')
 })
 
 // 类型/读写权限变化后，已选属性若不再兼容就清空，避免提交时才被后端拒绝。
