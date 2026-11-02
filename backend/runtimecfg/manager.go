@@ -44,6 +44,14 @@ type Reader interface {
 	Bool(Key) bool
 }
 
+// IntReader 数值类配置的读取能力。
+//
+// 与 Reader 分开而不是并进去：绝大多数只读布尔的组件（中间件 / 扫描 / 控制）
+// 和它们的测试替身不该被迫实现一个与自己无关的方法。组件按需类型断言。
+type IntReader interface {
+	Int(Key) int
+}
+
 // Applier 把变更应用到某个运行中的组件。
 //
 // 契约：
@@ -70,10 +78,11 @@ type snapshot struct {
 type Field struct {
 	Spec Spec
 
-	// Value 生效值（覆盖值优先，否则默认值）。
-	Value bool
-	// DefaultValue 来自 default.yaml（启动期配置）的值。
-	DefaultValue bool
+	// Value 生效值（覆盖值优先，否则默认值）。动态类型由 Spec.Type 决定：
+	// bool（ValueTypeBool）或 int（ValueTypeEnum）。
+	Value any
+	// DefaultValue 来自 default.yaml（启动期配置）的值，类型同 Value。
+	DefaultValue any
 	// Source "default" 或 "override"。
 	Source string
 	// Hot 是否运行期生效。
@@ -172,15 +181,27 @@ func (m *Manager) reload(ctx context.Context) {
 	}
 }
 
-func (m *Manager) baseValue(s Spec) bool {
+func (m *Manager) baseValue(s Spec) any {
 	if m.base == nil || s.Base == nil {
-		return false
+		return zeroFor(s.Type)
 	}
 	return s.Base(m.base)
 }
 
+// zeroFor 返回该类型的零值。用 any 承载后必须保住动态类型，否则
+// Int() / Bool() 的类型断言会静默拿到零值而无法区分「未配置」。
+func zeroFor(t ValueType) any {
+	switch t {
+	case ValueTypeEnum:
+		return 0
+	default:
+		return false
+	}
+}
+
 // decode 严格解析覆盖值。只接受与注册类型完全一致的字面量：
-// "true" / "1" / "on" / null 都不算布尔值。
+// "true" / "1" / "on" / null 都不算布尔值；枚举只接受 Options 里列出的整数，
+// "60" / 60.0 / 90 一律拒绝。
 func decode(s Spec, raw json.RawMessage) (any, error) {
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("%w: 值为空", ErrInvalidValue)
@@ -196,6 +217,19 @@ func decode(s Spec, raw json.RawMessage) (any, error) {
 			return nil, fmt.Errorf("%w: %s 只接受 true / false", ErrInvalidValue, s.Key)
 		}
 		return b, nil
+	case ValueTypeEnum:
+		// 用 *int 而不是 int：null 解码到 int 会静默得到 0，而 0 恰好是
+		// keepalive 的合法取值（关闭），会让 "null" 被当成一次有效配置。
+		var v *int
+		if err := json.Unmarshal(raw, &v); err != nil || v == nil {
+			return nil, fmt.Errorf("%w: %s 只接受整数选项", ErrInvalidValue, s.Key)
+		}
+		for _, o := range s.Options {
+			if o.Value == *v {
+				return *v, nil
+			}
+		}
+		return nil, fmt.Errorf("%w: %s 不接受取值 %d", ErrInvalidValue, s.Key, *v)
 	default:
 		return nil, fmt.Errorf("%w: 未知类型 %s", ErrInvalidValue, s.Type)
 	}
@@ -211,6 +245,25 @@ func (m *Manager) Bool(key Key) bool {
 	return b
 }
 
+// Int 读取枚举类配置的生效值。key 未登记或类型不是 int 时返回 0。
+func (m *Manager) Int(key Key) int {
+	snap := m.current.Load()
+	if snap == nil {
+		return 0
+	}
+	n, _ := snap.values[key].(int)
+	return n
+}
+
+// Value 读取任意已登记配置的生效值（供系统配置接口原样回显）。
+func (m *Manager) Value(key Key) any {
+	snap := m.current.Load()
+	if snap == nil {
+		return nil
+	}
+	return snap.values[key]
+}
+
 // BootBool 返回进程启动时的生效值。
 func (m *Manager) BootBool(key Key) bool {
 	if m.boot == nil {
@@ -218,6 +271,14 @@ func (m *Manager) BootBool(key Key) bool {
 	}
 	b, _ := m.boot.values[key].(bool)
 	return b
+}
+
+// bootValue 返回进程启动时的任意类型生效值，供 PendingRestart 比较。
+func (m *Manager) bootValue(key Key) any {
+	if m.boot == nil {
+		return nil
+	}
+	return m.boot.values[key]
 }
 
 // RegisterApplier 注册一个 key 的应用回调，返回注销函数。
@@ -251,15 +312,17 @@ func (m *Manager) List() []Field {
 	snap := m.current.Load()
 	out := make([]Field, 0, len(specs))
 	for _, s := range specs {
+		base := m.baseValue(s)
 		f := Field{
 			Spec:         s,
-			DefaultValue: m.baseValue(s),
+			Value:        base,
+			DefaultValue: base,
 			Source:       "default",
 			Hot:          s.Mode.Hot(),
 		}
 		if snap != nil {
-			if b, ok := snap.values[s.Key].(bool); ok {
-				f.Value = b
+			if v, ok := snap.values[s.Key]; ok {
+				f.Value = v
 			}
 			if row, ok := snap.overrides[s.Key]; ok {
 				f.Source = "override"
@@ -268,7 +331,7 @@ func (m *Manager) List() []Field {
 			}
 		}
 		if s.Mode == ApplyRestart {
-			f.PendingRestart = f.Value != m.BootBool(s.Key)
+			f.PendingRestart = f.Value != m.bootValue(s.Key)
 		}
 		out = append(out, f)
 	}
@@ -304,9 +367,9 @@ func (m *Manager) Update(ctx context.Context, key Key, raw json.RawMessage, upda
 	}
 
 	oldSnap := m.current.Load()
-	oldValue, _ := oldSnap.values[key].(bool)
+	oldValue := oldSnap.values[key]
 	oldRow, hadOld := oldSnap.overrides[key]
-	newValue := value.(bool)
+	newValue := value
 
 	now := m.now().Format("2006-01-02 15:04:05")
 	encoded, err := json.Marshal(newValue)
@@ -357,7 +420,7 @@ func (m *Manager) Reset(ctx context.Context, key Key, updatedBy string) (bool, e
 	if err := m.checkApplier(spec); err != nil {
 		return false, err
 	}
-	oldValue, _ := oldSnap.values[key].(bool)
+	oldValue := oldSnap.values[key]
 
 	if err := m.store.Delete(ctx, key); err != nil {
 		return false, fmt.Errorf("%w: %v", ErrPersist, err)

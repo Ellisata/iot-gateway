@@ -29,6 +29,11 @@ func TestRegistryCoversEveryBoolConfig(t *testing.T) {
 	managed := map[string]bool{}
 	for _, spec := range All() {
 		managed[string(spec.Key)] = true
+		// 本测试只守布尔叶子；枚举项（int）由 TestRegistrySpecsAreWellFormed
+		// 校验选项，并由 TestManagerEnumDefaultUpdateReset 验证默认值来源。
+		if spec.Type != ValueTypeBool {
+			continue
+		}
 		if !bools[string(spec.Key)] {
 			t.Errorf("注册项 %s 在 configFile.Config 里不存在或不是布尔字段", spec.Key)
 		}
@@ -64,7 +69,26 @@ func TestRegistryCoversEveryBoolConfig(t *testing.T) {
 func TestRegistrySpecsAreWellFormed(t *testing.T) {
 	cfg := &configFile.Config{}
 	for _, spec := range All() {
-		if spec.Type != ValueTypeBool {
+		switch spec.Type {
+		case ValueTypeBool:
+			if len(spec.Options) != 0 {
+				t.Errorf("%s 是布尔项，不应带 Options", spec.Key)
+			}
+		case ValueTypeEnum:
+			if len(spec.Options) == 0 {
+				t.Errorf("%s 是枚举项，必须至少有一个 Option", spec.Key)
+			}
+			seen := map[int]bool{}
+			for _, o := range spec.Options {
+				if o.LabelKey == "" {
+					t.Errorf("%s 的枚举项 %d 缺少 LabelKey", spec.Key, o.Value)
+				}
+				if seen[o.Value] {
+					t.Errorf("%s 的枚举值 %d 重复", spec.Key, o.Value)
+				}
+				seen[o.Value] = true
+			}
+		default:
 			t.Errorf("%s 的类型 %q 未实现", spec.Key, spec.Type)
 		}
 		if spec.Group == "" || spec.GroupLabelKey == "" || spec.LabelKey == "" || spec.DescKey == "" {
@@ -74,18 +98,29 @@ func TestRegistrySpecsAreWellFormed(t *testing.T) {
 			t.Errorf("%s 缺少默认值读取函数", spec.Key)
 			continue
 		}
-		// 只验证可调用且返回 bool —— 默认值本身由 default.yaml 决定。
-		_ = spec.Base(cfg)
+		// 默认值本身由 default.yaml 决定，这里只校验可调用且动态类型与 Type 一致。
+		v := spec.Base(cfg)
+		switch spec.Type {
+		case ValueTypeBool:
+			if _, ok := v.(bool); !ok {
+				t.Errorf("%s 的 Base 返回 %T，期望 bool", spec.Key, v)
+			}
+		case ValueTypeEnum:
+			if _, ok := v.(int); !ok {
+				t.Errorf("%s 的 Base 返回 %T，期望 int", spec.Key, v)
+			}
+		}
 	}
 
 	// 生效方式钉住：改错一个会让「立即生效」变成需要重启却看不出来。
 	wantMode := map[Key]ApplyMode{
-		KeyDiscoveryEnabled:  ApplyHotAction,
-		KeyDeviceScanEnabled: ApplyHotRead,
-		KeyPushChangeOnly:    ApplyHotRead,
-		KeyPluginEnabled:     ApplyRestart,
-		KeyAgentApiEnabled:   ApplyHotRead,
-		KeyControlEnabled:    ApplyHotRead,
+		KeyDiscoveryEnabled:         ApplyHotAction,
+		KeyDeviceScanEnabled:        ApplyHotRead,
+		KeyPushChangeOnly:           ApplyHotRead,
+		KeyPushKeepaliveIntervalSec: ApplyHotRead,
+		KeyPluginEnabled:            ApplyRestart,
+		KeyAgentApiEnabled:          ApplyHotRead,
+		KeyControlEnabled:           ApplyHotRead,
 	}
 	for key, want := range wantMode {
 		spec, ok := Lookup(key)

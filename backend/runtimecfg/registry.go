@@ -5,14 +5,25 @@ package runtimecfg
 
 import "iot-gateway/configFile"
 
-// ValueType 配置值的类型。当前只支持布尔开关；增加数值 / 字符串时在这里
-// 与 decode 的 switch 各补一支，并同步前端渲染分支。
+// ValueType 配置值的类型。增加新类型时在这里与 decode 的 switch 各补一支，
+// 并同步前端渲染分支。
 type ValueType string
 
 const (
 	// ValueTypeBool 布尔开关。
 	ValueTypeBool ValueType = "bool"
+
+	// ValueTypeEnum 固定选项的整数。取值范围由 Spec.Options 决定，当前用于
+	// 周期类配置（0 = 关闭 / 60 / 300 / 600 秒）。
+	ValueTypeEnum ValueType = "enum"
 )
+
+// Option 枚举项。Value 是存储与 API 的取值，LabelKey 是前端 i18n key
+// （译文由 zh-CN / en 两份 locale 维护，后端不传译文）。
+type Option struct {
+	Value    int
+	LabelKey string
+}
 
 // ApplyMode 配置项修改后的生效方式。
 type ApplyMode string
@@ -54,7 +65,11 @@ type Spec struct {
 	Mode ApplyMode
 
 	// Base 从启动期配置里取默认值。只能读，不得修改 cfg。
-	Base func(*configFile.Config) bool
+	// 返回值类型必须与 Type 一致：bool 对应 ValueTypeBool，int 对应 ValueTypeEnum。
+	Base func(*configFile.Config) any
+
+	// Options 仅 ValueTypeEnum 使用：必须非空、Value 不可重复。
+	Options []Option
 }
 
 // specs 是**有顺序的**注册表：页面按此顺序分组与排列。
@@ -67,7 +82,7 @@ var specs = []Spec{
 		LabelKey:      "runtimeConfig.fields.discoveryEnabled.label",
 		DescKey:       "runtimeConfig.fields.discoveryEnabled.hint",
 		Mode:          ApplyHotAction,
-		Base:          func(c *configFile.Config) bool { return c.Discovery.Enabled },
+		Base:          func(c *configFile.Config) any { return c.Discovery.Enabled },
 	},
 	{
 		Key:           KeyDeviceScanEnabled,
@@ -77,7 +92,7 @@ var specs = []Spec{
 		LabelKey:      "runtimeConfig.fields.deviceScanEnabled.label",
 		DescKey:       "runtimeConfig.fields.deviceScanEnabled.hint",
 		Mode:          ApplyHotRead,
-		Base:          func(c *configFile.Config) bool { return c.DeviceScan.Enabled },
+		Base:          func(c *configFile.Config) any { return c.DeviceScan.Enabled },
 	},
 	{
 		Key:           KeyPushChangeOnly,
@@ -87,7 +102,23 @@ var specs = []Spec{
 		LabelKey:      "runtimeConfig.fields.pushChangeOnly.label",
 		DescKey:       "runtimeConfig.fields.pushChangeOnly.hint",
 		Mode:          ApplyHotRead,
-		Base:          func(c *configFile.Config) bool { return c.Push.ChangeOnly },
+		Base:          func(c *configFile.Config) any { return c.Push.ChangeOnly },
+	},
+	{
+		Key:           KeyPushKeepaliveIntervalSec,
+		Type:          ValueTypeEnum,
+		Group:         "push",
+		GroupLabelKey: "runtimeConfig.groups.push",
+		LabelKey:      "runtimeConfig.fields.pushKeepaliveInterval.label",
+		DescKey:       "runtimeConfig.fields.pushKeepaliveInterval.hint",
+		Mode:          ApplyHotRead,
+		Options: []Option{
+			{Value: 0, LabelKey: "runtimeConfig.fields.pushKeepaliveInterval.options.off"},
+			{Value: 60, LabelKey: "runtimeConfig.fields.pushKeepaliveInterval.options.min1"},
+			{Value: 300, LabelKey: "runtimeConfig.fields.pushKeepaliveInterval.options.min5"},
+			{Value: 600, LabelKey: "runtimeConfig.fields.pushKeepaliveInterval.options.min10"},
+		},
+		Base: func(c *configFile.Config) any { return c.Push.KeepaliveIntervalSec },
 	},
 	{
 		Key:           KeyPluginEnabled,
@@ -97,7 +128,7 @@ var specs = []Spec{
 		LabelKey:      "runtimeConfig.fields.pluginEnabled.label",
 		DescKey:       "runtimeConfig.fields.pluginEnabled.hint",
 		Mode:          ApplyRestart,
-		Base:          func(c *configFile.Config) bool { return c.Plugin.Enabled },
+		Base:          func(c *configFile.Config) any { return c.Plugin.Enabled },
 	},
 	{
 		Key:           KeyAgentApiEnabled,
@@ -109,7 +140,7 @@ var specs = []Spec{
 		// 分组中间件按请求现读开关（middleware.AgentApiSwitchMiddleware），
 		// 不需要启停组件。
 		Mode: ApplyHotRead,
-		Base: func(c *configFile.Config) bool { return c.AgentApi.Enabled },
+		Base: func(c *configFile.Config) any { return c.AgentApi.Enabled },
 	},
 	{
 		Key:           KeyControlEnabled,
@@ -122,7 +153,7 @@ var specs = []Spec{
 		// 写路径都汇聚到 ControlService.Write，不需要启停组件。关闭后立即
 		// 拒绝新的下发，正在执行的那一批不受影响。
 		Mode: ApplyHotRead,
-		Base: func(c *configFile.Config) bool { return c.Control.Enabled },
+		Base: func(c *configFile.Config) any { return c.Control.Enabled },
 	},
 }
 

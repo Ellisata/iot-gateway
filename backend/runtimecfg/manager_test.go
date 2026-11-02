@@ -106,7 +106,7 @@ func TestManagerUpdateHotReadThrough(t *testing.T) {
 	}
 
 	f := findField(t, m.List(), KeyDeviceScanEnabled)
-	if f.Source != "override" || f.Value {
+	if f.Source != "override" || f.Value != false {
 		t.Fatalf("列表状态不正确: %+v", f)
 	}
 }
@@ -367,4 +367,61 @@ func openTestDBNoMigrate(t *testing.T) *gorm.DB {
 		t.Cleanup(func() { _ = sqlDB.Close() })
 	}
 	return db
+}
+
+// 枚举项走与布尔项相同的「默认值 → 覆盖 → 恢复默认」链路，且值以 int 暴露。
+func TestManagerEnumDefaultUpdateReset(t *testing.T) {
+	cfg := testConfig()
+	cfg.Push.KeepaliveIntervalSec = 300
+	store := newFakeStore()
+	m := newManager(cfg, store)
+
+	if got := m.Int(KeyPushKeepaliveIntervalSec); got != 300 {
+		t.Fatalf("默认值 = %d，want 300", got)
+	}
+	f := findField(t, m.List(), KeyPushKeepaliveIntervalSec)
+	if f.Value != 300 || f.DefaultValue != 300 || f.Source != "default" {
+		t.Fatalf("列表默认状态不正确: %+v", f)
+	}
+
+	if _, err := m.Update(context.Background(), KeyPushKeepaliveIntervalSec,
+		json.RawMessage("60"), "tester"); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if got := m.Int(KeyPushKeepaliveIntervalSec); got != 60 {
+		t.Fatalf("覆盖后 = %d，want 60", got)
+	}
+	if row := store.rows[KeyPushKeepaliveIntervalSec]; row.Value != "60" {
+		t.Fatalf("落库值 = %q，want 60", row.Value)
+	}
+	f = findField(t, m.List(), KeyPushKeepaliveIntervalSec)
+	if f.Value != 60 || f.Source != "override" {
+		t.Fatalf("列表覆盖状态不正确: %+v", f)
+	}
+
+	if _, err := m.Reset(context.Background(), KeyPushKeepaliveIntervalSec, "tester"); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	if got := m.Int(KeyPushKeepaliveIntervalSec); got != 300 {
+		t.Fatalf("恢复默认后 = %d，want 300", got)
+	}
+}
+
+// 枚举只接受 Options 里列出的**整数**：字符串、小数、null、未列出的值一律拒绝。
+func TestManagerEnumRejectsInvalidValues(t *testing.T) {
+	m := newManager(testConfig(), newFakeStore())
+
+	for _, raw := range []string{
+		`"60"`, // 字符串
+		`60.5`, // 小数
+		`null`, // null（int 解码会静默变成 0）
+		`90`,   // 不在 Options 里
+		`-1`,   // 不在 Options 里
+		`{}`,   // 对象
+	} {
+		if _, err := m.Update(context.Background(), KeyPushKeepaliveIntervalSec,
+			json.RawMessage(raw), "tester"); !errors.Is(err, ErrInvalidValue) {
+			t.Errorf("Update(%s) err=%v，期望 ErrInvalidValue", raw, err)
+		}
+	}
 }

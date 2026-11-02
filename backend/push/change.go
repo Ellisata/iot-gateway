@@ -5,6 +5,7 @@ package push
 
 import (
 	"sync"
+	"time"
 
 	"iot-gateway/collector"
 )
@@ -16,6 +17,14 @@ import (
 //   - 没有上次记录（首轮、重启后、通道重建后）→ 投递；
 //   - 值、质量码或物模型/属性编码任一不同 → 投递；
 //   - 全都相同 → 跳过。
+//
+// 周期保活（configFile push.keepaliveIntervalSec > 0）在此基础上多一条：
+// 本轮仍采集到这个点位、但上面三项全都没变，且距上次真正投递已超过 interval
+// → 再投递一次。它让"值长期不变"的下游仍能收到心跳。
+//
+// 保活由**本轮采集到的记录**驱动，而不是由定时器从缓存里合成：设备离线、采集失败时
+// 本轮根本没有该点位的记录，filter 不会被调用，自然也不会发出一条"看起来正常"的旧值。
+// 实际重发粒度受采集周期限制（max(interval, 采集周期)），不是严格等间隔。
 //
 // 质量码参与比较是刻意的：点位读数从正常（192）掉到"坏"（<128）时 value 可能是
 // 同一个占位串，只看值会让下游完全看不到这次状态变化。
@@ -57,22 +66,41 @@ type changeState struct {
 	quality        int
 	thingModelCode string
 	propertyCode   string
+
+	// lastDelivered 上次真正交给下游的时间，用于周期保活判定。
+	//
+	// **不参与 sameFacts**：它每次都不同，混进相等比较会让所有点位都被当成"有变化"。
+	// 用 time.Time 而不是格式化字符串，now.Sub 会走单调时钟，不受系统时间回拨影响。
+	lastDelivered time.Time
+}
+
+// sameFacts 报告两次投递的"点位事实"是否相同。只比较会改变下游语义的字段；
+// 名称/说明变化不算（见 changeState 的说明）。
+func (s changeState) sameFacts(o changeState) bool {
+	return s.value == o.value &&
+		s.quality == o.quality &&
+		s.thingModelCode == o.thingModelCode &&
+		s.propertyCode == o.propertyCode
 }
 
 func newChangeTracker() *changeTracker {
 	return &changeTracker{last: make(map[changeKey]changeState)}
 }
 
-// filter 返回 records 中自上次投递以来发生了变化的子集，并把它们的当前值记为
-// 「已投递」。
+// filter 返回 records 中本轮需要投递的子集：首次出现、事实发生变化，或
+// keepalive > 0 且距上次投递已超过该周期。命中的点位的 lastDelivered 记为 now。
+//
+// now 由调用方每批取一次；keepalive 为 0 表示关闭周期保活。
 //
 // 输入切片不会被修改（采集侧仍持有它，实时值快照也已读过同一份数据）；
 // 输出是新切片，保持原顺序 —— 下游的批次切分与点位顺序依赖这一点。
 //
 // 调用方必须确认这批记录确实会进入至少一个通道（见 Engine.pushRecords）：
 // 如果通道尚未就绪就把状态记成"已投递"，稳定不变的点位会在通道恢复后一直等不到
-// 下一次变化，表现为下游缺数。
-func (c *changeTracker) filter(records []collector.CollectedRecord) []collector.CollectedRecord {
+// 下一次变化，表现为下游缺数。同理，没有通道时 keepalive 也必须传 0，否则保活时间
+// 会被推进，新加的通道要再等一个周期才可能看到这些点位。
+func (c *changeTracker) filter(records []collector.CollectedRecord, now time.Time,
+	keepalive time.Duration) []collector.CollectedRecord {
 	out := make([]collector.CollectedRecord, 0, len(records))
 
 	c.mu.Lock()
@@ -89,9 +117,13 @@ func (c *changeTracker) filter(records []collector.CollectedRecord) []collector.
 			quality:        r.Quality,
 			thingModelCode: r.ThingModelCode,
 			propertyCode:   r.PropertyCode,
+			lastDelivered:  now,
 		}
-		if prev, ok := c.last[key]; ok && prev == state {
-			continue
+		if prev, ok := c.last[key]; ok && prev.sameFacts(state) {
+			// 事实没变：只有到期保活才继续投递。
+			if keepalive <= 0 || now.Sub(prev.lastDelivered) < keepalive {
+				continue
+			}
 		}
 		c.last[key] = state
 		out = append(out, r)

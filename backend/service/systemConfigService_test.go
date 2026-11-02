@@ -66,13 +66,31 @@ func TestSystemConfigServiceList(t *testing.T) {
 	if len(got.Groups) != 6 {
 		t.Fatalf("分组数 = %d，want 6", len(got.Groups))
 	}
+	// push 分组多了一个枚举项（无变化重发周期）。
+	wantFields := map[string]int{
+		"discovery": 1, "deviceScan": 1, "push": 2,
+		"plugin": 1, "agentApi": 1, "control": 1,
+	}
 	for _, g := range got.Groups {
-		if len(g.Fields) != 1 {
-			t.Errorf("分组 %s 有 %d 个字段，want 1", g.Key, len(g.Fields))
+		if len(g.Fields) != wantFields[g.Key] {
+			t.Errorf("分组 %s 有 %d 个字段，want %d", g.Key, len(g.Fields), wantFields[g.Key])
 		}
 		for _, f := range g.Fields {
-			if !f.Value || f.Source != "default" || f.LabelKey == "" || f.DescKey == "" {
+			if f.Source != "default" || f.LabelKey == "" || f.DescKey == "" {
 				t.Errorf("%s 的初始状态不正确: %+v", f.Key, f)
+			}
+			switch f.Type {
+			case "bool":
+				if f.Value != true {
+					t.Errorf("%s 的初始值应为 true: %+v", f.Key, f)
+				}
+			case "enum":
+				// 测试配置没有设置 keepaliveIntervalSec，默认 0（关闭）。
+				if f.Value != 0 || len(f.Options) == 0 {
+					t.Errorf("%s 的枚举初始状态不正确: %+v", f.Key, f)
+				}
+			default:
+				t.Errorf("%s 的类型 %q 未覆盖断言", f.Key, f.Type)
 			}
 		}
 	}
@@ -89,7 +107,7 @@ func TestSystemConfigServiceUpdateAndRestartFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Update deviceScan: %v", err)
 	}
-	if got.Value || got.RequiresRestart {
+	if got.Value != false || got.RequiresRestart {
 		t.Fatalf("deviceScan.enabled 应立即生效: %+v", got)
 	}
 
@@ -100,7 +118,7 @@ func TestSystemConfigServiceUpdateAndRestartFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Update plugin: %v", err)
 	}
-	if got.Value || !got.RequiresRestart {
+	if got.Value != false || !got.RequiresRestart {
 		t.Fatalf("plugin.enabled 应保存后要求重启: %+v", got)
 	}
 }

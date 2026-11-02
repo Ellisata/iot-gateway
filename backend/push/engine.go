@@ -45,11 +45,16 @@ type Engine struct {
 	// policy 非 nil 时以运行期配置为准（可在页面动态切换）；本字段只在
 	// 无 policy 的测试 / 最小装配路径上使用。
 	changeOnly bool
-	// policy 运行期配置来源，nil 时退回 changeOnly 字段。
+	// keepaliveSec 无变化时的周期重发间隔（秒，0 = 关闭）的启动期快照。
+	// 与 changeOnly 同源：policy 非 nil 时以运行期配置为准。
+	keepaliveSec int
+	// policy 运行期配置来源，nil 时退回 changeOnly / keepaliveSec 字段。
 	policy runtimecfg.Runtime
 	// changes 上次真正投递出去的点位值与质量码（见 changeTracker）。
 	// 常驻 Engine：采集侧热加载会重建任务，但"上次投给下游的是什么"不该随之重置。
 	changes *changeTracker
+	// now 时钟测试缝；nil 时用 time.Now。周期保活依赖时间推进，测试必须能控制它。
+	now func() time.Time
 
 	// 自动热加载
 	watchCtx    context.Context
@@ -80,6 +85,7 @@ func NewEngineWithPolicy(db *gorm.DB, cfg *configFile.Config, policy runtimecfg.
 	}
 	if cfg != nil {
 		e.changeOnly = cfg.Push.ChangeOnly
+		e.keepaliveSec = cfg.Push.KeepaliveIntervalSec
 	}
 	if policy != nil {
 		policy.RegisterApplier(runtimecfg.KeyPushChangeOnly, func(old, new any) error {
@@ -100,6 +106,23 @@ func (e *Engine) changeOnlyEnabled() bool {
 		return e.policy.Bool(runtimecfg.KeyPushChangeOnly)
 	}
 	return e.changeOnly
+}
+
+// keepaliveInterval 读当前生效的「无变化重发」周期，0 表示关闭。
+//
+// 用可选接口 IntReader 而不是往 runtimecfg.Reader 上加方法：只读布尔的组件
+// （中间件、扫描、控制）不该被迫实现一个与自己无关的读取器。
+func (e *Engine) keepaliveInterval() time.Duration {
+	sec := e.keepaliveSec
+	if e.policy != nil {
+		if r, ok := e.policy.(runtimecfg.IntReader); ok {
+			sec = r.Int(runtimecfg.KeyPushKeepaliveIntervalSec)
+		}
+	}
+	if sec <= 0 {
+		return 0
+	}
+	return time.Duration(sec) * time.Second
 }
 
 // Start 启动推送引擎：加载活跃通道并开始监控配置变化
@@ -164,7 +187,8 @@ func (e *Engine) Refresh() error {
 // 非阻塞：通道 outbox 满时丢弃最旧，绝不阻塞采集线程。
 //
 // 开启 push.changeOnly 时，这里还会滤掉自上次投递以来值/质量码未变的点位
-// （见 changeTracker）；过滤发生在实时值快照之后（MultiSink 的顺序见 wire.go），
+// （见 changeTracker）；若同时配置了 keepaliveIntervalSec，未变化但已超过该周期的
+// 点位会再投递一次。过滤发生在实时值快照之后（MultiSink 的顺序见 wire.go），
 // 快照因此每轮都能更新。
 func (e *Engine) PushRecords(records []collector.CollectedRecord) {
 	e.pushRecords(records, nil, true)
@@ -208,17 +232,23 @@ func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(C
 		return
 	}
 
-	// 变化才推送：只保留值或质量码发生变化（或首次出现）的记录。
+	now := time.Now()
+	if e.now != nil {
+		now = e.now()
+	}
+
+	// 变化才推送：只保留值或质量码发生变化（或首次出现）的记录；开启周期保活时，
+	// 未变化但距上次投递超过周期的点位也会保留。
 	// 走到这里说明至少有一个通道会收到它们，更新"已投递"状态才是安全的。
 	if filterChanges && e.changeOnlyEnabled() {
-		records = e.changes.filter(records)
+		records = e.changes.filter(records, now, e.keepaliveInterval())
 		if len(records) == 0 {
 			return
 		}
 	}
 
 	// 毫秒精度:TDengine 主键含时间戳(亚秒级轮次同秒会覆盖),秒级格式会静默丢数据
-	now := time.Now().Format("2006-01-02 15:04:05.000")
+	collectedAt := now.Format("2006-01-02 15:04:05.000")
 
 	// 按设备分组（当前采集流程本就是一设备一批，此处防御性分组）
 	groups := make(map[string][]collector.CollectedRecord)
@@ -233,7 +263,7 @@ func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(C
 	// 按设备分组后分片入队：每台设备拆成 ≤maxRecordsPerBatch 的小批次，
 	// 避免整台设备所有点位打包成一个超大批次（MQTT 单帧载荷与 outbox 内存均不可控）。
 	for _, devID := range deviceIDs {
-		for _, b := range splitBatches(devID, now, groups[devID]) {
+		for _, b := range splitBatches(devID, collectedAt, groups[devID]) {
 			for _, ch := range chans {
 				ch.Enqueue(b)
 			}

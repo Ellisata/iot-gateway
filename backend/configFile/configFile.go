@@ -167,6 +167,20 @@ type PushConfig struct {
 	// **本项只是默认值**：运行期经过 runtimecfg.Manager 读取，可在「运行开关」页
 	// 动态切换（下一批采集起生效，false -> true 时清空已投递记录再全量下发一次）。
 	ChangeOnly bool `mapstructure:"changeOnly"`
+
+	// KeepaliveIntervalSec 无变化时的周期重发间隔（秒），0 表示关闭。
+	//
+	// 只在 ChangeOnly 为 true 时有意义：值与上次投递完全相同、但距上次投递已超过
+	// 本间隔的点位，会再交给一次推送通道，让长期稳定的点位仍有心跳数据。
+	// 判定发生在推送引擎收到本轮采集记录时，因此设备离线 / 采集失败不会合成数据；
+	// 实际重发粒度受采集周期限制（max(本间隔, 采集周期)）。
+	//
+	// 打开后时序库（TDengine / InfluxDB）会周期性写入同一值的重复行 —— 这是
+	// 「要心跳」的预期代价，周期越长存储放大越少。
+	//
+	// **本项只是默认值**：运行期经过 runtimecfg.Manager 读取，可在「运行开关」页
+	// 动态切换（下一批采集起生效），取值限定为 0 / 60 / 300 / 600。
+	KeepaliveIntervalSec int `mapstructure:"keepaliveIntervalSec"`
 }
 
 // DeviceScanConfig 局域网 PLC 扫描发现配置。

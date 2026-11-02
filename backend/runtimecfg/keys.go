@@ -30,6 +30,10 @@ const (
 	// KeyPushChangeOnly 变化才推送开关。
 	KeyPushChangeOnly Key = "push.changeOnly"
 
+	// KeyPushKeepaliveIntervalSec 无变化时的周期重发间隔（秒），0 表示关闭。
+	// 只在 push.changeOnly 打开时有意义；枚举值见 registry.go。
+	KeyPushKeepaliveIntervalSec Key = "push.keepaliveIntervalSec"
+
 	// KeyPluginEnabled 外部协议插件总开关（仅重启生效）。
 	KeyPluginEnabled Key = "plugin.enabled"
 

@@ -71,7 +71,7 @@
               <p class="runtime-desc">{{ t(field.descKey) }}</p>
 
               <p class="runtime-meta">
-                {{ t('runtimeConfig.defaultValue') }}：{{ boolText(field.defaultValue) }}
+                {{ t('runtimeConfig.defaultValue') }}：{{ fieldValueText(field, field.defaultValue) }}
                 <span class="meta-dot" aria-hidden="true">·</span>
                 {{ field.source === 'override' ? t('runtimeConfig.sourceOverride') : t('runtimeConfig.sourceDefault') }}
                 <template v-if="field.source === 'override' && (field.updatedBy || field.updatedAt)">
@@ -91,7 +91,22 @@
               >
                 {{ t('runtimeConfig.resetDefault') }}
               </el-button>
+              <el-select
+                v-if="field.type === 'enum'"
+                v-model="field.value"
+                class="runtime-select"
+                :disabled="saving[field.key] || isFieldDisabled(field)"
+                @change="(value) => handleSelect(field, value)"
+              >
+                <el-option
+                  v-for="option in field.options || []"
+                  :key="option.value"
+                  :label="t(option.labelKey)"
+                  :value="option.value"
+                />
+              </el-select>
               <el-switch
+                v-else
                 v-model="field.value"
                 :loading="saving[field.key]"
                 :before-change="() => beforeToggle(field)"
@@ -141,6 +156,17 @@ const overrideCount = computed(() =>
 // 首屏还没拿到配置时用占位符，避免 0 被读成"所有开关都在用默认值"
 const displayOverride = computed(() => (loading.value ? '—' : overrideCount.value))
 
+// 「无变化重发」只在「变化才推送」开启时有意义：关闭后每轮本来就全发。
+const changeOnlyEnabled = computed(() => {
+  const pushGroup = groups.value.find((group) => group.key === 'push')
+  const field = (pushGroup?.fields || []).find((item) => item.key === 'push.changeOnly')
+  return field ? !!field.value : true
+})
+
+function isFieldDisabled(field) {
+  return field.key === 'push.keepaliveIntervalSec' && !changeOnlyEnabled.value
+}
+
 // 关闭这两个开关的影响面比其它项大：一个让管理平台找不到网关，一个让网关
 // 重启后不支持任何协议。打开方向不需要确认 —— 恢复能力不该有摩擦。
 const CONFIRM_ON_DISABLE = new Set(['discovery.enabled', 'plugin.enabled'])
@@ -150,7 +176,12 @@ const CONFIRM_ON_DISABLE = new Set(['discovery.enabled', 'plugin.enabled'])
 // 关闭方向反而是在收紧，不需要摩擦。
 const CONFIRM_ON_ENABLE = new Set(['agentApi.enabled', 'control.enabled'])
 
-function boolText(value) {
+// 布尔项显示「开启/关闭」，枚举项显示对应选项文案。
+function fieldValueText(field, value) {
+  if (field.type === 'enum') {
+    const option = (field.options || []).find((item) => item.value === value)
+    return option ? t(option.labelKey) : String(value)
+  }
   return value ? t('common.enabled') : t('common.disabled')
 }
 
@@ -209,7 +240,9 @@ async function fetchConfig() {
   }
 }
 
-async function handleToggle(field, value) {
+// 开关与下拉共用保存路径：失败时同样用服务端真值回填，避免控件停在
+// 用户以为已生效的位置。
+async function saveField(field, value) {
   saving[field.key] = true
   try {
     const res = await updateSystemConfig({ key: field.key, value })
@@ -217,11 +250,19 @@ async function handleToggle(field, value) {
       res?.requiresRestart ? t('runtimeConfig.savedRestart') : t('runtimeConfig.savedHot'),
     )
   } catch (err) {
-    // 失败时用服务端真值回填，避免开关停在用户以为已生效的位置
+    // 拦截器已经弹过错误提示
   } finally {
     saving[field.key] = false
     await fetchConfig()
   }
+}
+
+function handleToggle(field, value) {
+  return saveField(field, value)
+}
+
+function handleSelect(field, value) {
+  return saveField(field, value)
 }
 
 async function handleReset(field) {
@@ -321,6 +362,11 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
   padding-top: 1px;
+}
+
+/* 下拉宽度固定，避免切换选项时右侧动作区抖动 */
+.runtime-select {
+  width: 132px;
 }
 
 @media (max-width: 640px) {

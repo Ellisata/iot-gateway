@@ -44,11 +44,16 @@ func (s *SystemConfigService) List(ctx context.Context) (*vo.SystemConfigVO, err
 				Fields:   []vo.SystemConfigFieldVO{},
 			})
 		}
+		options := make([]vo.SystemConfigOptionVO, 0, len(f.Spec.Options))
+		for _, o := range f.Spec.Options {
+			options = append(options, vo.SystemConfigOptionVO{Value: o.Value, LabelKey: o.LabelKey})
+		}
 		out.Groups[gi].Fields = append(out.Groups[gi].Fields, vo.SystemConfigFieldVO{
 			Key:            string(f.Spec.Key),
 			Type:           string(f.Spec.Type),
 			Value:          f.Value,
 			DefaultValue:   f.DefaultValue,
+			Options:        options,
 			Source:         f.Source,
 			Hot:            f.Hot,
 			PendingRestart: f.PendingRestart,
@@ -71,7 +76,7 @@ func (s *SystemConfigService) Update(ctx context.Context, req *dto.UpdateSystemC
 	}
 	return &vo.SystemConfigUpdateVO{
 		Key:             req.Key,
-		Value:           s.manager.Bool(key),
+		Value:           s.manager.Value(key),
 		RequiresRestart: requiresRestart,
 	}, nil
 }
@@ -86,7 +91,7 @@ func (s *SystemConfigService) Reset(ctx context.Context, req *dto.ResetSystemCon
 	}
 	return &vo.SystemConfigUpdateVO{
 		Key:             req.Key,
-		Value:           s.manager.Bool(key),
+		Value:           s.manager.Value(key),
 		RequiresRestart: requiresRestart,
 	}, nil
 }

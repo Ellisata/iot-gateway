@@ -23,6 +23,7 @@ system_config 表里的覆盖行  >  configFile（default.yaml + APP_ENV 环境�
 | `discovery.enabled` | 立即生效 | 启停 UDP 广播 / 探询应答套接字。`port` / `intervalMs` 不在范围内。 |
 | `deviceScan.enabled` | 立即生效 | 只拦截**新**扫描；运行中的任务照常结束或由用户取消。 |
 | `push.changeOnly` | 立即生效 | 从下一批采集起生效。`false -> true` 时清空已投递记录，下一批全量下发一次。 |
+| `push.keepaliveIntervalSec` | 立即生效 | 无变化时的周期重发间隔，枚举 `0 / 60 / 300 / 600` 秒（0 = 关闭）。只在 `push.changeOnly=true` 时有意义；按采集轮次判定，设备离线时不会合成数据。打开后时序库会周期性写入重复行。 |
 | `plugin.enabled` | **重启后生效** | 插件管理器的 `Stop` 是终态的，运行期启停需要重写进程监管生命周期。 |
 | `agentApi.enabled` | 立即生效 | **出厂 false**。控制整组免鉴权的 `/agentApi` 镜像：路由始终注册（gin 启动后不可增删），分组中间件按请求现读开关，关闭时整组返回 403 —— 包括清单与 `/agentApi/systemConfig/update`，即 dsh 不能自己把自己打开。 |
 | `control.enabled` | 立即生效 | 控制下发（写 PLC 点位）总开关，**出厂 false**。`ControlService` 每次请求现读；Web / OpenAPI / MQTT 控制主题的写路径都汇聚到这里。关闭只拒绝新的下发，执行中的那一批不受影响。打开仍需插件 `Writable` 与点位 `rw_permission` 两层条件。 |
@@ -37,14 +38,15 @@ system_config 表里的覆盖行  >  configFile（default.yaml + APP_ENV 环境�
 ```sql
 CREATE TABLE IF NOT EXISTS system_config (
     key        TEXT PRIMARY KEY,   -- default.yaml 的点分路径，如 "push.changeOnly"
-    value      TEXT NOT NULL,      -- JSON 标量，当前是 true / false
+    value      TEXT NOT NULL,      -- JSON 标量：布尔 true/false，或枚举整数（如 300）
     updated_by TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 ```
 
 - value 用 JSON 而不是字符串布尔：`"true"` / `"1"` / `"on"` 一律拒绝，
-  避免同一个开关出现多种写法。
+  避免同一个开关出现多种写法。枚举项同理：只接受 `Options` 里列出的整数，
+  `"60"` / `60.5` / `null` / 未列出的值一律拒绝。
 - 未知 key、类型不符、损坏的覆盖行只记 WARN 并忽略，不阻断启动。
 - 降级后多出来的行不删除：再升级回去时它们仍然有效。
 
@@ -83,11 +85,14 @@ CREATE TABLE IF NOT EXISTS system_config (
 1. **默认值**：在 `default.yaml` 与 `configFile.Config` 里加字段（已有字段则跳过）。
 2. **登记**：在 `runtimecfg/registry.go` 的 `specs` 里加一条 `Spec`：
    - `Key` 用 default.yaml 的点分路径；
+   - `Type` 选 `ValueTypeBool` 或 `ValueTypeEnum`；枚举项必须填 `Options`
+     （`Value` + `LabelKey`，Value 唯一），`Base` 返回同类型值；
    - `Mode` 选 `ApplyHotRead`（每次用到时读）、`ApplyHotAction`（需要启停组件）
      或 `ApplyRestart`；
    - 填 `Base`、分组与 `LabelKey` / `DescKey`。
 3. **消费**：
-   - 热读项：组件从 `runtimecfg.Reader.Bool(key)` 读取，nil 时回退启动期配置；
+   - 热读项：组件从 `runtimecfg.Reader.Bool(key)` 读取（枚举用可选的
+     `runtimecfg.IntReader.Int(key)`），nil 时回退启动期配置；
    - 热应用项：组件在构造时 `RegisterApplier(key, fn)`，applier 必须原子
      （失败时保持调用前状态），且不得回调 `Manager.Update/Reset`；
    - 重启项：组件在构造时读一次并冻结，接口会返回 `requiresRestart=true`。

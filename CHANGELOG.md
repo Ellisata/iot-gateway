@@ -10,10 +10,21 @@ each release, followed by English entries.
 
 ### 新增
 
+- **无变化周期重发**：`push.changeOnly` 新增配套运行期开关 `push.keepaliveIntervalSec`（0 / 60 / 300 / 600 秒，出厂 0 = 关闭）。点位值持续不变时，按配置周期再投递一次，供下游做心跳/存活判断。判定在本轮采集记录上进行，设备离线或采集失败不会合成旧值；实际间隔不短于采集周期。仅在「变化才推送」开启时生效；打开后时序库会周期性写入相同值的重复行。运行开关页新增下拉选择，修改后下一批采集即生效。
 - **物模型与属性 Excel 导入**：新增物模型、物模型属性的模板下载与批量导入接口（`GET /thingModel/importThingModelTemplate` 等），页面提供「下载模板 / 导入」按钮。模板中的分类、数据类型、读写模式列改为「中文名（code）」下拉，导入接受 code、中文名或组合写法（code 忽略大小写）。物模型按标识与名称去重，属性在模型内按标识符去重；逐行校验、部分导入并返回失败明细。设备地址导入模板支持传 `deviceId`，按该设备协议生成数据类型下拉。
 
 ### Added
 
+- **Periodic republish of unchanged points**: adds the runtime switch
+  `push.keepaliveIntervalSec` (0 / 60 / 300 / 600 seconds, default 0 = off)
+  alongside `push.changeOnly`. When a point stays unchanged, it is delivered
+  once more after the configured interval so downstream systems receive a
+  heartbeat. The check runs against the current collection round, so an offline
+  device or failed read never produces a synthesized old value, and the real
+  interval is never shorter than the collection period. Effective only while
+  change-only push is on; enabling it also writes periodic duplicate rows to
+  time-series databases. The Runtime Switches page renders it as a dropdown and
+  changes apply from the next collection batch.
 - **Excel import for thing models and properties**: adds template download and
   bulk import endpoints for thing models and their properties
   (`GET /thingModel/importThingModelTemplate` etc.) plus "Download template" /

@@ -21,8 +21,12 @@ type SystemConfigFieldVO struct {
 	Type string `json:"type"`
 
 	// Value 生效值；DefaultValue 是 default.yaml 里的值。
-	Value        bool `json:"value"`
-	DefaultValue bool `json:"defaultValue"`
+	// 动态类型由 Type 决定：bool 对应 "bool"，int 对应 "enum"。
+	Value        any `json:"value"`
+	DefaultValue any `json:"defaultValue"`
+
+	// Options 仅 "enum" 类型有值，前端据此渲染下拉框。
+	Options []SystemConfigOptionVO `json:"options,omitempty"`
 
 	// Source "default" 表示无覆盖行，"override" 表示页面 / API 改过。
 	Source string `json:"source"`
@@ -39,9 +43,16 @@ type SystemConfigFieldVO struct {
 	DescKey  string `json:"descKey"`
 }
 
+// SystemConfigOptionVO 枚举项：Value 为存储值，LabelKey 由前端翻译。
+type SystemConfigOptionVO struct {
+	Value    int    `json:"value"`
+	LabelKey string `json:"labelKey"`
+}
+
 // SystemConfigUpdateVO 修改 / 重置后的结果。
 type SystemConfigUpdateVO struct {
-	Key             string `json:"key"`
-	Value           bool   `json:"value"`
-	RequiresRestart bool   `json:"requiresRestart"`
+	Key string `json:"key"`
+	// Value 动态类型由配置项的 Type 决定（bool / int）。
+	Value           any  `json:"value"`
+	RequiresRestart bool `json:"requiresRestart"`
 }

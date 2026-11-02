@@ -1597,7 +1597,17 @@ export default {
       },
       pushChangeOnly: {
         label: 'Push only on change',
-        hint: 'When neither the point value nor its quality changed, the record is not handed to push channels this round. Disable it if downstream needs periodic heartbeat data.',
+        hint: 'When neither the point value nor its quality changed, the record is not handed to push channels this round. For periodic heartbeat data, keep this switch on and set the "Republish unchanged" interval below.',
+      },
+      pushKeepaliveInterval: {
+        label: 'Republish unchanged',
+        hint: 'When a point value stays unchanged, publish it again at this interval so downstream still receives a heartbeat. Only effective while "Push only on change" is on; checks run per collection round, so the real interval is never shorter than the collection period. Time-series databases will receive duplicate rows periodically.',
+        options: {
+          off: 'Off',
+          min1: 'Every minute',
+          min5: 'Every 5 minutes',
+          min10: 'Every 10 minutes',
+        },
       },
       pluginEnabled: {
         label: 'Protocol plugins',

@@ -5,6 +5,7 @@ package push
 
 import (
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -27,13 +28,21 @@ func changeOnlyConfig() *configFile.Config {
 	return &configFile.Config{Push: configFile.PushConfig{ChangeOnly: true}}
 }
 
+// testNow 是 tracker 测试的固定时钟：变化过滤本身与时间无关，保活测试再显式推进它。
+var testNow = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// filterNoKeepalive 走「未开启周期保活」的路径，用于只关心变化语义的用例。
+func filterNoKeepalive(tr *changeTracker, records []collector.CollectedRecord) []collector.CollectedRecord {
+	return tr.filter(records, testNow, 0)
+}
+
 // ==================== changeTracker ====================
 
 func TestChangeTrackerFilter(t *testing.T) {
 	tr := newChangeTracker()
 
 	// 首次出现：全部投递
-	got := tr.filter([]collector.CollectedRecord{
+	got := filterNoKeepalive(tr, []collector.CollectedRecord{
 		changeRec("d1", "a1", "1", 192),
 		changeRec("d1", "a2", "2", 192),
 	})
@@ -42,7 +51,7 @@ func TestChangeTrackerFilter(t *testing.T) {
 	}
 
 	// 值与质量码都没变：全部跳过
-	if got := tr.filter([]collector.CollectedRecord{
+	if got := filterNoKeepalive(tr, []collector.CollectedRecord{
 		changeRec("d1", "a1", "1", 192),
 		changeRec("d1", "a2", "2", 192),
 	}); len(got) != 0 {
@@ -50,7 +59,7 @@ func TestChangeTrackerFilter(t *testing.T) {
 	}
 
 	// 只有 a2 的值变了：只投 a2
-	got = tr.filter([]collector.CollectedRecord{
+	got = filterNoKeepalive(tr, []collector.CollectedRecord{
 		changeRec("d1", "a1", "1", 192),
 		changeRec("d1", "a2", "3", 192),
 	})
@@ -59,7 +68,7 @@ func TestChangeTrackerFilter(t *testing.T) {
 	}
 
 	// 只有 a1 的质量码变了（值相同）：质量变化也算变化
-	got = tr.filter([]collector.CollectedRecord{
+	got = filterNoKeepalive(tr, []collector.CollectedRecord{
 		changeRec("d1", "a1", "1", 1),
 		changeRec("d1", "a2", "3", 192),
 	})
@@ -68,7 +77,7 @@ func TestChangeTrackerFilter(t *testing.T) {
 	}
 
 	// 不同设备下的同名地址 ID 互不影响
-	got = tr.filter([]collector.CollectedRecord{
+	got = filterNoKeepalive(tr, []collector.CollectedRecord{
 		changeRec("d2", "a1", "1", 1),
 	})
 	if len(got) != 1 {
@@ -80,7 +89,7 @@ func TestChangeTrackerFilter(t *testing.T) {
 func TestChangeTrackerPassthroughWithoutIdentity(t *testing.T) {
 	tr := newChangeTracker()
 	for i := 0; i < 2; i++ {
-		got := tr.filter([]collector.CollectedRecord{
+		got := filterNoKeepalive(tr, []collector.CollectedRecord{
 			changeRec("", "a1", "1", 192),
 			changeRec("d1", "", "2", 192),
 		})
@@ -98,24 +107,102 @@ func TestChangeTrackerDeliversOnCodeChange(t *testing.T) {
 	bound.ThingModelCode = "th_sensor"
 	bound.PropertyCode = "temperature"
 
-	if got := tr.filter([]collector.CollectedRecord{bound}); len(got) != 1 {
+	if got := filterNoKeepalive(tr, []collector.CollectedRecord{bound}); len(got) != 1 {
 		t.Fatalf("首轮投递 %d 条，want 1", len(got))
 	}
-	if got := tr.filter([]collector.CollectedRecord{bound}); len(got) != 0 {
+	if got := filterNoKeepalive(tr, []collector.CollectedRecord{bound}); len(got) != 0 {
 		t.Fatalf("编码未变仍投递 %d 条，want 0", len(got))
 	}
 
 	rebound := bound
 	rebound.PropertyCode = "humidity"
-	if got := tr.filter([]collector.CollectedRecord{rebound}); len(got) != 1 {
+	if got := filterNoKeepalive(tr, []collector.CollectedRecord{rebound}); len(got) != 1 {
 		t.Fatalf("改绑属性后投递 %d 条，want 1", len(got))
 	}
 
 	unbound := bound
 	unbound.ThingModelCode = ""
 	unbound.PropertyCode = ""
-	if got := tr.filter([]collector.CollectedRecord{unbound}); len(got) != 1 {
+	if got := filterNoKeepalive(tr, []collector.CollectedRecord{unbound}); len(got) != 1 {
 		t.Fatalf("解绑物模型后投递 %d 条，want 1", len(got))
+	}
+}
+
+// 未变化但到期时必须再投一次；投递后计时重置，不会每轮重复。
+func TestChangeTrackerKeepalive(t *testing.T) {
+	tr := newChangeTracker()
+	const interval = 5 * time.Minute
+	recs := []collector.CollectedRecord{changeRec("d1", "a1", "1", 192)}
+
+	// 首轮：首次出现，投递并开始计时
+	if got := tr.filter(recs, testNow, interval); len(got) != 1 {
+		t.Fatalf("首轮投递 %d 条，want 1", len(got))
+	}
+	// 未到期：跳过
+	if got := tr.filter(recs, testNow.Add(4*time.Minute), interval); len(got) != 0 {
+		t.Fatalf("未到期投递 %d 条，want 0", len(got))
+	}
+	// 到期：再投一次
+	if got := tr.filter(recs, testNow.Add(5*time.Minute), interval); len(got) != 1 {
+		t.Fatalf("到期投递 %d 条，want 1", len(got))
+	}
+	// 计时已从第二次投递重置：再过 4 分钟仍不投，再过 1 分钟才到期
+	if got := tr.filter(recs, testNow.Add(9*time.Minute), interval); len(got) != 0 {
+		t.Fatalf("第二轮未到期投递 %d 条，want 0", len(got))
+	}
+	if got := tr.filter(recs, testNow.Add(10*time.Minute), interval); len(got) != 1 {
+		t.Fatalf("第二轮到期投递 %d 条，want 1", len(got))
+	}
+}
+
+// 值变化立即投递，并把保活计时从"变化那一刻"重新起算：
+// 不能沿用旧计时在原来 T+5m 的时刻再补一条重复数据。
+func TestChangeTrackerKeepaliveResetsOnChange(t *testing.T) {
+	tr := newChangeTracker()
+	const interval = 5 * time.Minute
+
+	if got := tr.filter([]collector.CollectedRecord{changeRec("d1", "a1", "1", 192)},
+		testNow, interval); len(got) != 1 {
+		t.Fatalf("首轮投递 %d 条，want 1", len(got))
+	}
+
+	changed := []collector.CollectedRecord{changeRec("d1", "a1", "2", 192)}
+	if got := tr.filter(changed, testNow.Add(3*time.Minute), interval); len(got) != 1 {
+		t.Fatalf("变化投递 %d 条，want 1", len(got))
+	}
+	// 原首轮计时本应在 T+5m 到期，但变化已重置计时
+	if got := tr.filter(changed, testNow.Add(5*time.Minute), interval); len(got) != 0 {
+		t.Fatalf("变化后沿用旧计时投递 %d 条，want 0", len(got))
+	}
+	// 从变化时刻起满 5 分钟才到期
+	if got := tr.filter(changed, testNow.Add(8*time.Minute), interval); len(got) != 1 {
+		t.Fatalf("变化后到期投递 %d 条，want 1", len(got))
+	}
+}
+
+// interval=0 表示关闭：未变化的点位永远不重发。
+func TestChangeTrackerKeepaliveDisabled(t *testing.T) {
+	tr := newChangeTracker()
+	recs := []collector.CollectedRecord{changeRec("d1", "a1", "1", 192)}
+
+	if got := tr.filter(recs, testNow, 0); len(got) != 1 {
+		t.Fatalf("首轮投递 %d 条，want 1", len(got))
+	}
+	if got := tr.filter(recs, testNow.Add(24*time.Hour), 0); len(got) != 0 {
+		t.Fatalf("关闭保活后投递 %d 条，want 0", len(got))
+	}
+}
+
+// 保活不改变"缺身份字段一律透传"的既有语义。
+func TestChangeTrackerKeepalivePassthroughWithoutIdentity(t *testing.T) {
+	tr := newChangeTracker()
+	const interval = time.Minute
+	recs := []collector.CollectedRecord{changeRec("", "a1", "1", 192)}
+
+	for i := 0; i < 2; i++ {
+		if got := tr.filter(recs, testNow, interval); len(got) != 1 {
+			t.Fatalf("第 %d 轮透传 %d 条，want 1", i+1, len(got))
+		}
 	}
 }
 
@@ -275,5 +362,62 @@ func TestRefreshNewChannelResetsChangeState(t *testing.T) {
 	}
 	if got := len(c1.drain()); got != 1 {
 		t.Fatalf("既有通道收到 %d 批，want 1（重置后随首轮一起重投）", got)
+	}
+}
+
+// Engine 级验证：配置的 keepalive 周期确实传到了 tracker，并按采集轮次触发重发。
+func TestPushRecordsKeepalive(t *testing.T) {
+	cfg := changeOnlyConfig()
+	cfg.Push.KeepaliveIntervalSec = 300 // 5 分钟
+
+	ch := &stubChannel{id: "c1"}
+	e := NewEngine(nil, cfg)
+	e.mu.Lock()
+	e.channels["c1"] = ch
+	e.mu.Unlock()
+
+	now := testNow
+	e.now = func() time.Time { return now }
+
+	recs := []collector.CollectedRecord{changeRec("d1", "a1", "1", 192)}
+
+	e.PushRecords(recs) // 首轮
+	if got := len(ch.drain()); got != 1 {
+		t.Fatalf("首轮下发 %d 批，want 1", got)
+	}
+
+	e.PushRecords(recs) // 未到期
+	if got := len(ch.drain()); got != 0 {
+		t.Fatalf("未到期下发 %d 批，want 0", got)
+	}
+
+	now = now.Add(5 * time.Minute)
+	e.PushRecords(recs) // 到期
+	batches := ch.drain()
+	if len(batches) != 1 || len(batches[0].Records) != 1 {
+		t.Fatalf("到期下发 %+v，want 1 批 1 条", batches)
+	}
+	if batches[0].Records[0].Value != "1" {
+		t.Fatalf("保活重发的值 = %q，want 当前采集值 1", batches[0].Records[0].Value)
+	}
+}
+
+// changeOnly 关闭时每轮本来就全发，keepalive 配置不产生额外行为。
+func TestPushRecordsKeepaliveIgnoredWhenChangeOnlyOff(t *testing.T) {
+	cfg := &configFile.Config{Push: configFile.PushConfig{
+		ChangeOnly:           false,
+		KeepaliveIntervalSec: 60,
+	}}
+	ch := &stubChannel{id: "c1"}
+	e := NewEngine(nil, cfg)
+	e.mu.Lock()
+	e.channels["c1"] = ch
+	e.mu.Unlock()
+
+	recs := []collector.CollectedRecord{changeRec("d1", "a1", "1", 192)}
+	e.PushRecords(recs)
+	e.PushRecords(recs)
+	if got := len(ch.drain()); got != 2 {
+		t.Fatalf("changeOnly 关闭时下发 %d 批，want 2", got)
 	}
 }
