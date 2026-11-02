@@ -29,10 +29,61 @@
 | format | 说明 |
 |---|---|
 | `native-json`（默认，可省略） | 网关默认契约，字段语义见 [push-payload.md](../specs/push-payload.md)。**切换本功能不会改变它的任何字节。** |
+| `group-json` | 按采集组输出的帧格式（见 §2.1）。不接受 `mapping`。 |
 | `mapping-json` | 按下面的映射规则生成客户自定义 JSON。必须配置 `mapping`。 |
 | `script` | 用 goja 脚本生成任意文本载荷，适合声明式映射表达不了的结构。必须配置 `mapping` 里的脚本。 |
 
 非消息类通道（TDengine / InfluxDB）不接受 `format` / `mapping`。
+
+### 2.1 采集组与 group-json
+
+点位可以绑定到设备下的**采集组**（`collector_group`）。绑定后：
+
+- 采集周期由组的 `interval_ms` 决定，点位自身的 `scan_frequency` 不生效；
+- 组停用时，绑定到该组的点位不采集、不推送；
+- 推送按 `(设备, 组)` 分帧，一个批次只含同一组的点位；
+- 未分组点位保持旧行为（按 `scan_frequency` 采集，批次 `groupId` 为空）。
+
+`group-json` 的帧结构：
+
+```json
+{
+  "timestamp": "2026-11-02 20:00:00.123",
+  "deviceId": "dev-1",
+  "deviceName": "一号机",
+  "groupId": "g-1",
+  "groupName": "fast",
+  "intervalMs": 500,
+  "values": { "temperature": "23.5", "speed": "1450" },
+  "errors": { "pressure": 1 }
+}
+```
+
+质量码 `>= 128`（正常/不确定）进 `values`，`< 128`（坏）进 `errors`，值为质量码。
+未分组批次的 `groupId`/`groupName` 为空串、`intervalMs` 为 0。
+
+**通道订阅采集组**：`config_json.groupIds` 是组 ID 数组。
+
+- 省略/空数组：接收全部记录（含未分组）；
+- 非空：只接收这些组，未分组记录被排除。
+
+MQTT 主题模板支持以下占位符（旧 `+` → 设备 ID 的语义不变）：
+
+| 占位符 | 值 |
+|---|---|
+| `${deviceId}` | 设备 ID |
+| `${group}` | 采集组名称 |
+| `${groupId}` | 采集组 ID |
+| `+` | 设备 ID（兼容旧模板） |
+
+未分组批次的 `${group}` 与 `${groupId}` 都替换为 `legacy`。示例：
+
+```
+/iot/${deviceId}/${group}
+```
+
+> 组名会进入主题，创建时禁止 `/`、`+`、`#`、控制字符与保留字 `legacy`。
+> 组改名会改变主题；下游订阅需同步调整。
 
 时序库通道把**设备的物模型编码与点位的属性编码**也作为 tag 写入：
 

@@ -154,7 +154,7 @@ func (d *GroupedDrainer) Drain(pend []SpoolBatch, narrow bool) (ok bool, failID 
 			} else if agg.Rows() > 0 && agg.Rows()+len(p.Records) > d.MaxRows {
 				break
 			}
-			if !agg.Append(PushBatch{DeviceID: p.DeviceID, CollectedAt: p.CollectedAt, Records: p.Records}) {
+			if !agg.Append(p.ToPushBatch()) {
 				break // 冲突：本负载到此为止，该批次留给下一个负载
 			}
 			group = append(group, pend[i])

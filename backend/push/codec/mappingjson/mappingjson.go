@@ -321,6 +321,10 @@ func recordDoc(r collector.CollectedRecord, batchAt string) map[string]any {
 		// 物模型编码 / 属性编码：未绑定时为空串（路径仍可取值，不会报"路径不存在"）。
 		"thingModelCode": r.ThingModelCode,
 		"propertyCode":   r.PropertyCode,
+		// 采集组身份：未分组时为空串/0，路径仍可取值。
+		"groupId":         r.GroupID,
+		"groupName":       r.GroupName,
+		"groupIntervalMs": r.GroupIntervalMs,
 	}
 }
 
@@ -331,6 +335,9 @@ func batchDocument(batch push.PushBatch) map[string]any {
 	}
 	return map[string]any{
 		"deviceId":    batch.DeviceID,
+		"groupId":     batch.GroupID,
+		"groupName":   batch.GroupName,
+		"intervalMs":  batch.GroupIntervalMs,
 		"collectedAt": at,
 		"count":       len(batch.Records),
 	}

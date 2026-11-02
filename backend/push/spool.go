@@ -18,10 +18,35 @@ import (
 // SpoolBatch 从本地缓存取回的一批待补发数据。
 // Records 为反序列化后的采集记录,由调用方重建 PushBatch 走既有 publish 路径。
 type SpoolBatch struct {
-	ID          int64
-	DeviceID    string
-	CollectedAt string
-	Records     []collector.CollectedRecord
+	ID              int64
+	DeviceID        string
+	GroupID         string
+	GroupName       string
+	GroupIntervalMs int
+	CollectedAt     string
+	Records         []collector.CollectedRecord
+}
+
+// ToPushBatch 把缓存批次重建为待发布批次。
+//
+// 旧行（升级前写入）组列为空，但 records_json 里的记录可能已经带了组字段
+// （新版本写入的 records 才有；更早的连记录也没有）—— 因此组列为空时从首条
+// 记录回退推导，仍然取不到就按 legacy（空组）发布。
+func (b SpoolBatch) ToPushBatch() PushBatch {
+	groupID, groupName, groupInterval := b.GroupID, b.GroupName, b.GroupIntervalMs
+	if groupID == "" && len(b.Records) > 0 {
+		groupID = b.Records[0].GroupID
+		groupName = b.Records[0].GroupName
+		groupInterval = b.Records[0].GroupIntervalMs
+	}
+	return PushBatch{
+		DeviceID:        b.DeviceID,
+		GroupID:         groupID,
+		GroupName:       groupName,
+		GroupIntervalMs: groupInterval,
+		CollectedAt:     b.CollectedAt,
+		Records:         b.Records,
+	}
 }
 
 // Spool 推送断网本地缓存(持久化 outbox)接口。
@@ -90,10 +115,13 @@ func (s *SqliteSpool) InsertMany(batches []PushBatch) error {
 			return fmt.Errorf("spool: marshal records failed: %w", err)
 		}
 		rows = append(rows, po.PushOutbox{
-			ChannelID:   s.channelID,
-			DeviceID:    batches[i].DeviceID,
-			CollectedAt: batches[i].CollectedAt,
-			RecordsJSON: string(recordsJSON),
+			ChannelID:       s.channelID,
+			DeviceID:        batches[i].DeviceID,
+			GroupID:         batches[i].GroupID,
+			GroupName:       batches[i].GroupName,
+			GroupIntervalMs: batches[i].GroupIntervalMs,
+			CollectedAt:     batches[i].CollectedAt,
+			RecordsJSON:     string(recordsJSON),
 		})
 	}
 
@@ -133,11 +161,20 @@ func (s *SqliteSpool) FetchOldest(limit int) ([]SpoolBatch, error) {
 			logger.Error("spool: unmarshal records failed (id=%d): %v", rows[i].ID, err)
 			return nil, fmt.Errorf("spool: unmarshal records failed: %w", err)
 		}
+		groupID, groupName, groupInterval := rows[i].GroupID, rows[i].GroupName, rows[i].GroupIntervalMs
+		if groupID == "" && len(records) > 0 {
+			groupID = records[0].GroupID
+			groupName = records[0].GroupName
+			groupInterval = records[0].GroupIntervalMs
+		}
 		batches = append(batches, SpoolBatch{
-			ID:          rows[i].ID,
-			DeviceID:    rows[i].DeviceID,
-			CollectedAt: rows[i].CollectedAt,
-			Records:     records,
+			ID:              rows[i].ID,
+			DeviceID:        rows[i].DeviceID,
+			GroupID:         groupID,
+			GroupName:       groupName,
+			GroupIntervalMs: groupInterval,
+			CollectedAt:     rows[i].CollectedAt,
+			Records:         records,
 		})
 	}
 	return batches, nil

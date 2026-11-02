@@ -338,6 +338,15 @@ func (s *PushChannelService) samplePushBatch(ctx context.Context) push.PushBatch
 		_ = s.sqliteDB.WithContext(ctx).Where("id = ? AND model_id = ?", addr.PropertyID, model.ID).
 			First(&property).Error
 	}
+	// 采集组身份与运行期记录同源：预览/测试发送要能看到 groupId/groupName，
+	// 否则 group-json 预览会是一帧没有组头的空壳。
+	groupID, groupName, groupInterval := "", "", 0
+	if addr.GroupID != "" {
+		var group po.CollectorGroup
+		if err := s.sqliteDB.WithContext(ctx).Where("id = ?", addr.GroupID).First(&group).Error; err == nil {
+			groupID, groupName, groupInterval = group.ID, group.Name, group.IntervalMs
+		}
+	}
 	rec := collector.CollectedRecord{
 		DeviceID:           dev.ID,
 		DeviceName:         dev.Name,
@@ -352,8 +361,18 @@ func (s *PushChannelService) samplePushBatch(ctx context.Context) push.PushBatch
 		CollectedAt:        now,
 		ThingModelCode:     model.Code,
 		PropertyCode:       property.Identifier,
+		GroupID:            groupID,
+		GroupName:          groupName,
+		GroupIntervalMs:    groupInterval,
 	}
-	return push.PushBatch{DeviceID: dev.ID, CollectedAt: now, Records: []collector.CollectedRecord{rec}}
+	return push.PushBatch{
+		DeviceID:        dev.ID,
+		GroupID:         groupID,
+		GroupName:       groupName,
+		GroupIntervalMs: groupInterval,
+		CollectedAt:     now,
+		Records:         []collector.CollectedRecord{rec},
+	}
 }
 
 func builtinSample(now string) push.PushBatch {
@@ -372,8 +391,19 @@ func builtinSample(now string) push.PushBatch {
 		// 内置样例带一组示例编码，让未配置设备的空库也能预览到这两个字段。
 		ThingModelCode: "th_sensor",
 		PropertyCode:   "temperature",
+		// 内置样例带一个示例采集组，让空库也能预览 group-json 的帧头。
+		GroupID:         "demo-group",
+		GroupName:       "fast",
+		GroupIntervalMs: 500,
 	}
-	return push.PushBatch{DeviceID: rec.DeviceID, CollectedAt: now, Records: []collector.CollectedRecord{rec}}
+	return push.PushBatch{
+		DeviceID:        rec.DeviceID,
+		GroupID:         rec.GroupID,
+		GroupName:       rec.GroupName,
+		GroupIntervalMs: rec.GroupIntervalMs,
+		CollectedAt:     now,
+		Records:         []collector.CollectedRecord{rec},
+	}
 }
 
 // DeletePushChannel 删除数据推送通道

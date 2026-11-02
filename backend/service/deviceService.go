@@ -223,7 +223,11 @@ func (s *DeviceService) DeleteDevice(ctx context.Context, id string) error {
 		if result.RowsAffected == 0 {
 			return appError.NewAppErrorCtx(enums.DeviceNotExistsEnum.GetCode(), enums.DeviceNotExistsEnum.GetMessage(), enums.DeviceNotExistsEnum.GetMsgKey())
 		}
-		return tx.Where("device_id = ?", id).Delete(&po.DeviceAddress{}).Error
+		if err := tx.Where("device_id = ?", id).Delete(&po.DeviceAddress{}).Error; err != nil {
+			return err
+		}
+		// 采集组同样挂 device.id：不显式删就会留下界面上看不见的孤立组。
+		return tx.Where("device_id = ?", id).Delete(&po.CollectorGroup{}).Error
 	})
 	if err != nil {
 		return err
@@ -258,6 +262,12 @@ func (s *DeviceService) BatchDeleteDevice(ctx context.Context, ids []string) (in
 			return result.Error
 		}
 		addresses = result.RowsAffected
+
+		// 采集组与点位同样按 device_id 批量删除（同一事务；即使设备行已不存在，
+		// 遗留组也能被顺手清掉）。
+		if err := tx.Where("device_id IN ?", ids).Delete(&po.CollectorGroup{}).Error; err != nil {
+			return err
+		}
 
 		result = tx.Where("id IN ?", ids).Delete(&po.Device{})
 		if result.Error != nil {

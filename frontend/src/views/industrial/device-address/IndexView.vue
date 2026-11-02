@@ -64,6 +64,13 @@
           >
             {{ batchDeleteLabel }}
           </el-button>
+          <el-button
+            :icon="LayersLinked"
+            :disabled="selectedRows.length === 0"
+            @click="openAssignDialog"
+          >
+            {{ t('deviceAddress.batchAssignGroup') }}
+          </el-button>
           <span class="iot-sep" aria-hidden="true" />
           <el-button :icon="Download" @click="handleDownloadTemplate">{{ t('common.downloadTemplate') }}</el-button>
           <el-button :icon="Upload" :loading="importing" @click="handleImport">{{ t('common.import') }}</el-button>
@@ -240,6 +247,20 @@
             </el-tooltip>
           </template>
         </el-table-column>
+        <el-table-column :label="t('deviceAddress.collectorGroup')" width="170" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.groupId && row.groupName">
+              <span class="iot-mono">{{ row.groupName }}</span>
+              <span class="iot-cell-muted"> · {{ row.groupIntervalMs }} ms</span>
+              <el-tooltip v-if="row.groupStatus !== 1" :content="t('collectorGroup.disabledHint')" placement="top">
+                <span class="iot-pill is-rose iot-hint" tabindex="0">
+                  {{ t('collectorGroup.disabledShort') }}
+                </span>
+              </el-tooltip>
+            </span>
+            <span v-else class="iot-cell-muted">{{ t('deviceAddress.ungrouped') }}</span>
+          </template>
+        </el-table-column>
         <el-table-column
           :label="t('deviceAddress.scanFrequency')"
           width="116"
@@ -247,7 +268,8 @@
           class-name="iot-col-num"
         >
           <template #default="{ row }">
-            {{ row.scanFrequency }} ms
+            <!-- 绑定组后展示生效周期（组周期），扫描频率不再生效 -->
+            {{ row.groupId ? row.groupIntervalMs : row.scanFrequency }} ms
           </template>
         </el-table-column>
         <el-table-column :label="t('deviceAddress.thresholdAlarm')" width="180" align="center">
@@ -351,6 +373,41 @@
       @saved="handleDialogSaved"
     />
 
+    <!-- ========== 批量分配采集组 ========== -->
+    <el-dialog
+      v-model="assignDialogVisible"
+      class="iot-dialog"
+      :title="t('deviceAddress.batchAssignTitle')"
+      width="480px"
+      :close-on-click-modal="false"
+    >
+      <p class="iot-sub" style="margin-top: 0">
+        {{ t('deviceAddress.batchAssignHint', { n: selectedRows.length }) }}
+      </p>
+      <el-select
+        v-model="assignGroupId"
+        :placeholder="t('deviceAddress.collectorGroupPlaceholder')"
+        clearable
+        :loading="groupLoading"
+        style="width: 100%"
+      >
+        <el-option :label="t('deviceAddress.ungroup')" value="" />
+        <el-option
+          v-for="g in groupOptions"
+          :key="g.id"
+          :label="g.status === 1 ? g.name : `${g.name} (${t('collectorGroup.disabledShort')})`"
+          :value="g.id"
+        />
+      </el-select>
+      <p class="iot-form-hint is-block">{{ t('deviceAddress.batchAssignGroupHint') }}</p>
+      <template #footer>
+        <el-button @click="assignDialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="assignSubmitting" @click="handleAssignSubmit">
+          {{ t('common.confirm') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- ========== Excel 导入结果对话框 ========== -->
     <ImportResultDialog v-model:visible="importResultVisible" :result="importResult" />
 
@@ -372,6 +429,7 @@ import {
   IconArrowLeft as ArrowLeft,
   IconCopy as CopyDocument,
   IconDownload as Download,
+  IconLayersLinked as LayersLinked,
   IconMapPin as MapPin,
   IconPencil as EditPen,
   IconPlayerPause as PauseIcon,
@@ -389,6 +447,7 @@ import {
   downloadDeviceAddressTemplate,
 } from '@/api/modules/deviceAddress'
 import { getPointCapability } from '@/api/modules/deviceScan'
+import { listCollectorGroups, batchAssignCollectorGroup } from '@/api/modules/collectorGroup'
 import DeviceWorkspaceTabs from '@/components/DeviceWorkspaceTabs.vue'
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
 import AddressFormDialog from './AddressFormDialog.vue'
@@ -644,6 +703,58 @@ async function handleDelete(row) {
     fetchList()
   } catch {
     // 用户取消或删除失败，不做处理
+  }
+}
+
+// ---------- 批量分配采集组 ----------
+const assignDialogVisible = ref(false)
+const assignGroupId = ref('')
+const assignSubmitting = ref(false)
+const groupOptions = ref([])
+const groupLoading = ref(false)
+
+async function loadGroupOptions() {
+  groupLoading.value = true
+  try {
+    groupOptions.value = (await listCollectorGroups(deviceObjectId)) || []
+  } catch {
+    groupOptions.value = []
+  } finally {
+    groupLoading.value = false
+  }
+}
+
+function openAssignDialog() {
+  if (!selectedRows.value.length) return
+  assignGroupId.value = ''
+  assignDialogVisible.value = true
+  loadGroupOptions()
+}
+
+async function handleAssignSubmit() {
+  const rows = selectedRows.value
+  if (!rows.length) return
+  assignSubmitting.value = true
+  try {
+    const res = await batchAssignCollectorGroup({
+      deviceId: deviceObjectId,
+      ids: rows.map((row) => row.id),
+      groupId: assignGroupId.value || '',
+    })
+    const assigned = res?.assigned ?? 0
+    const missing = rows.length - assigned
+    if (missing > 0) {
+      ElMessage.warning(t('deviceAddress.batchAssignPartial', { n: assigned, missing }))
+    } else {
+      ElMessage.success(t('deviceAddress.batchAssignSuccess', { n: assigned }))
+    }
+    assignDialogVisible.value = false
+    tableRef.value?.clearSelection()
+    fetchList()
+  } catch {
+    // 失败原因由响应拦截器统一提示
+  } finally {
+    assignSubmitting.value = false
   }
 }
 

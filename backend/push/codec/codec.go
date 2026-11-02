@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"iot-gateway/push"
+	"iot-gateway/push/codec/groupjson"
 	"iot-gateway/push/codec/mappingjson"
 	"iot-gateway/push/codec/nativejson"
 	"iot-gateway/push/codec/scriptpayload"
@@ -31,6 +32,11 @@ func New(format string, mapping json.RawMessage) (push.Encoder, error) {
 			return nil, fmt.Errorf("native-json 不接受 mapping 配置")
 		}
 		return nativejson.New(), nil
+	case push.FormatGroupJSON:
+		if !blankJSON(mapping) {
+			return nil, fmt.Errorf("group-json 不接受 mapping 配置")
+		}
+		return groupjson.New(), nil
 	case push.FormatMappingJSON:
 		return mappingjson.New(mapping)
 	case push.FormatScript:

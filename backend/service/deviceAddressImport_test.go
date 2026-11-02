@@ -30,7 +30,7 @@ func newDeviceAddressImportTestDB(t *testing.T) *gorm.DB {
 		sqlDB.SetMaxOpenConns(1)
 		t.Cleanup(func() { sqlDB.Close() })
 	}
-	if err := db.AutoMigrate(&po.Device{}, &po.IotProtocol{}, &po.DeviceAddress{}); err != nil {
+	if err := db.AutoMigrate(&po.Device{}, &po.IotProtocol{}, &po.DeviceAddress{}, &po.CollectorGroup{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db

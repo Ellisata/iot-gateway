@@ -144,25 +144,44 @@ func TestBrokerURL(t *testing.T) {
 }
 
 func TestBuildTopics(t *testing.T) {
-	// 通配符替换
-	got := buildTopics("/IIoT/+/+/read", "dev-1")
+	// 通配符替换（未分组批次）
+	got := buildTopics("/IIoT/+/+/read", "dev-1", "", "")
 	want := []string{"/IIoT/dev-1/dev-1/read"}
 	if !equalTopics(got, want) {
 		t.Errorf("buildTopics = %v, want %v", got, want)
 	}
 
 	// 逗号分隔多主题
-	got = buildTopics("/IIoT/+/+/read,wer", "dev-1")
+	got = buildTopics("/IIoT/+/+/read,wer", "dev-1", "", "")
 	want = []string{"/IIoT/dev-1/dev-1/read", "wer"}
 	if !equalTopics(got, want) {
 		t.Errorf("buildTopics = %v, want %v", got, want)
 	}
 
 	// 空白过滤
-	got = buildTopics("  a, ,b  ,c,", "d")
+	got = buildTopics("  a, ,b  ,c,", "d", "", "")
 	want = []string{"a", "b", "c"}
 	if !equalTopics(got, want) {
 		t.Errorf("buildTopics = %v, want %v", got, want)
+	}
+
+	// 组占位符：${group} 是组名，${groupId} 是 UUID；未分组批次都回落为 legacy。
+	got = buildTopics("/iot/${deviceId}/${group}/${groupId}", "dev-1", "", "")
+	want = []string{"/iot/dev-1/legacy/legacy"}
+	if !equalTopics(got, want) {
+		t.Errorf("legacy buildTopics = %v, want %v", got, want)
+	}
+	got = buildTopics("/iot/${deviceId}/${group}/${groupId}", "dev-1", "fast", "g-1")
+	want = []string{"/iot/dev-1/fast/g-1"}
+	if !equalTopics(got, want) {
+		t.Errorf("group buildTopics = %v, want %v", got, want)
+	}
+
+	// 替换顺序：${groupId} 必须先于 ${group}，否则会留下一个多余的大括号。
+	got = buildTopics("${group}", "dev-1", "fast", "g-1")
+	want = []string{"fast"}
+	if !equalTopics(got, want) {
+		t.Errorf("token order buildTopics = %v, want %v", got, want)
 	}
 }
 

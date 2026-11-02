@@ -343,6 +343,45 @@
         >{{ previewText }}</pre>
       </div>
 
+      <!-- 采集组订阅：空 = 收全量（含未分组）；非空 = 只收所选组。
+           属于运行期路由语义，不放进 form-create 连接配置。 -->
+      <div v-if="selectedTypeMeta?.messageBased" class="channel-section">
+        <div class="channel-section-head">
+          <div class="channel-section-headline">
+            <span class="channel-section-mark" aria-hidden="true">
+              <el-icon><LayersLinked /></el-icon>
+            </span>
+            <div>
+              <p class="channel-section-name">{{ t('channel.groupSubscription.title') }}</p>
+              <p class="channel-section-sub">{{ t('channel.groupSubscription.subtitle') }}</p>
+            </div>
+          </div>
+        </div>
+        <el-select
+          v-model="subscribedGroupIds"
+          multiple
+          filterable
+          clearable
+          :loading="groupOptionsLoading"
+          :placeholder="t('channel.groupSubscription.placeholder')"
+          style="width: 100%"
+        >
+          <el-option-group
+            v-for="dev in groupOptionGroups"
+            :key="dev.deviceId"
+            :label="dev.deviceName || dev.deviceId"
+          >
+            <el-option
+              v-for="g in dev.groups"
+              :key="g.id"
+              :label="g.status === 1 ? g.name : `${g.name} (${t('collectorGroup.disabledShort')})`"
+              :value="g.id"
+            />
+          </el-option-group>
+        </el-select>
+        <p class="iot-form-hint is-block">{{ t('channel.groupSubscription.hint') }}</p>
+      </div>
+
       <template #footer>
         <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="submitting" :disabled="detailLoading" @click="handleSubmit">
@@ -360,6 +399,7 @@ import {
   IconAffiliate as Connection,
   IconBraces as Braces,
   IconBroadcast as Broadcast,
+  IconLayersLinked as LayersLinked,
   IconPencil as EditPen,
   IconPlus as Plus,
   IconSearch as Search,
@@ -377,6 +417,7 @@ import {
   testSendPushChannel,
 } from '@/api/modules/pushChannel'
 import { getPushChannelFormByName } from '@/api/modules/pushChannelForm'
+import { listCollectorGroups } from '@/api/modules/collectorGroup'
 import ChannelSelector from '@/components/ChannelSelector.vue'
 import MappingEditor from '@/components/pushMapping/MappingEditor.vue'
 import ScriptEditor from '@/components/pushMapping/ScriptEditor.vue'
@@ -485,6 +526,45 @@ const formData = reactive({
 // 选中类型的元数据与载荷格式/映射状态
 const selectedTypeMeta = computed(() => metaOf(formData.type))
 const outputFormat = ref('native-json')
+
+// ---------- 采集组订阅 ----------
+// 空 = 收全部（含未分组）；非空 = 只收所选组。组选项跨设备，按设备分组展示。
+const subscribedGroupIds = ref([])
+const groupOptions = ref([])
+const groupOptionsLoading = ref(false)
+
+const groupOptionGroups = computed(() => {
+  const byDevice = new Map()
+  for (const g of groupOptions.value) {
+    const key = g.deviceId || ''
+    if (!byDevice.has(key)) {
+      byDevice.set(key, { deviceId: key, deviceName: g.deviceName || key, groups: [] })
+    }
+    byDevice.get(key).groups.push(g)
+  }
+  // 配置里引用了已删除的组：保留选中项并单独列出来，不能静默变成「收全量」。
+  const known = new Set(groupOptions.value.map((g) => g.id))
+  const missing = (subscribedGroupIds.value || []).filter((id) => !known.has(id))
+  if (missing.length) {
+    byDevice.set('__missing__', {
+      deviceId: '__missing__',
+      deviceName: t('channel.groupSubscription.missingGroup'),
+      groups: missing.map((id) => ({ id, name: id, status: 1 })),
+    })
+  }
+  return [...byDevice.values()]
+})
+
+async function loadGroupOptions() {
+  groupOptionsLoading.value = true
+  try {
+    groupOptions.value = (await listCollectorGroups()) || []
+  } catch {
+    groupOptions.value = []
+  } finally {
+    groupOptionsLoading.value = false
+  }
+}
 const mappingState = reactive(createEmptyState())
 const mappingStateId = ref(0)
 const mappingEditorRef = ref(null)
@@ -989,6 +1069,13 @@ function buildConfigJson() {
     ? meta.messageBased
     : outputFormat.value === 'mapping-json' || outputFormat.value === 'script'
   if (messageBased) {
+    // 组订阅列表：空数组 = 收全量（含未分组），非空 = 只收所选组。
+    // 用 delete 而不是写空数组，保持旧配置的字节形态不变。
+    if (subscribedGroupIds.value.length) {
+      config.groupIds = [...subscribedGroupIds.value]
+    } else {
+      delete config.groupIds
+    }
     config.format = outputFormat.value || meta?.defaultFormat || 'native-json'
     if (editorKind.value) {
       const editor = activeEditor()
@@ -1008,6 +1095,7 @@ function buildConfigJson() {
   } else {
     delete config.format
     delete config.mapping
+    delete config.groupIds
   }
   return pruneHttpAuthFields(config)
 }
@@ -1179,8 +1267,11 @@ function handleAdd() {
   formData.description = ''
   formData.status = 1
   outputFormat.value = 'native-json'
+  subscribedGroupIds.value = []
+  groupOptions.value = []
   resetMappingState()
   dialogVisible.value = true
+  loadGroupOptions()
   // 新增时等待用户选择类型后再加载连接配置
   loadDynamicForm('')
 }
@@ -1214,6 +1305,15 @@ async function handleEdit(row) {
       prefillConfig = row.configJson
     }
     await applyOutputConfig(prefillConfig)
+    // 组订阅不在 form-create 规则里，必须显式回填；兼容二次编码的历史 configJson。
+    let cfg = prefillConfig
+    for (let i = 0; i < 3 && typeof cfg === 'string'; i += 1) {
+      cfg = safeParseJSON(cfg)
+    }
+    subscribedGroupIds.value = Array.isArray(cfg?.groupIds)
+      ? cfg.groupIds.filter(Boolean)
+      : []
+    loadGroupOptions()
     // 编辑时按类型加载连接配置，并回填已有填写值
     loadDynamicForm(formData.type, prefillConfig)
   } finally {

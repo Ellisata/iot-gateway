@@ -47,6 +47,9 @@ type config struct {
 
 	Format  string          `json:"format,omitempty"`
 	Mapping json.RawMessage `json:"mapping,omitempty"`
+
+	// GroupIDs 采集组订阅（空 = 接收全部；非空 = 只收匹配组，未分组记录不接收）。
+	GroupIDs []string `json:"groupIds,omitempty"`
 }
 
 func parseConfig(raw string) (*config, error) {

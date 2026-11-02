@@ -19,7 +19,10 @@ type RealtimePointVO struct {
 	// 写入能力是它与 rwPermission 的交集：属性为 R 时点位即使 RW 也不能写，
 	// 前端据此隐藏写入口（最终仍由 ControlService 拒绝）。
 	PropertyAccessMode string `json:"propertyAccessMode"`
-	ScanFrequency      int    `json:"scanFrequency"`
+	// 采集组绑定：ScanFrequency 返回**生效周期**（绑定时为组周期，未分组为点位自身频率）。
+	GroupID         string `json:"groupId"`
+	GroupName       string `json:"groupName"`
+	ScanFrequency   int    `json:"scanFrequency"`
 	// Quality 采集质量码（driver.QualityXxx：类别在高 2 位、成因在低 6 位）。
 	// 前端据此把"为什么坏"显示给操作工，而不是只给一个裸的 0。
 	Quality   int    `json:"quality"`

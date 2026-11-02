@@ -53,6 +53,7 @@ func newHTTPChannel(db *gorm.DB, ch *po.PushChannel) (push.Channel, error) {
 		DB:                db,
 		Encoder:           enc,
 		Transport:         newTransport(cfg),
+		GroupIDs:          cfg.GroupIDs,
 		Workers:           cfg.Workers,
 		Timeout:           time.Duration(cfg.timeoutSeconds()) * time.Second,
 		SpoolEnabled:      cfg.spoolEnabled(),

@@ -32,6 +32,35 @@ type TestSender interface {
 	TestSend(batch PushBatch) TestSendResult
 }
 
+// GroupSelector 可选接口：通道按采集组过滤是否接收某一批数据。
+//
+// 不放进 Channel 接口：时序库、OPC UA 等通道没有「订阅某几个组」的需求，
+// 强制实现只会多一个永远返回 true 的方法。未实现本接口 = 接收全部组。
+//
+// 语义由实现方约定，但必须满足：空订阅列表 = 接收全部（含未分组记录）；
+// 非空列表 = 只接收匹配组，未分组记录（groupID == ""）不接收。
+type GroupSelector interface {
+	AcceptsGroup(deviceID, groupID string) bool
+}
+
+// AcceptsGroupID 是 GroupSelector 的通用判据，供各消息类通道复用。
+//
+// 空列表（或只含空串）视为未配置订阅 = 接收全部；一旦有有效组 ID，
+// 未分组记录（groupID == ""）就不再接收。
+func AcceptsGroupID(ids []string, groupID string) bool {
+	hasFilter := false
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		hasFilter = true
+		if id == groupID {
+			return true
+		}
+	}
+	return !hasFilter
+}
+
 // PreviewWithEncoder 用给定编码器试编码，返回每条消息的载荷文本。
 func PreviewWithEncoder(enc Encoder, batch PushBatch) PreviewResult {
 	if enc == nil {

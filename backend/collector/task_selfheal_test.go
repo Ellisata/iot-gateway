@@ -29,7 +29,7 @@ func TestNewGatewayTaskSelfHealDataType(t *testing.T) {
 		sqlDB.SetMaxOpenConns(1)
 		t.Cleanup(func() { sqlDB.Close() })
 	}
-	for _, m := range []interface{}{&po.Device{}, &po.DeviceAddress{}, &po.IotProtocol{}} {
+	for _, m := range []interface{}{&po.Device{}, &po.DeviceAddress{}, &po.IotProtocol{}, &po.CollectorGroup{}} {
 		if err := db.AutoMigrate(m); err != nil {
 			t.Fatalf("migrate: %v", err)
 		}

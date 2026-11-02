@@ -76,7 +76,10 @@ type CreateDeviceAddressDTO struct {
 	ScanFrequency  int    `json:"scanFrequency"`
 	// PropertyID 绑定的物模型属性 id，空串 = 未绑定。
 	// 绑定时校验：设备已绑定该属性所属模型、kind 一致、读写权限覆盖。
-	PropertyID  string                     `json:"propertyId"`
+	PropertyID string `json:"propertyId"`
+	// GroupID 绑定的采集组 id，空串 = 不分组（按 scanFrequency 采集）。
+	// 绑定时校验组属于同一设备；绑定后采集周期由组决定，scanFrequency 不生效。
+	GroupID     string                     `json:"groupId"`
 	Description string                     `json:"description"`
 	Threshold   *DeviceAddressThresholdDTO `json:"threshold"`
 }
@@ -94,7 +97,9 @@ type UpdateDeviceAddressDTO struct {
 	RwPermission   string `json:"rwPermission"`
 	ScanFrequency  int    `json:"scanFrequency"`
 	// PropertyID 三态：省略 = 不改；空串 = 解除绑定；非空 = 绑定到该属性。
-	PropertyID  *string                    `json:"propertyId"`
+	PropertyID *string `json:"propertyId"`
+	// GroupID 三态：省略 = 不改；空串 = 解绑（回到 scanFrequency）；非空 = 绑到该组。
+	GroupID     *string                    `json:"groupId"`
 	Description string                     `json:"description"`
 	Status      *int                       `json:"status"`
 	Threshold   *DeviceAddressThresholdDTO `json:"threshold"`

@@ -237,45 +237,80 @@ func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(C
 		now = e.now()
 	}
 
-	// 变化才推送：只保留值或质量码发生变化（或首次出现）的记录；开启周期保活时，
-	// 未变化但距上次投递超过周期的点位也会保留。
-	// 走到这里说明至少有一个通道会收到它们，更新"已投递"状态才是安全的。
-	if filterChanges && e.changeOnlyEnabled() {
-		records = e.changes.filter(records, now, e.keepaliveInterval())
-		if len(records) == 0 {
-			return
-		}
-	}
-
 	// 毫秒精度:TDengine 主键含时间戳(亚秒级轮次同秒会覆盖),秒级格式会静默丢数据
 	collectedAt := now.Format("2006-01-02 15:04:05.000")
 
-	// 按设备分组（当前采集流程本就是一设备一批，此处防御性分组）
-	groups := make(map[string][]collector.CollectedRecord)
-	deviceIDs := make([]string, 0, len(records))
+	// 先按 (设备, 采集组) 桶化：组是推送帧、主题与订阅的单位。
+	// 组身份必须在变化过滤之前确定 —— 不同通道可能订阅不同组。
+	type bucketKey struct{ deviceID, groupID string }
+	buckets := make(map[bucketKey][]collector.CollectedRecord)
+	keys := make([]bucketKey, 0, len(records))
 	for _, r := range records {
-		if _, ok := groups[r.DeviceID]; !ok {
-			deviceIDs = append(deviceIDs, r.DeviceID)
+		k := bucketKey{deviceID: r.DeviceID, groupID: r.GroupID}
+		if _, ok := buckets[k]; !ok {
+			keys = append(keys, k)
 		}
-		groups[r.DeviceID] = append(groups[r.DeviceID], r)
+		buckets[k] = append(buckets[k], r)
 	}
+	// 排序保证同一次采集的分发顺序稳定（map 迭代顺序不确定）。
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].deviceID != keys[j].deviceID {
+			return keys[i].deviceID < keys[j].deviceID
+		}
+		return keys[i].groupID < keys[j].groupID
+	})
 
-	// 按设备分组后分片入队：每台设备拆成 ≤maxRecordsPerBatch 的小批次，
-	// 避免整台设备所有点位打包成一个超大批次（MQTT 单帧载荷与 outbox 内存均不可控）。
-	for _, devID := range deviceIDs {
-		for _, b := range splitBatches(devID, collectedAt, groups[devID]) {
-			for _, ch := range chans {
+	for _, k := range keys {
+		bucket := buckets[k]
+
+		// 先确定该桶的接收通道，再决定是否更新变化状态：
+		// 没有任何通道接收时，绝不能把点位记为"已投递"（见 changeTracker.filter）。
+		targets := make([]Channel, 0, len(chans))
+		for _, ch := range chans {
+			if gs, ok := ch.(GroupSelector); ok && !gs.AcceptsGroup(k.deviceID, k.groupID) {
+				continue
+			}
+			targets = append(targets, ch)
+		}
+		if len(targets) == 0 {
+			continue
+		}
+
+		// 变化才推送：值/质量码/组身份发生变化（或首次出现）才保留；开启周期保活时，
+		// 未变化但距上次投递超过周期的点位也会保留。状态只在确定有接收方后推进。
+		if filterChanges && e.changeOnlyEnabled() {
+			bucket = e.changes.filter(bucket, now, e.keepaliveInterval())
+			if len(bucket) == 0 {
+				continue
+			}
+		}
+
+		// 桶内再按 ≤maxRecordsPerBatch 切片，绝不跨组合并。
+		for _, b := range splitBatches(k.deviceID, k.groupID, collectedAt, bucket) {
+			for _, ch := range targets {
 				ch.Enqueue(b)
 			}
 		}
 	}
 }
 
-// splitBatches 将同一设备的记录切片为 ≤maxRecordsPerBatch 的小批次。
-// 对底层数组零拷贝切片，各批次共享同一采集时间戳。
-func splitBatches(deviceID, collectedAt string, records []collector.CollectedRecord) []PushBatch {
+// splitBatches 将同一 (设备, 采集组) 的记录切片为 ≤maxRecordsPerBatch 的小批次。
+// 对底层数组零拷贝切片，各批次共享同一采集时间戳与组身份。
+func splitBatches(deviceID, groupID, collectedAt string, records []collector.CollectedRecord) []PushBatch {
+	groupName, groupInterval := "", 0
+	if len(records) > 0 {
+		groupName = records[0].GroupName
+		groupInterval = records[0].GroupIntervalMs
+	}
 	if len(records) <= maxRecordsPerBatch {
-		return []PushBatch{{DeviceID: deviceID, CollectedAt: collectedAt, Records: records}}
+		return []PushBatch{{
+			DeviceID:        deviceID,
+			GroupID:         groupID,
+			GroupName:       groupName,
+			GroupIntervalMs: groupInterval,
+			CollectedAt:     collectedAt,
+			Records:         records,
+		}}
 	}
 	batches := make([]PushBatch, 0, (len(records)+maxRecordsPerBatch-1)/maxRecordsPerBatch)
 	for i := 0; i < len(records); i += maxRecordsPerBatch {
@@ -284,9 +319,12 @@ func splitBatches(deviceID, collectedAt string, records []collector.CollectedRec
 			end = len(records)
 		}
 		batches = append(batches, PushBatch{
-			DeviceID:    deviceID,
-			CollectedAt: collectedAt,
-			Records:     records[i:end],
+			DeviceID:        deviceID,
+			GroupID:         groupID,
+			GroupName:       groupName,
+			GroupIntervalMs: groupInterval,
+			CollectedAt:     collectedAt,
+			Records:         records[i:end],
 		})
 	}
 	return batches

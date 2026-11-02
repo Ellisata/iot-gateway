@@ -133,6 +133,10 @@ func (s *RealtimeService) GetDeviceSnapshot(ctx context.Context, req *dto.Realti
 	if err != nil {
 		return nil, err
 	}
+	groups, err := s.collectorGroupsByID(ctx, addrs)
+	if err != nil {
+		return nil, err
+	}
 
 	now := time.Now()
 	records := make([]vo.RealtimePointVO, len(addrs))
@@ -145,7 +149,24 @@ func (s *RealtimeService) GetDeviceSnapshot(ctx context.Context, req *dto.Realti
 			CommonDataType:     a.CommonDataType,
 			RwPermission:       a.RwPermission,
 			PropertyAccessMode: propertyModes[a.PropertyID],
+			GroupID:            a.GroupID,
 			ScanFrequency:      a.ScanFrequency,
+		}
+		// 采集组绑定时，生效周期与可采集性都由组决定：组缺失/停用 = 不采集，
+		// 与采集侧的判定保持一致（否则会显示一个看似正常的旧值）。
+		groupCollectable := true
+		if a.GroupID != "" {
+			if g, ok := groups[a.GroupID]; ok {
+				item.GroupName = g.Name
+				if g.IntervalMs > 0 {
+					item.ScanFrequency = g.IntervalMs
+				}
+				if g.Status != 1 {
+					groupCollectable = false
+				}
+			} else {
+				groupCollectable = false
+			}
 		}
 		// 只写点位与只写属性都不参与采集：快照里可能残留收紧之前采到的旧值，
 		// 直接忽略，否则前端会把一个不再轮询的点位显示成看似正常的实时值。
@@ -156,13 +177,13 @@ func (s *RealtimeService) GetDeviceSnapshot(ctx context.Context, req *dto.Realti
 				propertyReadable = false
 			}
 		}
-		if a.RwPermission != "W" && propertyReadable {
+		if a.RwPermission != "W" && propertyReadable && groupCollectable {
 			if p, ok := values[a.ID]; ok {
 				item.Value = p.Value
 				item.Quality = p.Quality
 				item.Collected = true
 				item.UpdatedAt = p.UpdatedAt.Format("2006-01-02 15:04:05")
-				item.Stale = isStale(now, p.UpdatedAt, a.ScanFrequency)
+				item.Stale = isStale(now, p.UpdatedAt, item.ScanFrequency)
 			}
 		}
 		records[i] = item
@@ -215,6 +236,35 @@ func (s *RealtimeService) propertyAccessModes(ctx context.Context, addrs []po.De
 		modes[p.ID] = p.AccessMode
 	}
 	return modes, nil
+}
+
+// collectorGroupsByID 批量加载点位绑定的采集组（按 group_id 去重后一次查询）。
+func (s *RealtimeService) collectorGroupsByID(ctx context.Context, addrs []po.DeviceAddress) (map[string]po.CollectorGroup, error) {
+	ids := make([]string, 0, len(addrs))
+	seen := make(map[string]struct{}, len(addrs))
+	for _, a := range addrs {
+		if a.GroupID == "" {
+			continue
+		}
+		if _, ok := seen[a.GroupID]; ok {
+			continue
+		}
+		seen[a.GroupID] = struct{}{}
+		ids = append(ids, a.GroupID)
+	}
+	out := make(map[string]po.CollectorGroup, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var groups []po.CollectorGroup
+	if err := s.sqliteDB.WithContext(ctx).Select("id", "name", "interval_ms", "status").
+		Where("id IN ?", ids).Find(&groups).Error; err != nil {
+		return nil, err
+	}
+	for _, g := range groups {
+		out[g.ID] = g
+	}
+	return out, nil
 }
 
 // isStale 判断一个值是否已过期：距上次更新超过 staleGraceFactor 个采集周期。

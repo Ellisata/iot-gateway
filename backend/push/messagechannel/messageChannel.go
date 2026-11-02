@@ -53,6 +53,8 @@ type Config struct {
 	DB                  *gorm.DB
 	Encoder             push.Encoder
 	Transport           Transport
+	// GroupIDs 采集组订阅（空 = 接收全部，含未分组记录）。
+	GroupIDs            []string
 	Workers             int
 	Timeout             time.Duration
 	SpoolEnabled        bool
@@ -111,6 +113,12 @@ func (c *Channel) Connected() bool { return c.connected.Load() }
 
 // Enqueue 实现 push.Channel。
 func (c *Channel) Enqueue(b push.PushBatch) { c.ob.Enqueue(b) }
+
+// AcceptsGroup 实现 push.GroupSelector：空订阅 = 全部；非空 = 只收匹配组，
+// 未分组记录不接收。
+func (c *Channel) AcceptsGroup(_ string, groupID string) bool {
+	return push.AcceptsGroupID(c.cfg.GroupIDs, groupID)
+}
 
 // Start 实现 push.Channel。
 func (c *Channel) Start() {
@@ -273,7 +281,7 @@ func (c *Channel) drainWindow(pend []push.SpoolBatch, _ bool) (bool, int64) {
 		}
 	}
 	for _, p := range pend {
-		b := push.PushBatch{DeviceID: p.DeviceID, CollectedAt: p.CollectedAt, Records: p.Records}
+		b := p.ToPushBatch()
 		switch c.sendBatch(b, true) {
 		case FailureNone:
 			success = append(success, p.ID)

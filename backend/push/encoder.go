@@ -22,6 +22,9 @@ type Encoder interface {
 const (
 	FormatNativeJSON  = "native-json"
 	FormatMappingJSON = "mapping-json"
+	// FormatGroupJSON 按采集组输出帧：timestamp/device/group + values/errors，
+	// 是 Neuron 风格的分组推送格式；与 native-json 的逐点数组契约并列，互不影响。
+	FormatGroupJSON = "group-json"
 	// FormatScript 用 goja 脚本生成载荷，是声明式映射表达不了时的逃生通道。
 	FormatScript = "script"
 )
@@ -47,6 +50,7 @@ type FormatMeta struct {
 func SupportedFormats() []FormatMeta {
 	return []FormatMeta{
 		{Name: FormatNativeJSON, Label: "Native JSON", Editor: EditorNone},
+		{Name: FormatGroupJSON, Label: "Group JSON", Editor: EditorNone},
 		{Name: FormatMappingJSON, Label: "Mapping JSON", RequiresMapping: true, Editor: EditorMapping},
 		{Name: FormatScript, Label: "Script", RequiresMapping: true, Editor: EditorScript},
 	}

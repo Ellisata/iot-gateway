@@ -173,8 +173,34 @@
         </div>
       </el-form-item>
 
+      <el-form-item :label="t('deviceAddress.collectorGroup')" prop="groupId">
+        <el-select
+          v-model="formData.groupId"
+          :placeholder="t('deviceAddress.collectorGroupPlaceholder')"
+          clearable
+          :loading="groupLoading"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="g in groupOptions"
+            :key="g.id"
+            :label="g.status === 1 ? g.name : `${g.name} (${t('collectorGroup.disabledShort')})`"
+            :value="g.id"
+            :disabled="g.status !== 1 && g.id !== formData.groupId"
+          />
+        </el-select>
+        <div class="iot-form-hint is-block">
+          {{ formData.groupId ? t('deviceAddress.collectorGroupHint') : t('deviceAddress.collectorGroupEmptyHint') }}
+        </div>
+      </el-form-item>
+
       <el-form-item :label="t('deviceAddress.scanFrequency')" prop="scanFrequency">
-        <el-select v-model="formData.scanFrequency" :placeholder="t('deviceAddress.scanPlaceholder')" style="width: 100%">
+        <el-select
+          v-model="formData.scanFrequency"
+          :placeholder="t('deviceAddress.scanPlaceholder')"
+          :disabled="!!formData.groupId"
+          style="width: 100%"
+        >
           <el-option
             v-for="item in scanFrequencyOptions"
             :key="item.value"
@@ -305,6 +331,7 @@ import {
 import { getDataTypes } from '@/api/modules/protocol'
 import { getDeviceObjectById } from '@/api/modules/deviceObject'
 import { listThingModelProperties } from '@/api/modules/thingModel'
+import { listCollectorGroups } from '@/api/modules/collectorGroup'
 import { useScanFrequencyOptions } from '@/composables/useScanFrequencyOptions'
 import { getAddressExample, getAddressSpec } from '@/utils/addressSyntax'
 import { buildConditionValues, parseConditionValues } from '@/utils/addressThreshold'
@@ -450,6 +477,22 @@ async function fetchPropertyOptions() {
   }
 }
 
+// ---------- 采集组 ----------
+// 组绑定后采集周期由组决定，scanFrequency 在表单里置灰并给出说明。
+const groupOptions = ref([])
+const groupLoading = ref(false)
+
+async function fetchGroupOptions() {
+  groupLoading.value = true
+  try {
+    groupOptions.value = (await listCollectorGroups(props.deviceId)) || []
+  } catch {
+    groupOptions.value = []
+  } finally {
+    groupLoading.value = false
+  }
+}
+
 // ---------- 对话框状态 ----------
 const loadingAddress = ref(false)
 const submitting = ref(false)
@@ -465,6 +508,7 @@ const formData = reactive({
   dataType: '',
   rwPermission: '',
   propertyId: '',
+  groupId: '',
   scanFrequency: null,
   description: '',
   status: 1,
@@ -489,7 +533,19 @@ const formRules = {
   ],
   dataType: [{ required: true, message: () => t('deviceAddress.selectDataType'), trigger: 'change' }],
   rwPermission: [{ required: true, message: () => t('deviceAddress.selectRw'), trigger: 'change' }],
-  scanFrequency: [{ required: true, message: () => t('deviceAddress.selectScan'), trigger: 'change' }],
+  // 绑定采集组后周期由组决定，扫描频率不再是必填项。
+  scanFrequency: [
+    {
+      validator: (_rule, value, callback) => {
+        if (formData.groupId) return callback()
+        if (value === null || value === undefined || value === '') {
+          return callback(new Error(t('deviceAddress.selectScan')))
+        }
+        callback()
+      },
+      trigger: 'change',
+    },
+  ],
   description: [{ max: 200, message: () => t('deviceAddress.descMaxLength'), trigger: 'blur' }],
 }
 
@@ -504,6 +560,7 @@ watch(
     nextTick(() => formRef.value?.clearValidate())
     ensureDataTypes()
     fetchPropertyOptions()
+    fetchGroupOptions()
     if (props.addressId) loadAddress(props.addressId)
   },
 )
@@ -520,6 +577,7 @@ async function loadAddress(id) {
     formData.dataType = row.commonDataType ?? ''
     formData.rwPermission = row.rwPermission ?? ''
     formData.propertyId = row.propertyId ?? ''
+    formData.groupId = row.groupId ?? ''
     formData.scanFrequency = row.scanFrequency ?? null
     formData.description = row.description ?? ''
     formData.status = row.status ?? 1
@@ -550,6 +608,7 @@ function resetFormData() {
   formData.dataType = ''
   formData.rwPermission = ''
   formData.propertyId = ''
+  formData.groupId = ''
   formData.scanFrequency = null
   formData.description = ''
   formData.status = 1
@@ -720,6 +779,7 @@ async function handleSubmit() {
       commonDataType: formData.dataType,
       rwPermission: formData.rwPermission,
       propertyId: formData.propertyId || '',
+      groupId: formData.groupId || '',
       scanFrequency: formData.scanFrequency,
       description: formData.description.trim() || undefined,
       status: formData.status,

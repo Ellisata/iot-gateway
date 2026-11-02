@@ -33,9 +33,11 @@ import (
 // 等于换了下游的语义身份。不参与比较的话，稳定不变的点位在重新绑定后永远等不到
 // 一条带新 tag 的记录（要等值变化），新 tag 的 series 一直缺数。
 //
-// 键为 (deviceID, deviceAddressID)。地址 ID 是库里的 UUID，本身全局唯一，带上设备 ID
-// 只是为了防御外部来源或历史数据里出现重复地址 ID。**缺失任一 ID 的记录一律透传**：
-// 去重键退化成空串时，宁可重复投递也不能把不同点位合并成一条。
+// 键为 (deviceID, deviceAddressID, groupID)。地址 ID 是库里的 UUID，本身全局唯一，
+// 带上设备 ID 只是为了防御外部来源或历史数据里出现重复地址 ID；groupID 参与键，
+// 是因为点位换组后下游的 topic/帧语义已变，必须重新投递一次。
+// **缺失任一 ID 的记录一律透传**：去重键退化成空串时，宁可重复投递也不能把不同
+// 点位合并成一条。
 //
 // 并发：PushRecords 由 workerPool 里多个设备的采集协程并发调用，故整体加锁。
 // 临界区只有 map 查找与字符串比较，单批上限 maxPointsPerRead（2000）条，
@@ -55,6 +57,9 @@ type changeTracker struct {
 type changeKey struct {
 	deviceID  string
 	addressID string
+	// groupID 参与键：点位从 A 组换到 B 组时，下游的 topic/帧语义已经变了，
+	// 即使值和质量码都没变也必须重新投递一次。
+	groupID string
 }
 
 // changeState 一次投递的点位事实。只放参与比较的字段：
@@ -62,10 +67,13 @@ type changeKey struct {
 // 因此改个点位名不会触发一轮全量重推。物模型/属性编码是例外 —— 它们是对外的
 // 语义身份（时序库 tag），换了必须投递一次（理由见 changeTracker 的说明）。
 type changeState struct {
-	value          string
-	quality        int
-	thingModelCode string
-	propertyCode   string
+	value           string
+	quality         int
+	thingModelCode  string
+	propertyCode    string
+	groupID         string
+	groupName       string
+	groupIntervalMs int
 
 	// lastDelivered 上次真正交给下游的时间，用于周期保活判定。
 	//
@@ -80,7 +88,10 @@ func (s changeState) sameFacts(o changeState) bool {
 	return s.value == o.value &&
 		s.quality == o.quality &&
 		s.thingModelCode == o.thingModelCode &&
-		s.propertyCode == o.propertyCode
+		s.propertyCode == o.propertyCode &&
+		s.groupID == o.groupID &&
+		s.groupName == o.groupName &&
+		s.groupIntervalMs == o.groupIntervalMs
 }
 
 func newChangeTracker() *changeTracker {
@@ -111,13 +122,16 @@ func (c *changeTracker) filter(records []collector.CollectedRecord, now time.Tim
 			out = append(out, r)
 			continue
 		}
-		key := changeKey{deviceID: r.DeviceID, addressID: r.DeviceAddressID}
+		key := changeKey{deviceID: r.DeviceID, addressID: r.DeviceAddressID, groupID: r.GroupID}
 		state := changeState{
-			value:          r.Value,
-			quality:        r.Quality,
-			thingModelCode: r.ThingModelCode,
-			propertyCode:   r.PropertyCode,
-			lastDelivered:  now,
+			value:           r.Value,
+			quality:         r.Quality,
+			thingModelCode:  r.ThingModelCode,
+			propertyCode:    r.PropertyCode,
+			groupID:         r.GroupID,
+			groupName:       r.GroupName,
+			groupIntervalMs: r.GroupIntervalMs,
+			lastDelivered:   now,
 		}
 		if prev, ok := c.last[key]; ok && prev.sameFacts(state) {
 			// 事实没变：只有到期保活才继续投递。

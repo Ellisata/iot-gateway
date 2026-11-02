@@ -85,6 +85,12 @@ func (s *DeviceAddressService) CreateDeviceAddress(ctx context.Context, req *dto
 		return err
 	}
 
+	// 采集组绑定：非空时必须属于同一设备。
+	groupID := strings.TrimSpace(req.GroupID)
+	if err := s.validateGroupBinding(ctx, db, req.DeviceID, groupID); err != nil {
+		return err
+	}
+
 	// 报警条件校验：可用比较符由数据类型的 Kind 决定（矩阵见 driver.OperatorsForKind）
 	enabled, op, values := thresholdFields(req.Threshold)
 	if err := validateAddressThreshold(enabled, op, values,
@@ -101,6 +107,7 @@ func (s *DeviceAddressService) CreateDeviceAddress(ctx context.Context, req *dto
 		DataType:         internal,
 		RwPermission:     req.RwPermission,
 		PropertyID:       strings.TrimSpace(req.PropertyID),
+		GroupID:          groupID,
 		ScanFrequency:    req.ScanFrequency,
 		Description:      req.Description,
 		Status:           1,
@@ -453,6 +460,14 @@ func (s *DeviceAddressService) UpdateDeviceAddress(ctx context.Context, req *dto
 			return err
 		}
 	}
+	// 采集组绑定三态：省略 = 不动，空串 = 解绑，非空 = 绑到该组。
+	if req.GroupID != nil {
+		newGroupID := strings.TrimSpace(*req.GroupID)
+		if err := s.validateGroupBinding(ctx, db, existing.DeviceID, newGroupID); err != nil {
+			return err
+		}
+		updates["group_id"] = newGroupID
+	}
 	if req.ScanFrequency > 0 {
 		updates["scan_frequency"] = req.ScanFrequency
 	}
@@ -560,6 +575,59 @@ func (s *DeviceAddressService) clearPointAlarms(ctx context.Context, ids []strin
 			logger.Warn("deviceAddress: clear quality alarm for deleted address %s failed: %v", id, err)
 		}
 	}
+}
+
+// BatchAssignCollectorGroup 批量把点位分配/解绑到采集组，返回实际更新行数。
+//
+// device_id 参与 WHERE：只更新这台设备名下的点位。groupID 为空 = 解绑，
+// 非空时先校验组属于该设备（防止把 A 设备的点位绑到 B 设备的组）。
+// 个别 id 不存在/不属于该设备时跳过，不因部分失败回滚整批（与批量删除语义一致）。
+func (s *DeviceAddressService) BatchAssignCollectorGroup(ctx context.Context, deviceID, groupID string, ids []string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	groupID = strings.TrimSpace(groupID)
+	var assigned int64
+	err := s.sqliteDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := s.validateGroupBinding(ctx, tx, deviceID, groupID); err != nil {
+			return err
+		}
+		result := tx.Model(&po.DeviceAddress{}).
+			Where("device_id = ? AND id IN ?", deviceID, ids).
+			Updates(map[string]interface{}{
+				"group_id":   groupID,
+				"updated_at": time.Now().Format("2006-01-02 15:04:05"),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		assigned = result.RowsAffected
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return assigned, nil
+}
+
+// validateGroupBinding 校验 groupID 属于 deviceID。空 groupID 表示不分组，直接通过。
+func (s *DeviceAddressService) validateGroupBinding(ctx context.Context, db *gorm.DB, deviceID, groupID string) error {
+	if groupID == "" {
+		return nil
+	}
+	var group po.CollectorGroup
+	if err := db.WithContext(ctx).Where("id = ?", groupID).First(&group).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return appError.NewAppErrorCtx(enums.CollectorGroupDeviceMismatchEnum.GetCode(),
+				enums.CollectorGroupDeviceMismatchEnum.GetMessage(), enums.CollectorGroupDeviceMismatchEnum.GetMsgKey())
+		}
+		return err
+	}
+	if group.DeviceID != deviceID {
+		return appError.NewAppErrorCtx(enums.CollectorGroupDeviceMismatchEnum.GetCode(),
+			enums.CollectorGroupDeviceMismatchEnum.GetMessage(), enums.CollectorGroupDeviceMismatchEnum.GetMsgKey())
+	}
+	return nil
 }
 
 // GetDeviceAddressByID 根据ID查询设备地址
@@ -673,6 +741,7 @@ func addressVO(a po.DeviceAddress) vo.DeviceAddressVO {
 		CommonDataType:   a.CommonDataType,
 		DataType:         a.DataType,
 		RwPermission:     a.RwPermission,
+		GroupID:          a.GroupID,
 		ScanFrequency:    a.ScanFrequency,
 		Description:      a.Description,
 		Status:           a.Status,
@@ -699,24 +768,56 @@ func (s *DeviceAddressService) enrichAddressVOs(ctx context.Context, records []v
 		seen[r.PropertyID] = struct{}{}
 		ids = append(ids, r.PropertyID)
 	}
-	if len(ids) == 0 {
+	if len(ids) > 0 {
+		var props []po.ThingModelProperty
+		if err := s.sqliteDB.WithContext(ctx).Select("id", "identifier", "name", "access_mode").
+			Where("id IN ?", ids).Find(&props).Error; err != nil {
+			return err
+		}
+		byID := make(map[string]po.ThingModelProperty, len(props))
+		for _, p := range props {
+			byID[p.ID] = p
+		}
+		for i := range records {
+			if p, ok := byID[records[i].PropertyID]; ok {
+				records[i].PropertyIdentifier = p.Identifier
+				records[i].PropertyName = p.Name
+				records[i].PropertyAccessMode = p.AccessMode
+			}
+		}
+	}
+
+	// 采集组展示字段：按 groupId 批量补全，避免每行再查一次。
+	groupIDs := make([]string, 0, len(records))
+	seenGroup := make(map[string]struct{}, len(records))
+	for _, r := range records {
+		if r.GroupID == "" {
+			continue
+		}
+		if _, ok := seenGroup[r.GroupID]; ok {
+			continue
+		}
+		seenGroup[r.GroupID] = struct{}{}
+		groupIDs = append(groupIDs, r.GroupID)
+	}
+	if len(groupIDs) == 0 {
 		return nil
 	}
 
-	var props []po.ThingModelProperty
-	if err := s.sqliteDB.WithContext(ctx).Select("id", "identifier", "name", "access_mode").
-		Where("id IN ?", ids).Find(&props).Error; err != nil {
+	var groups []po.CollectorGroup
+	if err := s.sqliteDB.WithContext(ctx).Select("id", "name", "interval_ms", "status").
+		Where("id IN ?", groupIDs).Find(&groups).Error; err != nil {
 		return err
 	}
-	byID := make(map[string]po.ThingModelProperty, len(props))
-	for _, p := range props {
-		byID[p.ID] = p
+	groupByID := make(map[string]po.CollectorGroup, len(groups))
+	for _, g := range groups {
+		groupByID[g.ID] = g
 	}
 	for i := range records {
-		if p, ok := byID[records[i].PropertyID]; ok {
-			records[i].PropertyIdentifier = p.Identifier
-			records[i].PropertyName = p.Name
-			records[i].PropertyAccessMode = p.AccessMode
+		if g, ok := groupByID[records[i].GroupID]; ok {
+			records[i].GroupName = g.Name
+			records[i].GroupIntervalMs = g.IntervalMs
+			records[i].GroupStatus = g.Status
 		}
 	}
 	return nil

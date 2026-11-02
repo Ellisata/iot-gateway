@@ -38,4 +38,11 @@ type CollectedRecord struct {
 	// 未绑定为空。与 ThingModelCode 同源同生命周期：点位通过 device_address.property_id
 	// 绑定属性，且绑定时已校验属性属于设备的物模型。
 	PropertyCode string `json:"propertyCode,omitempty"`
+	// GroupID / GroupName / GroupIntervalMs 采集组身份（未分组为空/0）。
+	//
+	// 带 json tag 保证断网缓存（push/spool）序列化回放后不丢失 —— 推送侧靠它
+	// 按 (device, group) 分帧、选择 topic 与通道订阅。组周期对绑定点位权威。
+	GroupID         string `json:"groupID,omitempty"`
+	GroupName       string `json:"groupName,omitempty"`
+	GroupIntervalMs int    `json:"groupIntervalMs,omitempty"`
 }

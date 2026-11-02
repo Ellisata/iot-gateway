@@ -84,6 +84,25 @@ func (ctr *DeviceAddressController) BatchDeleteDeviceAddress(c *gin.Context) {
 	}))
 }
 
+// BatchAssignCollectorGroup 批量把点位分配/解绑到采集组
+func (ctr *DeviceAddressController) BatchAssignCollectorGroup(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.BatchAssignCollectorGroupDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	assigned, err := ctr.deviceAddressService.BatchAssignCollectorGroup(ctx, req.DeviceID, req.GroupID, req.IDs)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(vo.BatchAssignCollectorGroupResultVO{
+		Requested: len(req.IDs),
+		Assigned:  assigned,
+	}))
+}
+
 // GetDeviceAddressByID 根据ID查询设备地址
 func (ctr *DeviceAddressController) GetDeviceAddressByID(c *gin.Context) {
 	ctx := c.Request.Context()

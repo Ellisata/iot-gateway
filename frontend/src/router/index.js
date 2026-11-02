@@ -50,6 +50,12 @@ const routes = [
         meta: { titleKey: 'menu.deviceAddress', hidden: true },
       },
       {
+        path: 'industrial/collector-group/:deviceObjectId',
+        name: 'GatewayCollectorGroup',
+        component: () => import('@/views/industrial/collector-group/IndexView.vue'),
+        meta: { titleKey: 'menu.collectorGroup', hidden: true },
+      },
+      {
         path: 'industrial/realtime/:deviceObjectId',
         name: 'GatewayRealtime',
         component: () => import('@/views/industrial/realtime/IndexView.vue'),

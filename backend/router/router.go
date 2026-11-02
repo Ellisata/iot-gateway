@@ -209,6 +209,13 @@ func WithControlRoutes(cc *controller.ControlController) RouteOption {
 	}
 }
 
+// WithCollectorGroupRoutes 采集组模块路由选项
+func WithCollectorGroupRoutes(cgc *controller.CollectorGroupController) RouteOption {
+	return func(r *gin.Engine) {
+		CollectorGroupRoutes(r, cgc)
+	}
+}
+
 // WithAgentApiRoutes dsh（AI Agent）调用面路由选项（**无鉴权，出厂关闭**）。
 //
 // 与其余 With* 的差别：它是**整组**挂载 —— 把各领域路由的同一份定义再挂一遍到
@@ -219,6 +226,7 @@ func WithAgentApiRoutes(
 	uc *controller.UserController,
 	dc *controller.DeviceController,
 	ac *controller.DeviceAddressController,
+	cgc *controller.CollectorGroupController,
 	tmc *controller.ThingModelController,
 	cc *controller.CollectionController,
 	rc *controller.RealtimeController,
@@ -240,6 +248,6 @@ func WithAgentApiRoutes(
 	ctrl *controller.ControlController,
 ) RouteOption {
 	return func(r *gin.Engine) {
-		AgentApiRoutes(r, cfg, uc, dc, ac, tmc, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc, ctrl)
+		AgentApiRoutes(r, cfg, uc, dc, ac, cgc, tmc, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc, ctrl)
 	}
 }

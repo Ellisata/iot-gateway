@@ -305,6 +305,29 @@ func (e *Engine) loadConfigChecksum() uint64 {
 		io.WriteString(h, "|")
 		// 属性绑定同理：改绑属性要重建任务，属性编码才会随记录更新。
 		io.WriteString(h, a.PropertyID)
+		io.WriteString(h, "|")
+		// 采集组绑定：改绑/解绑要重建任务，生效周期与记录里的组身份才会更新。
+		io.WriteString(h, a.GroupID)
+		io.WriteString(h, "\n")
+	}
+
+	// 采集组全表参与校验和（含停用组）：组改名/改周期/启停都必须触发热加载，
+	// 否则采集侧仍按旧周期轮询、记录里仍是旧组名（topic 也会跟着错）。
+	var groups []po.CollectorGroup
+	if err := e.db.Model(&po.CollectorGroup{}).Order("id").Find(&groups).Error; err != nil {
+		logger.Error("collector: load collector groups for checksum failed: %v", err)
+		return h.Sum64()
+	}
+	for _, g := range groups {
+		io.WriteString(h, g.ID)
+		io.WriteString(h, "|")
+		io.WriteString(h, g.DeviceID)
+		io.WriteString(h, "|")
+		io.WriteString(h, g.Name)
+		io.WriteString(h, "|")
+		io.WriteString(h, strconv.Itoa(g.IntervalMs))
+		io.WriteString(h, "|")
+		io.WriteString(h, strconv.Itoa(g.Status))
 		io.WriteString(h, "\n")
 	}
 

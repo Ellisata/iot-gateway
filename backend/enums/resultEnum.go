@@ -127,6 +127,14 @@ var (
 	// 混用会让用户去错误的地方找原因。
 	DevicePointScanUnsupportedEnum = NewBusinessEnum("40027", "该协议不支持点位扫描", "err.device_point_scan_unsupported")
 
+	// 采集组相关错误码（归属设备域，沿用 4004x 分段）
+	CollectorGroupExistsEnum          = NewBusinessEnum("40041", "采集组名称已存在", "err.collector_group_exists")
+	CollectorGroupNotExistsEnum       = NewBusinessEnum("40042", "采集组不存在", "err.collector_group_not_found")
+	CollectorGroupInUseEnum           = NewBusinessEnum("40043", "采集组已被点位绑定，不能删除", "err.collector_group_in_use")
+	CollectorGroupDeviceMismatchEnum  = NewBusinessEnum("40044", "采集组不属于该设备", "err.collector_group_device_mismatch")
+	CollectorGroupNameInvalidEnum     = NewBusinessEnum("40045", "采集组名称不合法（不能为空、不能含 / + #，且不能为 legacy）", "err.collector_group_name_invalid")
+	CollectorGroupIntervalInvalidEnum = NewBusinessEnum("40046", "采集组周期不合法（100-600000 毫秒）", "err.collector_group_interval_invalid")
+
 	// 物模型相关错误码（归属设备域，沿用 4000x 分段）
 	ThingModelExistsEnum                 = NewBusinessEnum("41001", "物模型标识或名称已存在", "err.thing_model_exists")
 	ThingModelNotExistsEnum              = NewBusinessEnum("41002", "物模型不存在", "err.thing_model_not_found")

@@ -114,6 +114,12 @@ func (ch *mqttChannel) Connected() bool { return ch.isConnected() }
 // 外部订阅数据只投时序库通道，不经过本通道回环发布。
 func (ch *mqttChannel) IsTimeSeries() bool { return false }
 
+// AcceptsGroup 实现 push.GroupSelector：空订阅 = 全部；非空 = 只收匹配组，
+// 未分组记录不接收。
+func (ch *mqttChannel) AcceptsGroup(_ string, groupID string) bool {
+	return push.AcceptsGroupID(ch.cfg.GroupIDs, groupID)
+}
+
 // Enqueue 非阻塞入队，绝不阻塞采集线程（实现 push.Channel）。
 // 入队路由（直投内存队列 / 落盘 / 丢最旧）由 push.Outbox 统一决定。
 func (ch *mqttChannel) Enqueue(b push.PushBatch) { ch.ob.Enqueue(b) }
@@ -296,7 +302,7 @@ func (ch *mqttChannel) publish(client mqtt.Client, b push.PushBatch) bool {
 		return false
 	}
 
-	topics := buildTopics(ch.cfg.Topic, b.DeviceID)
+	topics := buildTopics(ch.cfg.Topic, b.DeviceID, b.GroupName, b.GroupID)
 	if len(topics) == 0 {
 		ch.ob.Drop(1)
 		return false
@@ -373,7 +379,7 @@ func (ch *mqttChannel) drainWindow(client mqtt.Client, pend []push.SpoolBatch) (
 	successIDs := make([]int64, 0, len(pend))
 	var failID int64
 	for _, p := range pend {
-		batch := push.PushBatch{DeviceID: p.DeviceID, CollectedAt: p.CollectedAt, Records: p.Records}
+		batch := p.ToPushBatch()
 		if !ch.publish(client, batch) {
 			failID = p.ID
 			break

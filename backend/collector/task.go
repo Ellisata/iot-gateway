@@ -6,6 +6,7 @@ package collector
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -42,11 +43,20 @@ func forEachBatch(addrs []po.DeviceAddress, fn func(batch []po.DeviceAddress) er
 	return nil
 }
 
-// frequencyGroup 同一采集频率的点位集合
-// 每个频率分组拥有独立的 ticker 与调度 goroutine，按点位自身配置的 ScanFrequency 触发采集；
-// 实际读取以「每台设备一个任务」提交到共享 workerPool，设备之间互不阻塞。
+// groupInfo 采集组在采集侧的最小视图。
+type groupInfo struct {
+	deviceID   string
+	name       string
+	intervalMs int
+	status     int
+}
+
+// frequencyGroup 同一采集周期的点位集合
+// 每个频率分组拥有独立的 ticker 与调度 goroutine，按生效周期（绑定组时取组周期，
+// 未分组时取点位自身 ScanFrequency）触发采集；实际读取以「每台设备一个任务」
+// 提交到共享 workerPool，设备之间互不阻塞。
 type frequencyGroup struct {
-	interval   time.Duration                 // 采集间隔（基于 ScanFrequency）
+	interval   time.Duration                 // 采集间隔（生效周期）
 	addrGroups map[string][]po.DeviceAddress // deviceID -> 该频率下的点位列表
 	task       *gatewayTask
 
@@ -81,6 +91,12 @@ type gatewayTask struct {
 	// protocols: deviceID -> 协议名称（iot_protocol.name，如 "ModBus.TCP"）。
 	// 透传到采集记录，供下游区分协议命名空间（dataType 为协议内部类型名）。
 	protocols map[string]string
+
+	// groupByID: 采集组 ID -> 组信息（名称/周期/所属设备）。
+	// 点位绑定的组不存在、跨设备或已停用时，该点位不进入采集调度。
+	groupByID map[string]groupInfo
+	// addrGroupIDs: addressID -> groupID，仅用于驱动返回顺序与 addrs 不一致时的回退查询。
+	addrGroupIDs map[string]string
 
 	db        *gorm.DB
 	sink      RecordSink      // 采集数据接收者（推送引擎等），可为 nil
@@ -351,6 +367,10 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 	// 因此改绑定会触发热加载重建任务；模型编码与属性标识符本身创建后不可修改。
 	modelCodes, propCodes := loadThingModelCodes(db, devices)
 
+	// 采集组：点位绑定组后，组周期是生效周期；组不存在/跨设备/已停用的点位
+	// 不进入采集调度（与实时页的「不采集」判定一致）。
+	groups := loadCollectorGroups(db)
+
 	// 加载设备地址并按采集频率分组。
 	// 仅对拥有驱动的设备加载地址，避免协议不支持/驱动创建失败的设备
 	// 每周期仍提交 worker 任务后空转返回。
@@ -358,6 +378,7 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 	addrNameMap := make(map[string]map[string]string)             // deviceID -> addressID -> name
 	addrLabelMap := make(map[string]map[string]string)            // deviceID -> addressID -> 中文说明
 	addrPropCodes := make(map[string]string)                      // addressID -> 属性标识符
+	addrGroupIDs := make(map[string]string)                       // addressID -> 采集组 ID
 
 	for _, dev := range devices {
 		if _, ok := drvMap[dev.ID]; !ok {
@@ -393,6 +414,20 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 				}
 			}
 
+			// 采集组绑定时，组周期是生效周期；组缺失/跨设备/停用则整个点位不采集。
+			freq := addr.ScanFrequency
+			if addr.GroupID != "" {
+				g, ok := groups[addr.GroupID]
+				if !ok || g.deviceID != dev.ID || g.status != 1 {
+					continue
+				}
+				freq = g.intervalMs
+				addrGroupIDs[addr.ID] = addr.GroupID
+			}
+			if freq <= 0 {
+				freq = 1000 // 默认 1 秒
+			}
+
 			// data_type 是写入时派生的协议内部类型名缓存，可能因协议类型注册名变更、
 			// 旧数据或外部改库而漂移。加载时统一回退修正（data_type 仍可解析则保留原值），
 			// 修正结果回写库自愈，避免采集时驱动解码失败、寄存器/字数算错或类型码错取。
@@ -415,11 +450,7 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 				}
 			}
 
-			// 按采集频率分组
-			freq := addr.ScanFrequency
-			if freq <= 0 {
-				freq = 1000 // 默认 1 秒
-			}
+			// 按生效周期分组（同周期不同组共享 ticker，组身份随记录下发）
 			if freqToDevAddrs[freq] == nil {
 				freqToDevAddrs[freq] = make(map[string][]po.DeviceAddress)
 			}
@@ -435,6 +466,8 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 		modelCodes:     modelCodes,
 		addrPropCodes:  addrPropCodes,
 		protocols:      devProtocols,
+		groupByID:      groups,
+		addrGroupIDs:   addrGroupIDs,
 		db:             db,
 		sink:           sink,
 		stateSink:      stateSink,
@@ -445,8 +478,14 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 		quit:           make(chan struct{}),
 	}
 
-	// 创建频率分组
-	for freq, devAddrs := range freqToDevAddrs {
+	// 创建频率分组。按周期升序创建，避免 map 迭代导致启动顺序与测试输出不稳定。
+	freqs := make([]int, 0, len(freqToDevAddrs))
+	for freq := range freqToDevAddrs {
+		freqs = append(freqs, freq)
+	}
+	sort.Ints(freqs)
+	for _, freq := range freqs {
+		devAddrs := freqToDevAddrs[freq]
 		group := &frequencyGroup{
 			interval:   time.Duration(freq) * time.Millisecond,
 			addrGroups: devAddrs,
@@ -766,8 +805,13 @@ func (g *frequencyGroup) pollDevice(deviceID string, addrs []po.DeviceAddress) {
 
 // doPoll 同步执行一次该频率分组的采集（逐设备轮询，供测试/同步场景直接调用）。
 func (g *frequencyGroup) doPoll() {
-	for deviceID, addrs := range g.addrGroups {
-		g.pollDevice(deviceID, addrs)
+	deviceIDs := make([]string, 0, len(g.addrGroups))
+	for deviceID := range g.addrGroups {
+		deviceIDs = append(deviceIDs, deviceID)
+	}
+	sort.Strings(deviceIDs)
+	for _, deviceID := range deviceIDs {
+		g.pollDevice(deviceID, g.addrGroups[deviceID])
 	}
 }
 
@@ -952,9 +996,11 @@ func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, result
 	modelCode := t.modelCodes[dev.ID]
 	for i, r := range results {
 		name, label := "", ""
+		groupID := ""
 		if i < len(addrs) && addrs[i].ID == r.DeviceAddressID {
 			name = addrs[i].Name
 			label = addrs[i].Label
+			groupID = addrs[i].GroupID
 		} else {
 			// 索引未对齐：回退 map 查询（正常驱动不会走到这里）
 			if nameMap, ok := t.addrNameMap[dev.ID]; ok {
@@ -962,6 +1008,14 @@ func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, result
 			}
 			if labelMap, ok := t.addrLabelMap[dev.ID]; ok {
 				label = labelMap[r.DeviceAddressID]
+			}
+			groupID = t.addrGroupIDs[r.DeviceAddressID]
+		}
+		groupName, groupInterval := "", 0
+		if groupID != "" {
+			if g, ok := t.groupByID[groupID]; ok {
+				groupName = g.name
+				groupInterval = g.intervalMs
 			}
 		}
 		records = append(records, CollectedRecord{
@@ -977,6 +1031,9 @@ func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, result
 			Quality:            r.Quality,
 			ThingModelCode:     modelCode,
 			PropertyCode:       t.addrPropCodes[r.DeviceAddressID],
+			GroupID:            groupID,
+			GroupName:          groupName,
+			GroupIntervalMs:    groupInterval,
 		})
 	}
 	return records
@@ -1046,6 +1103,28 @@ func loadThingModelCodes(db *gorm.DB, devices []po.Device) (map[string]string, m
 		propCodes[p.ID] = propertyCode{modelID: p.ModelID, code: p.Identifier, accessMode: p.AccessMode}
 	}
 	return deviceCodes, propCodes
+}
+
+// loadCollectorGroups 加载全部采集组（含停用组，由调用方按 status 判定）。
+//
+// 表缺失或查询失败时只记警告并返回空表：早期测试库不一定有这张表，
+// 此时所有点位按 scan_frequency 旧行为采集，不应让整台设备停采。
+func loadCollectorGroups(db *gorm.DB) map[string]groupInfo {
+	out := make(map[string]groupInfo)
+	var rows []po.CollectorGroup
+	if err := db.Select("id", "device_id", "name", "interval_ms", "status").Find(&rows).Error; err != nil {
+		logger.Warn("collector: load collector groups failed, points will use scan_frequency: %v", err)
+		return out
+	}
+	for _, g := range rows {
+		out[g.ID] = groupInfo{
+			deviceID:   g.DeviceID,
+			name:       g.Name,
+			intervalMs: g.IntervalMs,
+			status:     g.Status,
+		}
+	}
+	return out
 }
 
 // incError 递增错误计数

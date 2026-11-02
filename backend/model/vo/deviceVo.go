@@ -53,7 +53,13 @@ type DeviceAddressVO struct {
 	// PropertyAccessMode 绑定属性的读写模式（R/W/RW，未绑定为空串）。
 	// 属性不含 R 时点位不进入采集，列表页据此显示「不采集」而不是「等待采集」。
 	PropertyAccessMode string `json:"propertyAccessMode"`
-	Name               string `json:"name"`
+	// 采集组绑定（空 = 未分组）。GroupName/GroupIntervalMs/GroupStatus 是展示用冗余字段，
+	// 由服务层按 groupId 批量补全，避免前端为每一行再查一次。
+	GroupID         string `json:"groupId"`
+	GroupName       string `json:"groupName"`
+	GroupIntervalMs int    `json:"groupIntervalMs"`
+	GroupStatus     int    `json:"groupStatus"`
+	Name            string `json:"name"`
 	Label              string `json:"label"` // 地址 name 的中文说明（如温度、电流）
 	CommonDataType     string `json:"commonDataType"`
 	DataType           string `json:"dataType"`

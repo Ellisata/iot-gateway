@@ -153,6 +153,9 @@ func (e *Encoder) Encode(b push.PushBatch) ([]push.EncodedMessage, error) {
 
 	batchObj := vm.NewObject()
 	_ = batchObj.Set("deviceId", b.DeviceID)
+	_ = batchObj.Set("groupId", b.GroupID)
+	_ = batchObj.Set("groupName", b.GroupName)
+	_ = batchObj.Set("intervalMs", b.GroupIntervalMs)
 	_ = batchObj.Set("collectedAt", b.CollectedAt)
 	records := make([]map[string]any, len(b.Records))
 	for i := range b.Records {
@@ -222,6 +225,9 @@ func recordMap(r collector.CollectedRecord, batchAt string) map[string]any {
 		"collectedAt":        at,
 		"thingModelCode":     r.ThingModelCode,
 		"propertyCode":       r.PropertyCode,
+		"groupId":            r.GroupID,
+		"groupName":          r.GroupName,
+		"groupIntervalMs":    int64(r.GroupIntervalMs),
 	}
 }
 

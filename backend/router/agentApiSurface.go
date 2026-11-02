@@ -189,6 +189,7 @@ var agentApiSurface = map[string]SurfaceEntry{
 			"rwPermission":   "只接受 R / W / RW",
 			"scanFrequency":  "扫描频率（毫秒）；<=0 按默认 1000 处理",
 			"propertyId":     "可选。物模型属性 id；要求设备已绑定该属性所属模型，且 kind 一致、读写权限覆盖属性模式",
+			"groupId":        "可选。采集组 id；要求组属于同一设备。绑定后采集周期由组决定，scanFrequency 不生效",
 		}),
 	},
 	"POST /deviceAddress/updateDeviceAddress": {
@@ -202,6 +203,7 @@ var agentApiSurface = map[string]SurfaceEntry{
 			"scanFrequency":  "毫秒；**<=0 = 不改**（与创建不同：创建时 <=0 按默认 1000 处理）",
 			"description":    "**无条件覆盖**：空串会清空描述",
 			"propertyId":     "三态：省略 = 不改，空串 = 解除绑定，非空 = 绑定；改类型/权限时也会重新校验既有绑定",
+			"groupId":        "三态：省略 = 不改，空串 = 解绑，非空 = 绑到该组；组必须属于该点位所在设备",
 			"status":         "1 启用 0 停用；省略/null = 不改",
 		}),
 	},
@@ -223,6 +225,52 @@ var agentApiSurface = map[string]SurfaceEntry{
 			argFormStr("deviceId", true, "这些点位挂在哪台设备下（普通表单字段，不是文件）"),
 		),
 		Note: "multipart 上传，**没有 JSON 请求体**；通用数据类型接受「单精度浮点（Float）」/中文名/code，读写权限接受「只读（R）」/只读/R，扫描频率接受 500 或 500（0.5 秒）",
+	},
+	"POST /deviceAddress/batchAssignCollectorGroup": {
+		Access: AccessWrite,
+		Params: argBody(dto.BatchAssignCollectorGroupDTO{}, map[string]string{
+			"deviceId": "分配范围的前置约束：ids 必须属于这台设备才会被更新",
+			"groupId":  "目标采集组 id；**空串 = 解绑**（点位回到按 scanFrequency 采集）",
+			"ids":      "点位 id，最多 200 条；个别不存在/不属于该设备时跳过，结果里的 assigned 可能小于 requested",
+		}),
+		Note: "绑定后采集周期由组决定，点位自身的 scanFrequency 不生效",
+	},
+
+	// ==================== 采集组 ====================
+	"GET /collectorGroup/pageCollectorGroup": {
+		Access: AccessRead,
+		Params: argQuery(dto.PageCollectorGroupDTO{}, map[string]string{
+			"deviceId": "所属设备 id",
+		}),
+	},
+	"GET /collectorGroup/getCollectorGroupById/:id": {Access: AccessRead, Params: argNone()},
+	"GET /collectorGroup/listCollectorGroups": {
+		Access: AccessRead,
+		Params: argQuery(dto.ListCollectorGroupsDTO{}, map[string]string{
+			"deviceId": "可选；不传返回全部设备的组（推送通道订阅选择器跨设备使用）",
+		}),
+	},
+	"POST /collectorGroup/createCollectorGroup": {
+		Access: AccessWrite,
+		Params: argBody(dto.CreateCollectorGroupDTO{}, map[string]string{
+			"intervalMs": "采集周期（毫秒，100-600000）；对绑定到该组的点位权威",
+			"name":       "组名；会进入 MQTT 主题，不能含 / + #，不能是保留字 legacy",
+		}),
+	},
+	"POST /collectorGroup/updateCollectorGroup": {
+		Access: AccessWrite,
+		Params: argBody(dto.UpdateCollectorGroupDTO{}, map[string]string{
+			"name":        "不传/空 = 不改",
+			"intervalMs":  "<=0 = 不改；>0 时须在 100-600000 毫秒内",
+			"description": "**无条件覆盖**：空串会清空描述",
+			"status":      "1 启用 0 停用；省略/null = 不改。停用后绑定到该组的点位不再采集",
+		}),
+		Note: "组不能换设备（device_id 创建后不可改）",
+	},
+	"GET /collectorGroup/deleteCollectorGroup/:id": {
+		Access: AccessWrite,
+		Params: argNone(),
+		Note:   "**用 GET 实现**。组仍被点位绑定时拒绝删除，必须先解绑",
 	},
 
 	// ==================== 物模型 ====================

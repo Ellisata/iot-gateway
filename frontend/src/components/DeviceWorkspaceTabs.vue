@@ -31,6 +31,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   IconActivityHeartbeat as ActivityHeartbeat,
+  IconLayersLinked as LayersLinked,
   IconMapPin as MapPin,
 } from '@tabler/icons-vue'
 import { useI18n } from 'vue-i18n'
@@ -47,6 +48,7 @@ const router = useRouter()
 
 const tabs = [
   { name: 'GatewayDeviceAddress', labelKey: 'deviceWorkspace.tabs.address', icon: MapPin },
+  { name: 'GatewayCollectorGroup', labelKey: 'deviceWorkspace.tabs.groups', icon: LayersLinked },
   { name: 'GatewayRealtime', labelKey: 'deviceWorkspace.tabs.realtime', icon: ActivityHeartbeat },
 ]
 

@@ -33,7 +33,7 @@ func TestEngineWatchLoopHotReload(t *testing.T) {
 		// 在 engine.Stop 之后关闭（defer 逆序执行，此 defer 先注册、后执行）
 		defer sqlDB.Close()
 	}
-	for _, m := range []interface{}{&po.Device{}, &po.DeviceAddress{}, &po.IotProtocol{}} {
+	for _, m := range []interface{}{&po.Device{}, &po.DeviceAddress{}, &po.IotProtocol{}, &po.CollectorGroup{}} {
 		if err := db.AutoMigrate(m); err != nil {
 			t.Fatalf("migrate: %v", err)
 		}
@@ -112,7 +112,7 @@ func newWatchTestDB(t *testing.T) *gorm.DB {
 		sqlDB.SetMaxOpenConns(1)
 		t.Cleanup(func() { sqlDB.Close() })
 	}
-	for _, m := range []interface{}{&po.Device{}, &po.DeviceAddress{}, &po.IotProtocol{}} {
+	for _, m := range []interface{}{&po.Device{}, &po.DeviceAddress{}, &po.IotProtocol{}, &po.CollectorGroup{}} {
 		if err := db.AutoMigrate(m); err != nil {
 			t.Fatalf("migrate: %v", err)
 		}

@@ -42,6 +42,10 @@ type mqttConfig struct {
 	// SpoolMaxBatches 本地缓存最大批次上限（可选，缺省/≤0 用 defaultSpoolMaxBatches）。
 	// 达到上限后裁剪最旧批次以约束磁盘占用。
 	SpoolMaxBatches int `json:"spoolMaxBatches"`
+
+	// GroupIDs 采集组订阅：空 = 接收全部（含未分组记录）；非空 = 只接收这些组，
+	// 未分组记录（groupID == ""）不接收。用于把不同组分流到不同通道/主题。
+	GroupIDs []string `json:"groupIds,omitempty"`
 }
 
 // spoolEnabled 本地缓存是否启用（缺省启用，仅显式 spoolDisabled=true 时关闭）。
@@ -108,7 +112,30 @@ func parseConfig(configJSON string) (*mqttConfig, error) {
 	if cfg.Topic == "" {
 		return nil, fmt.Errorf("mqtt: config topic is required")
 	}
+	cfg.GroupIDs = normalizeGroupIDs(cfg.GroupIDs)
 	return &cfg, nil
+}
+
+// normalizeGroupIDs 去掉空白项与重复项（保持原顺序），避免订阅集合里出现
+// 永远匹配不到的空字符串或在判据里反复比较同一个 id。
+func normalizeGroupIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }
 
 // brokerURL 构建 broker 连接地址
@@ -124,18 +151,35 @@ func (c *mqttConfig) brokerURL() string {
 	return fmt.Sprintf("tcp://%s:%s", c.Broker, port)
 }
 
-// buildTopics 根据配置主题模板与设备 ID 生成实际发布主题
+// buildTopics 根据配置主题模板生成实际发布主题。
 //
-// MQTT 发布禁止含通配符（+/#）的主题，因此把配置中的 + 替换为设备 ID
-// （如 /IIoT/+/+/read → /IIoT/{deviceId}/{deviceId}/read），接收端订阅
-// /IIoT/+/+/read 仍可收到全量。逗号分隔视作多个主题分别发布。
-func buildTopics(template, deviceID string) []string {
+// MQTT 发布禁止含通配符（+/#）的主题，因此：
+//   - 旧语义：配置中的 + 替换为设备 ID（如 /IIoT/+/+/read →
+//     /IIoT/{deviceId}/{deviceId}/read），接收端订阅 /IIoT/+/+/read 仍可收到全量；
+//   - 新增命名占位符：${deviceId}、${group}（组名）、${groupId}。
+//     未分组批次（legacy）的 ${group} 与 ${groupId} 都替换为 "legacy"。
+//
+// 替换顺序必须是 ${deviceId} → ${groupId} → ${group}：${group} 是 ${groupId}
+// 的前缀，先换它会留下一个多余的大括号。
+// 逗号分隔视作多个主题分别发布。
+func buildTopics(template, deviceID, groupName, groupID string) []string {
+	groupToken := groupName
+	if groupToken == "" {
+		groupToken = "legacy"
+	}
+	groupIDToken := groupID
+	if groupIDToken == "" {
+		groupIDToken = "legacy"
+	}
 	var topics []string
 	for _, t := range strings.Split(template, ",") {
 		t = strings.TrimSpace(t)
 		if t == "" {
 			continue
 		}
+		t = strings.ReplaceAll(t, "${deviceId}", deviceID)
+		t = strings.ReplaceAll(t, "${groupId}", groupIDToken)
+		t = strings.ReplaceAll(t, "${group}", groupToken)
 		topics = append(topics, strings.ReplaceAll(t, "+", deviceID))
 	}
 	return topics
