@@ -7,7 +7,7 @@ import request from '@/api'
  * 获取设备对象列表（分页）
  * @param {Object} params - 查询参数
  * @param {string} params.iotGatewayId - 网关 ID
- * @param {string} [params.name] - 按名称搜索（可选）
+ * @param {string} [params.name] - 按名称或扫描身份（scanIdentity）模糊搜索（可选）
  * @param {number} params.page - 页码（从 1 开始）
  * @param {number} params.size - 每页条数
  * @returns {Promise}

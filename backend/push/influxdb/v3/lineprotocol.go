@@ -64,9 +64,10 @@ func (lb *lineBuilder) appendBatch(collectedAt string, records []collector.Colle
 			ts = collectedAtMillis(r.CollectedAt)
 		}
 		if r.DeviceID != lb.curDevice {
-			// 设备切换(批间,或防御性批内):重建常量前缀,去重按 (设备,地址) 重新计数
+			// 设备切换(批间,或防御性批内):重建常量前缀,去重按 (设备,地址) 重新计数。
+			// 物模型编码与设备绑定,同属这一前缀(同一设备在同一批次里编码恒定)。
 			lb.curDevice = r.DeviceID
-			lb.prefix = linePrefix(lb.measurement, r.DeviceID)
+			lb.prefix = linePrefix(lb.measurement, r.DeviceID, r.ThingModelCode)
 			clear(lb.dedup)
 		}
 		if _, dup := lb.dedup[r.DeviceAddressID]; dup {
@@ -96,15 +97,22 @@ func (lb *lineBuilder) String() string {
 	return lb.sb.String()
 }
 
-// linePrefix 构建一行 Line Protocol 的常量前缀(measurement + device_id tag)。
-// 批内 device_id 恒定,前缀只构建一次;device_address_id 变化部分由 appendLine 逐点追加,
-// 避免每行重复转义常量 tag。
-func linePrefix(measurement, deviceID string) string {
-	return escapeMeasurement(measurement) + ",device_id=" + escapeTag(deviceID) + ",device_address_id="
+// linePrefix 构建一行 Line Protocol 的常量前缀(measurement + device_id 与物模型编码 tag)。
+// 批内 device_id 恒定,前缀只构建一次;device_address_id(与属性编码)变化部分由
+// appendLine 逐点追加,避免每行重复转义常量 tag。
+// 物模型编码为空(设备未绑定)时**不写这个 tag** —— 写成空串会在库里多出一个
+// 语义为"未绑定"的分组,查询时无法与"真的没有该维度"区分。
+func linePrefix(measurement, deviceID, modelCode string) string {
+	p := escapeMeasurement(measurement) + ",device_id=" + escapeTag(deviceID)
+	if modelCode != "" {
+		p += ",thing_model_code=" + escapeTag(modelCode)
+	}
+	return p + ",device_address_id="
 }
 
 // appendLine 将单条采集记录渲染进 sb(调用方提供复用缓冲),返回 ok=false 表示无法表示。
-// tag 仅稳定标识 device_id / device_address_id(名称可变不作 tag,与 tdengine 通道一致);
+// tag 仅稳定标识 device_id / device_address_id / thing_model_code / property_code
+// (名称可变不作 tag,与 tdengine 通道一致;后两个取自物模型绑定,未绑定时省略);
 // value 按 Kind 落到值族对应列(value_bool/value_int/value_float/value_str),每点只写
 // 命中的一列(其余列缺省即 null),value_kind 记录声明类别;quality 为整数
 // (driver.QualityXxx:类别在高 2 位、成因在低 6 位)。正常点位的行与引入成因那一维
@@ -119,6 +127,11 @@ func appendLine(sb *strings.Builder, prefix string, ts int64, r collector.Collec
 	sb.Reset()
 	sb.WriteString(prefix)
 	sb.WriteString(escapeTag(r.DeviceAddressID))
+	// 属性编码与点位绑定;未绑定时同样省略这个 tag(理由见 linePrefix)。
+	if r.PropertyCode != "" {
+		sb.WriteString(",property_code=")
+		sb.WriteString(escapeTag(r.PropertyCode))
+	}
 	sb.WriteByte(' ')
 
 	sb.WriteString(vv.col)
@@ -139,7 +152,7 @@ func appendLine(sb *strings.Builder, prefix string, ts int64, r collector.Collec
 // 经 appendLine 复用缓冲,不新建 Builder)。
 func buildLine(measurement string, ts int64, r collector.CollectedRecord) (string, bool) {
 	var sb strings.Builder
-	if !appendLine(&sb, linePrefix(measurement, r.DeviceID), ts, r) {
+	if !appendLine(&sb, linePrefix(measurement, r.DeviceID, r.ThingModelCode), ts, r) {
 		return "", false
 	}
 	return sb.String(), true

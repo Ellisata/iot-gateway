@@ -225,6 +225,8 @@ const schemaGroups = computed(() => {
         { name: 'protocol', type: 'string', desc: field('recordProtocol') },
         { name: 'quality', type: 'number', desc: field('recordQuality') },
         { name: 'collectedAt', type: 'string', desc: field('recordCollectedAt') },
+        { name: 'thingModelCode', type: 'string', desc: field('recordThingModelCode') },
+        { name: 'propertyCode', type: 'string', desc: field('recordPropertyCode') },
       ],
     },
   ]

@@ -101,14 +101,26 @@
           </template>
         </el-table-column>
 
-        <!-- 名称是这一行的身份：给一个小图标底座，让「一台设备」在滚动中可被一眼拾取 -->
+        <!-- 名称是这一行的身份：给一个小图标底座，让「一台设备」在滚动中可被一眼拾取。
+             扫描身份（协议|主机|端口|站号）作为第二行挂在名称下面，而不是单开一列：
+             页面宽度已顶到 1400 的版心上限，再加一列会让整张表永久横向滚动，
+             固定操作列又会盖住创建时间。空串 = 不是扫描建出来的，保持单行不占高度。 -->
         <el-table-column :label="t('common.name')" min-width="220">
           <template #default="{ row }">
             <div class="name-cell">
               <span class="name-mark" aria-hidden="true">
                 <el-icon><DeviceChip /></el-icon>
               </span>
-              <span class="name-text" :title="row.name">{{ row.name }}</span>
+              <div class="name-body">
+                <span class="name-text" :title="row.name">{{ row.name }}</span>
+                <span
+                  v-if="row.scanIdentity"
+                  class="scan-id-text"
+                  :title="row.scanIdentity"
+                >
+                  {{ row.scanIdentity }}
+                </span>
+              </div>
             </div>
           </template>
         </el-table-column>
@@ -125,6 +137,17 @@
               <span class="proto-chip">{{ row.protocolName }}</span>
             </el-tooltip>
             <span v-else class="cell-muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          v-if="!compact"
+          :label="t('deviceObject.thingModel')"
+          width="150"
+          show-overflow-tooltip
+        >
+          <template #default="{ row }">
+            <span v-if="row.modelName" class="proto-chip">{{ row.modelName }}</span>
+            <span v-else class="cell-muted">{{ t('deviceObject.unboundModel') }}</span>
           </template>
         </el-table-column>
         <el-table-column
@@ -278,6 +301,24 @@
               show-word-limit
             />
           </el-form-item>
+          <el-form-item :label="t('deviceObject.thingModel')" prop="modelId">
+            <el-select
+              v-model="formData.modelId"
+              :placeholder="t('deviceObject.modelPlaceholder')"
+              clearable
+              filterable
+              style="width: 100%"
+            >
+              <el-option
+                v-for="opt in modelOptions"
+                :key="opt.id"
+                :label="`${opt.name} (${opt.code})`"
+                :value="opt.id"
+                :disabled="opt.status !== 1"
+              />
+            </el-select>
+            <div class="iot-form-hint is-block">{{ t('deviceObject.modelHint') }}</div>
+          </el-form-item>
           <el-form-item :label="t('common.description')" prop="description">
             <el-input
               v-model="formData.description"
@@ -418,6 +459,7 @@ import {
   downloadDeviceTemplate,
 } from '@/api/modules/deviceObject'
 import { getProtocolById } from '@/api/modules/protocol'
+import { getThingModels } from '@/api/modules/thingModel'
 import ProtocolSelector from '@/components/ProtocolSelector.vue'
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
 import { useExcelImport } from '@/composables/useExcelImport'
@@ -437,6 +479,7 @@ function handleViewAddresses(row) {
     query: {
       deviceObjectName: row.name,
       protocolName: row.protocolName,
+      modelId: row.modelId || undefined,
     },
   })
 }
@@ -570,12 +613,24 @@ function stepPassed(step) {
 const formData = reactive({
   id: '',
   name: '',
+  modelId: '',
   protocol: '',
   protocolId: '',
   description: '',
   status: 1,
   protocolJson: '',
 })
+
+// 可绑定的物模型（停用的也返回，前端置灰；服务端仍会拒绝新绑定）。
+const modelOptions = ref([])
+
+async function fetchModelOptions() {
+  try {
+    modelOptions.value = (await getThingModels()) || []
+  } catch {
+    modelOptions.value = []
+  }
+}
 
 // ---------- 表单校验规则 ----------
 const formRules = {
@@ -775,6 +830,7 @@ function handleAdd() {
 
   formData.id = ''
   formData.name = ''
+  formData.modelId = ''
   formData.protocol = ''
   formData.protocolId = ''
   formData.description = ''
@@ -795,6 +851,7 @@ async function handleEdit(row) {
 
   formData.id = row.id
   formData.name = row.name
+  formData.modelId = row.modelId ?? ''
   // 列表/详情接口回传的协议字段是 protocolName，没有 protocol；
   // 取错字段会让 protocolSelected 为 false，第二步的协议参数区整块不渲染
   formData.protocol = row.protocolName ?? ''
@@ -804,6 +861,7 @@ async function handleEdit(row) {
   // 先获取完整详情（含 protocolConfig），保证在对话框打开前数据就绪
   try {
     const detail = await getDeviceObjectById(row.id)
+    formData.modelId = detail?.modelId ?? formData.modelId
     formData.protocolJson = detail?.protocolJson ?? ''
     formData.protocolId = detail?.protocolId ?? ''
     if (detail?.protocolName) formData.protocol = detail.protocolName
@@ -959,6 +1017,7 @@ async function handleSubmit() {
     const protocolConfig = collectProtocolConfig()
     const payload = {
       name: formData.name.trim(),
+      modelId: formData.modelId || '',
       protocolId: formData.protocolId,
       description: formData.description.trim() || undefined,
       status: formData.status,
@@ -996,6 +1055,7 @@ onMounted(() => {
     panelObserver.observe(panelRef.value)
   }
   fetchList()
+  fetchModelOptions()
 })
 
 onBeforeUnmount(() => {
@@ -1315,10 +1375,28 @@ onBeforeUnmount(() => {
   font-size: 15px;
 }
 
+.name-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .name-text {
   overflow: hidden;
   font-weight: 600;
   color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 扫描身份是技术标识：等宽小字压低存在感，不与名称争视觉主位 */
+.scan-id-text {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-4);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

@@ -53,6 +53,10 @@
           <el-icon><MenuIcon name="deviceObject" /></el-icon>
           <template #title>{{ t('menu.deviceObject') }}</template>
         </el-menu-item>
+        <el-menu-item index="/industrial/thing-model">
+          <el-icon><MenuIcon name="thingModel" /></el-icon>
+          <template #title>{{ t('menu.thingModel') }}</template>
+        </el-menu-item>
         <el-menu-item index="/industrial/device-scan">
           <el-icon><MenuIcon name="deviceScan" /></el-icon>
           <template #title>{{ t('menu.deviceScan') }}</template>

@@ -12,7 +12,9 @@ type CreateDeviceDTO struct {
 	Name         string          `json:"name" binding:"required,min=1,max=100"`
 	ProtocolID   string          `json:"protocolId" binding:"required"`
 	ProtocolJSON json.RawMessage `json:"protocolJson" binding:"required"`
-	Description  string          `json:"description"`
+	// ModelID 绑定的物模型 id，空串 = 未绑定。模型必须存在且启用。
+	ModelID     string `json:"modelId"`
+	Description string `json:"description"`
 }
 
 // UpdateDeviceDTO 更新设备请求
@@ -21,8 +23,12 @@ type UpdateDeviceDTO struct {
 	Name         string          `json:"name"`
 	ProtocolID   string          `json:"protocolId"`
 	ProtocolJSON json.RawMessage `json:"protocolJson"`
-	Description  string          `json:"description"`
-	Status       *int            `json:"status"`
+	// ModelID 三态：省略 = 不改；空串 = 解除绑定；非空 = 绑定到该模型。
+	// 用指针是因为平铺 string 下「没传」与「传空」都解码成零值，
+	// 旧客户端不带该字段时会被静默解绑。
+	ModelID     *string `json:"modelId"`
+	Description string  `json:"description"`
+	Status      *int    `json:"status"`
 }
 
 // TestDeviceConnectionDTO 测试设备连接请求
@@ -61,15 +67,18 @@ type DeviceAddressThresholdDTO struct {
 // commonDataType 为通用数据类型名，data_type 由服务端结合协议映射得出。
 // dataType 字段保留用于兼容旧请求（未传 commonDataType 时视为通用类型名）。
 type CreateDeviceAddressDTO struct {
-	DeviceID       string                     `json:"deviceId" binding:"required"`
-	Name           string                     `json:"name" binding:"required,min=1,max=100"`
-	Label          string                     `json:"label" binding:"required,min=1,max=100"` // 地址 name 的中文说明（如温度、电流）
-	CommonDataType string                     `json:"commonDataType"`
-	DataType       string                     `json:"dataType"` // 兼容旧请求，服务端映射后覆盖
-	RwPermission   string                     `json:"rwPermission" binding:"required,oneof=R W RW"`
-	ScanFrequency  int                        `json:"scanFrequency"`
-	Description    string                     `json:"description"`
-	Threshold      *DeviceAddressThresholdDTO `json:"threshold"`
+	DeviceID       string `json:"deviceId" binding:"required"`
+	Name           string `json:"name" binding:"required,min=1,max=100"`
+	Label          string `json:"label" binding:"required,min=1,max=100"` // 地址 name 的中文说明（如温度、电流）
+	CommonDataType string `json:"commonDataType"`
+	DataType       string `json:"dataType"` // 兼容旧请求，服务端映射后覆盖
+	RwPermission   string `json:"rwPermission" binding:"required,oneof=R W RW"`
+	ScanFrequency  int    `json:"scanFrequency"`
+	// PropertyID 绑定的物模型属性 id，空串 = 未绑定。
+	// 绑定时校验：设备已绑定该属性所属模型、kind 一致、读写权限覆盖。
+	PropertyID  string                     `json:"propertyId"`
+	Description string                     `json:"description"`
+	Threshold   *DeviceAddressThresholdDTO `json:"threshold"`
 }
 
 // UpdateDeviceAddressDTO 更新设备地址请求
@@ -77,16 +86,18 @@ type CreateDeviceAddressDTO struct {
 // Threshold 整个对象**可以省略**：不传 = 完全不动阈值配置（部分更新安全）；
 // 传了就整份覆盖。见 DeviceAddressThresholdDTO 的说明。
 type UpdateDeviceAddressDTO struct {
-	ID             string                     `json:"id" binding:"required"`
-	Name           string                     `json:"name"`
-	Label          string                     `json:"label" binding:"required,min=1,max=100"` // 地址 name 的中文说明（如温度、电流）
-	CommonDataType string                     `json:"commonDataType"`
-	DataType       string                     `json:"dataType"` // 兼容旧请求，服务端映射后覆盖
-	RwPermission   string                     `json:"rwPermission"`
-	ScanFrequency  int                        `json:"scanFrequency"`
-	Description    string                     `json:"description"`
-	Status         *int                       `json:"status"`
-	Threshold      *DeviceAddressThresholdDTO `json:"threshold"`
+	ID             string `json:"id" binding:"required"`
+	Name           string `json:"name"`
+	Label          string `json:"label" binding:"required,min=1,max=100"` // 地址 name 的中文说明（如温度、电流）
+	CommonDataType string `json:"commonDataType"`
+	DataType       string `json:"dataType"` // 兼容旧请求，服务端映射后覆盖
+	RwPermission   string `json:"rwPermission"`
+	ScanFrequency  int    `json:"scanFrequency"`
+	// PropertyID 三态：省略 = 不改；空串 = 解除绑定；非空 = 绑定到该属性。
+	PropertyID  *string                    `json:"propertyId"`
+	Description string                     `json:"description"`
+	Status      *int                       `json:"status"`
+	Threshold   *DeviceAddressThresholdDTO `json:"threshold"`
 }
 
 // BatchDeleteDeviceAddressDTO 批量删除设备地址请求
@@ -101,11 +112,11 @@ type BatchDeleteDeviceAddressDTO struct {
 
 // ==================== 通用分页 DTO ====================
 
-// PageDeviceDTO 设备分页查询（名称模糊检索）
+// PageDeviceDTO 设备分页查询（关键词模糊检索）
 type PageDeviceDTO struct {
 	Page int    `form:"page" binding:"required,min=1"`
 	Size int    `form:"size" binding:"required,min=1,max=100"`
-	Name string `form:"name"` // 设备名称（模糊查询）
+	Name string `form:"name"` // 匹配设备名称或扫描身份签名 scan_identity（模糊查询）
 }
 
 // PageDeviceAddressDTO 设备地址分页查询（按设备ID + 名称模糊检索）

@@ -61,6 +61,8 @@ func InitializeApp() (*AppDependencies, func()) {
 	deviceController := controller.NewDeviceController(deviceService)
 	deviceAddressService := service.NewDeviceAddressService(db, alarmService)
 	deviceAddressController := controller.NewDeviceAddressController(deviceAddressService)
+	thingModelService := service.NewThingModelService(db)
+	thingModelController := controller.NewThingModelController(thingModelService)
 	collectionService := service.NewCollectionService(collectorEngine)
 	collectionController := controller.NewCollectionController(collectionService)
 	realtimeService := service.NewRealtimeService(db, store, collectorEngine, deviceService)
@@ -98,7 +100,7 @@ func InitializeApp() (*AppDependencies, func()) {
 	systemConfigController := controller.NewSystemConfigController(systemConfigService)
 	dashboardService := service.NewDashboardService(recorder)
 	dashboardController := controller.NewDashboardController(dashboardService)
-	v := ProvideRouteOptions(manager, userController, deviceController, deviceAddressController, collectionController, realtimeController, protocolController, pushChannelController, pushChannelFormController, mqttSubscriptionController, pushController, alarmController, alarmWebhookController, alarmWebhookFormController, logFileController, openApiSecretController, openApiSecretService, openApiController, gatewayController, pluginController, deviceScanController, systemConfigController, dashboardController)
+	v := ProvideRouteOptions(manager, userController, deviceController, deviceAddressController, thingModelController, collectionController, realtimeController, protocolController, pushChannelController, pushChannelFormController, mqttSubscriptionController, pushController, alarmController, alarmWebhookController, alarmWebhookFormController, logFileController, openApiSecretController, openApiSecretService, openApiController, gatewayController, pluginController, deviceScanController, systemConfigController, dashboardController)
 	ginEngine := router.SetupRouter(v)
 	channelMonitor := alarm.NewChannelMonitor(db, engine, dispatcher)
 	announcer := discovery.NewAnnouncerWithPolicy(config, serviceGatewayService, openApiSecretService, manager)
@@ -178,6 +180,7 @@ func ProvideRouteOptions(
 	uc *controller.UserController,
 	dc *controller.DeviceController,
 	ac *controller.DeviceAddressController,
+	tmc *controller.ThingModelController,
 	cc *controller.CollectionController,
 	rc *controller.RealtimeController,
 	pc *controller.ProtocolController,
@@ -198,5 +201,5 @@ func ProvideRouteOptions(
 	scc *controller.SystemConfigController,
 	dbc *controller.DashboardController,
 ) []router.RouteOption {
-	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectionRoutes(cc), router.WithRealtimeRoutes(rc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithMqttSubscriptionRoutes(msc), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithAlarmWebhookRoutes(awc), router.WithAlarmWebhookFormRoutes(awfc), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac), router.WithGatewayRoutes(gc), router.WithPluginRoutes(plc), router.WithDeviceScanRoutes(dsc), router.WithSystemConfigRoutes(scc), router.WithDashboardRoutes(dbc), router.WithAgentApiRoutes(rcfg, uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc)}
+	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithThingModelRoutes(tmc), router.WithCollectionRoutes(cc), router.WithRealtimeRoutes(rc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithMqttSubscriptionRoutes(msc), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithAlarmWebhookRoutes(awc), router.WithAlarmWebhookFormRoutes(awfc), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac), router.WithGatewayRoutes(gc), router.WithPluginRoutes(plc), router.WithDeviceScanRoutes(dsc), router.WithSystemConfigRoutes(scc), router.WithDashboardRoutes(dbc), router.WithAgentApiRoutes(rcfg, uc, dc, ac, tmc, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc)}
 }

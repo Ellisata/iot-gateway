@@ -30,6 +30,13 @@ const routes = [
         meta: { titleKey: 'menu.dashboard', icon: 'Odometer' },
       },
       // ---- 工业物联网路由 ----
+      // 物模型管理挂在「工业物联网」菜单下，与设备/点位同域。
+      {
+        path: 'industrial/thing-model',
+        name: 'ThingModel',
+        component: () => import('@/views/industrial/thing-model/IndexView.vue'),
+        meta: { titleKey: 'menu.thingModel', icon: 'Box' },
+      },
       {
         path: 'industrial/device-object/:gatewayId?',
         name: 'GatewayDeviceObject',

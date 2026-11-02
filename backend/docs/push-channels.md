@@ -34,6 +34,19 @@
 
 非消息类通道（TDengine / InfluxDB）不接受 `format` / `mapping`。
 
+时序库通道把**设备的物模型编码与点位的属性编码**也作为 tag 写入：
+
+| 通道 | tag |
+|---|---|
+| `influxdb-v3` | `device_id`、`device_address_id`、`thing_model_code`、`property_code`（后两个未绑定时**省略**） |
+| `tdengine-v3` | 同上四个 tag（超级表 `TAGS`，未绑定时写空串） |
+
+TDengine 的超级表用 `CREATE STABLE IF NOT EXISTS` 建表：**已部署实例不会自动加 tag**，
+升级后需手动执行 `ALTER STABLE ... ADD TAG thing_model_code NCHAR(64)` 与
+`ALTER STABLE ... ADD TAG property_code NCHAR(64)`，否则写入会因 tag 数不符被判为毒批次
+并静默丢数据（启动日志会报出缺哪个 tag）。已有子表的新 tag 值为 NULL，新写入不会回填，
+需要时按子表 `ALTER TABLE ... SET TAG ...`。
+
 ## 3. 出站映射（mapping-json）
 
 ### 3.1 完整示例
@@ -94,6 +107,8 @@
 | `dataType` / `kind` / `protocol` | 协议内部类型、类型类别、协议名 |
 | `quality` | 质量码（整数） |
 | `collectedAt` | 采集时间；记录为空时回落为批次时间 |
+| `thingModelCode` | 设备绑定的物模型编码（`thing_model.code`）；未绑定为空串 |
+| `propertyCode` | 点位绑定的物模型属性标识符（`thing_model_property.identifier`）；未绑定为空串 |
 
 `batchFields` 额外可读：`deviceId`、`collectedAt`、`count`（本批记录数）。
 
@@ -164,9 +179,10 @@ HTTP 的 `emit=record` 会一个批次发多次请求。若其中一条失败并
 |---|---|
 | `batch.deviceId` | 批次设备 ID |
 | `batch.collectedAt` | 批次采集时间（可能为空） |
-| `batch.records[]` | 记录数组，字段与 CollectedRecord 一致：`deviceId`、`deviceName`、`deviceAddressId`、`deviceAddressName`、`deviceAddressLabel`、`value`、`dataType`、`kind`、`protocol`、`quality`、`collectedAt` |
+| `batch.records[]` | 记录数组，字段与 CollectedRecord 一致：`deviceId`、`deviceName`、`deviceAddressId`、`deviceAddressName`、`deviceAddressLabel`、`value`、`dataType`、`kind`、`protocol`、`quality`、`collectedAt`、`thingModelCode`、`propertyCode` |
 | `ctx.log(...)` | 写网关日志（每实例最多 100 行） |
 
+- `records[].collectedAt` 与 `batch.collectedAt` 遵循同一条回落规则：本地点位采集的记录级时间为空，此时取 `batch.collectedAt`（毫秒精度本地时间）。外部订阅记录带 `collectedAt` 时优先用记录自己的。
 - `value` 始终是**字符串**，不做 float64 中转，大整数不丢精度；需要算术时用 `Number(...)`。
 - 返回值：`string` 发送一条消息；`string[]` 发送多条消息；`null` / `undefined` 表示本批不发送。
 - 每次编码都新建 goja runtime，**不保留跨批次状态**。断网缓存会重放同一批次，脚本应对同一输入产出相同结果，不要依赖 `Date.now()` / `Math.random()`。

@@ -6,9 +6,11 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -55,6 +57,11 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req *dto.CreateDeviceD
 			return appError.NewAppErrorCtx(enums.DeviceExistsEnum.GetCode(), enums.DeviceExistsEnum.GetMessage(), enums.DeviceExistsEnum.GetMsgKey())
 		}
 
+		modelID := strings.TrimSpace(req.ModelID)
+		if err := ensureThingModelBindable(tx, modelID); err != nil {
+			return err
+		}
+
 		now := time.Now().Format("2006-01-02 15:04:05")
 		protocolJson := ""
 		if req.ProtocolJSON != nil {
@@ -64,6 +71,7 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req *dto.CreateDeviceD
 			Name:         req.Name,
 			ProtocolID:   req.ProtocolID,
 			ProtocolJSON: protocolJson,
+			ModelID:      modelID,
 			Description:  req.Description,
 			Status:       1,
 			CreatedAt:    now,
@@ -108,6 +116,27 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, req *dto.UpdateDeviceD
 		}
 
 		updates := make(map[string]interface{})
+		if req.ModelID != nil {
+			newModelID := strings.TrimSpace(*req.ModelID)
+			if newModelID != existing.ModelID {
+				// 已有点位绑定了属性时拒绝更换/解除模型：那些属性的归属就是当前模型，
+				// 直接换会留下「点位绑着另一个模型的属性」的悬空语义。
+				var bound int64
+				if err := tx.Model(&po.DeviceAddress{}).
+					Where("device_id = ? AND property_id <> ''", existing.ID).
+					Count(&bound).Error; err != nil {
+					return err
+				}
+				if bound > 0 {
+					return appError.NewAppErrorCtx(enums.ThingModelBindingLockedEnum.GetCode(),
+						enums.ThingModelBindingLockedEnum.GetMessage(), enums.ThingModelBindingLockedEnum.GetMsgKey())
+				}
+				if err := ensureThingModelBindable(tx, newModelID); err != nil {
+					return err
+				}
+				updates["model_id"] = newModelID
+			}
+		}
 		if req.Name != "" {
 			updates["name"] = req.Name
 		}
@@ -117,12 +146,20 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, req *dto.UpdateDeviceD
 		if req.ProtocolJSON != nil {
 			updates["protocol_json"] = protocolJson
 		}
-		// 连接配置或协议被改过，扫描身份签名就不再描述这台设备了 ——
+		// 连接配置或协议**真的变了**，扫描身份签名就不再描述这台设备了 ——
 		// 留着它会让"扫描建设备"对着一个过时的地址报警告，把用户引向一台
 		// 早已不连在那个地址上的设备。**清掉而不是重算**：重算得从 protocol_json
 		// 里认出地址，那些键名是插件自己声明的、不统一（理由见 po.Device.ScanIdentity）。
 		// 代价只是改过配置的设备不再参与地址判重 —— 漏报一种提示，好过误报。
-		if req.ProtocolJSON != nil || req.ProtocolID != "" {
+		//
+		// 判据不能是"请求里带了 protocolJson / protocolId"：编辑向导每次提交都会
+		// 固定带上这两个字段（哪怕只改了名字），照那个判会让改个描述就丢掉签名 ——
+		// 列表里不再显示、也不再参与扫描建库的地址判重。这里比的是**实际值**。
+		configChanged := req.ProtocolID != "" && req.ProtocolID != existing.ProtocolID
+		if req.ProtocolJSON != nil && !sameJSON(existing.ProtocolJSON, protocolJson) {
+			configChanged = true
+		}
+		if configChanged {
 			updates["scan_identity"] = ""
 		}
 		if req.Description != "" {
@@ -150,6 +187,25 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, req *dto.UpdateDeviceD
 		}
 	}
 	return nil
+}
+
+// sameJSON 判断两段 JSON 是否**语义**相等（键顺序、空白、数字写法都不影响结果）。
+//
+// 用于判断设备的连接配置有没有被真正改动：编辑向导把库里的 protocol_json
+// 回填进 form-create 再收集回来，键顺序与空白都可能变，字符串比较会把
+// "原样提交"误判成"改过"。
+//
+// 任一侧解析失败时退化为字符串比较：存了坏数据时宁可判"变了"（清掉扫描身份），
+// 也不能因为比较函数吞掉错误而留下一份过时的签名。
+func sameJSON(a, b string) bool {
+	var va, vb any
+	if err := json.Unmarshal([]byte(a), &va); err != nil {
+		return strings.TrimSpace(a) == strings.TrimSpace(b)
+	}
+	if err := json.Unmarshal([]byte(b), &vb); err != nil {
+		return strings.TrimSpace(a) == strings.TrimSpace(b)
+	}
+	return reflect.DeepEqual(va, vb)
 }
 
 // DeleteDevice 删除设备
@@ -249,6 +305,9 @@ func (s *DeviceService) GetDeviceByID(ctx context.Context, id string) (*vo.Devic
 		ProtocolID:      device.ProtocolID,
 		ProtocolName:    protocolName,
 		ProtocolJSON:    device.ProtocolJSON,
+		ModelID:         device.ModelID,
+		ModelName:       s.getThingModelName(ctx, device.ModelID),
+		ScanIdentity:    device.ScanIdentity,
 		Description:     device.Description,
 		Status:          device.Status,
 		Online:          online,
@@ -457,12 +516,16 @@ func describeHolders(names []string) string {
 	return b.String()
 }
 
-// PageDevice 设备分页查询（支持名称模糊检索）
+// PageDevice 设备分页查询（关键词可按名称或扫描身份签名模糊检索）
+//
+// 两个字段一起匹配而不是拆成两个参数：前端只有一个搜索框，用户输入的是
+// "IP/站号"还是"设备名"从形态上就能看出来，不需要他先选检索字段。
 func (s *DeviceService) PageDevice(ctx context.Context, req *dto.PageDeviceDTO) (*response.PageVo[vo.DeviceVO], error) {
 	db := s.sqliteDB.WithContext(ctx).Model(&po.Device{})
 
 	if req.Name != "" {
-		db = db.Where("name LIKE ?", "%"+req.Name+"%")
+		pattern := "%" + req.Name + "%"
+		db = db.Where("name LIKE ? OR scan_identity LIKE ?", pattern, pattern)
 	}
 
 	var total int64
@@ -501,6 +564,8 @@ func (s *DeviceService) toDeviceVOs(ctx context.Context, devices []po.Device) []
 		}
 	}
 
+	modelNames := s.thingModelNames(ctx, devices)
+
 	records := make([]vo.DeviceVO, len(devices))
 	for i, d := range devices {
 		records[i] = vo.DeviceVO{
@@ -509,6 +574,9 @@ func (s *DeviceService) toDeviceVOs(ctx context.Context, devices []po.Device) []
 			ProtocolID:      d.ProtocolID,
 			ProtocolName:    s.getProtocolName(ctx, d.ProtocolID),
 			ProtocolJSON:    d.ProtocolJSON,
+			ModelID:         d.ModelID,
+			ModelName:       modelNames[d.ModelID],
+			ScanIdentity:    d.ScanIdentity,
 			Description:     d.Description,
 			Status:          d.Status,
 			Online:          !offlineSet[d.ID],
@@ -572,6 +640,66 @@ func (s *DeviceService) getProtocolName(ctx context.Context, protocolID string) 
 		return ""
 	}
 	return protocol.Name
+}
+
+// ensureThingModelBindable 校验物模型存在且启用。空串表示“不绑定”，直接通过。
+func ensureThingModelBindable(db *gorm.DB, modelID string) error {
+	if modelID == "" {
+		return nil
+	}
+	var model po.ThingModel
+	if err := db.Where("id = ?", modelID).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return appError.NewAppErrorCtx(enums.ThingModelNotExistsEnum.GetCode(),
+				enums.ThingModelNotExistsEnum.GetMessage(), enums.ThingModelNotExistsEnum.GetMsgKey())
+		}
+		return err
+	}
+	if model.Status != 1 {
+		return appError.NewAppErrorCtx(enums.ThingModelDisabledEnum.GetCode(),
+			enums.ThingModelDisabledEnum.GetMessage(), enums.ThingModelDisabledEnum.GetMsgKey())
+	}
+	return nil
+}
+
+// getThingModelName 查物模型显示名；空 id 或查不到返回空串。
+func (s *DeviceService) getThingModelName(ctx context.Context, modelID string) string {
+	if modelID == "" {
+		return ""
+	}
+	var model po.ThingModel
+	if err := s.sqliteDB.WithContext(ctx).Select("name").Where("id = ?", modelID).First(&model).Error; err != nil {
+		return ""
+	}
+	return model.Name
+}
+
+// thingModelNames 一次性取这批设备引用的物模型名，避免列表页逐台查询。
+func (s *DeviceService) thingModelNames(ctx context.Context, devices []po.Device) map[string]string {
+	out := make(map[string]string)
+	ids := make([]string, 0, len(devices))
+	seen := make(map[string]struct{}, len(devices))
+	for _, d := range devices {
+		if d.ModelID == "" {
+			continue
+		}
+		if _, ok := seen[d.ModelID]; ok {
+			continue
+		}
+		seen[d.ModelID] = struct{}{}
+		ids = append(ids, d.ModelID)
+	}
+	if len(ids) == 0 {
+		return out
+	}
+	var models []po.ThingModel
+	if err := s.sqliteDB.WithContext(ctx).Select("id", "name").Where("id IN ?", ids).Find(&models).Error; err != nil {
+		return out
+	}
+	for _, m := range models {
+		out[m.ID] = m.Name
+	}
+	return out
 }
 
 // GetDeviceOverview 统计设备在线情况（只读聚合，无写库）。

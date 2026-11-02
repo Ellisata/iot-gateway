@@ -156,7 +156,7 @@ func (e *Encoder) Encode(b push.PushBatch) ([]push.EncodedMessage, error) {
 	_ = batchObj.Set("collectedAt", b.CollectedAt)
 	records := make([]map[string]any, len(b.Records))
 	for i := range b.Records {
-		records[i] = recordMap(b.Records[i])
+		records[i] = recordMap(b.Records[i], b.CollectedAt)
 	}
 	_ = batchObj.Set("records", vm.ToValue(records))
 
@@ -199,7 +199,15 @@ func (e *Encoder) Encode(b push.PushBatch) ([]push.EncodedMessage, error) {
 
 // recordMap 暴露给脚本的记录字段与 CollectedRecord 的 JSON 口径一致。
 // value 保持字符串，脚本要做算术需自行 Number(...)，避免经 float64 丢精度。
-func recordMap(r collector.CollectedRecord) map[string]any {
+//
+// collectedAt 与 native-json / mapping-json 同一条回落规则：本地点位采集的记录级
+// 时间为空（时间只在批次上），此时回落为 batch.collectedAt。三个格式对同一字段
+// 给出两种答案，脚本作者只会以为时间没采到。
+func recordMap(r collector.CollectedRecord, batchAt string) map[string]any {
+	at := r.CollectedAt
+	if at == "" {
+		at = batchAt
+	}
 	return map[string]any{
 		"deviceId":           r.DeviceID,
 		"deviceName":         r.DeviceName,
@@ -211,7 +219,9 @@ func recordMap(r collector.CollectedRecord) map[string]any {
 		"kind":               r.Kind,
 		"protocol":           r.Protocol,
 		"quality":            int64(r.Quality),
-		"collectedAt":        r.CollectedAt,
+		"collectedAt":        at,
+		"thingModelCode":     r.ThingModelCode,
+		"propertyCode":       r.PropertyCode,
 	}
 }
 

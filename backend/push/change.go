@@ -14,11 +14,15 @@ import (
 //
 // 语义只有三条：
 //   - 没有上次记录（首轮、重启后、通道重建后）→ 投递；
-//   - 值或质量码任一不同 → 投递；
-//   - 两者都相同 → 跳过。
+//   - 值、质量码或物模型/属性编码任一不同 → 投递；
+//   - 全都相同 → 跳过。
 //
 // 质量码参与比较是刻意的：点位读数从正常（192）掉到"坏"（<128）时 value 可能是
 // 同一个占位串，只看值会让下游完全看不到这次状态变化。
+//
+// 物模型编码 / 属性编码参与比较同样是刻意的：它们会作为时序库 tag 落库，改绑定
+// 等于换了下游的语义身份。不参与比较的话，稳定不变的点位在重新绑定后永远等不到
+// 一条带新 tag 的记录（要等值变化），新 tag 的 series 一直缺数。
 //
 // 键为 (deviceID, deviceAddressID)。地址 ID 是库里的 UUID，本身全局唯一，带上设备 ID
 // 只是为了防御外部来源或历史数据里出现重复地址 ID。**缺失任一 ID 的记录一律透传**：
@@ -46,10 +50,13 @@ type changeKey struct {
 
 // changeState 一次投递的点位事实。只放参与比较的字段：
 // 名称、说明、数据类型变了但值没变时不算"点位数据变化"，
-// 因此改个点位名不会触发一轮全量重推。
+// 因此改个点位名不会触发一轮全量重推。物模型/属性编码是例外 —— 它们是对外的
+// 语义身份（时序库 tag），换了必须投递一次（理由见 changeTracker 的说明）。
 type changeState struct {
-	value   string
-	quality int
+	value          string
+	quality        int
+	thingModelCode string
+	propertyCode   string
 }
 
 func newChangeTracker() *changeTracker {
@@ -77,7 +84,12 @@ func (c *changeTracker) filter(records []collector.CollectedRecord) []collector.
 			continue
 		}
 		key := changeKey{deviceID: r.DeviceID, addressID: r.DeviceAddressID}
-		state := changeState{value: r.Value, quality: r.Quality}
+		state := changeState{
+			value:          r.Value,
+			quality:        r.Quality,
+			thingModelCode: r.ThingModelCode,
+			propertyCode:   r.PropertyCode,
+		}
 		if prev, ok := c.last[key]; ok && prev == state {
 			continue
 		}

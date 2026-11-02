@@ -185,3 +185,21 @@ func TestBatchFieldsOnlyDefaultsEnvelope(t *testing.T) {
 		t.Errorf("payload mismatch:\n got: %s\nwant: %s", got, want)
 	}
 }
+
+// TestThingModelCodesInDoc 物模型编码 / 属性编码是出站映射可读的记录字段；
+// 未绑定时值为空串（路径存在、不报错），便于客户按需输出。
+func TestThingModelCodesInDoc(t *testing.T) {
+	enc := mustEncoder(t, `{"version":1,"fields":{
+		"model": {"source":"path","value":"thingModelCode"},
+		"prop":  {"source":"path","value":"propertyCode"}
+	}}`)
+	b := sampleBatch()
+	b.Records[0].ThingModelCode = "th_sensor"
+	b.Records[0].PropertyCode = "temperature"
+
+	got := encodeOne(t, enc, b)
+	want := `[{"model":"th_sensor","prop":"temperature"},{"model":"","prop":""}]`
+	if got != want {
+		t.Errorf("payload mismatch:\n got: %s\nwant: %s", got, want)
+	}
+}

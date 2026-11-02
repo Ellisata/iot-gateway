@@ -32,13 +32,15 @@ The MQTT channel pushes grouped **per device**; the payload is a JSON array wher
     "dataType": "word",
     "kind": "uint",
     "quality": 192,
-    "collectedAt": "2026-08-19 16:39:47.864"
+    "collectedAt": "2026-08-19 16:39:47.864",
+    "thingModelCode": "th_ac",
+    "propertyCode": "temperature"
   }
 ]
 ```
 
-> **Delivery cadence (change-only push)**: `push.changeOnly` ships as true. When both
-> `value` and `quality` of a point are unchanged since its last **actual delivery**, the
+> **Delivery cadence (change-only push)**: `push.changeOnly` ships as true. When
+> `value`, `quality` and the thing-model/property codes of a point are all unchanged since its last **actual delivery**, the
 > point is omitted from this round — downstream must not treat "a record arrived" as a
 > device heartbeat (use device-disconnection alarms for liveness). The first round after
 > gateway startup, or after a push channel is added/reconfigured, is always a full
@@ -58,6 +60,14 @@ The MQTT channel pushes grouped **per device**; the payload is a JSON array wher
 | `kind` | string | Data-kind category (one of the 6 kinds); the **single source of truth** for parsing `value` |
 | `quality` | int | Collection quality code (`driver.QualityXxx`; class in the top 2 bits, cause in the low 6): 192 = good, 128 = uncertain but usable, 0 = bad/unclassified, 1 = bad·address, 2 = bad·comms, 3 = bad·decode. **Test for "bad" with `quality < 128`, not `quality == 0`** (a bad code is written when a ranged read fails, with an empty `value`) |
 | `collectedAt` | string | Collection time, format `2006-01-02 15:04:05.000` (millisecond precision), **local time zone** |
+| `thingModelCode` | string | Thing model code bound to the device (`thing_model.code`); empty string when unbound. Immutable after creation, so it is a stable dimension |
+| `propertyCode` | string | Thing model property identifier bound to the point (`thing_model_property.identifier`); empty string when unbound. Binding validates that the property belongs to the device's model |
+
+`thingModelCode` / `propertyCode` are **appended fields** (at the end of the JSON); the name,
+order and value of existing fields stay byte-for-byte unchanged. Both fields are always
+present and fall back to an empty string when unbound. Records produced by external MQTT
+subscriptions have no local binding, so they are empty there too.
+The TSDB channels (TDengine / InfluxDB) write both as tags (`thing_model_code` / `property_code`).
 
 ## 3. Parsing `value`: dispatch by `kind`
 

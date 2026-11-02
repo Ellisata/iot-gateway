@@ -5,12 +5,19 @@ package vo
 
 // DeviceVO 设备响应
 type DeviceVO struct {
-	ID              string `json:"id"`
-	IotGatewayID    string `json:"iotGatewayId"`
-	Name            string `json:"name"`
-	ProtocolID      string `json:"protocolId"`
-	ProtocolName    string `json:"protocolName"`
-	ProtocolJSON    string `json:"protocolJson"`
+	ID           string `json:"id"`
+	IotGatewayID string `json:"iotGatewayId"`
+	Name         string `json:"name"`
+	ProtocolID   string `json:"protocolId"`
+	ProtocolName string `json:"protocolName"`
+	ProtocolJSON string `json:"protocolJson"`
+	// ModelID / ModelName 绑定的物模型（空串 = 未绑定）。
+	ModelID   string `json:"modelId"`
+	ModelName string `json:"modelName"`
+	// ScanIdentity 扫描来源身份签名（`协议|主机|端口|站号`），空串 = 这台设备
+	// 不是扫描建出来的（或建成后改过连接配置）。语义与写入规则见
+	// po.Device.ScanIdentity —— 对外只读展示，不能拿来当作设备地址使用。
+	ScanIdentity    string `json:"scanIdentity"`
 	Description     string `json:"description"`
 	Status          int    `json:"status"`
 	Online          bool   `json:"online"`          // 当前是否在线（无 active 断联报警）
@@ -36,18 +43,23 @@ type DeviceOverviewVO struct {
 // 报警条件三列是**平铺**的（而 DTO 里是嵌套对象）：VO 是表格行的投影，其余字段都是平铺的；
 // DTO 之所以嵌套只是因为输入需要「整块未传」这一态。这个不对称是刻意的。
 type DeviceAddressVO struct {
-	ID               string `json:"id"`
-	DeviceID         string `json:"deviceId"`
-	Name             string `json:"name"`
-	Label            string `json:"label"` // 地址 name 的中文说明（如温度、电流）
-	CommonDataType   string `json:"commonDataType"`
-	DataType         string `json:"dataType"`
-	RwPermission     string `json:"rwPermission"`
-	ScanFrequency    int    `json:"scanFrequency"`
-	Description      string `json:"description"`
-	Status           int    `json:"status"`
-	ThresholdEnabled int    `json:"thresholdEnabled"` // 0/1
-	ThresholdOp      string `json:"thresholdOp"`      // range|gt|ge|lt|le|eq|ne|in
+	ID       string `json:"id"`
+	DeviceID string `json:"deviceId"`
+	// PropertyID 绑定的物模型属性 id（空串 = 未绑定）。
+	// PropertyIdentifier / PropertyName 是展示用的冗余字段，由服务层按 id 补全。
+	PropertyID         string `json:"propertyId"`
+	PropertyIdentifier string `json:"propertyIdentifier"`
+	PropertyName       string `json:"propertyName"`
+	Name               string `json:"name"`
+	Label              string `json:"label"` // 地址 name 的中文说明（如温度、电流）
+	CommonDataType     string `json:"commonDataType"`
+	DataType           string `json:"dataType"`
+	RwPermission       string `json:"rwPermission"`
+	ScanFrequency      int    `json:"scanFrequency"`
+	Description        string `json:"description"`
+	Status             int    `json:"status"`
+	ThresholdEnabled   int    `json:"thresholdEnabled"` // 0/1
+	ThresholdOp        string `json:"thresholdOp"`      // range|gt|ge|lt|le|eq|ne|in
 	// ThresholdValue 操作数的 JSON 数组字符串（如 ["10","40"]），由前端自行解析展示 ——
 	// 与库里存的原样一致，不做二次包装（包装成对象会让 PO→VO 的映射多一层无谓转换）。
 	ThresholdValue string `json:"thresholdValue"`

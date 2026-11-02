@@ -111,6 +111,26 @@ var (
 	// 混用会让用户去错误的地方找原因。
 	DevicePointScanUnsupportedEnum = NewBusinessEnum("40027", "该协议不支持点位扫描", "err.device_point_scan_unsupported")
 
+	// 物模型相关错误码（归属设备域，沿用 4000x 分段）
+	ThingModelExistsEnum                 = NewBusinessEnum("41001", "物模型标识或名称已存在", "err.thing_model_exists")
+	ThingModelNotExistsEnum              = NewBusinessEnum("41002", "物模型不存在", "err.thing_model_not_found")
+	ThingModelPropertyExistsEnum         = NewBusinessEnum("41003", "属性标识符已存在", "err.thing_model_property_exists")
+	ThingModelPropertyNotExistsEnum      = NewBusinessEnum("41004", "物模型属性不存在", "err.thing_model_property_not_found")
+	ThingModelInUseEnum                  = NewBusinessEnum("41005", "物模型已被设备绑定，不能删除", "err.thing_model_in_use")
+	ThingModelPropertyInUseEnum          = NewBusinessEnum("41006", "属性已被点位绑定，不能删除", "err.thing_model_property_in_use")
+	ThingModelCodeInvalidEnum            = NewBusinessEnum("41007", "物模型标识不合法（字母开头，仅字母数字下划线短横线）", "err.thing_model_code_invalid")
+	ThingModelIdentifierInvalidEnum      = NewBusinessEnum("41008", "属性标识符不合法（字母开头，仅字母数字下划线）", "err.thing_model_identifier_invalid")
+	ThingModelIdentifierImmutableEnum    = NewBusinessEnum("41009", "属性标识符不可修改", "err.thing_model_identifier_immutable")
+	ThingModelCategoryInvalidEnum        = NewBusinessEnum("41010", "物模型分类不合法", "err.thing_model_category_invalid")
+	ThingModelCodeImmutableEnum          = NewBusinessEnum("41011", "物模型标识不可修改", "err.thing_model_code_immutable")
+	ThingModelDisabledEnum               = NewBusinessEnum("41012", "物模型已停用，不能绑定", "err.thing_model_disabled")
+	ThingModelBindingLockedEnum          = NewBusinessEnum("41013", "设备点位已绑定属性，请先解除绑定再更换物模型", "err.thing_model_binding_locked")
+	ThingModelBindingMismatchEnum        = NewBusinessEnum("41014", "设备未绑定该属性所属的物模型", "err.thing_model_binding_mismatch")
+	ThingModelPropertyDisabledEnum       = NewBusinessEnum("41015", "属性已停用，不能绑定", "err.thing_model_property_disabled")
+	ThingModelKindMismatchEnum           = NewBusinessEnum("41016", "点位数据类型与属性类型不一致", "err.thing_model_kind_mismatch")
+	ThingModelAccessMismatchEnum         = NewBusinessEnum("41017", "点位读写权限不覆盖属性读写模式", "err.thing_model_access_mismatch")
+	ThingModelPropertyBoundImmutableEnum = NewBusinessEnum("41018", "属性已被点位绑定，不能修改数据类型或读写模式", "err.thing_model_property_bound_immutable")
+
 	// 数据推送通道相关错误码
 	PushChannelExistsEnum      = NewBusinessEnum("60001", "数据推送通道名称已存在", "err.push_channel_exists")
 	PushChannelNotExistsEnum   = NewBusinessEnum("60002", "数据推送通道不存在", "err.push_channel_not_found")

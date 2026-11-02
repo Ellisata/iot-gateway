@@ -15,10 +15,12 @@ type Device struct {
 	Name         string `gorm:"column:name;uniqueIndex;not null" json:"name"`
 	ProtocolID   string `gorm:"column:protocol_id;not null" json:"protocolId"`
 	ProtocolJSON string `gorm:"column:protocol_json;not null" json:"protocolJson"`
-	Description  string `gorm:"column:description" json:"description"`
-	Status       int    `gorm:"column:status;default:1" json:"status"`
-	CreatedAt    string `gorm:"column:created_at" json:"createdAt"`
-	UpdatedAt    string `gorm:"column:updated_at" json:"updatedAt"`
+	// ModelID 绑定的物模型 ID（thing_model.id）。空串 = 未绑定。
+	ModelID     string `gorm:"column:model_id;not null;default:'';index:idx_device_model" json:"modelId"`
+	Description string `gorm:"column:description" json:"description"`
+	Status      int    `gorm:"column:status;default:1" json:"status"`
+	CreatedAt   string `gorm:"column:created_at" json:"createdAt"`
+	UpdatedAt   string `gorm:"column:updated_at" json:"updatedAt"`
 
 	// ScanIdentity 扫描来源身份签名（`协议|主机|端口|站号`，见
 	// service.scanIdentityOf），用来回答"设备表里是不是已经有一台设备连在

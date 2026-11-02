@@ -31,6 +31,12 @@ type PushPoint struct {
 	// 注意坏点位不再是 0：判"坏"要写 quality < 128，不能写 quality == 0。
 	Quality     int    `json:"quality"`
 	CollectedAt string `json:"collectedAt"`
+	// ThingModelCode 设备绑定的物模型编码（thing_model.code），未绑定为空串。
+	// PropertyCode 点位绑定的物模型属性标识符（thing_model_property.identifier），
+	// 未绑定为空串。两者**追加在末尾**：既有字段的顺序与取值逐字节不变，下游按
+	// 字段名读取不受影响（见 nativejson 包头的字节契约说明）。
+	ThingModelCode string `json:"thingModelCode"`
+	PropertyCode   string `json:"propertyCode"`
 }
 
 // Encoder native-json 编码器。
@@ -68,6 +74,8 @@ func MarshalBatch(records []collector.CollectedRecord, now string) ([]byte, erro
 			Protocol:          r.Protocol,
 			Quality:           r.Quality,
 			CollectedAt:       collectedAt,
+			ThingModelCode:    r.ThingModelCode,
+			PropertyCode:      r.PropertyCode,
 		})
 	}
 	payload, err := json.Marshal(points)

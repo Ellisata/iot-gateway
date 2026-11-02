@@ -37,13 +37,15 @@ MQTT 通道按**设备分组**推送，payload 为 JSON 数组，数组内每条
     "dataType": "word",
     "kind": "uint",
     "quality": 192,
-    "collectedAt": "2026-08-19 16:39:47.864"
+    "collectedAt": "2026-08-19 16:39:47.864",
+    "thingModelCode": "th_ac",
+    "propertyCode": "temperature"
   }
 ]
 ```
 
 > **投递时机（变化才推送）**：`push.changeOnly` 出厂为 true。同一设备同一点位的
-> `value` 与 `quality` 自上次**真正投递**后都没变时，本轮不再出现 —— 下游不能把
+> `value`、`quality` 与物模型/属性编码自上次**真正投递**后都没变时，本轮不再出现 —— 下游不能把
 > "收到一条记录"当作设备在线心跳（在线状态请看设备断联报警）。网关启动、
 > 推送通道新增或改配后的首轮总是全量，且质量码变化（如 192 → 2）本身也算变化。
 > 需要等间隔采样时把该开关置为 false（可在「运行开关」页动态切换，从下一批采集起生效）。
@@ -60,6 +62,13 @@ MQTT 通道按**设备分组**推送，payload 为 JSON 数组，数组内每条
 | `kind` | string | 数据类型类别（6 类之一），`value` 解析的**唯一事实来源** |
 | `quality` | int | 采集质量码（`driver.QualityXxx`，类别在高 2 位、成因在低 6 位）：192=正常、128=不确定但值可用、0=坏但未归类、1=坏·地址、2=坏·通信、3=坏·解析。**判"坏"要写 `quality < 128`，不能写 `quality == 0`**（区间读取失败时置坏码，value 为空串） |
 | `collectedAt` | string | 采集时间，格式 `2006-01-02 15:04:05.000`（毫秒精度），**本地时区** |
+| `thingModelCode` | string | 设备绑定的物模型编码（`thing_model.code`）；未绑定为空串。创建后不可修改，可作稳定维度 |
+| `propertyCode` | string | 点位绑定的物模型属性标识符（`thing_model_property.identifier`）；未绑定为空串。绑定时已校验属性属于设备的物模型 |
+
+`thingModelCode` / `propertyCode` 是**追加字段**（位于 JSON 末尾），既有字段的名称、顺序与
+取值逐字节不变；未绑定时字段仍然存在，值为空串。外部 MQTT 订阅产生的记录没有本地绑定，
+这两个字段同样为空串。
+时序库通道（TDengine / InfluxDB）把两者作为 tag 写入（`thing_model_code` / `property_code`）。
 
 ## 3. value 解析：按 `kind` 分派
 

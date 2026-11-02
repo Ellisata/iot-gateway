@@ -69,6 +69,14 @@ type gatewayTask struct {
 	// addrLabelMap: deviceID -> addressID -> 地址 name 的中文说明（如温度、电流）
 	addrLabelMap map[string]map[string]string
 
+	// modelCodes: deviceID -> 物模型编码（thing_model.code）。只含已绑定且模型存在的设备。
+	// 设备级常量，toRecords 在循环外取一次；未绑定取不到，记录里就是空串。
+	modelCodes map[string]string
+	// addrPropCodes: addressID -> 物模型属性标识符（thing_model_property.identifier）。
+	// 只含「属性属于该设备所绑模型」的点位（绑定时已校验，这里按设备模型再核一遍，
+	// 防止历史数据/直接改库留下跨模型绑定）。点位 ID 是 UUID，全局唯一，故单层映射即可。
+	addrPropCodes map[string]string
+
 	// protocols: deviceID -> 协议名称（iot_protocol.name，如 "ModBus.TCP"）。
 	// 透传到采集记录，供下游区分协议命名空间（dataType 为协议内部类型名）。
 	protocols map[string]string
@@ -337,12 +345,18 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 		logger.Warn("collector: no devices with supported protocol driver, collector will idle until a supported device is enabled")
 	}
 
+	// 物模型编码/属性编码随记录下发（见 CollectedRecord.ThingModelCode）。
+	// 绑定关系（device.model_id / device_address.property_id）已在 checksum 里，
+	// 因此改绑定会触发热加载重建任务；模型编码与属性标识符本身创建后不可修改。
+	modelCodes, propCodes := loadThingModelCodes(db, devices)
+
 	// 加载设备地址并按采集频率分组。
 	// 仅对拥有驱动的设备加载地址，避免协议不支持/驱动创建失败的设备
 	// 每周期仍提交 worker 任务后空转返回。
 	freqToDevAddrs := make(map[int]map[string][]po.DeviceAddress) // frequency -> deviceID -> addrs
 	addrNameMap := make(map[string]map[string]string)             // deviceID -> addressID -> name
 	addrLabelMap := make(map[string]map[string]string)            // deviceID -> addressID -> 中文说明
+	addrPropCodes := make(map[string]string)                      // addressID -> 属性标识符
 
 	for _, dev := range devices {
 		if _, ok := drvMap[dev.ID]; !ok {
@@ -375,6 +389,13 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 			addrNameMap[dev.ID][addr.ID] = addr.Name
 			addrLabelMap[dev.ID][addr.ID] = addr.Label
 
+			// 属性必须属于设备所绑的物模型才生效（正常写入路径已校验，这里防历史数据/直接改库）。
+			if addr.PropertyID != "" {
+				if p, ok := propCodes[addr.PropertyID]; ok && p.modelID == dev.ModelID {
+					addrPropCodes[addr.ID] = p.code
+				}
+			}
+
 			// 按采集频率分组
 			freq := addr.ScanFrequency
 			if freq <= 0 {
@@ -392,6 +413,8 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 		drivers:        drvMap,
 		addrNameMap:    addrNameMap,
 		addrLabelMap:   addrLabelMap,
+		modelCodes:     modelCodes,
+		addrPropCodes:  addrPropCodes,
 		protocols:      devProtocols,
 		db:             db,
 		sink:           sink,
@@ -906,6 +929,8 @@ func (t *gatewayTask) ensureConnected(drv driver.Driver, dev *po.Device) bool {
 func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, results []driver.ReadResult) []CollectedRecord {
 	records := make([]CollectedRecord, 0, len(results))
 	protocol := t.protocols[dev.ID]
+	// 物模型编码是设备级常量，提到循环外取一次（toRecords 是热点路径）。
+	modelCode := t.modelCodes[dev.ID]
 	for i, r := range results {
 		name, label := "", ""
 		if i < len(addrs) && addrs[i].ID == r.DeviceAddressID {
@@ -931,9 +956,74 @@ func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, result
 			Kind:               r.Kind,
 			Protocol:           protocol,
 			Quality:            r.Quality,
+			ThingModelCode:     modelCode,
+			PropertyCode:       t.addrPropCodes[r.DeviceAddressID],
 		})
 	}
 	return records
+}
+
+// propertyCode 物模型属性编码（identifier）+ 所属模型 ID。
+// 带上 model_id 是为了在任务构建时再核一次「点位绑定的属性确实属于设备所绑的模型」。
+type propertyCode struct {
+	modelID string
+	code    string
+}
+
+// loadThingModelCodes 预加载设备物模型编码（deviceID -> thing_model.code）与
+// 属性编码（propertyID -> thing_model_property.identifier），供 toRecords 随记录下发。
+//
+// 物模型是**可选绑定**：没绑定就没有编码（记录里是空串）。两张表缺失或查询失败
+// 只记一条警告并返回空表 —— 这两个字段只是推送载荷的附加维度，不该让整台设备
+// 因此停采（单测库与早期版本库不一定有这两张表）。
+//
+// 查询按设备所绑模型一次取回（而不是按点位 IN 上千个属性 ID），避免拼出超长
+// SQL；物模型数量本就远小于点位数。
+func loadThingModelCodes(db *gorm.DB, devices []po.Device) (map[string]string, map[string]propertyCode) {
+	deviceCodes := make(map[string]string)
+	propCodes := make(map[string]propertyCode)
+
+	modelIDs := make([]string, 0, len(devices))
+	seen := make(map[string]struct{}, len(devices))
+	for _, d := range devices {
+		if d.ModelID == "" {
+			continue
+		}
+		if _, ok := seen[d.ModelID]; ok {
+			continue
+		}
+		seen[d.ModelID] = struct{}{}
+		modelIDs = append(modelIDs, d.ModelID)
+	}
+	if len(modelIDs) == 0 {
+		return deviceCodes, propCodes
+	}
+
+	var models []po.ThingModel
+	if err := db.Select("id", "code").Where("id IN ?", modelIDs).Find(&models).Error; err != nil {
+		logger.Warn("collector: load thing models failed, records will omit thingModelCode: %v", err)
+		return deviceCodes, propCodes
+	}
+	codeByModel := make(map[string]string, len(models))
+	for _, m := range models {
+		codeByModel[m.ID] = m.Code
+	}
+	for _, d := range devices {
+		if c, ok := codeByModel[d.ModelID]; ok && c != "" {
+			deviceCodes[d.ID] = c
+		}
+	}
+
+	var props []po.ThingModelProperty
+	if err := db.Select("id", "model_id", "identifier").
+		Where("model_id IN ?", modelIDs).Find(&props).Error; err != nil {
+		logger.Warn("collector: load thing model properties failed, records will omit propertyCode: %v", err)
+		return deviceCodes, propCodes
+	}
+	for _, p := range props {
+		propCodes[p.ID] = propertyCode{modelID: p.ModelID, code: p.Identifier}
+	}
+	return deviceCodes, propCodes
 }
 
 // incError 递增错误计数

@@ -269,6 +269,11 @@ func (e *Engine) loadConfigChecksum() uint64 {
 		io.WriteString(h, d.ProtocolID)
 		io.WriteString(h, "|")
 		io.WriteString(h, d.ProtocolJSON)
+		io.WriteString(h, "|")
+		// 物模型绑定参与校验和：任务构建时按 model_id 解析物模型编码并落到采集记录
+		// （见 loadThingModelCodes），改绑定必须重建任务才会生效。
+		// 模型编码本身创建后不可修改（ThingModelService），故不并入哈希。
+		io.WriteString(h, d.ModelID)
 		io.WriteString(h, "\n")
 	}
 
@@ -297,6 +302,9 @@ func (e *Engine) loadConfigChecksum() uint64 {
 		io.WriteString(h, a.ThresholdOp)
 		io.WriteString(h, "|")
 		io.WriteString(h, a.ThresholdValue)
+		io.WriteString(h, "|")
+		// 属性绑定同理：改绑属性要重建任务，属性编码才会随记录更新。
+		io.WriteString(h, a.PropertyID)
 		io.WriteString(h, "\n")
 	}
 

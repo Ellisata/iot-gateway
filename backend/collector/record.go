@@ -28,4 +28,14 @@ type CollectedRecord struct {
 	// 外部 MQTT 订阅可在映射里配置 collectedAt，携带报文自带的时间；
 	// 时序通道逐条优先用它，留空/无法解析时才回落到批次时间。
 	CollectedAt string `json:"collectedAt,omitempty"`
+	// ThingModelCode 设备绑定的物模型编码（thing_model.code），未绑定为空。
+	//
+	// 由采集侧在任务构建时从 device.model_id 解析并随记录透传；编码创建后不可修改
+	// （见 ThingModelService），因此任务期内是常量。外部订阅记录没有本地绑定，恒为空。
+	// 带 json tag 以保证断网缓存（push/spool）序列化回放后不丢失。
+	ThingModelCode string `json:"thingModelCode,omitempty"`
+	// PropertyCode 点位绑定的物模型属性标识符（thing_model_property.identifier），
+	// 未绑定为空。与 ThingModelCode 同源同生命周期：点位通过 device_address.property_id
+	// 绑定属性，且绑定时已校验属性属于设备的物模型。
+	PropertyCode string `json:"propertyCode,omitempty"`
 }

@@ -1138,9 +1138,9 @@ func buildTopics(template, deviceID string) []string {
 | `Description` | string | `description` | |
 | `Status` | int | `status` | 默认 1（启用） |
 | `CreatedAt` / `UpdatedAt` | string | `createdAt`/`updatedAt` | `YYYY-MM-DD HH:mm:ss` |
-| `ScanIdentity` | string | `json:"-"` | **不参与 JSON 序列化**：扫描来源身份签名（`协议\|主机\|端口\|站号`），只由"扫描结果一键建设备"写入；手工新建与 Excel 导入一律留空（`:23-34` 详注） |
+| `ScanIdentity` | string | `json:"-"`（PO 上不序列化；经 `vo.DeviceVO.scanIdentity` 对外暴露） | 扫描来源身份签名（`协议\|主机\|端口\|站号`），只由"扫描结果一键建设备"写入；手工新建与 Excel 导入一律留空（`:23-34` 详注）。设备分页的 `name` 参数同时模糊匹配 `name` 与 `scan_identity` |
 
-**API 层 VO 额外字段**（不在 PO 上，由 service 组装）：`protocolName`、`online`、`lastSuccessTime`、`iotGatewayId`。
+**API 层 VO 额外字段**（不在 PO 上，由 service 组装）：`protocolName`、`scanIdentity`、`online`、`lastSuccessTime`、`iotGatewayId`。
 实测样例见 §4.3。
 
 ### 6.2 DeviceAddress / 点位 / tag

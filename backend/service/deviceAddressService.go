@@ -72,15 +72,21 @@ func (s *DeviceAddressService) CreateDeviceAddress(ctx context.Context, req *dto
 	if common == "" {
 		return appError.NewAppErrorCtx(enums.ParamValidEnum.GetCode(), "数据类型不能为空", enums.ParamValidEnum.GetMsgKey())
 	}
-	internal, err := s.resolveDataType(s.getProtocolName(ctx, device.ProtocolID), common)
+	protocolName := s.getProtocolName(ctx, device.ProtocolID)
+	internal, err := s.resolveDataType(protocolName, common)
 	if err != nil {
+		return err
+	}
+
+	// 物模型属性绑定：设备必须绑定该属性所属模型，且 kind/读写权限兼容。
+	if err := s.validatePropertyBinding(ctx, device, req.PropertyID, protocolName, internal, req.RwPermission, false); err != nil {
 		return err
 	}
 
 	// 报警条件校验：可用比较符由数据类型的 Kind 决定（矩阵见 driver.OperatorsForKind）
 	enabled, op, values := thresholdFields(req.Threshold)
 	if err := validateAddressThreshold(enabled, op, values,
-		kindOfAddressType(s.getProtocolName(ctx, device.ProtocolID), internal)); err != nil {
+		kindOfAddressType(protocolName, internal)); err != nil {
 		return err
 	}
 
@@ -92,6 +98,7 @@ func (s *DeviceAddressService) CreateDeviceAddress(ctx context.Context, req *dto
 		CommonDataType:   common,
 		DataType:         internal,
 		RwPermission:     req.RwPermission,
+		PropertyID:       strings.TrimSpace(req.PropertyID),
 		ScanFrequency:    req.ScanFrequency,
 		Description:      req.Description,
 		Status:           1,
@@ -127,6 +134,80 @@ func thresholdFields(t *dto.DeviceAddressThresholdDTO) (bool, string, []string) 
 // 协议/类型查不到时返回空串：判不了就不放行，避免配出一个永不生效的报警条件。
 func kindOfAddressType(protocolName, internalType string) string {
 	return driver.GetTypeRegistry().ForProtocol(driver.ScopeOf(protocolName)).KindOf(internalType)
+}
+
+// validatePropertyBinding 校验点位绑定物模型属性的四项前提：
+// 属性存在、设备已绑定其所属模型、kind 一致、点位读写权限覆盖属性读写模式。
+//
+// allowDisabled 用于「既有绑定」：模型或属性后来被停用，不应阻止用户保存该点位的
+// 其它字段（改名/改阈值）。新建绑定或换绑时传 false，要求模型与属性都处于启用状态。
+func (s *DeviceAddressService) validatePropertyBinding(
+	ctx context.Context,
+	device po.Device,
+	propertyID, protocolName, internalType, addressRW string,
+	allowDisabled bool,
+) error {
+	propertyID = strings.TrimSpace(propertyID)
+	if propertyID == "" {
+		return nil
+	}
+
+	var property po.ThingModelProperty
+	if err := s.sqliteDB.WithContext(ctx).Where("id = ?", propertyID).First(&property).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return appError.NewAppErrorCtx(enums.ThingModelPropertyNotExistsEnum.GetCode(),
+				enums.ThingModelPropertyNotExistsEnum.GetMessage(), enums.ThingModelPropertyNotExistsEnum.GetMsgKey())
+		}
+		return err
+	}
+	if device.ModelID == "" || device.ModelID != property.ModelID {
+		return appError.NewAppErrorCtx(enums.ThingModelBindingMismatchEnum.GetCode(),
+			enums.ThingModelBindingMismatchEnum.GetMessage(), enums.ThingModelBindingMismatchEnum.GetMsgKey())
+	}
+	if !allowDisabled {
+		if property.Status != 1 {
+			return appError.NewAppErrorCtx(enums.ThingModelPropertyDisabledEnum.GetCode(),
+				enums.ThingModelPropertyDisabledEnum.GetMessage(), enums.ThingModelPropertyDisabledEnum.GetMsgKey())
+		}
+		var model po.ThingModel
+		if err := s.sqliteDB.WithContext(ctx).Where("id = ?", property.ModelID).First(&model).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return appError.NewAppErrorCtx(enums.ThingModelBindingMismatchEnum.GetCode(),
+					enums.ThingModelBindingMismatchEnum.GetMessage(), enums.ThingModelBindingMismatchEnum.GetMsgKey())
+			}
+			return err
+		}
+		if model.Status != 1 {
+			return appError.NewAppErrorCtx(enums.ThingModelDisabledEnum.GetCode(),
+				enums.ThingModelDisabledEnum.GetMessage(), enums.ThingModelDisabledEnum.GetMsgKey())
+		}
+	}
+
+	// 判不了 kind（协议/类型查不到）就拒绝绑定，而不是放行一个无法自证兼容的绑定。
+	if kindOfAddressType(protocolName, internalType) != property.Kind {
+		return appError.NewAppErrorCtx(enums.ThingModelKindMismatchEnum.GetCode(),
+			enums.ThingModelKindMismatchEnum.GetMessage(), enums.ThingModelKindMismatchEnum.GetMsgKey())
+	}
+	if !accessCovers(addressRW, property.AccessMode) {
+		return appError.NewAppErrorCtx(enums.ThingModelAccessMismatchEnum.GetCode(),
+			enums.ThingModelAccessMismatchEnum.GetMessage(), enums.ThingModelAccessMismatchEnum.GetMsgKey())
+	}
+	return nil
+}
+
+// accessCovers 报告点位读写权限是否覆盖属性的读写模式。
+// RW 覆盖全部；R 只覆盖只读属性；W 只覆盖只写属性。
+func accessCovers(addressRW, propertyAccess string) bool {
+	switch addressRW {
+	case "RW":
+		return true
+	case "R":
+		return propertyAccess == "R"
+	case "W":
+		return propertyAccess == "W"
+	default:
+		return false
+	}
 }
 
 // validateAddressThreshold 校验报警条件（纯函数，便于单测）。
@@ -305,34 +386,70 @@ func (s *DeviceAddressService) UpdateDeviceAddress(ctx context.Context, req *dto
 	}
 	// label 为必填字段，binding 已保证非空，始终随更新写入
 	updates["label"] = req.Label
-	if req.CommonDataType != "" {
-		// 通用类型名 → 协议内部类型名，两者同步更新
-		var device po.Device
+
+	// 设备与协议名按需只查一次：类型/权限/绑定/阈值校验都要用。
+	var device po.Device
+	deviceLoaded := false
+	loadDevice := func() error {
+		if deviceLoaded {
+			return nil
+		}
 		if err := db.Where("id = ?", existing.DeviceID).First(&device).Error; err != nil {
 			return err
 		}
-		internal, err := s.resolveDataType(s.getProtocolName(ctx, device.ProtocolID), req.CommonDataType)
-		if err != nil {
-			return err
-		}
-		updates["common_data_type"] = req.CommonDataType
-		updates["data_type"] = internal
-	} else if req.DataType != "" {
-		// 兼容旧请求：dataType 视为通用类型名，映射后同步更新；
-		// 无法映射时报错，不再直接存内部名（保证 data_type 恒为有效内部名）。
-		var device po.Device
-		if err := db.Where("id = ?", existing.DeviceID).First(&device).Error; err != nil {
-			return err
-		}
-		internal, err := s.resolveDataType(s.getProtocolName(ctx, device.ProtocolID), req.DataType)
-		if err != nil {
-			return err
-		}
-		updates["common_data_type"] = req.DataType
-		updates["data_type"] = internal
+		deviceLoaded = true
+		return nil
 	}
+
+	effectiveInternal := existing.DataType
+	if req.CommonDataType != "" || req.DataType != "" {
+		if err := loadDevice(); err != nil {
+			return err
+		}
+		common := req.CommonDataType
+		if common == "" {
+			// 兼容旧请求：dataType 视为通用类型名，映射后同步更新；
+			// 无法映射时报错，不再直接存内部名（保证 data_type 恒为有效内部名）。
+			common = req.DataType
+		}
+		internal, err := s.resolveDataType(s.getProtocolName(ctx, device.ProtocolID), common)
+		if err != nil {
+			return err
+		}
+		updates["common_data_type"] = common
+		updates["data_type"] = internal
+		effectiveInternal = internal
+	}
+	effectiveRW := existing.RwPermission
 	if req.RwPermission != "" {
 		updates["rw_permission"] = req.RwPermission
+		effectiveRW = req.RwPermission
+	}
+
+	// 物模型属性绑定是三态的：省略 = 不动，空串 = 解绑，非空 = 绑定。
+	// 绑定或改变了类型/读写权限时，按更新后的生效值重新校验既有绑定。
+	typeOrRWChanged := req.CommonDataType != "" || req.DataType != "" || req.RwPermission != ""
+	if req.PropertyID != nil {
+		newPropertyID := strings.TrimSpace(*req.PropertyID)
+		if newPropertyID != "" {
+			if err := loadDevice(); err != nil {
+				return err
+			}
+			if err := s.validatePropertyBinding(ctx, device, newPropertyID,
+				s.getProtocolName(ctx, device.ProtocolID), effectiveInternal, effectiveRW,
+				newPropertyID == existing.PropertyID); err != nil {
+				return err
+			}
+		}
+		updates["property_id"] = newPropertyID
+	} else if existing.PropertyID != "" && typeOrRWChanged {
+		if err := loadDevice(); err != nil {
+			return err
+		}
+		if err := s.validatePropertyBinding(ctx, device, existing.PropertyID,
+			s.getProtocolName(ctx, device.ProtocolID), effectiveInternal, effectiveRW, true); err != nil {
+			return err
+		}
 	}
 	if req.ScanFrequency > 0 {
 		updates["scan_frequency"] = req.ScanFrequency
@@ -346,17 +463,12 @@ func (s *DeviceAddressService) UpdateDeviceAddress(ctx context.Context, req *dto
 	thresholdInert := false
 	if req.Threshold != nil {
 		enabled, op, values := thresholdFields(req.Threshold)
-		// Kind 按更新后的生效类型判断：本次若一起改了类型就用新类型，否则用库里现有的。
-		internalType := existing.DataType
-		if v, ok := updates["data_type"]; ok {
-			internalType = v.(string)
-		}
-		var dev po.Device
-		if err := db.Where("id = ?", existing.DeviceID).First(&dev).Error; err != nil {
+		// Kind 按更新后的生效类型判断（effectiveInternal 已包含本次类型变更）。
+		if err := loadDevice(); err != nil {
 			return err
 		}
-		protocolName := s.getProtocolName(ctx, dev.ProtocolID)
-		if err := validateAddressThreshold(enabled, op, values, kindOfAddressType(protocolName, internalType)); err != nil {
+		protocolName := s.getProtocolName(ctx, device.ProtocolID)
+		if err := validateAddressThreshold(enabled, op, values, kindOfAddressType(protocolName, effectiveInternal)); err != nil {
 			return err
 		}
 		stored := marshalThresholdValues(values)
@@ -458,8 +570,11 @@ func (s *DeviceAddressService) GetDeviceAddressByID(ctx context.Context, id stri
 		return nil, err
 	}
 
-	out := addressVO(addr)
-	return &out, nil
+	records := []vo.DeviceAddressVO{addressVO(addr)}
+	if err := s.enrichAddressVOs(ctx, records); err != nil {
+		return nil, err
+	}
+	return &records[0], nil
 }
 
 // PageDeviceAddress 设备地址分页查询（支持设备ID过滤 + 名称模糊检索）
@@ -487,6 +602,9 @@ func (s *DeviceAddressService) PageDeviceAddress(ctx context.Context, req *dto.P
 	records := make([]vo.DeviceAddressVO, len(addrs))
 	for i, a := range addrs {
 		records[i] = addressVO(a)
+	}
+	if err := s.enrichAddressVOs(ctx, records); err != nil {
+		return nil, err
 	}
 
 	return &response.PageVo[vo.DeviceAddressVO]{
@@ -532,6 +650,9 @@ func (s *DeviceAddressService) ListAddressesByDeviceIDs(ctx context.Context, dev
 	for i, a := range addrs {
 		records[i] = addressVO(a)
 	}
+	if err := s.enrichAddressVOs(ctx, records); err != nil {
+		return nil, err
+	}
 	return records, nil
 }
 
@@ -541,6 +662,7 @@ func addressVO(a po.DeviceAddress) vo.DeviceAddressVO {
 	return vo.DeviceAddressVO{
 		ID:               a.ID,
 		DeviceID:         a.DeviceID,
+		PropertyID:       a.PropertyID,
 		Name:             a.Name,
 		Label:            a.Label,
 		CommonDataType:   a.CommonDataType,
@@ -555,6 +677,43 @@ func addressVO(a po.DeviceAddress) vo.DeviceAddressVO {
 		CreatedAt:        a.CreatedAt,
 		UpdatedAt:        a.UpdatedAt,
 	}
+}
+
+// enrichAddressVOs 按 PropertyID 批量补全属性的 identifier/name（展示用）。
+// 查不到时留空：属性删除有绑定守卫，正常不会出现悬空 id，这里不把它升级成错误。
+func (s *DeviceAddressService) enrichAddressVOs(ctx context.Context, records []vo.DeviceAddressVO) error {
+	ids := make([]string, 0, len(records))
+	seen := make(map[string]struct{}, len(records))
+	for _, r := range records {
+		if r.PropertyID == "" {
+			continue
+		}
+		if _, ok := seen[r.PropertyID]; ok {
+			continue
+		}
+		seen[r.PropertyID] = struct{}{}
+		ids = append(ids, r.PropertyID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	var props []po.ThingModelProperty
+	if err := s.sqliteDB.WithContext(ctx).Select("id", "identifier", "name").
+		Where("id IN ?", ids).Find(&props).Error; err != nil {
+		return err
+	}
+	byID := make(map[string]po.ThingModelProperty, len(props))
+	for _, p := range props {
+		byID[p.ID] = p
+	}
+	for i := range records {
+		if p, ok := byID[records[i].PropertyID]; ok {
+			records[i].PropertyIdentifier = p.Identifier
+			records[i].PropertyName = p.Name
+		}
+	}
+	return nil
 }
 
 // getProtocolName 根据协议 ID 查询协议名称（iot_protocol.name），

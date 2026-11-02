@@ -20,7 +20,7 @@ const (
 	maxValueStr = 255
 	// maxKindLen value_kind NCHAR 宽度(声明类别,恒远小于此值,截断仅防御)
 	maxKindLen = 16
-	// maxTagLen tag(device_id / device_address_id)NCHAR 宽度
+	// maxTagLen tag(device_id / device_address_id / thing_model_code / property_code)NCHAR 宽度
 	maxTagLen = 64
 )
 
@@ -30,8 +30,8 @@ const (
 // 子句(自动建表),聚合可把「每设备每轮采集一次往返」合并为「攒批后一次往返」,
 // 显著降低设备量大时的固定开销(见 batchRows / batchIntervalMs 配置)。
 //
-// 子表名 = deviceId_deviceAddressId(自动建表),tag 仅 deviceId / deviceAddressId
-// 两个稳定标识(名称可变不作 tag)。同一条语句内子表名必须唯一:
+// 子表名 = deviceId_deviceAddressId(自动建表),tag 为 deviceId / deviceAddressId
+// 与物模型编码 / 属性编码(名称可变不作 tag)。同一条语句内子表名必须唯一:
 // appendBatch 检测到与已追加子表冲突(跨采集轮次同一设备+点位、不同时间戳)时
 // 返回 false 且不改动状态,调用方应先 flush 再重试,避免跨轮数据被批内去重丢弃。
 type insertBuilder struct {
@@ -238,11 +238,16 @@ func subtableHash(deviceID, addressID string) string {
 }
 
 // joinTags 将采集记录的标签组合为 TAGS(...) 内的值列表(与建表 tag 顺序一致)。
-// 仅保留稳定标识 deviceId / deviceAddressId:deviceName / deviceAddressName 可变,
-// 作 tag 会因子表 tag 值不可变更而陈旧,故不入库(名称查询/展示走设备配置关联)。
+// 仅保留稳定标识:deviceId / deviceAddressId / 物模型编码 / 属性编码。
+// deviceName / deviceAddressName 可变,作 tag 会因子表 tag 值不可变更而陈旧,
+// 故不入库(名称查询/展示走设备配置关联)。
+// 物模型编码 / 属性编码未绑定时写空串(与 TDengine 的 NULL tag 区分:这里是明确的
+// "没有绑定",查询可直接按 ” 过滤)。
 func joinTags(r collector.CollectedRecord) string {
 	return quoteString(truncateRunes(r.DeviceID, maxTagLen)) + ", " +
-		quoteString(truncateRunes(r.DeviceAddressID, maxTagLen))
+		quoteString(truncateRunes(r.DeviceAddressID, maxTagLen)) + ", " +
+		quoteString(truncateRunes(r.ThingModelCode, maxTagLen)) + ", " +
+		quoteString(truncateRunes(r.PropertyCode, maxTagLen))
 }
 
 // truncateRunes 将字符串截断为至多 max 个 rune(字符)。

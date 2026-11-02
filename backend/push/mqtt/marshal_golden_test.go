@@ -28,6 +28,8 @@ func TestMarshalBatchGolden(t *testing.T) {
 			Protocol:           "ModBus.TCP",
 			Quality:            192,
 			CollectedAt:        "2026-10-19 17:05:30.123",
+			ThingModelCode:     "th_sensor",
+			PropertyCode:       "temperature",
 		},
 		{
 			DeviceID:          "d1",
@@ -40,6 +42,8 @@ func TestMarshalBatchGolden(t *testing.T) {
 			Protocol:          "ModBus.TCP",
 			Quality:           2,
 			// 留空：必须回落到批次时间
+			ThingModelCode: "th_sensor",
+			PropertyCode:   "switch",
 		},
 	}
 
@@ -48,7 +52,7 @@ func TestMarshalBatchGolden(t *testing.T) {
 		t.Fatalf("marshalBatch: %v", err)
 	}
 
-	const want = `[{"deviceId":"d1","deviceName":"Device 1","deviceAddressId":"a1","deviceAddressName":"温度","value":"23.5","dataType":"float32","kind":"float","protocol":"ModBus.TCP","quality":192,"collectedAt":"2026-10-19 17:05:30.123"},{"deviceId":"d1","deviceName":"Device 1","deviceAddressId":"a2","deviceAddressName":"开关","value":"0","dataType":"bool","kind":"bool","protocol":"ModBus.TCP","quality":2,"collectedAt":"2026-10-24 10:00:00.000"}]`
+	const want = `[{"deviceId":"d1","deviceName":"Device 1","deviceAddressId":"a1","deviceAddressName":"温度","value":"23.5","dataType":"float32","kind":"float","protocol":"ModBus.TCP","quality":192,"collectedAt":"2026-10-19 17:05:30.123","thingModelCode":"th_sensor","propertyCode":"temperature"},{"deviceId":"d1","deviceName":"Device 1","deviceAddressId":"a2","deviceAddressName":"开关","value":"0","dataType":"bool","kind":"bool","protocol":"ModBus.TCP","quality":2,"collectedAt":"2026-10-24 10:00:00.000","thingModelCode":"th_sensor","propertyCode":"switch"}]`
 	if string(got) != want {
 		t.Errorf("native payload changed:\n got: %s\nwant: %s", got, want)
 	}

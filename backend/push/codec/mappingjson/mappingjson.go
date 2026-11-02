@@ -318,6 +318,9 @@ func recordDoc(r collector.CollectedRecord, batchAt string) map[string]any {
 		"protocol":           r.Protocol,
 		"quality":            r.Quality,
 		"collectedAt":        at,
+		// 物模型编码 / 属性编码：未绑定时为空串（路径仍可取值，不会报"路径不存在"）。
+		"thingModelCode": r.ThingModelCode,
+		"propertyCode":   r.PropertyCode,
 	}
 }
 

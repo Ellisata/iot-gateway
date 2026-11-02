@@ -227,3 +227,54 @@ func TestEncodeConcurrent(t *testing.T) {
 		t.Fatalf("concurrent Encode: %v", err)
 	}
 }
+
+// TestEncodeThingModelCodes 脚本可见 thingModelCode / propertyCode（未绑定时为空串）。
+func TestEncodeThingModelCodes(t *testing.T) {
+	enc := newTestEncoder(t, map[string]any{
+		"script": `function encode(batch) {
+			return JSON.stringify(batch.records.map(function (r) { return r.thingModelCode + "/" + r.propertyCode }))
+		}`,
+	})
+	b := sampleBatch()
+	b.Records[0].ThingModelCode = "th_sensor"
+	b.Records[0].PropertyCode = "temperature"
+
+	msgs, err := enc.Encode(b)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	want := `["th_sensor/temperature","/"]`
+	if string(msgs[0].Payload) != want {
+		t.Errorf("payload = %s, want %s", msgs[0].Payload, want)
+	}
+}
+
+// TestRecordCollectedAtFallsBackToBatch 脚本里的 r.collectedAt 与 native-json /
+// mapping-json 同一条回落规则：本地采集的记录级时间为空时取 batch.collectedAt。
+func TestRecordCollectedAtFallsBackToBatch(t *testing.T) {
+	enc := newTestEncoder(t, map[string]any{
+		"script": `function encode(batch) {
+			return JSON.stringify(batch.records.map(function (r) { return r.collectedAt }))
+		}`,
+	})
+	b := sampleBatch() // 记录级 collectedAt 全空，批次时间有值
+	msgs, err := enc.Encode(b)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	want := `["2026-10-24 10:00:00.000","2026-10-24 10:00:00.000"]`
+	if string(msgs[0].Payload) != want {
+		t.Errorf("payload = %s, want %s", msgs[0].Payload, want)
+	}
+
+	// 记录自带时间（外部订阅映射）时优先用自己的。
+	b.Records[0].CollectedAt = "2026-10-19 17:05:30.123"
+	msgs, err = enc.Encode(b)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	want = `["2026-10-19 17:05:30.123","2026-10-24 10:00:00.000"]`
+	if string(msgs[0].Payload) != want {
+		t.Errorf("payload = %s, want %s", msgs[0].Payload, want)
+	}
+}

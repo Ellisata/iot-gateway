@@ -47,6 +47,34 @@ func TestBuildLine(t *testing.T) {
 	}
 }
 
+// TestBuildLineThingModelTags 物模型编码 / 属性编码作为 tag 写入；未绑定时**省略**
+// 这两个 tag（而不是写空串），以免库里出现一个语义为"未绑定"的额外分组。
+func TestBuildLineThingModelTags(t *testing.T) {
+	collectedAt := "2026-08-18 10:00:00"
+	ts := wantTS(collectedAt)
+
+	bound := rec("dev-1", "40001", driver.KindInt, "1280", 192)
+	bound.ThingModelCode = "th_sensor"
+	bound.PropertyCode = "temperature"
+	line, ok := buildLine("collected_data", ts, bound)
+	if !ok {
+		t.Fatal("buildLine should succeed")
+	}
+	want := fmt.Sprintf(`collected_data,device_id=dev-1,thing_model_code=th_sensor,device_address_id=40001,property_code=temperature value_int=1280i,value_kind="int",quality=192i %d`, ts)
+	if line != want {
+		t.Errorf("line = %q\nwant %q", line, want)
+	}
+
+	// 只绑设备模型、点位未绑属性：只写 thing_model_code
+	modelOnly := rec("dev-1", "40002", driver.KindInt, "1", 192)
+	modelOnly.ThingModelCode = "th_sensor"
+	line, _ = buildLine("collected_data", ts, modelOnly)
+	want = fmt.Sprintf(`collected_data,device_id=dev-1,thing_model_code=th_sensor,device_address_id=40002 value_int=1i,value_kind="int",quality=192i %d`, ts)
+	if line != want {
+		t.Errorf("line = %q\nwant %q", line, want)
+	}
+}
+
 // TestBuildLineQuality 坏点位只改 quality 这个数字，**不再多带 quality_cause 字段** ——
 // 成因已并进这个整数，行结构与引入成因那一维之前完全一致（上一条 TestBuildLine
 // 是正常点位那一侧的守卫）。已有查询里凡是用 quality == 0 判"坏"的都要改判为

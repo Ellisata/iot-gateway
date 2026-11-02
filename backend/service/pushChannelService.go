@@ -327,6 +327,17 @@ func (s *PushChannelService) samplePushBatch(ctx context.Context) push.PushBatch
 	if dataType == "" {
 		dataType = "float32"
 	}
+	// 物模型编码/属性编码与运行期记录同源：预览与测试发送也要能看到这两个字段，
+	// 否则用户会以为映射里的路径写错了。未绑定/查询失败时留空即可。
+	var model po.ThingModel
+	if dev.ModelID != "" {
+		_ = s.sqliteDB.WithContext(ctx).Where("id = ?", dev.ModelID).First(&model).Error
+	}
+	var property po.ThingModelProperty
+	if addr.PropertyID != "" && model.ID != "" {
+		_ = s.sqliteDB.WithContext(ctx).Where("id = ? AND model_id = ?", addr.PropertyID, model.ID).
+			First(&property).Error
+	}
 	rec := collector.CollectedRecord{
 		DeviceID:           dev.ID,
 		DeviceName:         dev.Name,
@@ -339,6 +350,8 @@ func (s *PushChannelService) samplePushBatch(ctx context.Context) push.PushBatch
 		Protocol:           protocol,
 		Quality:            driver.QualityGood,
 		CollectedAt:        now,
+		ThingModelCode:     model.Code,
+		PropertyCode:       property.Identifier,
 	}
 	return push.PushBatch{DeviceID: dev.ID, CollectedAt: now, Records: []collector.CollectedRecord{rec}}
 }
@@ -356,6 +369,9 @@ func builtinSample(now string) push.PushBatch {
 		Protocol:           "Demo",
 		Quality:            driver.QualityGood,
 		CollectedAt:        now,
+		// 内置样例带一组示例编码，让未配置设备的空库也能预览到这两个字段。
+		ThingModelCode: "th_sensor",
+		PropertyCode:   "temperature",
 	}
 	return push.PushBatch{DeviceID: rec.DeviceID, CollectedAt: now, Records: []collector.CollectedRecord{rec}}
 }

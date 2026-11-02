@@ -26,6 +26,8 @@ func TestEncoderProducesOneMessage(t *testing.T) {
 			Kind:               "float",
 			Protocol:           "ModBus.TCP",
 			Quality:            192,
+			ThingModelCode:     "th_sensor",
+			PropertyCode:       "temperature",
 		}},
 	})
 	if err != nil {
@@ -34,7 +36,7 @@ func TestEncoderProducesOneMessage(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("messages = %d, want 1", len(msgs))
 	}
-	const want = `[{"deviceId":"d1","deviceName":"Device 1","deviceAddressId":"a1","deviceAddressName":"temp","value":"23.5","dataType":"float32","kind":"float","protocol":"ModBus.TCP","quality":192,"collectedAt":"2026-10-24 10:00:00.000"}]`
+	const want = `[{"deviceId":"d1","deviceName":"Device 1","deviceAddressId":"a1","deviceAddressName":"temp","value":"23.5","dataType":"float32","kind":"float","protocol":"ModBus.TCP","quality":192,"collectedAt":"2026-10-24 10:00:00.000","thingModelCode":"th_sensor","propertyCode":"temperature"}]`
 	if string(msgs[0].Payload) != want {
 		t.Errorf("payload:\n got: %s\nwant: %s", msgs[0].Payload, want)
 	}

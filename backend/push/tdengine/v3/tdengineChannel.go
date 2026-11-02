@@ -294,18 +294,20 @@ func (ch *tdengineChannel) ensureSchema(db *sql.DB) error {
 	return nil
 }
 
-// warnSchemaDrift 探测已部署实例的超级表是否还留着 quality_cause 列,留着就报一条 ERROR。
+// warnSchemaDrift 探测已部署实例的超级表结构与本版是否一致:
+//   - 还留着 quality_cause 列(本版已删,成因并进 quality);
+//   - 缺少 thing_model_code / property_code 两个 tag(本版新增)。
 //
-// 这一列在本版被删掉了(成因并进 quality),而建表语句是 CREATE STABLE IF NOT EXISTS ——
-// 表已存在就整个跳过,新版**不会**替运维删列。列还在时写入侧的位置式 INSERT 列数对不上,
-// TDengine 会拒收该语句;而 SQL 报错在 push/drain.go 里被判为**毒批次**(删除并记 dropped),
+// 两种情况的共同后果是写入侧的位置式 INSERT 列数/tag 数对不上,TDengine 会拒收
+// 该语句;而 SQL 报错在 push/drain.go 里被判为**毒批次**(删除并记 dropped),
 // 所以忘记迁移的症状不是响亮停摆,而是**静默、永久的数据丢失**。
-// 一条启动期就能看见的日志是这条路上唯一廉价的护栏。
+// 建表语句是 CREATE STABLE IF NOT EXISTS,表已存在就整个跳过 —— 新版**不会**替
+// 运维删列/加 tag。一条启动期就能看见的日志是这条路上唯一廉价的护栏。
 //
 // 探测本身**绝不阻断建连**:查询失败只记 WARN —— 与 ensureSchemaSQL "只建不改、
 // 绝不让通道起不来"是同一条理由(它每轮重连都会跑)。
-// 判据本身在纯函数 hasQualityCauseColumn 里,便于单测(TDengine 各版本的
-// DESCRIBE 列形状不同,那正是它要扛住的东西)。
+// 判据本身在纯函数 hasQualityCauseColumn / missingSchemaTags 里,便于单测
+// (TDengine 各版本的 DESCRIBE 列形状不同,那正是它要扛住的东西)。
 func (ch *tdengineChannel) warnSchemaDrift(ctx context.Context, db *sql.DB) {
 	rows, err := db.QueryContext(ctx, "DESCRIBE "+ch.cfg.safeDB+"."+ch.cfg.safeStable)
 	if err != nil {
@@ -336,14 +338,26 @@ func (ch *tdengineChannel) warnSchemaDrift(ctx context.Context, db *sql.DB) {
 		table = append(table, row)
 	}
 
-	if !hasQualityCauseColumn(cols, table) {
-		return
+	if hasQualityCauseColumn(cols, table) {
+		logger.Error("push/tdengine: 超级表 %s.%s 仍带着 quality_cause 列,而本版已不再写入它 —— "+
+			"位置式 INSERT 会因列数不符被拒,且该错误被判为毒批次后**静默丢弃数据**。"+
+			"请立即执行一次: ALTER STABLE %s.%s DROP COLUMN quality_cause;",
+			ch.cfg.safeDB, ch.cfg.safeStable, ch.cfg.safeDB, ch.cfg.safeStable)
 	}
-	logger.Error("push/tdengine: 超级表 %s.%s 仍带着 quality_cause 列,而本版已不再写入它 —— "+
-		"位置式 INSERT 会因列数不符被拒,且该错误被判为毒批次后**静默丢弃数据**。"+
-		"请立即执行一次: ALTER STABLE %s.%s DROP COLUMN quality_cause;",
-		ch.cfg.safeDB, ch.cfg.safeStable, ch.cfg.safeDB, ch.cfg.safeStable)
+	if missing := missingSchemaTags(cols, table); len(missing) > 0 {
+		logger.Error("push/tdengine: 超级表 %s.%s 缺少 tag %v —— 写入侧的 TAGS(...) 会因 tag 数不符被拒,"+
+			"该错误被判为毒批次后**静默丢弃数据**。"+
+			"请立即执行: ALTER STABLE %s.%s ADD TAG thing_model_code NCHAR(64); "+
+			"ALTER STABLE %s.%s ADD TAG property_code NCHAR(64); "+
+			"(已有子表的新 tag 为 NULL,新写入不会回填,需要时按子表 ALTER TABLE ... SET TAG ...)",
+			ch.cfg.safeDB, ch.cfg.safeStable, missing,
+			ch.cfg.safeDB, ch.cfg.safeStable, ch.cfg.safeDB, ch.cfg.safeStable)
+	}
 }
+
+// schemaCodeTags 本版新增、写入侧 TAGS(...) 必需的 tag 名。
+// 前两个(device_id / device_address_id)是历史 tag,任何既有超级表都有,不在此列。
+var schemaCodeTags = []string{"thing_model_code", "property_code"}
 
 // hasQualityCauseColumn 报告 DESCRIBE 的结果里有没有 quality_cause 这个列(字段)。
 //
@@ -353,6 +367,33 @@ func (ch *tdengineChannel) warnSchemaDrift(ctx context.Context, db *sql.DB) {
 // 认不出形状(没有 Field 列)时返回 false 而不是报错 —— 这只是启动期的一句提示,
 // 不是判据,拿不准就放过。
 func hasQualityCauseColumn(cols []string, table [][]any) bool {
+	names := describeFieldNames(cols, table)
+	if names == nil {
+		return false
+	}
+	_, ok := names["quality_cause"]
+	return ok
+}
+
+// missingSchemaTags 返回本版必需、但 DESCRIBE 结果里找不到的 tag 名(按 schemaCodeTags 顺序)。
+// 认不出 DESCRIBE 形状时返回 nil(拿不准就放过,理由同 hasQualityCauseColumn)。
+func missingSchemaTags(cols []string, table [][]any) []string {
+	names := describeFieldNames(cols, table)
+	if names == nil {
+		return nil
+	}
+	var missing []string
+	for _, tag := range schemaCodeTags {
+		if _, ok := names[tag]; !ok {
+			missing = append(missing, tag)
+		}
+	}
+	return missing
+}
+
+// describeFieldNames 把 DESCRIBE 结果的 Field 列收集成小写名字集合。
+// 返回 nil 表示认不出形状(没有 Field 列)。
+func describeFieldNames(cols []string, table [][]any) map[string]struct{} {
 	fieldIdx := -1
 	for i, c := range cols {
 		if strings.EqualFold(c, "field") {
@@ -361,17 +402,18 @@ func hasQualityCauseColumn(cols []string, table [][]any) bool {
 		}
 	}
 	if fieldIdx < 0 {
-		return false
+		return nil
 	}
+	names := make(map[string]struct{}, len(table))
 	for _, row := range table {
 		if fieldIdx >= len(row) {
 			continue
 		}
-		if name, ok := row[fieldIdx].(string); ok && strings.EqualFold(name, "quality_cause") {
-			return true
+		if name, ok := row[fieldIdx].(string); ok {
+			names[strings.ToLower(name)] = struct{}{}
 		}
 	}
-	return false
+	return names
 }
 
 // write 将构建好的单条(可为多子表聚合)INSERT 语句写入 TDengine。

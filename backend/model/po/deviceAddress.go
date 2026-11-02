@@ -11,8 +11,10 @@ import (
 
 // DeviceAddress 物联网设备地址位持久化对象
 type DeviceAddress struct {
-	ID             string `gorm:"primaryKey;column:id" json:"id"`
-	DeviceID       string `gorm:"column:device_id;not null" json:"deviceId"`
+	ID       string `gorm:"primaryKey;column:id" json:"id"`
+	DeviceID string `gorm:"column:device_id;not null" json:"deviceId"`
+	// PropertyID 绑定的物模型属性 ID（thing_model_property.id）。空串 = 未绑定。
+	PropertyID     string `gorm:"column:property_id;not null;default:'';index:idx_device_address_property" json:"propertyId"`
 	Name           string `gorm:"column:name;uniqueIndex;not null" json:"name"`
 	Label          string `gorm:"column:label;not null" json:"label"`                     // 地址 name 的中文说明（如温度、电流）
 	CommonDataType string `gorm:"column:common_data_type;not null" json:"commonDataType"` // 通用数据类型名（配置界面展示）

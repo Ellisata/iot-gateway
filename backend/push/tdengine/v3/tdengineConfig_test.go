@@ -173,7 +173,8 @@ func TestEnsureSchemaSQL(t *testing.T) {
 	}
 	// 列顺序必须与写入侧 VALUES 逐列对齐（见 sqlbuilder.go 的 fmt.Fprintf）；
 	// 且必须是 CREATE ... IF NOT EXISTS —— 不能改成无条件 ALTER，理由见 ensureSchemaSQL 的注释。
-	want := "CREATE STABLE IF NOT EXISTS iot_db.s_hand (`time` TIMESTAMP, value_bool BOOL, value_int BIGINT, value_float DOUBLE, value_str NCHAR(255), value_kind NCHAR(16), quality INT) TAGS (device_id NCHAR(64), device_address_id NCHAR(64))"
+	// tag 顺序必须与写入侧 TAGS(...) 逐项对齐（见 sqlbuilder.go 的 joinTags）。
+	want := "CREATE STABLE IF NOT EXISTS iot_db.s_hand (`time` TIMESTAMP, value_bool BOOL, value_int BIGINT, value_float DOUBLE, value_str NCHAR(255), value_kind NCHAR(16), quality INT) TAGS (device_id NCHAR(64), device_address_id NCHAR(64), thing_model_code NCHAR(64), property_code NCHAR(64))"
 	if stmts[1] != want {
 		t.Errorf("create stable stmt = %q\nwant %q", stmts[1], want)
 	}
@@ -302,6 +303,80 @@ func TestHasQualityCauseColumn(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			if got := hasQualityCauseColumn(c.cols, c.table); got != c.want {
 				t.Errorf("hasQualityCauseColumn = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// TestMissingSchemaTags 升级护栏：旧超级表没有本版新增的两个 tag 时必须报出来，
+// 否则位置式 INSERT 的 tag 数不符会被判为毒批次并静默丢数据。
+func TestMissingSchemaTags(t *testing.T) {
+	td3 := []string{"field", "type", "length", "note"}
+	cases := []struct {
+		name  string
+		cols  []string
+		table [][]any
+		want  []string
+	}{
+		{
+			"旧表：两个新 tag 都没有",
+			td3,
+			[][]any{
+				{"time", "TIMESTAMP", 8, ""},
+				{"value_int", "BIGINT", 8, ""},
+				{"device_id", "NCHAR", 64, "TAG"},
+				{"device_address_id", "NCHAR", 64, "TAG"},
+			},
+			[]string{"thing_model_code", "property_code"},
+		},
+		{
+			"只补了一个 tag",
+			td3,
+			[][]any{
+				{"device_id", "NCHAR", 64, "TAG"},
+				{"thing_model_code", "NCHAR", 64, "TAG"},
+			},
+			[]string{"property_code"},
+		},
+		{
+			"迁移完成",
+			td3,
+			[][]any{
+				{"device_id", "NCHAR", 64, "TAG"},
+				{"device_address_id", "NCHAR", 64, "TAG"},
+				{"thing_model_code", "NCHAR", 64, "TAG"},
+				{"property_code", "NCHAR", 64, "TAG"},
+			},
+			nil,
+		},
+		{
+			"Field 不在首列也认得出来",
+			[]string{"note", "field", "type"},
+			[][]any{
+				{"", "device_id", "NCHAR"},
+				{"", "THING_MODEL_CODE", "NCHAR"},
+				{"", "PROPERTY_CODE", "NCHAR"},
+			},
+			nil,
+		},
+		{
+			"形状认不出来：放过",
+			[]string{"name", "type"},
+			[][]any{{"device_id", "NCHAR"}},
+			nil,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := missingSchemaTags(c.cols, c.table)
+			if len(got) != len(c.want) {
+				t.Fatalf("missingSchemaTags = %v, want %v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Errorf("missingSchemaTags = %v, want %v", got, c.want)
+					break
+				}
 			}
 		})
 	}

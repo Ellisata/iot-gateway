@@ -205,8 +205,9 @@ func (c *tdengineConfig) dsn() string {
 //
 // 列/tag 名统一 snake_case(与数据库命名规范一致)。
 // 每条采集记录经 `INSERT ... USING {stable} TAGS(...)` 自动创建子表,
-// 子表名 = deviceId_deviceAddressId。tag 仅稳定标识 device_id / device_address_id,
-// 名称可变不作 tag(子表 tag 值不可变更,存名称会陈旧),名称查询/展示走设备配置关联。
+// 子表名 = deviceId_deviceAddressId。tag 为稳定标识 device_id / device_address_id
+// 与物模型编码 thing_model_code / 属性编码 property_code;名称可变不作 tag
+// (子表 tag 值不可变更,存名称会陈旧),名称查询/展示走设备配置关联。
 // 值列宽度与写入侧截断保持一致:value_str → maxValueStr、value_kind → maxKindLen、
 // tag → maxTagLen(sqlbuilder.go)。
 //
@@ -214,17 +215,23 @@ func (c *tdengineConfig) dsn() string {
 // 这个整数,不再单独占一列 —— 曾短暂存在过的 quality_cause 列在本版被删掉了。
 //
 // ⚠️ **已部署实例的超级表不会因本函数而变** :语句是 CREATE STABLE IF NOT EXISTS,
-// 表已存在就整个跳过,新版不会替运维删列;而写入侧是**位置式** INSERT,列数对不上
-// 会被 TDengine 拒收,且该错误被 push/drain.go 判为毒批次后**静默丢数据**。
-// 升级前必须手工执行一次(新装实例无需,建表即不带该列):
+// 表已存在就整个跳过,新版不会替运维删列/加 tag;而写入侧是**位置式** INSERT,
+// 列数/tag 数对不上会被 TDengine 拒收,且该错误被 push/drain.go 判为毒批次后
+// **静默丢数据**。升级前必须手工执行一次(新装实例无需,建表即带全部 tag):
 //
-//	ALTER STABLE {db}.{stable} DROP COLUMN quality_cause;
+//	ALTER STABLE {db}.{stable} DROP COLUMN quality_cause;                 -- 旧版删列
+//	ALTER STABLE {db}.{stable} ADD TAG thing_model_code NCHAR(64);        -- 本版加 tag
+//	ALTER STABLE {db}.{stable} ADD TAG property_code NCHAR(64);
 //
-// 注意启动与重连后都会执行本函数 —— 若改成无条件 ALTER,列已存在时报错会让
+// 加 tag 后已有子表的新 tag 值为 NULL(历史数据不会自动回填);新写入**不会**更新
+// 子表 tag —— 需要回填时按子表执行 ALTER TABLE {db}.{sub} SET TAG ...。
+//
+// 注意启动与重连后都会执行本函数 —— 若改成无条件 ALTER,列/tag 已存在时报错会让
 // ensureSchema 失败、通道永远建不起来(硬性宕机),所以这里只建不改。
 // 忘记迁移时的护栏是那条漂移探测日志(见 tdengineChannel.warnSchemaDrift)。
 func (c *tdengineConfig) ensureSchemaSQL() []string {
-	tags := fmt.Sprintf("TAGS (device_id NCHAR(%d), device_address_id NCHAR(%d))", maxTagLen, maxTagLen)
+	tags := fmt.Sprintf("TAGS (device_id NCHAR(%d), device_address_id NCHAR(%d), thing_model_code NCHAR(%d), property_code NCHAR(%d))",
+		maxTagLen, maxTagLen, maxTagLen, maxTagLen)
 	stable := c.safeDB + "." + c.safeStable
 	return []string{
 		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", c.safeDB),

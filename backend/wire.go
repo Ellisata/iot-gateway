@@ -190,6 +190,7 @@ func ProvideRouteOptions(
 	uc *controller.UserController,
 	dc *controller.DeviceController,
 	ac *controller.DeviceAddressController,
+	tmc *controller.ThingModelController,
 	cc *controller.CollectionController,
 	rc *controller.RealtimeController,
 	pc *controller.ProtocolController,
@@ -214,6 +215,7 @@ func ProvideRouteOptions(
 		router.WithUserRoutes(uc),
 		router.WithDeviceRoutes(dc),
 		router.WithDeviceAddressRoutes(ac),
+		router.WithThingModelRoutes(tmc),
 		router.WithCollectionRoutes(cc),
 		router.WithRealtimeRoutes(rc),
 		router.WithProtocolRoutes(pc),
@@ -236,6 +238,6 @@ func ProvideRouteOptions(
 		// 出厂关闭**，由运行期开关 agentApi.enabled 控制）。
 		// 刻意放在最后 —— 它复用同一批 controller，与前面各 With* 无顺序依赖。
 		// 风险与暴露清单见 router/agentApiRouter.go。
-		router.WithAgentApiRoutes(rcfg, uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc),
+		router.WithAgentApiRoutes(rcfg, uc, dc, ac, tmc, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc),
 	}
 }

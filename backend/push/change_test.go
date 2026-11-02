@@ -90,6 +90,35 @@ func TestChangeTrackerPassthroughWithoutIdentity(t *testing.T) {
 	}
 }
 
+// 物模型/属性编码变化也必须投递：它们是时序库的 tag，改绑定后稳定不变的点位
+// 若继续被过滤，新 tag 的 series 会一直缺数（要等到值变化）。
+func TestChangeTrackerDeliversOnCodeChange(t *testing.T) {
+	tr := newChangeTracker()
+	bound := changeRec("d1", "a1", "1", 192)
+	bound.ThingModelCode = "th_sensor"
+	bound.PropertyCode = "temperature"
+
+	if got := tr.filter([]collector.CollectedRecord{bound}); len(got) != 1 {
+		t.Fatalf("首轮投递 %d 条，want 1", len(got))
+	}
+	if got := tr.filter([]collector.CollectedRecord{bound}); len(got) != 0 {
+		t.Fatalf("编码未变仍投递 %d 条，want 0", len(got))
+	}
+
+	rebound := bound
+	rebound.PropertyCode = "humidity"
+	if got := tr.filter([]collector.CollectedRecord{rebound}); len(got) != 1 {
+		t.Fatalf("改绑属性后投递 %d 条，want 1", len(got))
+	}
+
+	unbound := bound
+	unbound.ThingModelCode = ""
+	unbound.PropertyCode = ""
+	if got := tr.filter([]collector.CollectedRecord{unbound}); len(got) != 1 {
+		t.Fatalf("解绑物模型后投递 %d 条，want 1", len(got))
+	}
+}
+
 // ==================== Engine ====================
 
 func TestPushRecordsChangeOnly(t *testing.T) {

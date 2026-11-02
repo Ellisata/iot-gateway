@@ -18,6 +18,8 @@ export const RECORD_DOC_KEYS = [
   'protocol',
   'quality',
   'collectedAt',
+  'thingModelCode',
+  'propertyCode',
 ]
 
 export const BATCH_DOC_KEYS = ['deviceId', 'collectedAt', 'count']
@@ -131,9 +133,14 @@ export function isEmptyMappingState(state) {
   )
 }
 
+// 新建通道 / 切到 mapping-json / 点「常用字段一键填充」时的默认输出字段。
+// 物模型编码与属性编码紧随点位 ID：它们是下游做语义关联最常用的两个维度，
+// 运行期未绑定时为空串（字段仍会输出）。
 const COMMON_ROWS = [
   { key: 'deviceId', value: 'deviceId' },
   { key: 'deviceAddressId', value: 'deviceAddressId' },
+  { key: 'thingModelCode', value: 'thingModelCode' },
+  { key: 'propertyCode', value: 'propertyCode' },
   { key: 'value', value: 'value', type: 'number' },
   { key: 'quality', value: 'quality', type: 'number' },
   { key: 'collectedAt', value: 'collectedAt' },

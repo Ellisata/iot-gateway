@@ -138,6 +138,20 @@
           show-overflow-tooltip
           class-name="iot-col-muted"
         />
+        <el-table-column
+          v-if="!compact"
+          :label="t('deviceAddress.property')"
+          width="180"
+          show-overflow-tooltip
+        >
+          <template #default="{ row }">
+            <span v-if="row.propertyIdentifier">
+              <span class="iot-mono">{{ row.propertyIdentifier }}</span>
+              <span class="iot-cell-muted"> · {{ row.propertyName }}</span>
+            </span>
+            <span v-else class="iot-cell-muted">{{ t('deviceAddress.unboundProperty') }}</span>
+          </template>
+        </el-table-column>
         <el-table-column :label="t('deviceAddress.dataType')" width="130" align="center">
           <template #default="{ row }">
             <span v-if="row.dataType" class="iot-chip">{{ row.dataType }}</span>
@@ -326,7 +340,45 @@
           />
         </el-form-item>
 
-        <el-form-item :label="t('deviceAddress.dataType')" prop="dataType">
+        <el-form-item prop="dataType">
+          <!-- 类型映射说明：物模型属性过滤与报警比较符都按「类别（Kind）」判定，
+               只给类型名字的话用户看不出 Boolean 与 Float 的区别，遇到"属性不见了"
+               只能猜。气泡放在标签旁，和地址帮助保持同一种交互。 -->
+          <template #label>
+            <span class="inline-flex items-center gap-1">
+              {{ t('deviceAddress.dataType') }}
+              <el-popover
+                v-if="dataTypeKindRows.length"
+                placement="bottom"
+                :width="320"
+                trigger="click"
+              >
+                <template #reference>
+                  <el-button
+                    :icon="QuestionFilled"
+                    circle
+                    text
+                    size="small"
+                    :aria-label="t('deviceAddress.kindMapTitle')"
+                  />
+                </template>
+                <div class="text-xs leading-5">
+                  <div class="font-semibold text-gray-700 mb-2">{{ t('deviceAddress.kindMapTitle') }}</div>
+                  <div class="max-h-64 overflow-y-auto space-y-0.5">
+                    <div
+                      v-for="row in dataTypeKindRows"
+                      :key="row.value"
+                      class="flex items-center justify-between gap-3"
+                    >
+                      <span class="font-mono text-gray-800 break-all">{{ row.label }}</span>
+                      <span class="shrink-0 text-gray-500">{{ row.kindLabel }}</span>
+                    </div>
+                  </div>
+                  <div class="mt-2 text-gray-400">{{ t('deviceAddress.kindMapHint') }}</div>
+                </div>
+              </el-popover>
+            </span>
+          </template>
           <el-select
             v-model="formData.dataType"
             :placeholder="t('deviceAddress.dataTypePlaceholder')"
@@ -353,6 +405,28 @@
               :value="item.value"
             />
           </el-select>
+        </el-form-item>
+
+        <el-form-item :label="t('deviceAddress.property')" prop="propertyId">
+          <el-select
+            v-model="formData.propertyId"
+            :placeholder="t('deviceAddress.propertyPlaceholder')"
+            clearable
+            :disabled="!deviceModelId"
+            :loading="propertyLoading"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="p in compatiblePropertyOptions"
+              :key="p.id"
+              :label="`${p.identifier} · ${p.name}`"
+              :value="p.id"
+              :disabled="p.status !== 1 && p.id !== formData.propertyId"
+            />
+          </el-select>
+          <div class="iot-form-hint is-block">
+            {{ deviceModelId ? t('deviceAddress.propertyHint') : t('deviceAddress.noModelBound') }}
+          </div>
         </el-form-item>
 
         <el-form-item :label="t('deviceAddress.scanFrequency')" prop="scanFrequency">
@@ -514,6 +588,8 @@ import {
 } from '@/api/modules/deviceAddress'
 import { getDataTypes } from '@/api/modules/protocol'
 import { getPointCapability } from '@/api/modules/deviceScan'
+import { getDeviceObjectById } from '@/api/modules/deviceObject'
+import { listThingModelProperties } from '@/api/modules/thingModel'
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
 import PointDiscoveryDialog from './PointDiscoveryDialog.vue'
 import { useExcelImport } from '@/composables/useExcelImport'
@@ -562,6 +638,31 @@ async function fetchDataTypes() {
   }
 }
 
+// 数据类型类别（driver.KindXxx）的中文说法：物模型属性过滤与报警比较符都按
+// 类别判定，把 Kind 直接摊给用户看（int/bool/string）比不解释更糊涂。
+const KIND_LABEL_KEYS = {
+  int: 'deviceAddress.kindInt',
+  uint: 'deviceAddress.kindUint',
+  float: 'deviceAddress.kindFloat',
+  bool: 'deviceAddress.kindBool',
+  string: 'deviceAddress.kindString',
+  time: 'deviceAddress.kindTime',
+}
+
+// 当前协议的类型 → 类别映射，供「数据类型」标签旁的气泡展示。
+// 未收录的 Kind（将来插件新增类别）原样显示，不静默吞成空。
+const dataTypeKindRows = computed(() =>
+  dataTypeOptions.value.map((item) => {
+    const kind = kindByType.value[item.value] || ''
+    const key = KIND_LABEL_KEYS[kind]
+    return {
+      value: item.value,
+      label: item.label,
+      kindLabel: kind ? (key ? t(key) : kind) : t('deviceAddress.kindUnknown'),
+    }
+  }),
+)
+
 const rwPermissionOptions = computed(() => {
   const options = [
     { value: 'R', label: t('deviceAddress.readonlyShort') },
@@ -580,6 +681,36 @@ const route = useRoute()
 const router = useRouter()
 const deviceObjectId = route.params.deviceObjectId
 const deviceObjectName = route.query.deviceObjectName || ''
+
+// ---------- 物模型属性 ----------
+// 设备绑定模型后，点位可绑定该模型下的属性。modelId 通常由设备页通过 query 带入；
+// 直接刷新本页时再回查一次设备详情，避免下拉永远为空。
+const deviceModelId = ref(route.query.modelId || '')
+const propertyOptionsAll = ref([])
+const propertyLoading = ref(false)
+
+async function fetchPropertyOptions() {
+  if (!deviceModelId.value) {
+    try {
+      const detail = await getDeviceObjectById(deviceObjectId)
+      deviceModelId.value = detail?.modelId || ''
+    } catch {
+      deviceModelId.value = ''
+    }
+  }
+  if (!deviceModelId.value) {
+    propertyOptionsAll.value = []
+    return
+  }
+  propertyLoading.value = true
+  try {
+    propertyOptionsAll.value = (await listThingModelProperties(deviceModelId.value)) || []
+  } catch {
+    propertyOptionsAll.value = []
+  } finally {
+    propertyLoading.value = false
+  }
+}
 
 // ---------- 协议地址示例 ----------
 // 地址写法随协议完全不同（"D100" 在三菱指 D 寄存器、在欧姆龙 FINS 指 DM 区），
@@ -739,6 +870,7 @@ const formData = reactive({
   label: '',
   dataType: '',
   rwPermission: '',
+  propertyId: '',
   scanFrequency: null,
   description: '',
   status: 1,
@@ -782,6 +914,7 @@ function handleEdit(row) {
   formData.label = row.label ?? ''
   formData.dataType = row.commonDataType ?? ''
   formData.rwPermission = row.rwPermission ?? ''
+  formData.propertyId = row.propertyId ?? ''
   formData.scanFrequency = row.scanFrequency ?? null
   formData.description = row.description ?? ''
   formData.status = row.status ?? 1
@@ -859,6 +992,7 @@ function resetFormData() {
   formData.label = ''
   formData.dataType = ''
   formData.rwPermission = ''
+  formData.propertyId = ''
   formData.scanFrequency = null
   formData.description = ''
   formData.status = 1
@@ -866,6 +1000,45 @@ function resetFormData() {
   formData.thresholdOp = ''
   formData.thresholdValues = []
 }
+
+// ---------- 属性下拉：按当前数据类型与读写模式过滤 ----------
+// 与后端 validatePropertyBinding 同一规则；前端过滤是为了让不兼容的选项根本选不到。
+// 当前已选中的属性始终保留在列表里，否则类型/权限刚变化时下拉会突然“失值”。
+function accessCovers(addressRW, propertyAccess) {
+  switch (addressRW) {
+    case 'RW':
+      return true
+    case 'R':
+      return propertyAccess === 'R'
+    case 'W':
+      return propertyAccess === 'W'
+    default:
+      return false
+  }
+}
+
+const compatiblePropertyOptions = computed(() => {
+  const kind = currentKind.value
+  return propertyOptionsAll.value.filter((p) => {
+    if (p.id === formData.propertyId) return true
+    if (kind && p.kind !== kind) return false
+    // 新建时读写权限还没选，此时不按权限过滤，否则下拉一开始是空的。
+    if (formData.rwPermission && !accessCovers(formData.rwPermission, p.accessMode)) return false
+    return true
+  })
+})
+
+// 类型/读写权限变化后，已选属性若不再兼容就清空，避免提交时才被后端拒绝。
+watch([() => formData.dataType, () => formData.rwPermission], () => {
+  if (!dialogVisible.value || !formData.propertyId) return
+  const p = propertyOptionsAll.value.find((x) => x.id === formData.propertyId)
+  if (!p) return
+  const kind = kindByType.value[formData.dataType] || ''
+  const accessMismatch = formData.rwPermission && !accessCovers(formData.rwPermission, p.accessMode)
+  if ((kind && p.kind !== kind) || accessMismatch) {
+    formData.propertyId = ''
+  }
+})
 
 // ---------- 报警条件（按数据类型的类别切换控件） ----------
 
@@ -1049,6 +1222,7 @@ async function handleSubmit() {
       label: formData.label.trim(),
       commonDataType: formData.dataType,
       rwPermission: formData.rwPermission,
+      propertyId: formData.propertyId || '',
       scanFrequency: formData.scanFrequency,
       description: formData.description.trim() || undefined,
       status: formData.status,
@@ -1091,6 +1265,7 @@ onMounted(() => {
   fetchList()
   fetchDataTypes()
   fetchPointCapability()
+  fetchPropertyOptions()
 })
 
 onBeforeUnmount(() => {

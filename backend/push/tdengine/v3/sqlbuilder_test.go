@@ -93,6 +93,9 @@ func TestBuildInsertSQL(t *testing.T) {
 		rec("dev-1", "40005", driver.KindFloat, "25.5000", 192),
 		rec("dev-1", "40007", driver.KindString, "AB'C", 0),
 	}
+	// 首点绑定物模型:编码/属性编码按 tag 写入;其余未绑定写空串
+	records[0].ThingModelCode = "th_sensor"
+	records[0].PropertyCode = "temperature"
 	sql := buildInsertSQL("iot_db", "s_hand", collectedAt, records)
 
 	// 注意:地址 "40001" 以数字开头,sanitizeIdent 补下划线前缀 → "_40001";表名带恒定哈希后缀
@@ -100,7 +103,8 @@ func TestBuildInsertSQL(t *testing.T) {
 	checks := []string{
 		"INSERT INTO ",
 		"iot_db." + subtableName("dev-1", "40001") + " USING iot_db.s_hand",
-		"TAGS ('dev-1', '40001')", // 仅稳定标识作 tag,名称不入库
+		"TAGS ('dev-1', '40001', 'th_sensor', 'temperature')", // 稳定标识 + 物模型/属性编码;名称不入库
+		"TAGS ('dev-1', '40003', '', '')",                     // 未绑定物模型:编码为空串
 		fmt.Sprintf("VALUES (%d, NULL, 1280, NULL, NULL, 'int', 192)", wantTS(collectedAt)),
 		"iot_db." + subtableName("dev-1", "40003") + " USING iot_db.s_hand",
 		fmt.Sprintf("VALUES (%d, true, NULL, NULL, NULL, 'bool', 192)", wantTS(collectedAt)), // Boolean 1 → true

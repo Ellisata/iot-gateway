@@ -76,6 +76,13 @@ func WithDeviceRoutes(dc *controller.DeviceController) RouteOption {
 	}
 }
 
+// WithThingModelRoutes 设备物模型模块路由选项
+func WithThingModelRoutes(tc *controller.ThingModelController) RouteOption {
+	return func(r *gin.Engine) {
+		ThingModelRoutes(r, tc)
+	}
+}
+
 // WithProtocolRoutes 协议模块路由选项
 func WithProtocolRoutes(pc *controller.ProtocolController) RouteOption {
 	return func(r *gin.Engine) {
@@ -205,6 +212,7 @@ func WithAgentApiRoutes(
 	uc *controller.UserController,
 	dc *controller.DeviceController,
 	ac *controller.DeviceAddressController,
+	tmc *controller.ThingModelController,
 	cc *controller.CollectionController,
 	rc *controller.RealtimeController,
 	pc *controller.ProtocolController,
@@ -224,6 +232,6 @@ func WithAgentApiRoutes(
 	dbc *controller.DashboardController,
 ) RouteOption {
 	return func(r *gin.Engine) {
-		AgentApiRoutes(r, cfg, uc, dc, ac, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc)
+		AgentApiRoutes(r, cfg, uc, dc, ac, tmc, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc)
 	}
 }
