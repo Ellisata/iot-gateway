@@ -85,6 +85,7 @@ func TestRegistrySpecsAreWellFormed(t *testing.T) {
 		KeyPushChangeOnly:    ApplyHotRead,
 		KeyPluginEnabled:     ApplyRestart,
 		KeyAgentApiEnabled:   ApplyHotRead,
+		KeyControlEnabled:    ApplyHotRead,
 	}
 	for key, want := range wantMode {
 		spec, ok := Lookup(key)

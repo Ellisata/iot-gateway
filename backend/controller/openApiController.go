@@ -12,14 +12,18 @@ import (
 	"iot-gateway/service"
 )
 
-// OpenApiController 开放接口控制器（供外部系统凭密钥调用，只读）
+// OpenApiController 开放接口控制器（供外部系统凭密钥调用）。
+//
+// 除控制下发外均为只读查询。控制下发仍受 control.enabled、协议 Writable、
+// 点位 W 权限三层约束，见 service.ControlService。
 type OpenApiController struct {
 	openApiService *service.OpenApiService
+	controlService *service.ControlService
 }
 
 // NewOpenApiController 创建开放接口控制器
-func NewOpenApiController(openApiService *service.OpenApiService) *OpenApiController {
-	return &OpenApiController{openApiService: openApiService}
+func NewOpenApiController(openApiService *service.OpenApiService, controlService *service.ControlService) *OpenApiController {
+	return &OpenApiController{openApiService: openApiService, controlService: controlService}
 }
 
 // PageDevices 对外设备分页查询
@@ -127,6 +131,27 @@ func (ctr *OpenApiController) PointAbnormal(c *gin.Context) {
 		return
 	}
 	data, err := ctr.openApiService.PointAbnormal(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// WriteControl 对外控制下发。
+//
+// 这是开放接口里**唯一会改变现场设备状态**的端点。仍受 control.enabled、
+// 协议 Writable、点位 rw_permission 三层约束；审计 source 记为 "openapi"。
+// X-Api-Key 中间件只做存在性校验，不注入操作者名称，因此 operator 固定为
+// "openapi"（不记录密钥本身，避免审计表泄露凭据）。
+func (ctr *OpenApiController) WriteControl(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.ControlDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.controlService.Write(ctx, &req, "openapi", "openapi")
 	if err != nil {
 		c.JSON(200, appError.HandleErrorCtx(ctx, err))
 		return

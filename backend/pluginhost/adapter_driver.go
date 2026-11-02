@@ -77,7 +77,14 @@ func (m *Manager) register(meta driversdk.Meta, link processLink) error {
 	for _, p := range meta.Protocols {
 		protocol := p.Name
 		serial := p.SerialExclusive
+		// 只有声明了 Writable 的协议才返回带 Write 的包装类型。
+		// 不能给所有 remoteDriver 都实现 driver.Writer：那样网关的
+		// `drv.(driver.Writer)` 永远成立，能力声明就形同虚设。
+		writable := p.Writable
 		if err := driver.RegisterExternal(protocol, func() driver.Driver {
+			if writable {
+				return newRemoteWritableDriver(link, protocol, serial, m.opts.Timeouts)
+			}
 			return newRemoteDriver(link, protocol, serial, m.opts.Timeouts)
 		}); err != nil {
 			for _, done := range names {

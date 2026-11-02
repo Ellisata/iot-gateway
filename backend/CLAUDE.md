@@ -93,6 +93,9 @@
 
 ### 采集引擎([collector/engine.go](collector/engine.go))
 - 从 SQLite 加载活跃设备与地址(`status=1`),经 WorkerPool 并发调度 `driver.Driver` 轮询。
+- **只写点位(`rw_permission=W`)不进入采集调度**:驱动契约里没有权限字段,读它会在设备侧
+  报错并把设备拖入退避/离线;`W` 只在控制下发与回读判定里生效。实时快照仍为它们占位
+  (`collected=false`),前端据此显示「不采集」。
 - 后台 watcher 每 10s 计算配置 checksum,设备/地址变更自动**热加载**(`Refresh` 零中断换任务)。
 - 采集结果通过 `RecordSink` 接口交给下游(绑定为 `push.Engine`)。
 

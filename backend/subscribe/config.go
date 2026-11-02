@@ -27,6 +27,9 @@ type subscription struct {
 	// topics 拆分后的订阅过滤器列表（去空、去重、保序），建连时逐个订阅。
 	topics []string
 	qos    byte
+	// controlTopic 控制下发主题（可选，单独订阅）。
+	// 该主题的报文不进入解析器，直接交给 ControlWriter。
+	controlTopic string
 
 	// 解析器：类型 + 原始配置 + 已构造实例（可能尚未构造，见 buildParser）。
 	parserType   string
@@ -64,6 +67,20 @@ func parseSubscriptionWith(row *po.MqttSubscription, strict bool) (*subscription
 	if len(topics) == 0 {
 		return nil, fmt.Errorf("topic 不能为空")
 	}
+	controlTopic := strings.TrimSpace(row.ControlTopic)
+	if controlTopic != "" {
+		// 控制主题是单个过滤器；逗号会被 MQTT 当成主题名的一部分，静默订阅不到。
+		if strings.Contains(controlTopic, ",") {
+			return nil, fmt.Errorf("controlTopic 只能是一个 MQTT 主题过滤器")
+		}
+		// 与数据主题相同时一条报文会被两个回调各收一次：控制指令可能被当成
+		// 数据解析，或反之。拒绝这种配置比运行时去重更可靠。
+		for _, t := range topics {
+			if t == controlTopic {
+				return nil, fmt.Errorf("controlTopic 不能与 topic 相同")
+			}
+		}
+	}
 	if row.QoS < 0 || row.QoS > 2 {
 		return nil, fmt.Errorf("qos %d 超出范围 [0,2]", row.QoS)
 	}
@@ -94,6 +111,7 @@ func parseSubscriptionWith(row *po.MqttSubscription, strict bool) (*subscription
 		topic:        topic,
 		topics:       topics,
 		qos:          byte(row.QoS),
+		controlTopic: controlTopic,
 		parserType:   parserType,
 		parserConfig: parserConfig,
 		parserSig:    parserType + "|" + string(parserConfig),
@@ -101,7 +119,7 @@ func parseSubscriptionWith(row *po.MqttSubscription, strict bool) (*subscription
 	// 用拆分后的过滤器拼签名：只改空白/重复项不应触发重连。
 	cfg.connSig = strings.Join([]string{
 		row.ID, broker, row.Port, row.ClientID, row.Username,
-		row.Password, strings.Join(topics, ","), strconv.Itoa(row.QoS),
+		row.Password, strings.Join(topics, ","), strconv.Itoa(row.QoS), controlTopic,
 	}, "|")
 	return cfg, nil
 }

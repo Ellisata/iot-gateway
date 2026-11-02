@@ -25,6 +25,7 @@ system_config 表里的覆盖行  >  configFile（default.yaml + APP_ENV 环境�
 | `push.changeOnly` | 立即生效 | 从下一批采集起生效。`false -> true` 时清空已投递记录，下一批全量下发一次。 |
 | `plugin.enabled` | **重启后生效** | 插件管理器的 `Stop` 是终态的，运行期启停需要重写进程监管生命周期。 |
 | `agentApi.enabled` | 立即生效 | **出厂 false**。控制整组免鉴权的 `/agentApi` 镜像：路由始终注册（gin 启动后不可增删），分组中间件按请求现读开关，关闭时整组返回 403 —— 包括清单与 `/agentApi/systemConfig/update`，即 dsh 不能自己把自己打开。 |
+| `control.enabled` | 立即生效 | 控制下发（写 PLC 点位）总开关，**出厂 false**。`ControlService` 每次请求现读；Web / OpenAPI / MQTT 控制主题的写路径都汇聚到这里。关闭只拒绝新的下发，执行中的那一批不受影响。打开仍需插件 `Writable` 与点位 `rw_permission` 两层条件。 |
 
 未纳入（有意为之）：`server.port`、`jwt.*`、`log.*`、`sqlite.path`、
 `plugin.dir/glob/timeouts`、`discovery.port/intervalMs`，以及
@@ -100,7 +101,9 @@ CREATE TABLE IF NOT EXISTS system_config (
 ## 7. 安全
 
 - 这些开关能改变网关的对外行为（局域网可见性、扫描能力、推送量、重启后是否
-  加载任何协议）。写接口应只对管理员开放。
+  加载任何协议），以及**是否允许写 PLC 点位**。写接口应只对管理员开放。
+- `control.enabled` 的风险方向与 `agentApi.enabled` 相同：危险的是「打开」。
+  页面对开启方向做二次确认，提示会改变现场设备状态；关闭方向直接生效。
 - `/agentApi` 按项目现有约定免鉴权，与 plugin 上传、设备删除同一暴露面；
   **`agentApi.enabled` 出厂 false**，开启后整组可达。风险说明见
   `router/agentApiRouter.go` 顶部。若网关会暴露到不可信网络，应保持关闭，

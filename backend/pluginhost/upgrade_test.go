@@ -13,6 +13,8 @@ import (
 
 	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"github.com/Ellisata/iot-gateway-sdk/driversdk"
+
+	"iot-gateway/model/po"
 )
 
 // ==================== 测试辅助 ====================
@@ -174,6 +176,9 @@ func TestRegistrationSigIgnoresCosmeticFields(t *testing.T) {
 		{"加协议", func(m *driversdk.Meta) { m.Protocols = append(m.Protocols, driversdk.Protocol{Name: "Acme.UDP"}) }},
 		{"改协议名", func(m *driversdk.Meta) { m.Protocols[0].Name = "Acme.TCP2" }},
 		{"翻转 SerialExclusive", func(m *driversdk.Meta) { m.Protocols[0].SerialExclusive = true }},
+		// Writable 决定工厂返回的实例是否实现 driver.Writer，必须参与比对。
+		// 漏掉它时热升级只更新 lp.meta：能力检查说可写，而既有实例仍只读。
+		{"翻转 Writable", func(m *driversdk.Meta) { m.Protocols[0].Writable = true }},
 		{"加类型", func(m *driversdk.Meta) {
 			m.Types = append(m.Types, &driver.DataType{Name: "int32", Kind: driver.KindInt, Size: 4})
 		}},
@@ -196,11 +201,12 @@ func TestRegistrationSigIgnoresCosmeticFields(t *testing.T) {
 	}
 }
 
-// TestNeedsTaskRebuild 只有「协议名集合」与「SerialExclusive」才需要重建采集任务。
+// TestNeedsTaskRebuild 只有「协议名集合」「SerialExclusive」与「Writable」
+// 才需要重建采集任务。
 //
-// 采集任务在建任务时就固化了这两件事（collector.serialExclusive 与
-// 「哪些设备能建出驱动」）；类型表 / TypeMap / scope 都是查询时现算的。
-// 判宽的代价是每次改类型都白白中断全部采集。
+// 采集任务在建任务时就固化了这三件事（collector.serialExclusive、
+// 「哪些设备能建出驱动」、驱动实例是否实现 driver.Writer）；类型表 / TypeMap /
+// scope 都是查询时现算的。判宽的代价是每次改类型都白白中断全部采集。
 func TestNeedsTaskRebuild(t *testing.T) {
 	meta := func(scope string, protocols ...driversdk.Protocol) driversdk.Meta {
 		return driversdk.Meta{Scope: scope, Protocols: protocols}
@@ -220,6 +226,8 @@ func TestNeedsTaskRebuild(t *testing.T) {
 		{"删协议", meta("a", tcp, rtu), meta("a", tcp), true},
 		{"换协议名", meta("a", tcp), meta("a", rtu), true},
 		{"翻转 SerialExclusive", meta("a", tcp), meta("a", driversdk.Protocol{Name: "Acme.TCP", SerialExclusive: true}), true},
+		// 既有驱动的具体类型在创建时就定死了；不重建任务，旧实例永远不是 Writer。
+		{"翻转 Writable", meta("a", tcp), meta("a", driversdk.Protocol{Name: "Acme.TCP", Writable: true}), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -675,6 +683,101 @@ func TestManagerUpgradeSerialExclusiveChangeRebuildsTask(t *testing.T) {
 	se, ok := d.(driver.SerialExclusive)
 	if !ok || !se.SerialExclusive() {
 		t.Error("新实例应报告独占串行总线")
+	}
+}
+
+// TestManagerUpgradeWritableChangeReRegistersAndRebuildsTask 只读协议换成可写
+// 协议时，**必须**同时重注册驱动并重建采集任务。
+//
+// 这是最容易漏的一处：能力检查读的是 Manager 的 meta，而实际下发看的是采集
+// 任务里那个驱动实例的类型。两者分头更新就会出现"界面说可写、下发报
+// protocol does not support write"的错配 —— 既有实例在创建时就定成了
+// remoteDriver，事后换 meta 不会让它凭空长出一个 Write 方法。
+func TestManagerUpgradeWritableChangeReRegistersAndRebuildsTask(t *testing.T) {
+	reload := &fakeReloader{}
+	m, _, dir := newTestManager(t, reload)
+	startWithRunningReloader(t, m, reload)
+
+	before, err := driver.Create(fixtureProtocol)
+	if err != nil {
+		t.Fatalf("driver.Create: %v", err)
+	}
+	if _, ok := before.(driver.Writer); ok {
+		t.Fatal("升级前协议未声明 Writable，实例不应实现 driver.Writer")
+	}
+	if m.ProtocolWritable(fixtureProtocol) {
+		t.Fatal("升级前不该报告可写")
+	}
+
+	setFixtureEnv(t, m, envFixtureVariant+"=writable")
+	replacePluginBinary(t, fixturePluginPath(t, dir))
+	m.Reload()
+
+	if got := m.Status()[0].Upgrades; got != 1 {
+		t.Fatalf("Upgrades = %d, want 1", got)
+	}
+	if !m.ProtocolWritable(fixtureProtocol) {
+		t.Error("升级后 Manager 应报告协议可写")
+	}
+
+	// 工厂必须已重注册：新建实例带出写能力。
+	after, err := driver.Create(fixtureProtocol)
+	if err != nil {
+		t.Fatalf("driver.Create: %v", err)
+	}
+	if _, ok := after.(driver.Writer); !ok {
+		t.Error("Writable 翻转后新建的实例必须实现 driver.Writer —— 注册表仍是旧工厂")
+	}
+
+	// 既有实例不会凭空长出 Write，必须靠任务重建换成新实例。
+	waitFor(t, 3*time.Second, "Writable 变化触发采集任务重建", func() bool {
+		return reload.calls.Load() == 1
+	})
+	time.Sleep(200 * time.Millisecond)
+	if n := reload.calls.Load(); n != 1 {
+		t.Errorf("应恰好刷新 1 次（防抖后），实际 %d 次", n)
+	}
+}
+
+// TestManagerUpgradeTouchesProtocolRows 热升级成功后必须刷新对应协议行的
+// updated_at，而**未发生升级**（包括单纯重启 / 重复扫描）时不得改动它。
+//
+// 这个时间戳是"该协议背后的插件已换代"的观察点；放进 provisionProtocol 会让
+// 每次启动都刷新一遍，字段就失去意义了 —— 所以它必须挂在升级路径上。
+func TestManagerUpgradeTouchesProtocolRows(t *testing.T) {
+	const frozen = "2000-01-01 00:00:00"
+
+	reload := &fakeReloader{}
+	m, db, dir := newTestManager(t, reload)
+	startWithRunningReloader(t, m, reload)
+
+	updatedAt := func() string {
+		t.Helper()
+		var row po.IotProtocol
+		if err := db.Where("name = ?", fixtureProtocol).First(&row).Error; err != nil {
+			t.Fatalf("查询协议行: %v", err)
+		}
+		return row.UpdatedAt
+	}
+	if err := db.Model(&po.IotProtocol{}).Where("name = ?", fixtureProtocol).
+		Update("updated_at", frozen).Error; err != nil {
+		t.Fatalf("重置 updated_at: %v", err)
+	}
+
+	// 没有内容变化 → 不升级 → 时间戳保持原样。
+	m.Reload()
+	if got := updatedAt(); got != frozen {
+		t.Fatalf("未升级时不应刷新 updated_at，得到 %q", got)
+	}
+
+	// 替换二进制 → 升级成功 → 时间戳必须刷新。
+	replacePluginBinary(t, fixturePluginPath(t, dir))
+	m.Reload()
+	if got := m.Status()[0].Upgrades; got != 1 {
+		t.Fatalf("Upgrades = %d, want 1", got)
+	}
+	if got := updatedAt(); got == frozen || got == "" {
+		t.Errorf("升级成功后 updated_at 应被刷新，实际 %q", got)
 	}
 }
 

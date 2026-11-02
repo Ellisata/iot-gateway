@@ -66,6 +66,7 @@ const envFixtureTag = "IOTGW_FIXTURE_TAG"
 //	renamescope 换 scope（只动类型 scope）
 //	addproto    多一个协议名（必须重建采集任务）
 //	serial      翻转 SerialExclusive（必须重建采集任务）
+//	writable    翻开 Writable（必须重注册驱动并重建采集任务）
 //	discovery   给协议挂上扫描能力（只动 Discovery）
 //	discovery2  同 discovery 但 Title/预算不同，用于验证「热升级后扫描规格现算」
 //	pointscan        给协议挂上点位扫描能力（只动 PointDiscovery）
@@ -209,6 +210,24 @@ func (d *fixtureDriver) Read(addrs []driver.DeviceAddress) ([]driver.ReadResult,
 	return out, nil
 }
 
+// Write 让夹具驱动**始终**实现 driver.Writer。
+//
+// Meta 是否声明 Writable 由 envFixtureVariant 控制：Serve 只校验"声明了
+// Writable 必须实现 Writer"，不禁止未声明的协议实现它 —— 因此基线变体仍是
+// 只读协议，writable 变体才会被注册成 remoteWritableDriver。这条差异正是
+// 热升级测试要验证的东西。
+func (d *fixtureDriver) Write(reqs []driver.WriteRequest) ([]driver.WriteResult, error) {
+	out := make([]driver.WriteResult, len(reqs))
+	for i, r := range reqs {
+		out[i] = driver.WriteResult{
+			DeviceAddressID: r.DeviceAddressID,
+			Code:            driver.WriteCodeOK,
+			Value:           r.Value,
+		}
+	}
+	return out, nil
+}
+
 func (d *fixtureDriver) IsConnected() bool { return d.connected }
 func (d *fixtureDriver) Close() error      { d.connected = false; return nil }
 
@@ -244,6 +263,8 @@ func fixtureMeta() driversdk.Meta {
 		meta.Protocols = append(meta.Protocols, driversdk.Protocol{Name: fixtureProtocolAlt})
 	case "serial":
 		meta.Protocols[0].SerialExclusive = true
+	case "writable":
+		meta.Protocols[0].Writable = true
 	case "discovery":
 		meta.Protocols[0].Discovery = &driver.DiscoverySpec{
 			Title:       "夹具扫描",

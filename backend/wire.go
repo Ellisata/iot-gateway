@@ -93,6 +93,9 @@ func InitializeApp() (*AppDependencies, func()) {
 		// Sink 绑定到推送引擎的 PushRecordsToTimeSeries（见 push/engine.go）。
 		subscribe.NewManager,
 		wire.Bind(new(subscribe.Sink), new(*push.Engine)),
+		// MQTT 下行控制：subscribe 只依赖自己的 ControlWriter 接口，
+		// 生产实现是 *service.ControlService（避免 subscribe → service 的循环依赖）。
+		wire.Bind(new(subscribe.ControlWriter), new(*service.ControlService)),
 		// 实时值快照（实现 collector.RecordSink，供前端实时数据页查询）
 		realtime.NewStore,
 		// 大盘遥测计数器（实现 collector.RecordSink）+ 每分钟采样器。
@@ -136,6 +139,9 @@ func InitializeApp() (*AppDependencies, func()) {
 		wire.Bind(new(pluginhost.Reloader), new(*collector.Engine)),
 		// 协议服务经此接口读取「插件声明的表单」（恢复默认表单用）
 		wire.Bind(new(service.ProtocolFormSource), new(*pluginhost.Manager)),
+		// 控制下发服务：执行走采集引擎活会话，协议可写能力走插件 meta。
+		wire.Bind(new(service.ControlRunner), new(*collector.Engine)),
+		wire.Bind(new(service.WritableSource), new(*pluginhost.Manager)),
 
 		// 局域网自动发现广播器。两个来源都复用本图里已有的 provider：
 		// 身份来自 GatewayService.GetGateway，默认密钥来自
@@ -210,6 +216,7 @@ func ProvideRouteOptions(
 	dsc *controller.DeviceScanController,
 	scc *controller.SystemConfigController,
 	dbc *controller.DashboardController,
+	ctrl *controller.ControlController,
 ) []router.RouteOption {
 	return []router.RouteOption{
 		router.WithUserRoutes(uc),
@@ -234,10 +241,11 @@ func ProvideRouteOptions(
 		router.WithDeviceScanRoutes(dsc),
 		router.WithSystemConfigRoutes(scc),
 		router.WithDashboardRoutes(dbc),
+		router.WithControlRoutes(ctrl),
 		// dsh（AI Agent）调用面：把上述领域路由再挂一遍到 /agentApi（**无鉴权，
 		// 出厂关闭**，由运行期开关 agentApi.enabled 控制）。
 		// 刻意放在最后 —— 它复用同一批 controller，与前面各 With* 无顺序依赖。
 		// 风险与暴露清单见 router/agentApiRouter.go。
-		router.WithAgentApiRoutes(rcfg, uc, dc, ac, tmc, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc),
+		router.WithAgentApiRoutes(rcfg, uc, dc, ac, tmc, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc, ctrl),
 	}
 }

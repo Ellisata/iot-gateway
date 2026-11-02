@@ -172,6 +172,45 @@ func TestRealtimeSnapshotAlignsPointsAndValues(t *testing.T) {
 	}
 }
 
+// 只写点位不参与采集：即使内存快照里还留着「改成 W 之前」采到的旧值，
+// 快照也必须报 collected=false，否则前端会把它显示成一个看似正常的实时值。
+func TestRealtimeSnapshotIgnoresWriteOnlyValues(t *testing.T) {
+	db := newRealtimeTestDB(t)
+	writeOnly := addr("w1", "cmd", "启停命令", 1)
+	writeOnly.RwPermission = "W"
+	seedRealtimeDevice(t, db, "d1", "p1", testCreatedAt, []po.DeviceAddress{
+		addr("a1", "temp", "温度", 1),
+		writeOnly,
+	})
+
+	svc, store := newRealtimeTestService(t, db)
+	// 模拟权限被改成 W 之前已经采到的值仍留在内存快照里
+	store.PushRecords([]collector.CollectedRecord{
+		{DeviceID: "d1", DeviceAddressID: "a1", DeviceAddressName: "temp",
+			DeviceAddressLabel: "温度", Value: "23.5", DataType: "float"},
+		{DeviceID: "d1", DeviceAddressID: "w1", DeviceAddressName: "cmd",
+			DeviceAddressLabel: "启停命令", Value: "1", DataType: "int16"},
+	})
+
+	got, err := svc.GetDeviceSnapshot(context.Background(), req("d1", 1, 50, ""))
+	if err != nil {
+		t.Fatalf("GetDeviceSnapshot: %v", err)
+	}
+	byID := map[string]int{}
+	for i, r := range got.Records {
+		byID[r.AddressID] = i
+	}
+
+	w1 := got.Records[byID["w1"]]
+	if w1.Collected || w1.Value != "" || w1.Quality != 0 || w1.UpdatedAt != "" || w1.Stale {
+		t.Errorf("只写点位不得带实时值：collected=%v value=%q quality=%d updatedAt=%q stale=%v",
+			w1.Collected, w1.Value, w1.Quality, w1.UpdatedAt, w1.Stale)
+	}
+	if a1 := got.Records[byID["a1"]]; !a1.Collected || a1.Value != "23.5" {
+		t.Errorf("a1 = {collected:%v value:%q}, want {true \"23.5\"}", a1.Collected, a1.Value)
+	}
+}
+
 // 名称检索同时命中点位名与说明，且不得跨设备串台。
 func TestRealtimeSnapshotNameFilterMatchesNameOrLabel(t *testing.T) {
 	db := newRealtimeTestDB(t)
@@ -222,6 +261,69 @@ func TestRealtimeSnapshotNameFilterMatchesNameOrLabel(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// addressIds 精确取值：只返回「本设备 + 被点名 + 启用」的点位，并忽略分页。
+// 点位配置页的实时值列靠它按当前页的十几行取值，因此重复项/空白/别台设备 ID/
+// 不存在的 ID/停用点位一起塞进来时也不能串台或报错。
+func TestRealtimeSnapshotAddressIDsFilter(t *testing.T) {
+	db := newRealtimeTestDB(t)
+	seedRealtimeDevice(t, db, "d1", "p1", testCreatedAt, []po.DeviceAddress{
+		addr("a1", "temp", "温度", 1),
+		addr("a2", "pressure", "压力", 1),
+		addr("a3", "flow", "流量", 1),
+		addr("a4", "disabled", "已停用点位", 0),
+	})
+	seedRealtimeDevice(t, db, "d2", "p1", testCreatedAt, []po.DeviceAddress{
+		addr("b1", "temp2", "别台设备的点位", 1),
+	})
+
+	svc, store := newRealtimeTestService(t, db)
+	store.PushRecords([]collector.CollectedRecord{{
+		DeviceID: "d1", DeviceAddressID: "a1", DeviceAddressName: "temp",
+		DeviceAddressLabel: "温度", Value: "23.5", DataType: "float",
+	}})
+
+	got, err := svc.GetDeviceSnapshot(context.Background(), &dto.RealtimeSnapshotDTO{
+		DeviceID: "d1", Page: 1, Size: 1, // size=1 应被忽略
+		AddressIDs: " a1, a3, a1, b1, nope, a4 ",
+	})
+	if err != nil {
+		t.Fatalf("GetDeviceSnapshot: %v", err)
+	}
+	if got.Total != 2 {
+		t.Errorf("total = %d, want 2（只该有 a1/a3）", got.Total)
+	}
+	if len(got.Records) != 2 {
+		t.Fatalf("records = %d, want 2（分页应被忽略）", len(got.Records))
+	}
+	if got.Page != 1 || got.Size != 2 {
+		t.Errorf("page/size = %d/%d, want 1/2", got.Page, got.Size)
+	}
+
+	byID := map[string]int{}
+	for i, r := range got.Records {
+		byID[r.AddressID] = i
+	}
+	for _, leaked := range []string{"a2", "a4", "b1", "nope"} {
+		if _, ok := byID[leaked]; ok {
+			t.Errorf("点位 %s 不应出现在结果里", leaked)
+		}
+	}
+	if a1 := got.Records[byID["a1"]]; !a1.Collected || a1.Value != "23.5" {
+		t.Errorf("a1 = {collected:%v value:%q}, want {true \"23.5\"}", a1.Collected, a1.Value)
+	}
+
+	// 全部无效时返回空结果，而不是报错
+	empty, err := svc.GetDeviceSnapshot(context.Background(), &dto.RealtimeSnapshotDTO{
+		DeviceID: "d1", Page: 1, Size: 10, AddressIDs: "nope,b1",
+	})
+	if err != nil {
+		t.Fatalf("GetDeviceSnapshot(empty): %v", err)
+	}
+	if empty.Total != 0 || len(empty.Records) != 0 {
+		t.Errorf("全部无效 ID 应返回空结果，得到 total=%d records=%d", empty.Total, len(empty.Records))
 	}
 }
 

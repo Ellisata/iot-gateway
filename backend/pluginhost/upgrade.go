@@ -25,15 +25,30 @@ type typeSig struct {
 	size int
 }
 
+// protocolSig 单个协议在注册面里的可比较指纹。
+//
+// 两项都决定工厂返回的驱动实例**具体实现哪些接口**：SerialExclusive 决定是否
+// 实现 driver.SerialExclusive，Writable 决定是否实现 driver.Writer。实例的
+// 具体类型在 driver.Create 时就固化了，事后改 Meta 不会改变既有实例 —— 所以
+// 漏掉任何一项，注册表与插件实际能力就会静默错配。
+type protocolSig struct {
+	serialExclusive bool
+	writable        bool
+}
+
+func protocolSigOf(p driversdk.Protocol) protocolSig {
+	return protocolSig{serialExclusive: p.SerialExclusive, writable: p.Writable}
+}
+
 // registrationSig 是 Meta 中与 driver 运行时注册表有关的部分。
 //
 // 只有它变化才需要动 driver.* 注册表；Description / Version / FormJSON 只影响
 // iot_protocol 供给，而供给从不覆盖已有行，因此不参与比较。
 type registrationSig struct {
 	scope     string
-	protocols map[string]bool    // 协议名 → SerialExclusive
-	types     map[string]typeSig // 小写内部类型名 → {Kind,Size}
-	typeMap   map[string]string  // 通用类型名 → 内部类型名
+	protocols map[string]protocolSig // 协议名 → {SerialExclusive, Writable}
+	types     map[string]typeSig     // 小写内部类型名 → {Kind,Size}
+	typeMap   map[string]string      // 通用类型名 → 内部类型名
 }
 
 // registrationSigOf 从 Meta 派生注册面指纹。
@@ -48,12 +63,12 @@ type registrationSig struct {
 func registrationSigOf(m driversdk.Meta) registrationSig {
 	sig := registrationSig{
 		scope:     m.Scope,
-		protocols: make(map[string]bool, len(m.Protocols)),
+		protocols: make(map[string]protocolSig, len(m.Protocols)),
 		types:     make(map[string]typeSig, len(m.Types)),
 		typeMap:   make(map[string]string, len(m.TypeMap)),
 	}
 	for _, p := range m.Protocols {
-		sig.protocols[p.Name] = p.SerialExclusive
+		sig.protocols[p.Name] = protocolSigOf(p)
 	}
 	for _, dt := range m.Types {
 		if dt == nil {
@@ -100,22 +115,26 @@ func (s registrationSig) equal(o registrationSig) bool {
 
 // needsTaskRebuild 报告升级是否必须重建采集任务。
 //
-// 采集任务在建任务时就固化了两件事：每台设备的锁粒度（serialExclusive，见
-// collector/task.go 的 serialExclusive）与「哪些设备能建出驱动」（协议名集合）。
-// 其余（类型表、TypeMap、scope）都是查询时现算的，换了立刻生效。
+// 采集任务在建任务时就固化了三件事：每台设备的锁粒度（serialExclusive，见
+// collector/task.go 的 serialExclusive）、「哪些设备能建出驱动」（协议名集合），
+// 以及**驱动实例的具体类型** —— 它是否实现 driver.Writer 在 driver.Create 时
+// 就定下来了。因此 Writable 翻转也必须重建：否则 Manager 的 meta 说协议可写、
+// 界面按钮亮着，而任务里那个旧实例仍会在 `drv.(driver.Writer)` 上断言失败，
+// 表现为"能力检查通过、下发却报 protocol does not support write"。
 //
+// 其余（类型表、TypeMap、scope）都是查询时现算的，换了立刻生效。
 // 注意这是 registrationSig 的**真子集**：只改类型表不会走到这里。
 func needsTaskRebuild(oldMeta, newMeta driversdk.Meta) bool {
 	if len(oldMeta.Protocols) != len(newMeta.Protocols) {
 		return true
 	}
-	oldSerial := make(map[string]bool, len(oldMeta.Protocols))
+	oldProtos := make(map[string]protocolSig, len(oldMeta.Protocols))
 	for _, p := range oldMeta.Protocols {
-		oldSerial[p.Name] = p.SerialExclusive
+		oldProtos[p.Name] = protocolSigOf(p)
 	}
 	for _, p := range newMeta.Protocols {
-		serial, ok := oldSerial[p.Name]
-		if !ok || serial != p.SerialExclusive {
+		old, ok := oldProtos[p.Name]
+		if !ok || old != protocolSigOf(p) {
 			return true
 		}
 	}
@@ -160,9 +179,10 @@ func (m *Manager) spawnAndDescribe(path, expectSHA string) (*pluginProcess, driv
 // 所有既有驱动的 stale() 一起翻真、IsConnected() 返回 false，采集引擎既有的
 // 1s→60s 重连退避把设备接到新进程上 —— 其它协议与内置驱动完全不受影响。
 //
-// 只有「协议名集合」或「SerialExclusive」变化时才需要重建采集任务：前者
-// 决定哪些设备能建出驱动，后者是建任务时固化的锁粒度。其余变化（类型表、
-// TypeMap、scope）都是查询时现算的，无需中断采集。
+// 只有「协议名集合」「SerialExclusive」或「Writable」变化时才需要重建采集
+// 任务：前者决定哪些设备能建出驱动，后两者是建任务时固化的驱动实例形态
+// （锁粒度、是否实现 driver.Writer）。其余变化（类型表、TypeMap、scope）
+// 都是查询时现算的，无需中断采集。
 func (m *Manager) upgrade(lp *loadedPlugin, fp fileFingerprint) error {
 	base := filepath.Base(lp.path)
 
@@ -200,7 +220,7 @@ func (m *Manager) upgrade(lp *loadedPlugin, fp fileFingerprint) error {
 
 	oldSig, newSig := registrationSigOf(oldMeta), registrationSigOf(newMeta)
 	if !oldSig.equal(newSig) {
-		logger.Warn("pluginhost: 插件 %s 的注册面已变化（scope / 协议 / 类型 / 类型映射），将重注册驱动；"+
+		logger.Warn("pluginhost: 插件 %s 的注册面已变化（scope / 协议 / 序列独占 / 可写能力 / 类型 / 类型映射），将重注册驱动；"+
 			"引用被移除协议名的设备会被跳过", base)
 
 		m.unregister(lp)
@@ -240,6 +260,13 @@ func (m *Manager) upgrade(lp *loadedPlugin, fp fileFingerprint) error {
 		// 必须显式说清楚，否则会被当成「升级没生效」。
 		logger.Info("pluginhost: 插件的 iot_protocol 行已按新版本核对；已有行的表单不会被覆盖，" +
 			"如需改用插件新表单请在协议列表里执行「恢复默认表单」")
+	}
+
+	// 刷新协议行的 updated_at，作为「该协议的插件已换代」的观察点。
+	// 失败不影响升级本身：驱动已经可用，只是这个时间戳没更新。
+	if err := m.touchProtocolRows(newMeta); err != nil {
+		logger.Error("pluginhost: 热升级后刷新协议行更新时间失败（协议 %s）: %v",
+			protocolNames(newMeta), err)
 	}
 
 	if needsTaskRebuild(oldMeta, newMeta) {

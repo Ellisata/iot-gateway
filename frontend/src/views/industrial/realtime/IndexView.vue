@@ -29,6 +29,13 @@
       </div>
     </header>
 
+    <!-- 同一台设备的两个视图：点位配置 / 实时监控，一步切换且保留筛选 -->
+    <DeviceWorkspaceTabs
+      :device-object-id="deviceObjectId"
+      :device-object-name="snapshot?.deviceName || deviceObjectName"
+      :protocol-name="snapshot?.protocolName || route.query.protocolName || ''"
+    />
+
     <!-- 设备与采集状态：六项读数排成一张发丝线格栅，不再是一堆灰色小块 -->
     <section class="iot-panel iot-enter" style="animation-delay: 60ms">
       <div v-loading="loading" class="status-strip">
@@ -131,8 +138,10 @@
       >
         <el-table-column type="index" :label="t('common.index')" width="68" align="center" />
 
-        <!-- 点位名是这一行的身份：与设备对象页一样给一个小图标底座 -->
-        <el-table-column :label="t('realtime.pointName')" min-width="200">
+        <!-- 列名与点位配置页共用同一组 i18n key：name 是协议地址，label 是标签。
+             实时页曾把它们叫「点位名称 / 说明」，既与配置页不一致，后一个还容易
+             和独立的「描述」字段混淆。 -->
+        <el-table-column :label="t('deviceAddress.addressName')" min-width="200">
           <template #default="{ row }">
             <div class="iot-name-cell">
               <span class="iot-name-mark" aria-hidden="true">
@@ -144,7 +153,7 @@
         </el-table-column>
         <el-table-column
           prop="label"
-          :label="t('realtime.pointLabel')"
+          :label="t('deviceAddress.tag')"
           min-width="150"
           show-overflow-tooltip
           class-name="iot-col-muted"
@@ -156,8 +165,16 @@
             <span
               v-if="row.collected"
               :key="`${row.addressId}|${row.value}`"
-              class="value-flash"
+              class="iot-value-flash"
             >{{ row.value }}</span>
+            <!-- 只写点位永远不会被采集：不能和「尚未采到」共用同一个 —，否则会被当成采集故障 -->
+            <el-tooltip
+              v-else-if="row.rwPermission === 'W'"
+              :content="t('deviceAddress.writeonlyHint')"
+              placement="top"
+            >
+              <span class="iot-cell-muted iot-hint" tabindex="0">{{ t('realtime.writeonlyNoValue') }}</span>
+            </el-tooltip>
             <span v-else class="iot-cell-muted">{{ t('realtime.emptyValue') }}</span>
           </template>
         </el-table-column>
@@ -191,6 +208,44 @@
             </span>
           </template>
         </el-table-column>
+        <el-table-column :label="t('common.action')" width="116" align="center" fixed="right">
+          <template #default="{ row }">
+            <div class="iot-row-actions">
+              <!-- 就地改点位：看到值不对/质量码报地址错误时，不必退回地址页。
+                   保存后只刷新快照，当前这一屏的位置与筛选都不动。 -->
+              <el-tooltip :content="t('realtime.editAddress')" placement="top">
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="EditPen"
+                  :aria-label="t('realtime.editAddress')"
+                  @click="openEditAddress(row)"
+                />
+              </el-tooltip>
+              <!-- 可用时说明「这是控制下发」，不可用时说明为什么不能写；
+                   不能只在禁用时给 tooltip —— 正常状态下的图标没有文字，用户同样需要说明。 -->
+              <el-tooltip
+                :content="canWritePoint(row) ? t('control.writeTitle') : writeDisabledReason(row)"
+                placement="top"
+              >
+                <span>
+                  <el-button
+                    class="iot-row-btn"
+                    type="primary"
+                    link
+                    size="small"
+                    :icon="Edit"
+                    :disabled="!canWritePoint(row)"
+                    :aria-label="t('control.write')"
+                    @click="openWrite(row)"
+                  />
+                </span>
+              </el-tooltip>
+            </div>
+          </template>
+        </el-table-column>
 
         <template #empty>
           <div class="iot-empty">
@@ -216,6 +271,97 @@
         />
       </div>
     </section>
+
+    <!-- 控制下发：写入前二次确认，写入后展示逐点结果与回读值 -->
+    <el-dialog
+      v-model="writeDialogVisible"
+      class="iot-dialog"
+      :title="t('control.writeTitle')"
+      width="640px"
+      :close-on-click-modal="false"
+    >
+      <div v-if="writeTarget" class="control-write">
+        <div class="control-write-head">
+          <div class="control-write-name">
+            <span class="control-write-label">{{ writeTarget.label || writeTarget.name }}</span>
+            <span class="iot-mono control-write-addr">{{ writeTarget.name }}</span>
+            <span v-if="writeTarget.dataType" class="iot-chip">{{ writeTarget.dataType }}</span>
+          </div>
+          <span class="iot-pill" :class="writeTarget.rwPermission?.includes('W') ? 'is-amber' : 'is-gray'">
+            {{ writeTarget.rwPermission || '—' }}
+          </span>
+        </div>
+
+        <el-form label-width="96px" @submit.prevent>
+          <el-form-item :label="t('control.currentValue')">
+            <span class="iot-mono">{{ writeTarget.value || '—' }}</span>
+            <span v-if="writeTarget.stale" class="control-inline-hint">{{ t('control.staleHint') }}</span>
+          </el-form-item>
+          <el-form-item :label="t('control.targetValue')" required>
+            <el-input
+              v-model="writeForm.value"
+              :placeholder="t('control.valuePlaceholder')"
+              @keyup.enter="submitWrite"
+            />
+          </el-form-item>
+          <el-form-item :label="t('control.verify')">
+            <el-switch v-model="writeForm.verify" />
+            <span class="control-inline-hint">{{ t('control.verifyHint') }}</span>
+          </el-form-item>
+        </el-form>
+
+        <div class="iot-notice is-warning">
+          <span class="iot-notice-mark" aria-hidden="true">
+            <el-icon><AlertTriangle /></el-icon>
+          </span>
+          <p class="iot-notice-text">{{ t('control.confirmHint') }}</p>
+        </div>
+
+        <div v-if="writeResult" class="control-result">
+          <div class="control-result-head">
+            <span>{{ writeResult.duplicate ? t('control.duplicate') : t('control.resultTitle') }}</span>
+            <span class="control-result-meta">{{ writeResult.requestId }}</span>
+          </div>
+          <el-table :data="writeResult.results" class="iot-table is-compact" size="small">
+            <el-table-column prop="addressName" :label="t('control.point')" min-width="120" />
+            <el-table-column prop="value" :label="t('control.requested')" width="100" />
+            <el-table-column prop="resultValue" :label="t('control.resultValue')" width="100" />
+            <el-table-column prop="readbackValue" :label="t('control.readback')" width="100" />
+            <el-table-column :label="t('control.status')" width="120">
+              <template #default="{ row }">
+                <span class="iot-pill" :class="controlResultClass(row)">
+                  {{ controlResultText(row) }}
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column
+              prop="message"
+              :label="t('control.message')"
+              min-width="160"
+              show-overflow-tooltip
+            />
+          </el-table>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="flex items-center justify-end gap-2">
+          <el-button @click="writeDialogVisible = false">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" :loading="writing" @click="submitWrite">
+            {{ writeResult ? t('control.writeAgain') : t('control.confirmWrite') }}
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 就地编辑点位：与地址页共用同一份表单与校验 -->
+    <AddressFormDialog
+      v-model="editDialogVisible"
+      :device-id="deviceObjectId"
+      :protocol-name="snapshot?.protocolName || route.query.protocolName || ''"
+      :address-id="editingAddressId"
+      @saved="handleAddressSaved"
+    />
   </div>
 </template>
 
@@ -226,12 +372,19 @@ import {
   IconActivityHeartbeat as ActivityHeartbeat,
   IconAlertTriangle as AlertTriangle,
   IconArrowLeft as ArrowLeft,
+  IconEdit as Edit,
   IconInfoCircle as InfoCircle,
+  IconPencil as EditPen,
   IconPoint as Point,
   IconRefresh as Refresh,
   IconSearch as Search,
 } from '@tabler/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { getRealtimeSnapshot } from '@/api/modules/realtime'
+import { getControlCapability, writeControl } from '@/api/modules/control'
+import DeviceWorkspaceTabs from '@/components/DeviceWorkspaceTabs.vue'
+import AddressFormDialog from '../device-address/AddressFormDialog.vue'
+import { qualityBadText } from '@/utils/pointQuality'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -248,14 +401,33 @@ function goBack() {
 }
 
 // ---------- 查询表单 ----------
+const PAGE_SIZES = [10, 20, 50, 100]
+const initialPage = Number(route.query.page)
+const initialSize = Number(route.query.size)
 const queryForm = reactive({
-  name: '',
+  name: String(route.query.name || ''),
 })
+// 已生效的搜索词（输入框里敲了但没点查询的不算）：轮询、翻页与页签切换都沿用它
+const appliedName = ref(String(route.query.name || ''))
 
 // ---------- 分页 ----------
-const currentPage = ref(1)
-const pageSize = ref(20)
+const currentPage = ref(initialPage > 0 ? initialPage : 1)
+const pageSize = ref(PAGE_SIZES.includes(initialSize) ? initialSize : 20)
 const total = ref(0)
+
+// 把已生效的筛选与分页写回 URL。页签切换（DeviceWorkspaceTabs）会带上当前 query，
+// 于是「在实时页筛出某个点位 → 切去改配置 → 切回来」仍是同一屏。
+// 默认值不写进 query，避免地址里堆一串 ?page=1&size=20。
+function syncQuery() {
+  const query = { ...route.query }
+  if (appliedName.value) query.name = appliedName.value
+  else delete query.name
+  if (currentPage.value > 1) query.page = String(currentPage.value)
+  else delete query.page
+  if (pageSize.value !== 20) query.size = String(pageSize.value)
+  else delete query.size
+  router.replace({ query })
+}
 
 // ---------- 数据 ----------
 const loading = ref(false)
@@ -326,7 +498,7 @@ async function fetchSnapshot(showLoading = false) {
       deviceObjectId,
       page: currentPage.value,
       size: pageSize.value,
-      name: queryForm.name || undefined,
+      name: appliedName.value || undefined,
     })
     snapshot.value = res
     tableData.value = res?.records ?? []
@@ -342,22 +514,28 @@ async function fetchSnapshot(showLoading = false) {
 
 // ---------- 搜索 / 翻页 ----------
 function handleSearch() {
+  appliedName.value = queryForm.name.trim()
   currentPage.value = 1
+  syncQuery()
   fetchSnapshot(true)
 }
 
 function handleReset() {
   queryForm.name = ''
+  appliedName.value = ''
   currentPage.value = 1
+  syncQuery()
   fetchSnapshot(true)
 }
 
 function handleSizeChange() {
   currentPage.value = 1
+  syncQuery()
   fetchSnapshot(true)
 }
 
 function handlePageChange() {
+  syncQuery()
   fetchSnapshot(true)
 }
 
@@ -404,29 +582,139 @@ function qualityClass(row) {
 
 function qualityText(row) {
   if (row.quality === 192) return t('realtime.qualityGood')
-  if (row.quality <= 3) return qualityBadText(row)
+  if (row.quality <= 3) return qualityBadText(t, row.quality)
   return row.quality
 }
 
-// 坏子码 → i18n key。取值只有后端 driver.QualityBadXxx 这三个（低 6 位的子码），
-// 故用显式映射而不是拼 key —— 拼错了 vue-i18n 会把 key 原样显示出来，
-// 而"realtime.qualityBad.undefined"这种东西出现在运维页面上比不显示更糟。
-const QUALITY_BAD_KEYS = {
-  1: 'realtime.qualityBadAddress',
-  2: 'realtime.qualityBadComms',
-  3: 'realtime.qualityBadParse',
+// ---------- 控制下发 ----------
+const capability = ref(null)
+const writeDialogVisible = ref(false)
+const writeTarget = ref(null)
+const writeForm = reactive({ value: '', verify: true })
+const writeResult = ref(null)
+const writing = ref(false)
+
+async function fetchCapability() {
+  try {
+    capability.value = await getControlCapability(deviceObjectId)
+  } catch {
+    // 能力查询失败（设备被删/网关未就绪）时保守禁用，不显示写入口。
+    capability.value = { enabled: false, writable: false, reason: 'unavailable' }
+  }
 }
 
-// qualityBadText 返回坏点位的文案；未归因（0）时退回原始质量码 ——
-// 不把"未知"伪装成某个具体原因。
-function qualityBadText(row) {
-  const key = QUALITY_BAD_KEYS[row.quality]
-  return key ? t(key) : String(row.quality)
+function canWritePoint(row) {
+  return (
+    capability.value?.writable === true &&
+    String(row?.rwPermission || '').includes('W')
+  )
+}
+
+function writeDisabledReason(row) {
+  if (canWritePoint(row)) return ''
+  if (!capability.value) return t('control.checking')
+  if (!capability.value.enabled) return t('control.disabled')
+  if (!capability.value.writable) {
+    return t(`control.reason.${capability.value.reason || 'protocol_not_writable'}`)
+  }
+  return t('control.pointNotWritable')
+}
+
+function openWrite(row) {
+  writeTarget.value = row
+  writeForm.value = row.value ?? ''
+  writeForm.verify = true
+  writeResult.value = null
+  writeDialogVisible.value = true
+}
+
+function newRequestId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+async function submitWrite() {
+  const target = writeTarget.value
+  if (!target) return
+  const value = String(writeForm.value ?? '')
+  if (value.trim() === '' && target.dataType !== 'string') {
+    ElMessage.warning(t('control.valueRequired'))
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      t('control.confirmMessage', {
+        name: target.label || target.name,
+        value,
+      }),
+      t('control.confirmTitle'),
+      {
+        type: 'warning',
+        confirmButtonText: t('control.confirmWrite'),
+        cancelButtonText: t('common.cancel'),
+      },
+    )
+  } catch {
+    return // 用户取消
+  }
+
+  writing.value = true
+  try {
+    const res = await writeControl({
+      deviceId: deviceObjectId,
+      requestId: newRequestId(),
+      verify: writeForm.verify,
+      items: [{ deviceAddressId: target.addressId, value }],
+    })
+    writeResult.value = res
+    const results = res?.results ?? []
+    const failed = results.filter((r) => !r.ok).length
+    if (failed > 0) {
+      ElMessage.warning(t('control.partialFailed', { failed, total: results.length }))
+    } else {
+      ElMessage.success(res?.duplicate ? t('control.duplicateSuccess') : t('control.writeSuccess'))
+    }
+    fetchSnapshot(false)
+  } catch {
+    // axios 拦截器已提示业务错误；保留弹窗让用户看到输入并重试
+  } finally {
+    writing.value = false
+  }
+}
+
+function controlResultClass(row) {
+  if (!row?.ok) return 'is-rose'
+  if (row.verified) return 'is-green'
+  return 'is-amber'
+}
+
+function controlResultText(row) {
+  if (!row?.ok) return t('control.failed')
+  if (row.verified) return t('control.verified')
+  return t('control.unverified')
+}
+
+// ---------- 就地编辑点位 ----------
+// 只带 addressId，完整数据由 AddressFormDialog 按 id 拉取 —— 实时表格行里没有
+// 报警条件、描述、启停状态，直接拿行数据填表会把这些配置悄悄清空。
+const editDialogVisible = ref(false)
+const editingAddressId = ref('')
+
+function openEditAddress(row) {
+  editingAddressId.value = row.addressId
+  editDialogVisible.value = true
+}
+
+function handleAddressSaved() {
+  // 地址写法/类型/采集频率的改动在下一个采集周期体现；先拉一次，让用户马上看到变化
+  fetchSnapshot(false)
 }
 
 // ---------- 生命周期 ----------
 onMounted(() => {
   fetchSnapshot(true)
+  fetchCapability()
   restartTimer()
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
@@ -487,24 +775,67 @@ onUnmounted(() => {
   width: 118px;
 }
 
-/* 值变化时闪烁一次：值是数据的核心，不闪的话用户看不出「数据在动」 */
-.value-flash {
-  display: inline-block;
-  padding: 0 6px;
-  font-weight: 600;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-  border-radius: 4px;
-  animation: valueFlash 0.9s ease-out;
+/* 值变化时的高亮动画在 styles/console.css（.iot-value-flash），与点位配置页共用 */
+
+/* 控制下发弹窗 */
+.control-write-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line-soft);
 }
 
-@keyframes valueFlash {
-  from {
-    background-color: var(--el-color-primary-light-7);
-  }
-  to {
-    background-color: transparent;
-  }
+.control-write-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.control-write-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.control-write-addr {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.control-inline-hint {
+  margin-left: 10px;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+.control-result {
+  margin-top: 16px;
+}
+
+.control-result-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.control-result-meta {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--ink-4);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {

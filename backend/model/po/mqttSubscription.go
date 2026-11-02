@@ -28,6 +28,14 @@ type MqttSubscription struct {
 	// 多个过滤器用英文逗号分隔，共用本行的 QoS 与解析器。
 	Topic string `gorm:"column:topic;not null" json:"topic"`
 	QoS   int    `gorm:"column:qos;default:1" json:"qos"`
+	// ControlTopic 控制下发主题（可选，单独一个 MQTT 过滤器）。
+	//
+	// 该主题上的报文不经过解析器，而是按约定 JSON 直接调用控制服务：
+	//   {"deviceId":"...","requestId":"...","verify":true,
+	//    "items":[{"deviceAddressId":"...","value":"42"}]}
+	// requestId 必填：MQTT QoS1 会重投，没有幂等键就无法阻止重复写 PLC。
+	// 为空表示该订阅只做数据采集，不接受控制指令。
+	ControlTopic string `gorm:"column:control_topic;not null;default:''" json:"controlTopic"`
 	// MappingJSON 内置映射（parser_type=builtin）的规则（见 parser/mapping）。
 	// builtin 类型沿用本列，保证历史数据与 API 零迁移；其它类型读 ParserConfig。
 	MappingJSON string `gorm:"column:mapping_json;not null" json:"mappingJson"`

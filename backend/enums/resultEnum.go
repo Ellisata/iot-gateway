@@ -88,6 +88,19 @@ var (
 	DeviceAddressNotExistsEnum   = NewBusinessEnum("40012", "设备地址不存在", "err.device_address_not_found")
 	DeviceAddressDataTypeErrEnum = NewBusinessEnum("40013", "协议不支持该数据类型", "err.device_address_data_type")
 
+	// 控制下发相关错误码。
+	//
+	// 归在设备域（4003x）：用户视角是"给这台设备的这个点写值"，
+	// 不是"协议配置错了"。与设备扫描（4002x）相邻但不重叠。
+	ControlDisabledEnum            = NewBusinessEnum("40031", "控制下发功能未启用", "err.control_disabled")
+	ControlProtocolNotWritableEnum = NewBusinessEnum("40032", "该协议不支持控制下发", "err.control_protocol_not_writable")
+	ControlAddressNotWritableEnum  = NewBusinessEnum("40033", "该点位没有写权限", "err.control_address_not_writable")
+	ControlAddressNotFoundEnum     = NewBusinessEnum("40034", "点位不存在或不属于该设备", "err.control_address_not_found")
+	ControlDeviceOfflineEnum       = NewBusinessEnum("40035", "设备当前不在采集或链路离线", "err.control_device_offline")
+	ControlParamInvalidEnum        = NewBusinessEnum("40036", "控制下发参数不合法", "err.control_param_invalid")
+	ControlWriteFailedEnum         = NewBusinessEnum("40037", "控制下发失败（链路错误，写入状态未知）", "err.control_write_failed")
+	ControlRateLimitedEnum         = NewBusinessEnum("40038", "控制下发过于频繁，请稍后再试", "err.control_rate_limited")
+
 	// 局域网设备扫描发现相关错误码。
 	//
 	// 归在设备域而不是协议域：「该协议不支持扫描」虽然是协议能力问题，但用户

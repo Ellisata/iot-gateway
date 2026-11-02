@@ -13,7 +13,9 @@ import (
 
 // OpenApiRoutes 开放接口路由：仅做 X-Api-Key 密钥鉴权（不走 JWT），
 // 供外部系统调用。该分组即对外白名单——默认关闭，只有显式挂载到
-// 此分组下的接口才对外开放；新接口经 OpenApiService 只读扩展后在此追加。
+// 此分组下的接口才对外开放；新接口在此追加。
+//
+// 除 /control/write（控制下发，高风险管理动作）外，其余接口均为只读查询。
 func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService, oac *controller.OpenApiController) {
 	openApi := r.Group("/openApi", middleware.OpenApiAuthMiddleware(oass))
 	{
@@ -28,5 +30,9 @@ func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService, oac *contr
 		// （见 docs/openApi.md 4.6 / 4.7）
 		openApi.GET("/alarm/deviceReliability", oac.DeviceReliability)
 		openApi.GET("/alarm/pointAbnormal", oac.PointAbnormal)
+
+		// 控制下发（**唯一会改变现场设备状态的对外接口**）。
+		// 仍需 control.enabled + 协议 Writable + 点位 W 权限三层同时满足。
+		openApi.POST("/control/write", oac.WriteControl)
 	}
 }

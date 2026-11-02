@@ -489,7 +489,9 @@ function handleViewRealtime(row) {
   router.push({
     name: 'GatewayRealtime',
     params: { deviceObjectId: row.id },
-    query: { deviceObjectName: row.name },
+    // 协议名一并带过去：实时页的「点位配置」页签依赖它取地址写法示例与数据类型，
+    // 快照还没返回时也不至于切过去是个空壳
+    query: { deviceObjectName: row.name, protocolName: row.protocolName },
   })
 }
 

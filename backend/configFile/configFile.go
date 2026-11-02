@@ -96,6 +96,35 @@ type Config struct {
 
 	// AgentApi dsh（AI Agent）免鉴权调用面（/agentApi）配置
 	AgentApi AgentApiConfig `mapstructure:"agentApi"`
+
+	// Control 控制下发（写 PLC 点位）配置
+	Control ControlConfig `mapstructure:"control"`
+}
+
+// ControlConfig 控制下发配置。
+//
+// 出厂**关闭**：写 PLC 会改变现场设备状态，与"读采集"是完全不同的风险面。
+// 即便协议声明了 Writable、点位是 RW，也必须先显式打开这个总开关。
+//
+// 与 discovery / plugin 等"接进来就能用"的开关方向相反。本字段只是默认值：
+// 已登记为 runtimecfg 热读项（control.enabled），页面 / API 的覆盖值优先，
+// ControlService 每次请求现读。
+type ControlConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+
+	// MaxWritesPerMinute 单台设备每分钟最多下发的**点位数**（不是请求数）。
+	// 0 表示不限制。默认 60。
+	//
+	// 批量请求按实际点位数计入：一次写 10 个点就消耗 10 个配额。
+	// 检查与扣减在同一把锁内完成，超限时整批拒绝，不会出现"前几个点写下去、
+	// 后几个点被限流"的半批状态。
+	MaxWritesPerMinute int `mapstructure:"maxWritesPerMinute"`
+
+	// MaxWritesPerPointPerMinute 单个点位每分钟最多写入次数。0 表示不限制。默认 20。
+	//
+	// 与设备级限制同时生效，任一超限即拒绝。固定一分钟窗口，实现见
+	// service/controlRateLimit.go。
+	MaxWritesPerPointPerMinute int `mapstructure:"maxWritesPerPointPerMinute"`
 }
 
 // AgentApiConfig dsh（AI Agent）调用面 /agentApi 的配置。
@@ -274,6 +303,11 @@ type PluginConfig struct {
 	// 硬规则：必须大于 protocolJSON 里配置的协议自身超时，
 	// 否则网关会放弃插件仍在执行的调用，重试会在串行总线上堆积。
 	ReadTimeoutMs int `mapstructure:"readTimeoutMs"`
+
+	// WriteTimeoutMs 控制下发超时（毫秒），默认 15000。
+	// 写入可能排在一次在途 Read 之后（插件按会话串行化），因此不能比协议
+	// 单帧超时还短；但也不宜接近 Read，否则一次失控的写会长时间占住设备锁。
+	WriteTimeoutMs int `mapstructure:"writeTimeoutMs"`
 
 	// RestartMinDelayMs / RestartMaxDelayMs 崩溃重启退避区间（毫秒），默认 1000 / 30000。
 	RestartMinDelayMs int `mapstructure:"restartMinDelayMs"`

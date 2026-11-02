@@ -426,8 +426,11 @@ const bulkType = ref('')
 const dataTypeOptions = ref([])
 const dataTypeLoading = ref(false)
 
+// 与新增/编辑地址表单保持同一组选项：这里建出来的点位之后也会进那张表单，
+// 入口之间档位不一致就会出现「这边建得出来、那边改不了」
 const rwOptions = computed(() => [
   { value: 'R', label: t('deviceAddress.readonlyShort') },
+  { value: 'W', label: t('deviceAddress.writeonlyShort') },
   { value: 'RW', label: t('deviceAddress.readwriteShort') },
 ])
 

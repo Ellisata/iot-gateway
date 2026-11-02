@@ -39,7 +39,10 @@ type Timeouts struct {
 	Connect   time.Duration // connect
 	Ping      time.Duration // ping（临时实例，与 connect 同量级）
 	Read      time.Duration // read（2000 点位批量在慢速串行链路上可能很久）
-	Close     time.Duration // close（尽力而为，绝不能拖住停机）
+	// Write 单次控制下发。写只涉及少数点位，但可能排在一次在途 Read 之后
+	//（插件会话锁串行化），所以不能取得比协议单帧超时还短。
+	Write time.Duration
+	Close time.Duration // close（尽力而为，绝不能拖住停机）
 }
 
 // DefaultTimeouts 默认超时，与 default.yaml 的 driver 段默认值一致。
@@ -49,6 +52,7 @@ func DefaultTimeouts() Timeouts {
 		Connect:   30 * time.Second,
 		Ping:      30 * time.Second,
 		Read:      60 * time.Second,
+		Write:     15 * time.Second,
 		Close:     2 * time.Second,
 	}
 }

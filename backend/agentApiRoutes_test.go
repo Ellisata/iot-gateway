@@ -67,6 +67,7 @@ func newTestEngineWithReader(cfg runtimecfg.Reader) *gin.Engine {
 		(*controller.DeviceScanController)(nil),
 		(*controller.SystemConfigController)(nil),
 		(*controller.DashboardController)(nil),
+		(*controller.ControlController)(nil),
 	))
 }
 

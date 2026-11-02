@@ -5,6 +5,7 @@ package subscribe
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 
 	"iot-gateway/collector"
 	"iot-gateway/logger"
+	"iot-gateway/model/dto"
 	"iot-gateway/parser"
 	"iot-gateway/utils"
 )
@@ -41,6 +43,13 @@ const (
 	// parseBatchTimeout 单批解析的兜底超时。脚本层还有逐报文超时，
 	// 这里的值只需防住「解析器整体卡死」。
 	parseBatchTimeout = 30 * time.Second
+
+	// controlQueueSize 控制指令缓冲区。控制是低频动作，队列只用于把
+	// paho 收包协程与「写 SQLite + 等 PLC 应答」解耦，不需要很大。
+	controlQueueSize = 256
+	// controlWriteTimeout 单条 MQTT 控制指令的处理上限。
+	// 必须小于 MQTT 客户端的 keepalive/会话超时，也不应比网关控制 API 更宽。
+	controlWriteTimeout = 20 * time.Second
 )
 
 // Sink 订阅数据的下游出口。
@@ -60,11 +69,17 @@ type subscriber struct {
 	sink Sink
 	// info 设备/点位元信息落库器，可为 nil（管理器未传或库不可用）。
 	info devicePointSink
+	// ctrl 控制下发出口，可为 nil（未传控制服务时只记错误，不 panic）。
+	ctrl ControlWriter
 
 	client mqtt.Client
 
 	running   atomic.Bool
 	connected atomic.Bool
+	// stopping 停机/热加载重建期间置位：控制 worker 丢弃积压指令，避免 Stop
+	// 逐条等 PLC 应答。与 running 分开是因为测试直接构造 subscriber 时不调 start，
+	// running 为 false 并不代表要丢弃控制指令。
+	stopping atomic.Bool
 
 	messages atomic.Uint64
 	records  atomic.Uint64
@@ -84,6 +99,14 @@ type subscriber struct {
 	pending     atomic.Int64
 	workerDone  chan struct{}
 
+	// 控制指令独立队列：控制是低频动作，不能与遥测报文抢同一个解析队列；
+	// 也不能在 paho 收包协程里直接写 SQLite / 等 PLC 应答。
+	control           chan controlMessage
+	controlMu         sync.RWMutex
+	controlClosed     bool
+	controlPending    atomic.Int64
+	controlWorkerDone chan struct{}
+
 	parserMu  sync.RWMutex
 	prs       parser.Parser
 	parserSig string
@@ -91,20 +114,31 @@ type subscriber struct {
 	stopOnce sync.Once
 }
 
-func newSubscriber(cfg *subscription, sink Sink, info devicePointSink) *subscriber {
+// controlMessage 一条待下发的控制指令。
+type controlMessage struct {
+	topic      string
+	payload    []byte
+	receivedAt time.Time
+}
+
+func newSubscriber(cfg *subscription, sink Sink, info devicePointSink, ctrl ControlWriter) *subscriber {
 	s := &subscriber{
-		cfg:        cfg,
-		sink:       sink,
-		info:       info,
-		prs:        cfg.prs,
-		parserSig:  cfg.parserSig,
-		recent:     newRecentMessageRing(recentMessageRingSize),
-		queue:      make(chan parser.Message, subscriptionQueueSize),
-		workerDone: make(chan struct{}),
+		cfg:               cfg,
+		sink:              sink,
+		info:              info,
+		ctrl:              ctrl,
+		prs:               cfg.prs,
+		parserSig:         cfg.parserSig,
+		recent:            newRecentMessageRing(recentMessageRingSize),
+		queue:             make(chan parser.Message, subscriptionQueueSize),
+		workerDone:        make(chan struct{}),
+		control:           make(chan controlMessage, controlQueueSize),
+		controlWorkerDone: make(chan struct{}),
 	}
 	s.lastErr.Store("")
 	s.lastMessage.Store("")
 	go s.runWorker()
+	go s.runControlWorker()
 	return s
 }
 
@@ -171,6 +205,22 @@ func (s *subscriber) start() {
 				logger.Error("mqtt subscription %q: SUBSCRIBE %s failed: %v", s.cfg.name, s.cfg.topic, err)
 			}
 		}()
+
+		// 控制主题单独订阅、单独回调：不能混进数据解析器。
+		if ct := s.cfg.controlTopic; ct != "" {
+			ctoken := c.Subscribe(ct, s.cfg.qos, s.onControlMessage)
+			go func() {
+				if !ctoken.WaitTimeout(subscribeTimeout) {
+					s.setErr("控制主题订阅应答超时")
+					logger.Warn("mqtt subscription %q: SUBSCRIBE control topic %s timed out", s.cfg.name, ct)
+					return
+				}
+				if err := ctoken.Error(); err != nil {
+					s.setErr(err.Error())
+					logger.Error("mqtt subscription %q: SUBSCRIBE control topic %s failed: %v", s.cfg.name, ct, err)
+				}
+			}()
+		}
 	})
 	opts.SetConnectionLostHandler(func(_ mqtt.Client, err error) {
 		s.connected.Store(false)
@@ -202,6 +252,7 @@ func (s *subscriber) start() {
 // stop 断开连接、排空解析队列并关闭解析器。
 func (s *subscriber) stop() {
 	s.stopOnce.Do(func() {
+		s.stopping.Store(true)
 		s.running.Store(false)
 		if s.client != nil {
 			s.client.Disconnect(250)
@@ -216,6 +267,15 @@ func (s *subscriber) stop() {
 		}
 		s.queueMu.Unlock()
 		<-s.workerDone
+
+		// 控制队列同样先关再等：worker 退出前会把已入队的指令处理完。
+		s.controlMu.Lock()
+		if !s.controlClosed {
+			s.controlClosed = true
+			close(s.control)
+		}
+		s.controlMu.Unlock()
+		<-s.controlWorkerDone
 
 		s.parserMu.Lock()
 		p := s.prs
@@ -259,6 +319,149 @@ func (s *subscriber) onMessage(_ mqtt.Client, msg mqtt.Message) {
 		QoS:        msg.Qos(),
 		Retained:   msg.Retained(),
 	})
+}
+
+// onControlMessage 处理一条控制主题报文。运行在 paho 收包协程中：
+// 只做大小检查与入队，真正的写 PLC 在独立 worker 中执行。
+func (s *subscriber) onControlMessage(_ mqtt.Client, msg mqtt.Message) {
+	s.messages.Add(1)
+
+	payload := msg.Payload()
+	receivedAt := time.Now()
+	oversized := len(payload) > parser.DefaultMaxPayloadBytes
+	s.recordRecent(msg, payload, receivedAt, oversized)
+
+	if oversized {
+		s.errors.Add(1)
+		s.setErr(fmt.Sprintf("控制报文 %d 字节，超过上限 %d", len(payload), parser.DefaultMaxPayloadBytes))
+		logger.Warn("mqtt subscription %q: control topic %s 报文过大（%d 字节），已丢弃",
+			s.cfg.name, msg.Topic(), len(payload))
+		return
+	}
+
+	buf := make([]byte, len(payload))
+	copy(buf, payload)
+	s.enqueueControl(controlMessage{topic: msg.Topic(), payload: buf, receivedAt: receivedAt})
+}
+
+// enqueueControl 非阻塞入队；满时丢最旧，绝不让控制指令阻塞 paho 收包协程。
+func (s *subscriber) enqueueControl(msg controlMessage) {
+	s.controlMu.RLock()
+	defer s.controlMu.RUnlock()
+	if s.controlClosed {
+		return
+	}
+
+	s.controlPending.Add(1)
+	select {
+	case s.control <- msg:
+		return
+	default:
+	}
+	select {
+	case <-s.control:
+		s.controlPending.Add(-1)
+		s.dropped.Add(1)
+	default:
+	}
+	select {
+	case s.control <- msg:
+	default:
+		s.controlPending.Add(-1)
+		s.dropped.Add(1)
+	}
+}
+
+// runControlWorker 串行处理控制指令。串行是刻意的：同一条订阅上的控制
+// 指令不应并发打到 PLC，否则设备侧看到的顺序与报文到达顺序无关。
+func (s *subscriber) runControlWorker() {
+	defer close(s.controlWorkerDone)
+	for msg := range s.control {
+		// 停机/热加载重连时不再下发积压的控制指令：它们可能已经过时，
+		// 而逐条等 PLC 应答会让 Stop 拖到十几秒。已在执行的那一条会自然结束。
+		if s.stopping.Load() {
+			s.controlPending.Add(-1)
+			continue
+		}
+		func() {
+			// pending 在整条指令处理完（含等 PLC 应答）后才减一，waitIdle
+			// 因此能真正等到控制写入结束，而不是刚出队就返回。
+			defer s.controlPending.Add(-1)
+			s.handleControl(msg)
+		}()
+	}
+}
+
+func (s *subscriber) handleControl(msg controlMessage) {
+	var p controlPayload
+	if err := json.Unmarshal(msg.payload, &p); err != nil {
+		s.errors.Add(1)
+		s.setErr("控制报文不是合法 JSON: " + err.Error())
+		logger.Warn("mqtt subscription %q: control topic %s 报文解析失败: %v",
+			s.cfg.name, msg.topic, err)
+		return
+	}
+
+	items := p.Items
+	if len(items) == 0 && p.AddressID != "" {
+		items = []dto.ControlItemDTO{{DeviceAddressID: p.AddressID, Value: p.Value}}
+	}
+	if p.DeviceID == "" || len(items) == 0 {
+		s.errors.Add(1)
+		s.setErr("控制报文缺少 deviceId 或点位")
+		logger.Warn("mqtt subscription %q: control topic %s 缺少 deviceId/items",
+			s.cfg.name, msg.topic)
+		return
+	}
+	if p.RequestID == "" {
+		// MQTT QoS1 会重投；没有幂等键时一次重投就会再写一遍 PLC。
+		// 宁可拒绝，也不接受"无法安全重试"的控制报文。
+		s.errors.Add(1)
+		s.setErr("控制报文缺少 requestId（MQTT 重投需要幂等键）")
+		logger.Warn("mqtt subscription %q: control topic %s 缺少 requestId，已拒绝",
+			s.cfg.name, msg.topic)
+		return
+	}
+	if s.ctrl == nil {
+		s.errors.Add(1)
+		s.setErr("控制服务未启用")
+		logger.Warn("mqtt subscription %q: 收到控制报文但控制服务未启用", s.cfg.name)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), controlWriteTimeout)
+	res, err := s.ctrl.Write(ctx, &dto.ControlDTO{
+		DeviceID:  p.DeviceID,
+		RequestID: p.RequestID,
+		Verify:    p.Verify,
+		Items:     items,
+	}, "mqtt", "mqtt:"+s.cfg.name)
+	cancel()
+
+	if err != nil {
+		s.errors.Add(1)
+		s.setErr(err.Error())
+		logger.Error("mqtt subscription %q: control write device=%s request=%s failed: %v",
+			s.cfg.name, p.DeviceID, p.RequestID, err)
+		return
+	}
+
+	failed := 0
+	for _, r := range res.Results {
+		if !r.OK {
+			failed++
+		}
+	}
+	if failed > 0 {
+		s.errors.Add(uint64(failed))
+		s.setErr(fmt.Sprintf("%d/%d 个控制点写入失败", failed, len(res.Results)))
+		logger.Warn("mqtt subscription %q: control write device=%s request=%s, %d/%d points failed",
+			s.cfg.name, p.DeviceID, p.RequestID, failed, len(res.Results))
+		return
+	}
+	s.lastMessage.Store(time.Now().Format("2006-01-02 15:04:05"))
+	logger.Info("mqtt subscription %q: control write device=%s request=%s items=%d ok",
+		s.cfg.name, p.DeviceID, p.RequestID, len(items))
 }
 
 // recordRecent 保存一条最近报文快照。运行在 paho 收包协程中：
@@ -387,7 +590,7 @@ func (s *subscriber) processBatch(batch []parser.Message) {
 // waitIdle 等待所有已入队报文处理完毕（测试用）。
 func (s *subscriber) waitIdle(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
-	for s.pending.Load() > 0 {
+	for s.pending.Load() > 0 || s.controlPending.Load() > 0 {
 		if time.Now().After(deadline) {
 			return false
 		}

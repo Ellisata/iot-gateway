@@ -27,6 +27,11 @@ type ctlDriver struct {
 	// resultCount < 0 表示按 addrs 数量返回；否则固定返回该数量（用于测试索引对齐校验）。
 	resultCount int
 	readCalls   atomic.Int64
+
+	writeErr   error
+	writeCalls atomic.Int64
+	// writeResultCount < 0 表示按 reqs 数量返回；否则固定返回该数量。
+	writeResultCount int
 }
 
 func (d *ctlDriver) Connect(string) error {
@@ -61,6 +66,24 @@ func (d *ctlDriver) Read(addrs []driver.DeviceAddress) ([]driver.ReadResult, err
 	out := make([]driver.ReadResult, n)
 	for i := 0; i < n && i < len(addrs); i++ {
 		out[i] = driver.ReadResult{DeviceAddressID: addrs[i].ID, Value: "val-" + addrs[i].Name, DataType: addrs[i].DataType, Kind: driver.KindInt}
+	}
+	return out, nil
+}
+
+func (d *ctlDriver) Write(reqs []driver.WriteRequest) ([]driver.WriteResult, error) {
+	d.writeCalls.Add(1)
+	d.mu.Lock()
+	err, n := d.writeErr, d.writeResultCount
+	d.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if n < 0 {
+		n = len(reqs)
+	}
+	out := make([]driver.WriteResult, n)
+	for i := 0; i < n && i < len(reqs); i++ {
+		out[i] = driver.WriteResult{DeviceAddressID: reqs[i].DeviceAddressID, Code: driver.WriteCodeOK, Value: reqs[i].Value}
 	}
 	return out, nil
 }
@@ -450,4 +473,90 @@ func TestRemoteDriverAsDriverInterface(t *testing.T) {
 	rd, _ := newTestRemote(t, &ctlDriver{resultCount: -1}, true)
 	var _ driver.Driver = rd
 	var _ driver.SerialExclusive = rd
+}
+
+// ==================== 控制下发 ====================
+
+func writableTestMeta() driversdk.Meta {
+	m := testMeta()
+	m.Protocols[0].Writable = true
+	return m
+}
+
+func newTestWritableRemote(t *testing.T, stub *ctlDriver) *remoteWritableDriver {
+	t.Helper()
+	p := newFakeProcess(t)
+	p.start(t, func() driver.Driver { return stub }, writableTestMeta())
+	return newRemoteWritableDriver(p, testProtocol, false, DefaultTimeouts())
+}
+
+func TestRemoteWritableDriverWrite(t *testing.T) {
+	stub := &ctlDriver{writeResultCount: -1}
+	rd := newTestWritableRemote(t, stub)
+	var _ driver.Writer = rd
+
+	if err := rd.Connect(`{}`); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	reqs := []driver.WriteRequest{
+		{DeviceAddressID: "a1", Name: "40001", DataType: "int16", Value: "42"},
+		{DeviceAddressID: "a2", Name: "00001", DataType: "bool", Value: "true"},
+	}
+	got, err := rd.Write(reqs)
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if len(got) != len(reqs) {
+		t.Fatalf("结果数 = %d，期望 %d", len(got), len(reqs))
+	}
+	for i := range reqs {
+		if got[i].DeviceAddressID != reqs[i].DeviceAddressID || !got[i].OK() || got[i].Value != reqs[i].Value {
+			t.Errorf("结果[%d] = %+v，期望 id=%s value=%s", i, got[i], reqs[i].DeviceAddressID, reqs[i].Value)
+		}
+	}
+	if n := stub.writeCalls.Load(); n != 1 {
+		t.Errorf("驱动 Write 调用次数 = %d，期望 1", n)
+	}
+}
+
+// 协议没有声明 Writable 时，插件侧必须拒绝 —— 能力声明是唯一开关，
+// 不能因为驱动恰好实现了 Writer 就放行。
+func TestRemoteWritableDriverProtocolNotWritable(t *testing.T) {
+	stub := &ctlDriver{writeResultCount: -1}
+	p := newFakeProcess(t)
+	p.start(t, func() driver.Driver { return stub }, testMeta()) // Writable=false
+	rd := newRemoteWritableDriver(p, testProtocol, false, DefaultTimeouts())
+
+	if err := rd.Connect(`{}`); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	_, err := rd.Write([]driver.WriteRequest{{DeviceAddressID: "a1", Name: "40001", DataType: "int16", Value: "1"}})
+	if err == nil || !strings.Contains(err.Error(), "Writable") {
+		t.Fatalf("期望 Writable 拒绝，得到 %v", err)
+	}
+	if n := stub.writeCalls.Load(); n != 0 {
+		t.Errorf("驱动不应被调用，实际 %d 次", n)
+	}
+}
+
+func TestRemoteWritableDriverResultCountMismatch(t *testing.T) {
+	stub := &ctlDriver{writeResultCount: 0}
+	rd := newTestWritableRemote(t, stub)
+	if err := rd.Connect(`{}`); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if _, err := rd.Write([]driver.WriteRequest{{DeviceAddressID: "a1", Name: "40001", DataType: "int16", Value: "1"}}); err == nil {
+		t.Fatal("结果数量不匹配时必须报错，避免点位错位")
+	}
+}
+
+func TestRemoteWritableDriverTransportError(t *testing.T) {
+	stub := &ctlDriver{writeResultCount: -1, writeErr: errors.New("boom")}
+	rd := newTestWritableRemote(t, stub)
+	if err := rd.Connect(`{}`); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if _, err := rd.Write([]driver.WriteRequest{{DeviceAddressID: "a1", Name: "40001", DataType: "int16", Value: "1"}}); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("期望链路错误，得到 %v", err)
+	}
 }

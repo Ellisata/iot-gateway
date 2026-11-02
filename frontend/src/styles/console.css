@@ -350,11 +350,39 @@
   color: var(--ink-4);
 }
 
+/* 可悬停查看说明的文本/胶囊：虚线下划线是「这里有 tooltip」的唯一视觉线索 */
+.iot-hint {
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
 .iot-mono {
   font-family: var(--font-mono);
   font-size: 12.5px;
   color: var(--ink-2);
   font-variant-numeric: tabular-nums;
+}
+
+/* 实时值变化时闪一次：值是数据的核心，不闪的话用户看不出「数据在动」。
+   实时监控页与点位配置页的实时值列共用这一份，避免两处动画各写一遍。 */
+.iot-value-flash {
+  display: inline-block;
+  padding: 0 6px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  border-radius: 4px;
+  animation: iotValueFlash 0.9s ease-out;
+}
+
+@keyframes iotValueFlash {
+  from {
+    background-color: var(--el-color-primary-light-7);
+  }
+  to {
+    background-color: transparent;
+  }
 }
 
 /* ID：等宽字体压低存在感，复制按钮常驻但低对比，悬停整行才完全显形 */

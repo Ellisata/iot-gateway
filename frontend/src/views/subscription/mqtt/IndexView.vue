@@ -262,6 +262,16 @@
                   </template>
                 </el-input>
               </el-form-item>
+              <el-form-item :label="t('subscription.controlTopic')" class="col-span-2">
+                <el-input
+                  v-model="formData.controlTopic"
+                  :placeholder="t('subscription.controlTopicPlaceholder')"
+                >
+                  <template #append>
+                    <span class="text-xs">{{ t('subscription.controlTopicHint') }}</span>
+                  </template>
+                </el-input>
+              </el-form-item>
               <el-form-item :label="t('subscription.qos')">
                 <el-select v-model="formData.qos" style="width: 100%">
                   <el-option :value="0" label="0 — at most once" />
@@ -1482,6 +1492,7 @@ const formData = reactive({
   username: '',
   password: '',
   topic: '',
+  controlTopic: '',
   qos: 1,
   sort: 0,
   status: 1,
@@ -1581,6 +1592,7 @@ function resetForm() {
     username: '',
     password: '',
     topic: '',
+    controlTopic: '',
     qos: 1,
     sort: 0,
     status: 1,
@@ -1624,6 +1636,7 @@ async function handleEdit(row) {
       username: data.username || '',
       password: data.password || '',
       topic: data.topic,
+      controlTopic: data.controlTopic || '',
       qos: data.qos ?? 1,
       sort: data.sort ?? 0,
       status: data.status ?? 1,
@@ -2019,6 +2032,7 @@ async function handleSubmit() {
       username: formData.username,
       password: formData.password,
       topic: formData.topic,
+      controlTopic: String(formData.controlTopic || '').trim(),
       qos: formData.qos,
       parserType: parserType.value,
       sampleTopic: String(sampleTopic.value || '').trim(),

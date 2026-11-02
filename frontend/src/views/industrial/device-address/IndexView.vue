@@ -26,6 +26,13 @@
       </div>
     </header>
 
+    <!-- 同一台设备的两个视图：点位配置 / 实时监控，一步切换且保留筛选 -->
+    <DeviceWorkspaceTabs
+      :device-object-id="deviceObjectId"
+      :device-object-name="deviceObjectName"
+      :protocol-name="protocolName"
+    />
+
     <!-- 工作区：筛选、批量动作、表格、分页共用一块表面 -->
     <section ref="panelRef" class="iot-panel iot-enter" style="animation-delay: 60ms">
       <div class="iot-toolbar">
@@ -152,6 +159,57 @@
             <span v-else class="iot-cell-muted">{{ t('deviceAddress.unboundProperty') }}</span>
           </template>
         </el-table-column>
+        <!-- 实时值：配置页顺带看一眼「这个地址现在读到什么」。
+             只对启用的点位有意义；未启用/未采集都显示占位，不把空值伪装成 0。 -->
+        <el-table-column :label="t('deviceAddress.liveValue')" width="176">
+          <template #header>
+            <div class="live-head">
+              <span>{{ t('deviceAddress.liveValue') }}</span>
+              <el-tooltip
+                :content="livePaused ? t('deviceAddress.liveResume') : t('deviceAddress.livePause')"
+                placement="top"
+              >
+                <button
+                  type="button"
+                  class="live-toggle"
+                  :aria-label="livePaused ? t('deviceAddress.liveResume') : t('deviceAddress.livePause')"
+                  :aria-pressed="livePaused"
+                  @click="toggleLive"
+                >
+                  <el-icon>
+                    <PlayIcon v-if="livePaused" />
+                    <PauseIcon v-else />
+                  </el-icon>
+                </button>
+              </el-tooltip>
+            </div>
+          </template>
+          <template #default="{ row }">
+            <span v-if="row.status !== 1" class="iot-cell-muted">—</span>
+            <!-- 只写点位不参与采集：别显示成「等待采集」—— 那是 R/RW 还没轮询到的状态 -->
+            <div v-else-if="row.rwPermission === 'W'" class="live-pending">
+              <el-tooltip :content="t('deviceAddress.writeonlyHint')" placement="top">
+                <span class="iot-cell-muted iot-hint" tabindex="0">
+                  {{ t('deviceAddress.writeonlyNoValue') }}
+                </span>
+              </el-tooltip>
+            </div>
+            <div v-else-if="!liveOf(row).collected" class="live-pending">
+              <!-- 暂停时没有缓存值就如实说「已暂停」，别让「等待采集」暗示还在轮询 -->
+              <span class="iot-pill" :class="livePaused ? 'is-amber' : 'is-gray'">
+                {{ livePaused ? t('deviceAddress.livePaused') : t('deviceAddress.liveWaiting') }}
+              </span>
+            </div>
+            <div v-else class="live-cell">
+              <span :key="`${row.id}|${liveOf(row).value}`" class="iot-value-flash live-value">
+                {{ liveOf(row).value === '' ? '—' : liveOf(row).value }}
+              </span>
+              <span class="iot-pill" :class="livePillClass(liveOf(row))">
+                {{ livePillText(liveOf(row)) }}
+              </span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column :label="t('deviceAddress.dataType')" width="130" align="center">
           <template #default="{ row }">
             <span v-if="row.dataType" class="iot-chip">{{ row.dataType }}</span>
@@ -166,9 +224,20 @@
         </el-table-column>
         <el-table-column :label="t('deviceAddress.rwPermission')" width="110" align="center">
           <template #default="{ row }">
-            <span class="iot-pill" :class="rwClass(row.rwPermission)">
-              {{ rwLabel(row.rwPermission) }}
-            </span>
+            <!-- 只写点位不参与采集，值永远为空：胶囊加虚线下划线，悬停说明这是预期而非故障 -->
+            <el-tooltip
+              :disabled="row.rwPermission !== 'W'"
+              :content="t('deviceAddress.writeonlyHint')"
+              placement="top"
+            >
+              <span
+                class="iot-pill"
+                :class="[rwClass(row.rwPermission), row.rwPermission === 'W' ? 'iot-hint' : '']"
+                :tabindex="row.rwPermission === 'W' ? 0 : undefined"
+              >
+                {{ rwLabel(row.rwPermission) }}
+              </span>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column
@@ -246,12 +315,12 @@
               <el-icon><MapPin /></el-icon>
             </span>
             <p class="iot-empty-title">
-              {{ queryForm.name
-                ? t('deviceAddress.emptySearch', { name: queryForm.name })
+              {{ appliedName
+                ? t('deviceAddress.emptySearch', { name: appliedName })
                 : t('deviceAddress.emptyTitle') }}
             </p>
-            <p v-if="!queryForm.name" class="iot-empty-hint">{{ t('deviceAddress.emptyHint') }}</p>
-            <el-button v-if="queryForm.name" @click="handleReset">{{ t('common.reset') }}</el-button>
+            <p v-if="!appliedName" class="iot-empty-hint">{{ t('deviceAddress.emptyHint') }}</p>
+            <el-button v-if="appliedName" @click="handleReset">{{ t('common.reset') }}</el-button>
             <el-button v-else type="primary" :icon="Plus" @click="handleAdd">
               {{ t('deviceAddress.add') }}
             </el-button>
@@ -267,286 +336,20 @@
           :total="total"
           layout="total, sizes, prev, pager, next, jumper"
           background
-          @size-change="fetchList"
-          @current-change="fetchList"
+          @size-change="handleSizeChange"
+          @current-change="handlePageChange"
         />
       </div>
     </section>
 
     <!-- ========== 新增 / 编辑 对话框 ========== -->
-    <el-dialog
-      v-model="dialogVisible"
-      class="iot-dialog"
-      :title="isEdit ? t('deviceAddress.editTitle') : t('deviceAddress.addTitle')"
-      width="620px"
-      :close-on-click-modal="false"
-      @close="handleDialogClose"
-    >
-      <el-form
-        ref="formRef"
-        :model="formData"
-        :rules="formRules"
-        label-width="110px"
-        label-position="right"
-        status-icon
-      >
-        <el-form-item :label="t('deviceAddress.addressName')" prop="name">
-          <div class="flex items-center gap-2 w-full">
-            <el-input
-              v-model="formData.name"
-              :placeholder="addressPlaceholder"
-              maxlength="100"
-              show-word-limit
-              class="flex-1 min-w-0"
-            />
-            <!-- 用气泡而不是抽屉：表单本身已经开在对话框里，气泡能让说明和输入框同时可见、
-                 边看边改，抽屉会盖住半个表单 -->
-            <el-popover v-if="addressSpec" placement="bottom" :width="380" trigger="click">
-              <template #reference>
-                <el-button :icon="QuestionFilled" circle text class="shrink-0" />
-              </template>
-              <div class="text-xs leading-5">
-                <div class="font-semibold text-gray-700 mb-2">{{ t('deviceAddress.addressHelpTitle') }}</div>
-
-                <div class="text-gray-400 mb-1">{{ t('deviceAddress.addressHelpSyntax') }}</div>
-                <div class="font-mono text-gray-800 bg-gray-50 rounded px-2 py-1 mb-3 break-all">
-                  {{ t(addressSpec.templateKey) }}
-                </div>
-
-                <div class="text-gray-400 mb-1">{{ t('deviceAddress.addressHelpExamples') }}</div>
-                <div class="font-mono text-gray-800 mb-3 space-y-0.5">
-                  <div v-for="eg in addressSpec.examples" :key="eg">{{ eg }}</div>
-                </div>
-
-                <div class="text-gray-400 mb-1">{{ t('deviceAddress.addressHelpPitfalls') }}</div>
-                <ul class="list-disc pl-4 text-gray-600 space-y-1.5">
-                  <li v-for="key in addressSpec.pitfallKeys" :key="key">{{ t(key) }}</li>
-                </ul>
-              </div>
-            </el-popover>
-          </div>
-          <!-- 常驻提示：占位符一输入就消失，而地址格式正是最需要一直看见的信息 -->
-          <div v-if="addressExample" class="iot-form-hint is-block">
-            {{ t('deviceAddress.addressHint', { protocol: protocolName, example: addressExample }) }}
-          </div>
-        </el-form-item>
-
-        <el-form-item :label="t('deviceAddress.tag')" prop="label">
-          <el-input
-            v-model="formData.label"
-            :placeholder="t('deviceAddress.tagPlaceholder')"
-            maxlength="100"
-            show-word-limit
-          />
-        </el-form-item>
-
-        <el-form-item prop="dataType">
-          <!-- 类型映射说明：物模型属性过滤与报警比较符都按「类别（Kind）」判定，
-               只给类型名字的话用户看不出 Boolean 与 Float 的区别，遇到"属性不见了"
-               只能猜。气泡放在标签旁，和地址帮助保持同一种交互。 -->
-          <template #label>
-            <span class="inline-flex items-center gap-1">
-              {{ t('deviceAddress.dataType') }}
-              <el-popover
-                v-if="dataTypeKindRows.length"
-                placement="bottom"
-                :width="320"
-                trigger="click"
-              >
-                <template #reference>
-                  <el-button
-                    :icon="QuestionFilled"
-                    circle
-                    text
-                    size="small"
-                    :aria-label="t('deviceAddress.kindMapTitle')"
-                  />
-                </template>
-                <div class="text-xs leading-5">
-                  <div class="font-semibold text-gray-700 mb-2">{{ t('deviceAddress.kindMapTitle') }}</div>
-                  <div class="max-h-64 overflow-y-auto space-y-0.5">
-                    <div
-                      v-for="row in dataTypeKindRows"
-                      :key="row.value"
-                      class="flex items-center justify-between gap-3"
-                    >
-                      <span class="font-mono text-gray-800 break-all">{{ row.label }}</span>
-                      <span class="shrink-0 text-gray-500">{{ row.kindLabel }}</span>
-                    </div>
-                  </div>
-                  <div class="mt-2 text-gray-400">{{ t('deviceAddress.kindMapHint') }}</div>
-                </div>
-              </el-popover>
-            </span>
-          </template>
-          <el-select
-            v-model="formData.dataType"
-            :placeholder="t('deviceAddress.dataTypePlaceholder')"
-            style="width: 100%"
-            :loading="dataTypeLoading"
-            :loading-text="t('common.loading')"
-            @change="onDataTypeChange"
-          >
-            <el-option
-              v-for="item in dataTypeOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item :label="t('deviceAddress.rwPermission')" prop="rwPermission">
-          <el-select v-model="formData.rwPermission" :placeholder="t('deviceAddress.rwPlaceholder')" style="width: 100%">
-            <el-option
-              v-for="item in rwPermissionOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item :label="t('deviceAddress.property')" prop="propertyId">
-          <el-select
-            v-model="formData.propertyId"
-            :placeholder="t('deviceAddress.propertyPlaceholder')"
-            clearable
-            :disabled="!deviceModelId"
-            :loading="propertyLoading"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="p in compatiblePropertyOptions"
-              :key="p.id"
-              :label="`${p.identifier} · ${p.name}`"
-              :value="p.id"
-              :disabled="p.status !== 1 && p.id !== formData.propertyId"
-            />
-          </el-select>
-          <div class="iot-form-hint is-block">
-            {{ deviceModelId ? t('deviceAddress.propertyHint') : t('deviceAddress.noModelBound') }}
-          </div>
-        </el-form-item>
-
-        <el-form-item :label="t('deviceAddress.scanFrequency')" prop="scanFrequency">
-          <el-select v-model="formData.scanFrequency" :placeholder="t('deviceAddress.scanPlaceholder')" style="width: 100%">
-            <el-option
-              v-for="item in scanFrequencyOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-        </el-form-item>
-
-        <!-- 报警条件：开关 + 比较符 + 操作数。比较符与操作数控件都按数据类型的类别切换 -->
-        <el-form-item :label="t('deviceAddress.thresholdAlarm')" prop="thresholdEnabled">
-          <el-switch
-            v-model="formData.thresholdEnabled"
-            :active-value="1"
-            :inactive-value="0"
-            :disabled="conditionUnsupported"
-            :active-text="t('common.enabled')"
-            :inactive-text="t('common.enableDisable.off')"
-          />
-          <div class="iot-form-hint is-block">
-            {{ conditionUnsupported ? t('deviceAddress.opUnsupportedKind') : t('deviceAddress.thresholdHint') }}
-          </div>
-        </el-form-item>
-
-        <template v-if="formData.thresholdEnabled === 1 && !conditionUnsupported">
-          <el-form-item :label="t('deviceAddress.thresholdOp')" prop="thresholdOp">
-            <el-select v-model="formData.thresholdOp" :placeholder="t('deviceAddress.opPlaceholder')" style="width: 100%">
-              <el-option v-for="op in availableOperators" :key="op" :label="operatorLabel(op)" :value="op" />
-            </el-select>
-          </el-form-item>
-
-          <!-- 区间：两个数值槽位（下限、上限），位置固定，不检查的那侧留空 -->
-          <template v-if="formData.thresholdOp === 'range'">
-            <el-form-item :label="t('deviceAddress.opRangeLow')" prop="thresholdValues">
-              <el-input-number
-                v-model="formData.thresholdValues[0]"
-                :controls="false"
-                :placeholder="t('deviceAddress.boundUnchecked')"
-                style="width: 100%"
-              />
-            </el-form-item>
-            <el-form-item :label="t('deviceAddress.opRangeHigh')">
-              <el-input-number
-                v-model="formData.thresholdValues[1]"
-                :controls="false"
-                :placeholder="t('deviceAddress.boundUnchecked')"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </template>
-
-          <!-- 布尔：值就是真/假，用下拉而不是输入框，避免运维手敲 "on" 这类认不出的字面量 -->
-          <el-form-item v-else-if="currentKind === 'bool'" :label="t('deviceAddress.boolValue')">
-            <el-select v-model="formData.thresholdValues[0]" style="width: 100%">
-              <el-option :label="t('deviceAddress.boolTrue')" value="1" />
-              <el-option :label="t('deviceAddress.boolFalse')" value="0" />
-            </el-select>
-          </el-form-item>
-
-          <!-- 文本集合：多值输入 -->
-          <el-form-item v-else-if="formData.thresholdOp === 'in'" :label="t('deviceAddress.textSet')">
-            <el-select
-              v-model="formData.thresholdValues"
-              multiple
-              filterable
-              allow-create
-              default-first-option
-              :reserve-keyword="false"
-              :placeholder="t('deviceAddress.textSetPlaceholder')"
-              style="width: 100%"
-            />
-          </el-form-item>
-
-          <!-- 数值单比较 / 文本等于不等于：一个操作数，控件随类别切换 -->
-          <el-form-item v-else :label="t('deviceAddress.thresholdValue')">
-            <el-input-number
-              v-if="currentKind !== 'string'"
-              v-model="formData.thresholdValues[0]"
-              :controls="false"
-              style="width: 100%"
-            />
-            <el-input v-else v-model="formData.thresholdValues[0]" :placeholder="t('deviceAddress.textValuePlaceholder')" />
-          </el-form-item>
-        </template>
-
-        <el-form-item :label="t('common.description')" prop="description">
-          <el-input
-            v-model="formData.description"
-            :placeholder="t('deviceAddress.descPlaceholder')"
-            type="textarea"
-            :rows="3"
-            maxlength="200"
-            show-word-limit
-          />
-        </el-form-item>
-
-        <el-form-item :label="t('common.status')" prop="status">
-          <el-switch
-            v-model="formData.status"
-            :active-value="1"
-            :inactive-value="0"
-            :active-text="t('common.enabled')"
-            :inactive-text="t('common.enableDisable.off')"
-          />
-        </el-form-item>
-      </el-form>
-
-      <template #footer>
-        <div class="flex items-center justify-end gap-2">
-          <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
-          <el-button type="primary" :loading="submitting" @click="handleSubmit">
-            {{ isEdit ? t('common.save') : t('common.submit') }}
-          </el-button>
-        </div>
-      </template>
-    </el-dialog>
+    <AddressFormDialog
+      v-model="formDialogVisible"
+      :device-id="deviceObjectId"
+      :protocol-name="protocolName"
+      :address-id="editingAddressId"
+      @saved="handleDialogSaved"
+    />
 
     <!-- ========== Excel 导入结果对话框 ========== -->
     <ImportResultDialog v-model:visible="importResultVisible" :result="importResult" />
@@ -562,16 +365,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   IconArrowLeft as ArrowLeft,
   IconCopy as CopyDocument,
   IconDownload as Download,
-  IconHelpCircleFilled as QuestionFilled,
   IconMapPin as MapPin,
   IconPencil as EditPen,
+  IconPlayerPause as PauseIcon,
+  IconPlayerPlay as PlayIcon,
   IconPlus as Plus,
   IconSearch as Search,
   IconTrash as Delete,
@@ -579,102 +383,23 @@ import {
 } from '@tabler/icons-vue'
 import {
   getDeviceAddressList,
-  addDeviceAddress,
-  updateDeviceAddress,
   deleteDeviceAddress,
   batchDeleteDeviceAddress,
   importDeviceAddresses,
   downloadDeviceAddressTemplate,
 } from '@/api/modules/deviceAddress'
-import { getDataTypes } from '@/api/modules/protocol'
 import { getPointCapability } from '@/api/modules/deviceScan'
-import { getDeviceObjectById } from '@/api/modules/deviceObject'
-import { listThingModelProperties } from '@/api/modules/thingModel'
+import DeviceWorkspaceTabs from '@/components/DeviceWorkspaceTabs.vue'
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
+import AddressFormDialog from './AddressFormDialog.vue'
 import PointDiscoveryDialog from './PointDiscoveryDialog.vue'
 import { useExcelImport } from '@/composables/useExcelImport'
-import { useScanFrequencyOptions } from '@/composables/useScanFrequencyOptions'
-import { getAddressExample, getAddressSpec } from '@/utils/addressSyntax'
+import { useRealtimeValues } from '@/composables/useRealtimeValues'
+import { parseConditionValues } from '@/utils/addressThreshold'
+import { qualityBadText } from '@/utils/pointQuality'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
-
-// ---------- 下拉选项 ----------
-// 数据类型通过协议接口获取：/protocol/getDataTypes?protocolName=xxx
-const dataTypeOptions = ref([])
-const dataTypeLoading = ref(false)
-// 通用类型名 -> 数据类型类别（driver.KindXxx）。报警条件的比较符下拉靠它决定 ——
-// 光看类型名字分不出 "Boolean" 与 "Float" 的类别。见 vo.DataTypeOptionVO.KindByType。
-const kindByType = ref({})
-
-// 接口返回 { protocol, commonTypes, extendedTypes, allTypes, kindByType }，使用 allTypes 填充下拉选项
-function normalizeDataTypes(data) {
-  kindByType.value = data?.kindByType ?? {}
-  const list = data?.allTypes ?? data
-  if (!Array.isArray(list)) return []
-  return list
-    .map((item) => {
-      if (typeof item === 'string') return { value: item, label: item }
-      const value = item?.code ?? item?.value ?? item?.dataType
-      const label = item?.description ?? item?.name ?? item?.label ?? value
-      return value == null ? null : { value: String(value), label: String(label) }
-    })
-    .filter(Boolean)
-}
-
-async function fetchDataTypes() {
-  dataTypeLoading.value = true
-  try {
-    // 取设备对象传入的协议名；取不到就别猜（原来兜底到 Omron.Net.CIP，但那个名字
-    // 不是任何驱动注册的协议名，解析不到反而把问题藏起来），让下拉保持为空
-    // （局部变量改叫 proto：外层 protocolName 是 computed，同名遮蔽容易看混）
-    const proto = route.query.protocolName
-    const res = await getDataTypes(proto)
-    dataTypeOptions.value = normalizeDataTypes(res)
-  } catch {
-    dataTypeOptions.value = []
-  } finally {
-    dataTypeLoading.value = false
-  }
-}
-
-// 数据类型类别（driver.KindXxx）的中文说法：物模型属性过滤与报警比较符都按
-// 类别判定，把 Kind 直接摊给用户看（int/bool/string）比不解释更糊涂。
-const KIND_LABEL_KEYS = {
-  int: 'deviceAddress.kindInt',
-  uint: 'deviceAddress.kindUint',
-  float: 'deviceAddress.kindFloat',
-  bool: 'deviceAddress.kindBool',
-  string: 'deviceAddress.kindString',
-  time: 'deviceAddress.kindTime',
-}
-
-// 当前协议的类型 → 类别映射，供「数据类型」标签旁的气泡展示。
-// 未收录的 Kind（将来插件新增类别）原样显示，不静默吞成空。
-const dataTypeKindRows = computed(() =>
-  dataTypeOptions.value.map((item) => {
-    const kind = kindByType.value[item.value] || ''
-    const key = KIND_LABEL_KEYS[kind]
-    return {
-      value: item.value,
-      label: item.label,
-      kindLabel: kind ? (key ? t(key) : kind) : t('deviceAddress.kindUnknown'),
-    }
-  }),
-)
-
-const rwPermissionOptions = computed(() => {
-  const options = [
-    { value: 'R', label: t('deviceAddress.readonlyShort') },
-    { value: 'W', label: t('deviceAddress.writeonlyShort') },
-    { value: 'RW', label: t('deviceAddress.readwriteShort') },
-  ]
-  return isEdit.value ? options : options.filter(o => o.value !== 'W')
-})
-
-// 扫描频率下拉与「自动发现点位」弹窗共用一份（composables/useScanFrequencyOptions.js）：
-// 两处写的是同一个 device_address.scan_frequency，选项必须一致
-const scanFrequencyOptions = useScanFrequencyOptions()
 
 // ---------- 路由 ----------
 const route = useRoute()
@@ -682,48 +407,10 @@ const router = useRouter()
 const deviceObjectId = route.params.deviceObjectId
 const deviceObjectName = route.query.deviceObjectName || ''
 
-// ---------- 物模型属性 ----------
-// 设备绑定模型后，点位可绑定该模型下的属性。modelId 通常由设备页通过 query 带入；
-// 直接刷新本页时再回查一次设备详情，避免下拉永远为空。
-const deviceModelId = ref(route.query.modelId || '')
-const propertyOptionsAll = ref([])
-const propertyLoading = ref(false)
-
-async function fetchPropertyOptions() {
-  if (!deviceModelId.value) {
-    try {
-      const detail = await getDeviceObjectById(deviceObjectId)
-      deviceModelId.value = detail?.modelId || ''
-    } catch {
-      deviceModelId.value = ''
-    }
-  }
-  if (!deviceModelId.value) {
-    propertyOptionsAll.value = []
-    return
-  }
-  propertyLoading.value = true
-  try {
-    propertyOptionsAll.value = (await listThingModelProperties(deviceModelId.value)) || []
-  } catch {
-    propertyOptionsAll.value = []
-  } finally {
-    propertyLoading.value = false
-  }
-}
-
-// ---------- 协议地址示例 ----------
-// 地址写法随协议完全不同（"D100" 在三菱指 D 寄存器、在欧姆龙 FINS 指 DM 区），
-// 实例化在 utils/addressSyntax.js，这里只负责取。协议未登记时回落到通用文案，
-// 宁可不举例也不给一个错的例子。
+// ---------- 协议 ----------
+// 协议名由设备对象页带过来：地址写法示例与「自动发现点位」能力都按它取。
+// 新增/编辑表单已抽到 AddressFormDialog，那边同样通过 prop 拿到它。
 const protocolName = computed(() => route.query.protocolName || '')
-const addressSpec = computed(() => getAddressSpec(protocolName.value))
-const addressExample = computed(() => getAddressExample(protocolName.value))
-const addressPlaceholder = computed(() =>
-  addressExample.value
-    ? t('deviceAddress.namePlaceholderExample', { example: addressExample.value })
-    : t('deviceAddress.namePlaceholder'),
-)
 
 function goBack() {
   router.push({ name: 'GatewayDeviceObject' })
@@ -770,14 +457,33 @@ async function copyId(id) {
 }
 
 // ---------- 查询表单 ----------
+const PAGE_SIZES = [10, 20, 50, 100]
+const initialPage = Number(route.query.page)
+const initialSize = Number(route.query.size)
 const queryForm = reactive({
-  name: '',
+  name: String(route.query.name || ''),
 })
+// 已生效的搜索词（输入框里敲了但没点查询的不算）：翻页、空态文案与页签切换都沿用它
+const appliedName = ref(String(route.query.name || ''))
 
 // ---------- 分页 ----------
-const currentPage = ref(1)
-const pageSize = ref(10)
+const currentPage = ref(initialPage > 0 ? initialPage : 1)
+const pageSize = ref(PAGE_SIZES.includes(initialSize) ? initialSize : 10)
 const total = ref(0)
+
+// 把已生效的筛选与分页写回 URL。页签切换（DeviceWorkspaceTabs）会带上当前 query，
+// 于是「在实时页筛出某个点位 → 切去改配置 → 切回来」仍是同一屏，刷新/分享链接也一致。
+// 默认值不写进 query，避免地址里堆一串 ?page=1&size=10。
+function syncQuery() {
+  const query = { ...route.query }
+  if (appliedName.value) query.name = appliedName.value
+  else delete query.name
+  if (currentPage.value > 1) query.page = String(currentPage.value)
+  else delete query.page
+  if (pageSize.value !== 10) query.size = String(pageSize.value)
+  else delete query.size
+  router.replace({ query })
+}
 
 // ---------- 表格数据 ----------
 const loading = ref(false)
@@ -787,6 +493,38 @@ const tableData = ref([])
 const displayTotal = computed(() =>
   loading.value && tableData.value.length === 0 ? '—' : total.value,
 )
+
+// ---------- 实时值（点位表内嵌） ----------
+// 只看当前页：配置页要的是「这几行现在读到什么」，不是整台设备的实时大盘。
+// 轮询节奏、暂停、标签页隐藏时停跑的判据都在 composable 里，与实时监控页同源。
+// 只把启用点位送去取值：停用行本来就显示占位，没必要让它们占 IN 子句
+const pageAddressIds = computed(() =>
+  tableData.value.filter((row) => row.status === 1).map((row) => row.id),
+)
+const {
+  values: liveValues,
+  paused: livePaused,
+  togglePause: toggleLive,
+} = useRealtimeValues(deviceObjectId, pageAddressIds)
+
+function liveOf(row) {
+  return liveValues.value[row.id] || {}
+}
+
+// 质量优先于新鲜度：地址错误/通讯失败比「值过期」更能解释为什么没有数
+function livePillClass(live) {
+  if (live.quality <= 3) return 'is-rose'
+  if (live.stale) return 'is-amber'
+  if (live.quality === 192) return 'is-green'
+  return 'is-gray'
+}
+
+function livePillText(live) {
+  if (live.quality <= 3) return qualityBadText(t, live.quality)
+  if (live.stale) return t('deviceAddress.liveStale')
+  if (live.quality === 192) return t('deviceAddress.liveNormal')
+  return String(live.quality)
+}
 
 // ---------- 窄屏列裁剪 ----------
 // 判据取**工作区的真实宽度**而不是窗口宽度：侧栏折叠后同一窗口会多出 176px，
@@ -819,7 +557,7 @@ async function fetchList() {
       page: currentPage.value,
       size: pageSize.value,
     }
-    if (queryForm.name) params.name = queryForm.name
+    if (appliedName.value) params.name = appliedName.value
     const res = await getDeviceAddressList(params)
     tableData.value = res?.records ?? []
     total.value = res?.total ?? 0
@@ -831,13 +569,28 @@ async function fetchList() {
 
 // ---------- 搜索 / 重置 ----------
 function handleSearch() {
+  appliedName.value = queryForm.name.trim()
   currentPage.value = 1
+  syncQuery()
   fetchList()
 }
 
 function handleReset() {
   queryForm.name = ''
+  appliedName.value = ''
   currentPage.value = 1
+  syncQuery()
+  fetchList()
+}
+
+function handlePageChange() {
+  syncQuery()
+  fetchList()
+}
+
+function handleSizeChange() {
+  currentPage.value = 1
+  syncQuery()
   fetchList()
 }
 
@@ -857,71 +610,25 @@ const {
   refresh: fetchList,
 })
 
-// ---------- 对话框状态 ----------
-const dialogVisible = ref(false)
-const isEdit = ref(false)
-const submitting = ref(false)
-const formRef = ref(null)
+// ---------- 新增 / 编辑对话框 ----------
+// 空串 = 新增；非空 = 编辑该点位。表单本身在 AddressFormDialog 里，
+// 与实时监控页的就地编辑共用同一份校验与提交逻辑。
+const formDialogVisible = ref(false)
+const editingAddressId = ref('')
 
-// ---------- 表单数据 ----------
-const formData = reactive({
-  id: '',
-  name: '',
-  label: '',
-  dataType: '',
-  rwPermission: '',
-  propertyId: '',
-  scanFrequency: null,
-  description: '',
-  status: 1,
-  // 报警条件：开关 + 比较符 + 操作数。提交时打包成嵌套的 threshold 对象，
-  // 因为后端用「整个对象省不省略」区分「不动配置」与「整份覆盖」——见 deviceDto.go。
-  // values 用定长槽位：range 是 [下限, 上限]（空串占位），其余算子只用 [0]；
-  // in 用整个数组（多值）。
-  thresholdEnabled: 0,
-  thresholdOp: '',
-  thresholdValues: [],
-})
-
-// ---------- 表单校验规则 ----------
-const formRules = {
-  name: [
-    { required: true, message: () => t('deviceAddress.nameRequired'), trigger: 'blur' },
-    { min: 1, max: 100, message: () => t('deviceAddress.nameLength'), trigger: 'blur' },
-  ],
-  label: [
-    { required: true, message: () => t('deviceAddress.tagRequired'), trigger: 'blur' },
-    { min: 1, max: 100, message: () => t('deviceAddress.tagLength'), trigger: 'blur' },
-  ],
-  dataType: [{ required: true, message: () => t('deviceAddress.selectDataType'), trigger: 'change' }],
-  rwPermission: [{ required: true, message: () => t('deviceAddress.selectRw'), trigger: 'change' }],
-  scanFrequency: [{ required: true, message: () => t('deviceAddress.selectScan'), trigger: 'change' }],
-  description: [{ max: 200, message: () => t('deviceAddress.descMaxLength'), trigger: 'blur' }],
-}
-
-// ---------- 新增 ----------
 function handleAdd() {
-  isEdit.value = false
-  resetFormData()
-  dialogVisible.value = true
+  editingAddressId.value = ''
+  formDialogVisible.value = true
 }
 
-// ---------- 编辑 ----------
 function handleEdit(row) {
-  isEdit.value = true
-  formData.id = row.id
-  formData.name = row.name
-  formData.label = row.label ?? ''
-  formData.dataType = row.commonDataType ?? ''
-  formData.rwPermission = row.rwPermission ?? ''
-  formData.propertyId = row.propertyId ?? ''
-  formData.scanFrequency = row.scanFrequency ?? null
-  formData.description = row.description ?? ''
-  formData.status = row.status ?? 1
-  formData.thresholdEnabled = row.thresholdEnabled ?? 0
-  formData.thresholdOp = row.thresholdOp ?? ''
-  formData.thresholdValues = parseConditionValues(row.thresholdValue)
-  dialogVisible.value = true
+  editingAddressId.value = row.id
+  formDialogVisible.value = true
+}
+
+// 保存后刷新列表：新值/新类型要立刻反映在当前表格里
+function handleDialogSaved() {
+  fetchList()
 }
 
 // ---------- 删除 ----------
@@ -980,186 +687,6 @@ async function handleBatchDelete() {
   }
 }
 
-// ---------- 对话框关闭 ----------
-function handleDialogClose() {
-  formRef.value?.resetFields()
-}
-
-// ---------- 重置表单数据 ----------
-function resetFormData() {
-  formData.id = ''
-  formData.name = ''
-  formData.label = ''
-  formData.dataType = ''
-  formData.rwPermission = ''
-  formData.propertyId = ''
-  formData.scanFrequency = null
-  formData.description = ''
-  formData.status = 1
-  formData.thresholdEnabled = 0
-  formData.thresholdOp = ''
-  formData.thresholdValues = []
-}
-
-// ---------- 属性下拉：按当前数据类型与读写模式过滤 ----------
-// 与后端 validatePropertyBinding 同一规则；前端过滤是为了让不兼容的选项根本选不到。
-// 当前已选中的属性始终保留在列表里，否则类型/权限刚变化时下拉会突然“失值”。
-function accessCovers(addressRW, propertyAccess) {
-  switch (addressRW) {
-    case 'RW':
-      return true
-    case 'R':
-      return propertyAccess === 'R'
-    case 'W':
-      return propertyAccess === 'W'
-    default:
-      return false
-  }
-}
-
-const compatiblePropertyOptions = computed(() => {
-  const kind = currentKind.value
-  return propertyOptionsAll.value.filter((p) => {
-    if (p.id === formData.propertyId) return true
-    if (kind && p.kind !== kind) return false
-    // 新建时读写权限还没选，此时不按权限过滤，否则下拉一开始是空的。
-    if (formData.rwPermission && !accessCovers(formData.rwPermission, p.accessMode)) return false
-    return true
-  })
-})
-
-// 类型/读写权限变化后，已选属性若不再兼容就清空，避免提交时才被后端拒绝。
-watch([() => formData.dataType, () => formData.rwPermission], () => {
-  if (!dialogVisible.value || !formData.propertyId) return
-  const p = propertyOptionsAll.value.find((x) => x.id === formData.propertyId)
-  if (!p) return
-  const kind = kindByType.value[formData.dataType] || ''
-  const accessMismatch = formData.rwPermission && !accessCovers(formData.rwPermission, p.accessMode)
-  if ((kind && p.kind !== kind) || accessMismatch) {
-    formData.propertyId = ''
-  }
-})
-
-// ---------- 报警条件（按数据类型的类别切换控件） ----------
-
-// 每个数据类型的类别可用哪些比较符 —— 与后端 driver.OperatorsForKind 同一张矩阵。
-// 前端复制一份是刻意的：靠 /protocol/getDataTypes 的 kindByType 拿到类别后，
-// 下拉选项必须立刻能算出来，不该为每个类型再发一次请求。漂移风险由后端的
-// 校验兜住（算子不在可用集时保存会被拒并说明原因）。
-const OPERATORS_BY_KIND = {
-  int: ['range', 'gt', 'ge', 'lt', 'le', 'eq', 'ne'],
-  uint: ['range', 'gt', 'ge', 'lt', 'le', 'eq', 'ne'],
-  float: ['range', 'gt', 'ge', 'lt', 'le', 'eq', 'ne'],
-  bool: ['eq', 'ne'],
-  string: ['eq', 'ne', 'in'],
-}
-
-const OPERATOR_LABEL_KEYS = {
-  range: 'deviceAddress.opRange',
-  gt: 'deviceAddress.opGt',
-  ge: 'deviceAddress.opGe',
-  lt: 'deviceAddress.opLt',
-  le: 'deviceAddress.opLe',
-  eq: 'deviceAddress.opEq',
-  ne: 'deviceAddress.opNe',
-  in: 'deviceAddress.opIn',
-}
-
-// 当前选中数据类型的类别（查不到就是空串 = 不支持条件报警）
-const currentKind = computed(() => kindByType.value[formData.dataType] ?? '')
-
-// 时间类型与未知类别不支持条件报警 —— 整个条件区禁用并给出原因
-const conditionUnsupported = computed(() => !currentKind.value || currentKind.value === 'time')
-
-const availableOperators = computed(() => OPERATORS_BY_KIND[currentKind.value] ?? [])
-
-function operatorLabel(op) {
-  return t(OPERATOR_LABEL_KEYS[op] ?? op)
-}
-
-// 把库里的 JSON 数组字符串解析成表单用的数组。坏数据/空值退回空数组（等价于未配置）。
-function parseConditionValues(raw) {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.map((v) => String(v)) : []
-  } catch {
-    return []
-  }
-}
-
-// 把表单条件整理成交付后端的形态：去掉尾部空槽位，并按其算子应有的形状归一。
-// 后端要求 range 恰好两个槽位（位置固定：下限、上限），所以那里**保留**空串占位。
-function buildConditionValues() {
-  const values = formData.thresholdValues ?? []
-  if (formData.thresholdOp === 'range') {
-    return [String(values[0] ?? ''), String(values[1] ?? '')]
-  }
-  if (formData.thresholdOp === 'in') {
-    return values.map((v) => String(v ?? '').trim()).filter((v) => v !== '')
-  }
-  return values.length ? [String(values[0] ?? '').trim()] : []
-}
-
-// 用户切换数据类型时重置条件：类型一变，可用算子与操作数的**形状**都可能变
-// （数值的 range 对布尔非法，布尔的 1/0 对文本无意义），留着上一次的残留只会得到
-// 一个后端不认的组合。
-//
-// 刻意用 el-select 的 @change 而不是 watch(currentKind)：currentKind 也会因为
-// **程序化加载**而变化（handleEdit 载入另一行、kindByType 异步到达），
-// 用 watch 会在打开编辑框的那一刻把刚载入的操作数清空 —— 表现为"条件莫名其妙变了"。
-function onDataTypeChange() {
-  formData.thresholdOp = ''
-  formData.thresholdValues = []
-}
-
-// 换算子时按新算子应有的形状整理操作数。这里是**保值**的：
-// 三种形状都从 values[0]（和 [1]）取值，编辑时载入的条件不会被破坏。
-watch(
-  () => formData.thresholdOp,
-  (op) => {
-    if (op === 'range') {
-      formData.thresholdValues = [formData.thresholdValues[0] ?? '', formData.thresholdValues[1] ?? '']
-    } else if (op === 'in') {
-      formData.thresholdValues = [...formData.thresholdValues.filter((v) => String(v ?? '').trim() !== '')]
-    } else {
-      formData.thresholdValues = [formData.thresholdValues[0] ?? '']
-    }
-  },
-)
-
-// 跨字段规则没法用 Element Plus 的声明式 rules 表达，在提交前统一校验一次。
-// 文案与后端 validateAddressThreshold 保持一致，避免两边说法分叉。
-function validateThreshold() {
-  if (formData.thresholdEnabled !== 1) return true
-  if (conditionUnsupported.value) {
-    ElMessage.warning(t('deviceAddress.opUnsupportedKind'))
-    return false
-  }
-  if (!formData.thresholdOp) {
-    ElMessage.warning(t('deviceAddress.opRequired'))
-    return false
-  }
-  const values = buildConditionValues()
-  if (formData.thresholdOp === 'range') {
-    const [low, high] = values
-    if (!low && !high) {
-      ElMessage.warning(t('deviceAddress.rangeRequired'))
-      return false
-    }
-    if (low && high && Number(low) >= Number(high)) {
-      ElMessage.warning(t('deviceAddress.rangeOrder'))
-      return false
-    }
-    return true
-  }
-  if (values.length === 0 || values.every((v) => !v)) {
-    ElMessage.warning(t('deviceAddress.valueRequired'))
-    return false
-  }
-  return true
-}
-
 // 表格里展示条件摘要（如 `∈ [10, 40]`、`= FAULT`）。
 function conditionText(row) {
   const op = row.thresholdOp
@@ -1204,54 +731,6 @@ function rwLabel(permission) {
   }[permission] || permission || '—'
 }
 
-// ---------- 提交 ----------
-async function handleSubmit() {
-  if (!formRef.value) return
-  try {
-    await formRef.value.validate()
-  } catch {
-    return
-  }
-  if (!validateThreshold()) return
-
-  submitting.value = true
-  try {
-    const payload = {
-      deviceId: deviceObjectId,
-      name: formData.name.trim(),
-      label: formData.label.trim(),
-      commonDataType: formData.dataType,
-      rwPermission: formData.rwPermission,
-      propertyId: formData.propertyId || '',
-      scanFrequency: formData.scanFrequency,
-      description: formData.description.trim() || undefined,
-      status: formData.status,
-      // 始终整份提交：编辑时后端靠「对象是否省略」区分不动/覆盖，这里既然用户看得见
-      // 条件字段，传过去的就是他的当前意图（关掉开关也要如实传 enabled=0）。
-      threshold: {
-        enabled: formData.thresholdEnabled,
-        op: formData.thresholdOp,
-        values: buildConditionValues(),
-      },
-    }
-
-    if (isEdit.value) {
-      payload.id = formData.id
-      await updateDeviceAddress(payload)
-      ElMessage.success(t('deviceAddress.editSuccess'))
-    } else {
-      await addDeviceAddress(payload)
-      ElMessage.success(t('deviceAddress.addSuccess'))
-    }
-    dialogVisible.value = false
-    fetchList()
-  } catch (err) {
-
-  } finally {
-    submitting.value = false
-  }
-}
-
 // ---------- 初始化 ----------
 onMounted(() => {
   // 十来列的固定宽度合计远超 1400px，低于 1550 就切到紧凑列 —— 差几个像素时表格
@@ -1263,9 +742,7 @@ onMounted(() => {
     panelObserver.observe(panelRef.value)
   }
   fetchList()
-  fetchDataTypes()
   fetchPointCapability()
-  fetchPropertyOptions()
 })
 
 onBeforeUnmount(() => {
@@ -1279,6 +756,55 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 实时值列：表头带一个暂停按钮，让「等一会看变化」和「别一直刷」都能就地做到 */
+.live-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.live-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--ink-4);
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.live-toggle:hover {
+  color: var(--brand);
+  background: var(--line-soft);
+}
+
+.live-toggle:focus-visible {
+  outline: 2px solid var(--el-color-primary-light-5);
+  outline-offset: 1px;
+}
+
+.live-pending {
+  display: inline-flex;
+}
+
+.live-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.live-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 </style>

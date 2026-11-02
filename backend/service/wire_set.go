@@ -28,4 +28,5 @@ var ServiceProviderSet = wire.NewSet(
 	NewDeviceScanService,
 	NewSystemConfigService,
 	NewDashboardService,
+	NewControlService,
 )

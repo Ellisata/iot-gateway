@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -23,6 +24,36 @@ const staleGraceFactor = 3
 // defaultScanFrequency 与采集引擎建任务时的兜底一致（见 newGatewayTask）：
 // 未配置或配置为非正数时按 1 秒采集。
 const defaultScanFrequency = 1000
+
+// maxSnapshotAddressIDs 是 addressIds 过滤的上限。点位表页长最大 100，
+// 留一倍余量即可；超出的部分直接丢弃，避免构造出来的 querystring 把巨量 ID
+// 塞进 IN 子句。
+const maxSnapshotAddressIDs = 200
+
+// splitSnapshotAddressIDs 解析逗号分隔的点位 ID：逐段 trim、丢弃空段、去重保序。
+func splitSnapshotAddressIDs(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	seen := make(map[string]struct{}, len(parts))
+	ids := make([]string, 0, len(parts))
+	for _, part := range parts {
+		id := strings.TrimSpace(part)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+		if len(ids) == maxSnapshotAddressIDs {
+			break
+		}
+	}
+	return ids
+}
 
 // RealtimeService 设备实时数据服务。
 //
@@ -46,7 +77,10 @@ func NewRealtimeService(sqliteDB *gorm.DB, store *realtime.Store, engine *collec
 	}
 }
 
-// GetDeviceSnapshot 查询单台设备的实时数据快照（分页）。
+// GetDeviceSnapshot 查询单台设备的实时数据快照。
+//
+// 默认按 page/size 分页；给了 AddressIDs 时改为精确返回这一批点位（忽略分页），
+// 供点位配置页按当前页的十几行取实时值 —— 那条路不需要也不该受列表分页影响。
 func (s *RealtimeService) GetDeviceSnapshot(ctx context.Context, req *dto.RealtimeSnapshotDTO) (*vo.RealtimeSnapshotVO, error) {
 	// 设备状态直接复用 DeviceService：在线判定（active 断联报警）与
 	// 最近成功采集时间（引擎内存态）的逻辑只有一份，避免两处漂移。
@@ -55,8 +89,12 @@ func (s *RealtimeService) GetDeviceSnapshot(ctx context.Context, req *dto.Realti
 		return nil, err
 	}
 
+	addressIDs := splitSnapshotAddressIDs(req.AddressIDs)
 	db := s.sqliteDB.WithContext(ctx).Model(&po.DeviceAddress{}).
 		Where("device_id = ? AND status = 1", req.DeviceID)
+	if len(addressIDs) > 0 {
+		db = db.Where("id IN ?", addressIDs)
+	}
 	if req.Name != "" {
 		like := "%" + req.Name + "%"
 		db = db.Where("name LIKE ? OR label LIKE ?", like, like)
@@ -70,10 +108,19 @@ func (s *RealtimeService) GetDeviceSnapshot(ctx context.Context, req *dto.Realti
 	var addrs []po.DeviceAddress
 	// 排序必须带 id 兜底：created_at 只精确到秒，同秒创建的点位仅按它排序时
 	// 次序不确定，前端在轮询中翻页会看到重复或漏行。id 为 UUIDv7（时间有序），可作稳定次序。
-	if err := db.Order("created_at ASC, id ASC").
-		Offset((req.Page - 1) * req.Size).Limit(req.Size).
-		Find(&addrs).Error; err != nil {
+	query := db.Order("created_at ASC, id ASC")
+	if len(addressIDs) == 0 {
+		query = query.Offset((req.Page - 1) * req.Size).Limit(req.Size)
+	}
+	if err := query.Find(&addrs).Error; err != nil {
 		return nil, err
+	}
+
+	// 精确取值模式下页面语义是「这一批」：返回 page=1、size=实际条数，
+	// 而不是把请求里带上的分页信息原样回显（那会让人以为还能翻页）。
+	page, size := req.Page, req.Size
+	if len(addressIDs) > 0 {
+		page, size = 1, len(addrs)
 	}
 
 	ids := make([]string, len(addrs))
@@ -94,12 +141,16 @@ func (s *RealtimeService) GetDeviceSnapshot(ctx context.Context, req *dto.Realti
 			RwPermission:   a.RwPermission,
 			ScanFrequency:  a.ScanFrequency,
 		}
-		if p, ok := values[a.ID]; ok {
-			item.Value = p.Value
-			item.Quality = p.Quality
-			item.Collected = true
-			item.UpdatedAt = p.UpdatedAt.Format("2006-01-02 15:04:05")
-			item.Stale = isStale(now, p.UpdatedAt, a.ScanFrequency)
+		// 只写点位不参与采集：快照里可能残留「改成 W 之前」采到的旧值，
+		// 直接忽略，否则前端会把一个不再轮询的点位显示成看似正常的实时值。
+		if a.RwPermission != "W" {
+			if p, ok := values[a.ID]; ok {
+				item.Value = p.Value
+				item.Quality = p.Quality
+				item.Collected = true
+				item.UpdatedAt = p.UpdatedAt.Format("2006-01-02 15:04:05")
+				item.Stale = isStale(now, p.UpdatedAt, a.ScanFrequency)
+			}
 		}
 		records[i] = item
 	}
@@ -113,8 +164,8 @@ func (s *RealtimeService) GetDeviceSnapshot(ctx context.Context, req *dto.Realti
 		CollectorRunning: s.engine.IsRunning(),
 		LastSuccessTime:  device.LastSuccessTime,
 		ServerTime:       now.Format("2006-01-02 15:04:05"),
-		Page:             req.Page,
-		Size:             req.Size,
+		Page:             page,
+		Size:             size,
 		Total:            total,
 		Records:          records,
 	}, nil
