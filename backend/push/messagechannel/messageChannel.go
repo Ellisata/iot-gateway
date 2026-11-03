@@ -68,6 +68,9 @@ type Channel struct {
 	cfg Config
 	ob  *push.Outbox
 
+	// recent 最近推送报文（仅内存、仅观测），见 push.RecentRing。
+	recent *push.RecentRing
+
 	done chan struct{}
 	ctx  context.Context
 	stop context.CancelFunc
@@ -89,7 +92,7 @@ func New(cfg Config) *Channel {
 	if cfg.ReconnectInterval <= 0 {
 		cfg.ReconnectInterval = 5 * time.Second
 	}
-	c := &Channel{cfg: cfg}
+	c := &Channel{cfg: cfg, recent: push.NewRecentRing(push.RecentPushRingSize)}
 	c.ob = push.NewOutbox(push.OutboxConfig{
 		Tag:          cfg.Tag,
 		ID:           cfg.ID,
@@ -225,13 +228,17 @@ func (c *Channel) tryConnect() {
 func (c *Channel) sendBatch(b push.PushBatch, fromDrain bool) FailureKind {
 	msgs, err := c.cfg.Encoder.Encode(b)
 	if err != nil {
-		c.fail("encode batch: "+err.Error(), fromDrain)
+		errMsg := "encode batch: " + err.Error()
+		c.recordRecent(b, nil, Outcome{Kind: FailurePoison, Err: err}, time.Now(), fromDrain)
+		c.fail(errMsg, fromDrain)
 		return FailurePoison
 	}
 	for _, msg := range msgs {
+		started := time.Now()
 		ctx, cancel := context.WithTimeout(c.ctx, c.cfg.Timeout)
 		out := c.cfg.Transport.Send(ctx, msg.Payload)
 		cancel()
+		c.recordRecent(b, msg.Payload, out, started, fromDrain)
 
 		switch out.Kind {
 		case FailureNone:
@@ -252,6 +259,42 @@ func (c *Channel) sendBatch(b push.PushBatch, fromDrain bool) FailureKind {
 		c.ob.MarkPublished(1)
 	}
 	return FailureNone
+}
+
+// recordRecent 记录一条出站报文（仅内存观测）。
+func (c *Channel) recordRecent(
+	b push.PushBatch,
+	payload []byte,
+	out Outcome,
+	started time.Time,
+	fromDrain bool,
+) {
+	if c.recent == nil {
+		return
+	}
+	errMsg := ""
+	if out.Kind != FailureNone {
+		errMsg = outcomeError(out)
+	}
+	c.recent.Add(push.RecentPushMessage{
+		At:         time.Now(),
+		Target:     c.cfg.Target,
+		DeviceCode: b.DeviceCode,
+		GroupCode:  b.GroupCode,
+		Records:    len(b.Records),
+		StatusCode: out.StatusCode,
+		DurationMs: time.Since(started).Milliseconds(),
+		Error:      errMsg,
+		FromDrain:  fromDrain,
+	}, payload)
+}
+
+// RecentMessages 实现 push.RecentMessagesProvider：最近推送报文（新→旧）。
+func (c *Channel) RecentMessages(limit int) []push.RecentPushMessage {
+	if c.recent == nil {
+		return []push.RecentPushMessage{}
+	}
+	return c.recent.Snapshot(limit)
 }
 
 func outcomeError(out Outcome) string {

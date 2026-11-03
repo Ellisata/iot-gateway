@@ -24,6 +24,7 @@ The MQTT channel pushes grouped **per device**; the payload is a JSON array wher
 [
   {
     "deviceId": "019fabd15a9176dda844147d98d38f9b",
+    "deviceCode": "ac-1-code",
     "deviceName": "空调-modbus-tcp",
     "deviceAddressId": "019fb1137da076a4ac97af5e51f2e22c",
     "deviceAddressName": "411115",
@@ -53,6 +54,7 @@ The MQTT channel pushes grouped **per device**; the payload is a JSON array wher
 | Field | Type | Description |
 |------|------|------|
 | `deviceId` / `deviceName` | string | Device identity and name |
+| `deviceCode` | string | Device code (`device.code`); empty string for legacy data without a code. Immutable after creation, so it is a stable cross-environment key. Read it by field name, not by position |
 | `deviceAddressId` / `deviceAddressName` | string | Point identity and address name (e.g. `411115`) |
 | `value` | string | **Already-decoded** collected value (protocol, byte order and word order resolved on the gateway) |
 | `protocol` | string | Protocol name (`iot_protocol.name`, e.g. `ModBus.TCP`); the namespace identifier, see §4 |
@@ -63,10 +65,11 @@ The MQTT channel pushes grouped **per device**; the payload is a JSON array wher
 | `thingModelCode` | string | Thing model code bound to the device (`thing_model.code`); empty string when unbound. Immutable after creation, so it is a stable dimension |
 | `propertyCode` | string | Thing model property identifier bound to the point (`thing_model_property.identifier`); empty string when unbound. Binding validates that the property belongs to the device's model |
 
-`thingModelCode` / `propertyCode` are **appended fields** (at the end of the JSON); the name,
-order and value of existing fields stay byte-for-byte unchanged. Both fields are always
-present and fall back to an empty string when unbound. Records produced by external MQTT
-subscriptions have no local binding, so they are empty there too.
+`deviceCode` follows `deviceId`; `thingModelCode` / `propertyCode` are **appended fields**
+(at the end of the JSON). All three are always present and fall back to an empty string
+when missing; the names, relative order and values of existing fields are unchanged.
+Records produced by external MQTT subscriptions have no local binding, so these fields are
+empty there too.
 The TSDB channels (TDengine / InfluxDB) write both as tags (`thing_model_code` / `property_code`).
 
 ## 3. Parsing `value`: dispatch by `kind`

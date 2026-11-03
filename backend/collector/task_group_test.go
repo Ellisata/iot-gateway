@@ -40,7 +40,7 @@ func newCollectorGroupTestDB(t *testing.T) *gorm.DB {
 		t.Fatal(err)
 	}
 	if err := db.Create(&po.Device{
-		ID: "dev-1", Name: "dev1", ProtocolID: "proto-1", ProtocolJSON: "{}", Status: 1,
+		ID: "dev-1", Code: "dev-1-code", Name: "dev1", ProtocolID: "proto-1", ProtocolJSON: "{}", Status: 1,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -53,8 +53,8 @@ func TestNewGatewayTaskUsesCollectorGroupInterval(t *testing.T) {
 	db := newCollectorGroupTestDB(t)
 
 	groups := []po.CollectorGroup{
-		{ID: "g-fast", DeviceID: "dev-1", Name: "fast", IntervalMs: 200, Status: 1},
-		{ID: "g-slow", DeviceID: "dev-1", Name: "slow", IntervalMs: 3000, Status: 1},
+		{ID: "g-fast", DeviceID: "dev-1", Code: "fast", Name: "fast", IntervalMs: 200, Status: 1},
+		{ID: "g-slow", DeviceID: "dev-1", Code: "slow", Name: "slow", IntervalMs: 3000, Status: 1},
 		{ID: "g-off", DeviceID: "dev-1", Name: "off", IntervalMs: 100, Status: 0},
 		{ID: "g-other", DeviceID: "dev-2", Name: "other", IntervalMs: 100, Status: 1},
 	}
@@ -114,17 +114,18 @@ func TestNewGatewayTaskUsesCollectorGroupInterval(t *testing.T) {
 
 	// 记录里必须带组身份，推送侧才能按组拆分。
 	recs := task.toRecords(
-		&po.Device{ID: "dev-1", Name: "dev1"},
+		&po.Device{ID: "dev-1", Code: "dev-1-code", Name: "dev1"},
 		[]po.DeviceAddress{{ID: "a-fast", Name: "40002", Label: "温度", GroupID: "g-fast"}},
 		[]driver.ReadResult{{DeviceAddressID: "a-fast", Value: "23", Quality: 192}},
 	)
-	if len(recs) != 1 || recs[0].GroupID != "g-fast" || recs[0].GroupName != "fast" || recs[0].GroupIntervalMs != 200 {
-		t.Fatalf("record group identity = %+v, want g-fast/fast/200", recs)
+	if len(recs) != 1 || recs[0].GroupID != "g-fast" || recs[0].GroupCode != "fast" ||
+		recs[0].GroupName != "fast" || recs[0].GroupIntervalMs != 200 || recs[0].DeviceCode != "dev-1-code" {
+		t.Fatalf("record group identity = %+v, want g-fast/fast/200 + device code", recs)
 	}
 
 	// 索引未对齐的回退路径也要取得到组身份。
 	recs = task.toRecords(
-		&po.Device{ID: "dev-1", Name: "dev1"},
+		&po.Device{ID: "dev-1", Code: "dev-1-code", Name: "dev1"},
 		[]po.DeviceAddress{
 			{ID: "a-free", Name: "40001"},
 			{ID: "a-fast", Name: "40002", GroupID: "g-fast"},

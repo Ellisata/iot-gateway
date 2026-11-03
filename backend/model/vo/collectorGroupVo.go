@@ -5,9 +5,11 @@ package vo
 
 // CollectorGroupVO 采集组响应。
 type CollectorGroupVO struct {
-	ID          string `json:"id"`
-	DeviceID    string `json:"deviceId"`
-	DeviceName  string `json:"deviceName"` // 展示用冗余字段
+	ID         string `json:"id"`
+	DeviceID   string `json:"deviceId"`
+	DeviceName string `json:"deviceName"` // 展示用冗余字段
+	// Code 采集组编码（设备内唯一，创建后不可修改，供 MQTT 主题使用）。
+	Code        string `json:"code"`
 	Name        string `json:"name"`
 	IntervalMs  int    `json:"intervalMs"`
 	Description string `json:"description"`

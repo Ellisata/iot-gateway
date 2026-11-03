@@ -10,9 +10,12 @@ each release, followed by English entries.
 
 ### 新增
 
-- **采集组与分组推送**：设备下可建采集组（迁移 `028_collector_group.sql`），组持有采集周期；点位通过 `device_address.group_id` 绑定到组，绑定后按组周期采集，未绑定点位继续按 `scan_frequency` 采集（升级零行为变化）。组停用后绑定点位停止采集与推送，仍被点位绑定的组禁止删除；删除设备级联删除其采集组。推送侧按 `(设备, 组)` 分帧，新增 `group-json` 载荷格式（`timestamp/device/group` + `values/errors` 字典）；通道可用 `config_json.groupIds` 只订阅指定组（空 = 全量，未分组记录在非空订阅下不推送）；MQTT 主题新增 `${deviceId}` / `${group}` / `${groupId}` 占位符，未分组记录回落为 `legacy`，旧 `+` 语义不变。断网缓存新增组列（迁移 `029_push_outbox_group.sql`），补发按原组重建主题。控制台新增「采集组」工作区页签、点位批量分配采集组与通道组订阅选择器。
+- **采集组与分组推送**：设备下可建采集组（迁移 `028_collector_group.sql`），组持有采集周期；点位通过 `device_address.group_id` 绑定到组，绑定后按组周期采集，未绑定点位继续按 `scan_frequency` 采集（升级零行为变化）。组停用后绑定点位停止采集与推送，仍被点位绑定的组禁止删除；删除设备级联删除其采集组。推送侧按 `(设备, 组)` 分帧，新增 `group-json` 载荷格式（`timestamp/device/group` + `values/errors` 字典）；通道可用 `config_json.groupIds` 只订阅指定组（空 = 全量，未分组记录在非空订阅下不推送）。断网缓存新增组列（迁移 `029_push_outbox_group.sql`），补发按原组重建主题。控制台新增「采集组」工作区页签、点位批量分配采集组与通道组订阅选择器。
 - **无变化周期重发**：`push.changeOnly` 新增配套运行期开关 `push.keepaliveIntervalSec`（0 / 60 / 300 / 600 秒，出厂 0 = 关闭）。点位值持续不变时，按配置周期再投递一次，供下游做心跳/存活判断。判定在本轮采集记录上进行，设备离线或采集失败不会合成旧值；实际间隔不短于采集周期。仅在「变化才推送」开启时生效；打开后时序库会周期性写入相同值的重复行。运行开关页新增下拉选择，修改后下一批采集即生效。
 - **物模型与属性 Excel 导入**：新增物模型、物模型属性的模板下载与批量导入接口（`GET /thingModel/importThingModelTemplate` 等），页面提供「下载模板 / 导入」按钮。模板中的分类、数据类型、读写模式列改为「中文名（code）」下拉，导入接受 code、中文名或组合写法（code 忽略大小写）。物模型按标识与名称去重，属性在模型内按标识符去重；逐行校验、部分导入并返回失败明细。设备地址导入模板支持传 `deviceId`，按该设备协议生成数据类型下拉。
+- **设备与采集组编码**：设备与采集组新增面向主题与外部引用的稳定编码 `code`（迁移 `030_device_collector_group_code.sql`）：字母开头、仅字母数字下划线短横线、最长 64，创建必填、创建后不可修改、`legacy` 保留；Excel 导入与扫描建库按名称自动生成并避让，存量行按 ID 回填。编码随记录、载荷与断网缓存落盘（迁移 `031_push_outbox_topic_code.sql`），补发可重建原主题；控制台表单与检索均支持编码。
+- **MQTT 主题改用编码模板**：占位符改为 `${deviceCode}` / `${thingModelCode}` / `${groupCode}`，缺失时分别回落 `_unencoded` / `_unmodeled` / `legacy`，组改名不影响订阅；通道编辑页主题字段改为模板下拉 + 手动输入（迁移 `032_mqtt_topic_template_select.sql`）。
+- **推送报文实时监控**：每通道在内存保留最近 100 条推送报文，新增只读 `GET /push/recentMessages`（镜像到 `/agentApi`）；控制台通道列表新增监控抽屉，展示连接状态、积压、最近报文的主题/设备/组、2 KiB 载荷预览与错误，打开期间每 3 秒刷新；时序库通道新增累计写入行数 `rowsCount`。
 
 ### Added
 
@@ -26,10 +29,8 @@ each release, followed by English entries.
   `(device, group)` and a new `group-json` payload emits
   `timestamp/device/group` plus `values/errors` dictionaries. Message channels
   can subscribe to specific groups via `config_json.groupIds` (empty = receive
-  everything; ungrouped records are excluded when the list is non-empty). MQTT
-  topics add `${deviceId}` / `${group}` / `${groupId}` placeholders, with
-  ungrouped records falling back to `legacy`; the legacy `+` semantics are
-  unchanged. The offline spool stores group columns (migration
+  everything; ungrouped records are excluded when the list is non-empty). The
+  offline spool stores group columns (migration
   `029_push_outbox_group.sql`) so replay rebuilds the original topic. The
   console adds a Collector Groups workspace tab, bulk point assignment, and a
   per-channel group subscription selector.
@@ -53,6 +54,27 @@ each release, followed by English entries.
   are validated individually, valid rows are imported and failures are
   reported. The device-address import template now accepts `deviceId` to scope
   data-type dropdowns to that device's protocol.
+- **Device and collector-group codes**: devices and collector groups gain a
+  stable `code` for topics and external references (migration
+  `030_device_collector_group_code.sql`): starts with a letter, letters/digits/
+  underscore/hyphen only, up to 64 chars, required on create, immutable
+  afterwards, `legacy` reserved; Excel import and scan-created devices derive
+  one from the name with collision avoidance, and existing rows are backfilled
+  from the ID. The code is stored with records, payloads and the offline spool
+  (migration `031_push_outbox_topic_code.sql`) so replay rebuilds the original
+  topic; console forms and search support it.
+- **MQTT topic templates use codes**: placeholders become `${deviceCode}` /
+  `${thingModelCode}` / `${groupCode}`, falling back to `_unencoded` /
+  `_unmodeled` / `legacy` respectively, so renaming a group no longer changes
+  downstream subscriptions; the channel editor turns the topic field into a
+  template picker plus free text (migration
+  `032_mqtt_topic_template_select.sql`).
+- **Live push-message monitoring**: each channel keeps its last 100 outbound
+  messages in memory behind the read-only `GET /push/recentMessages` (mirrored
+  to `/agentApi`); the channel list gains a monitor drawer showing connection
+  state, backlog, each message's topic/device/group, a 2 KiB payload preview and
+  errors, refreshing every 3 seconds while open. Time-series channels also
+  report cumulative written rows as `rowsCount`.
 
 ## [0.5.0] - 2026-11-02
 

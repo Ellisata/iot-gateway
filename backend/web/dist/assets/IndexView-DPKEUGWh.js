@@ -1,0 +1,1 @@
+import{$t as e,un as t}from"./vendor-B__5ucVT.js";import{t as n}from"./AlarmTable-BUIB-GUe.js";var r={__name:`IndexView`,setup(r){return(r,i)=>(t(),e(n,{"target-type":`device`}))}};export{r as default};

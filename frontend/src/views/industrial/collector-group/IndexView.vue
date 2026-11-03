@@ -71,6 +71,11 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column :label="t('collectorGroup.code')" width="160">
+          <template #default="{ row }">
+            <span class="iot-code-text" :title="row.code">{{ row.code || '—' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column :label="t('collectorGroup.interval')" width="150" align="center">
           <template #default="{ row }">{{ row.intervalMs }} ms</template>
         </el-table-column>
@@ -164,6 +169,18 @@
       @close="resetForm"
     >
       <el-form ref="formRef" :model="formData" :rules="formRules" label-width="110px" status-icon>
+        <el-form-item :label="t('collectorGroup.code')" prop="code">
+          <el-input
+            v-model="formData.code"
+            :placeholder="t('collectorGroup.codePlaceholder')"
+            :disabled="isEdit && !!formData.code"
+            maxlength="64"
+            show-word-limit
+          />
+          <div class="iot-form-hint is-block">
+            {{ isEdit && formData.code ? t('collectorGroup.codeImmutableHint') : t('collectorGroup.codeHint') }}
+          </div>
+        </el-form-item>
         <el-form-item :label="t('collectorGroup.name')" prop="name">
           <el-input
             v-model="formData.name"
@@ -302,6 +319,7 @@ const isEdit = computed(() => !!formData.id)
 
 const formData = reactive({
   id: '',
+  code: '',
   name: '',
   intervalMs: 1000,
   description: '',
@@ -309,6 +327,23 @@ const formData = reactive({
 })
 
 const formRules = {
+  code: [
+    { required: true, message: () => t('collectorGroup.codeRequired'), trigger: 'blur' },
+    {
+      pattern: /^[A-Za-z][A-Za-z0-9_-]{0,63}$/,
+      message: () => t('collectorGroup.codeInvalid'),
+      trigger: 'blur',
+    },
+    {
+      validator: (_rule, value, callback) => {
+        if (String(value || '').trim().toLowerCase() === 'legacy') {
+          return callback(new Error(t('collectorGroup.codeInvalid')))
+        }
+        callback()
+      },
+      trigger: 'blur',
+    },
+  ],
   name: [
     { required: true, message: () => t('collectorGroup.nameRequired'), trigger: 'blur' },
     { min: 1, max: 64, message: () => t('collectorGroup.nameLength'), trigger: 'blur' },
@@ -334,6 +369,7 @@ function handleAdd() {
 
 function handleEdit(row) {
   formData.id = row.id
+  formData.code = row.code || ''
   formData.name = row.name
   formData.intervalMs = row.intervalMs
   formData.description = row.description || ''
@@ -343,6 +379,7 @@ function handleEdit(row) {
 
 function resetForm() {
   formData.id = ''
+  formData.code = ''
   formData.name = ''
   formData.intervalMs = 1000
   formData.description = ''
@@ -360,6 +397,7 @@ async function handleSubmit() {
   submitting.value = true
   try {
     const payload = {
+      code: formData.code.trim(),
       name: formData.name.trim(),
       intervalMs: formData.intervalMs,
       description: formData.description.trim(),
@@ -405,3 +443,19 @@ async function handleDelete(row) {
 
 fetchList()
 </script>
+
+<style scoped>
+/* 编码是主题里的稳定段：等宽小字，避免与组名的视觉权重打架 */
+.iot-code-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+</style>

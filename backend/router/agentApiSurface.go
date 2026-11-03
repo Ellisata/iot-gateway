@@ -524,6 +524,13 @@ var agentApiSurface = map[string]SurfaceEntry{
 		Note: "**真的向配置的下游发送一条样例数据**，不保存配置",
 	},
 	"GET /push/status": {Access: AccessRead, Params: argNone()},
+	"GET /push/recentMessages": {
+		Access: AccessRead,
+		Params: argQuery(dto.RecentPushMessagesDTO{}, map[string]string{
+			"channelId": "通道主键（列表行 / push/status 返回的 id）",
+		}),
+		Note: "通道最近推送的报文（载荷最多 2 KiB 预览），可能含采集数据；仅内存，最近 100 条",
+	},
 	"POST /push/refresh": {
 		Access: AccessWrite,
 		Params: argNone(),

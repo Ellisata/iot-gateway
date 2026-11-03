@@ -57,6 +57,20 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req *dto.CreateDeviceD
 			return appError.NewAppErrorCtx(enums.DeviceExistsEnum.GetCode(), enums.DeviceExistsEnum.GetMessage(), enums.DeviceExistsEnum.GetMsgKey())
 		}
 
+		code := strings.TrimSpace(req.Code)
+		if !validateEntityCode(code) {
+			return deviceCodeInvalidErr()
+		}
+		var codeDup po.Device
+		if err := tx.Where("code = ?", code).First(&codeDup).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+		}
+		if codeDup.ID != "" {
+			return deviceCodeExistsErr()
+		}
+
 		modelID := strings.TrimSpace(req.ModelID)
 		if err := ensureThingModelBindable(tx, modelID); err != nil {
 			return err
@@ -68,6 +82,7 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req *dto.CreateDeviceD
 			protocolJson = string(req.ProtocolJSON)
 		}
 		device := &po.Device{
+			Code:         code,
 			Name:         req.Name,
 			ProtocolID:   req.ProtocolID,
 			ProtocolJSON: protocolJson,
@@ -115,7 +130,32 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, req *dto.UpdateDeviceD
 			protocolJson = string(req.ProtocolJSON)
 		}
 
+		code := strings.TrimSpace(req.Code)
+		if code != "" && !validateEntityCode(code) {
+			return deviceCodeInvalidErr()
+		}
+
 		updates := make(map[string]interface{})
+		if code != "" {
+			// 编码创建后不可修改。仅允许给历史空编码补一次（迁移已回填，正常
+			// 不会走到这里；直接写库/测试库的老数据仍可自愈）。
+			if existing.Code != "" {
+				if code != existing.Code {
+					return deviceCodeImmutableErr()
+				}
+			} else {
+				var codeDup po.Device
+				if err := tx.Where("code = ? AND id != ?", code, id).First(&codeDup).Error; err != nil {
+					if !errors.Is(err, gorm.ErrRecordNotFound) {
+						return err
+					}
+				}
+				if codeDup.ID != "" {
+					return deviceCodeExistsErr()
+				}
+				updates["code"] = code
+			}
+		}
 		if req.ModelID != nil {
 			newModelID := strings.TrimSpace(*req.ModelID)
 			if newModelID != existing.ModelID {
@@ -311,6 +351,7 @@ func (s *DeviceService) GetDeviceByID(ctx context.Context, id string) (*vo.Devic
 
 	return &vo.DeviceVO{
 		ID:              device.ID,
+		Code:            device.Code,
 		Name:            device.Name,
 		ProtocolID:      device.ProtocolID,
 		ProtocolName:    protocolName,
@@ -535,7 +576,7 @@ func (s *DeviceService) PageDevice(ctx context.Context, req *dto.PageDeviceDTO) 
 
 	if req.Name != "" {
 		pattern := "%" + req.Name + "%"
-		db = db.Where("name LIKE ? OR scan_identity LIKE ?", pattern, pattern)
+		db = db.Where("name LIKE ? OR scan_identity LIKE ? OR code LIKE ?", pattern, pattern, pattern)
 	}
 
 	var total int64
@@ -580,6 +621,7 @@ func (s *DeviceService) toDeviceVOs(ctx context.Context, devices []po.Device) []
 	for i, d := range devices {
 		records[i] = vo.DeviceVO{
 			ID:              d.ID,
+			Code:            d.Code,
 			Name:            d.Name,
 			ProtocolID:      d.ProtocolID,
 			ProtocolName:    s.getProtocolName(ctx, d.ProtocolID),
@@ -798,14 +840,27 @@ func (s *DeviceService) deviceLastSuccess(deviceID string) string {
 // ==================== Excel 批量导入设备 ====================
 
 // ImportDevices 从 Excel(.xlsx) 批量导入设备。
-// 模板三列：名称 / 协议 / 描述。协议列按 iot_protocol.name 匹配，未知协议跳过该行并记录原因；
-// 名称重复（库内或文件内）跳过该行；其余行部分导入并返回汇总，供前端展示失败明细。
+//
+// 模板：名称 / 协议 / 描述 / 编码（编码可选，旧的三列表格仍可直接导入）。
+// 协议列按 iot_protocol.name 匹配，未知协议跳过该行并记录原因；名称重复
+// （库内或文件内）跳过该行；编码非法或重复也跳过该行。未填编码时按名称生成，
+// 生成结果在文件内与库内都保证唯一。其余行部分导入并返回汇总，供前端展示失败明细。
 // 导入仅建基本信息，协议参数留空 "{}"，连接参数后续在编辑界面补填。
 func (s *DeviceService) ImportDevices(ctx context.Context, data []byte) (*vo.ExcelImportResultVO, error) {
-	// 预加载现有设备名，用于去重
+	// 预加载现有设备名与编码：名称用于框架去重，编码用于生成/校验时避让。
 	var names []string
 	if err := s.sqliteDB.WithContext(ctx).Model(&po.Device{}).Pluck("name", &names).Error; err != nil {
 		return nil, err
+	}
+	var codes []string
+	if err := s.sqliteDB.WithContext(ctx).Model(&po.Device{}).Pluck("code", &codes).Error; err != nil {
+		return nil, err
+	}
+	codeTaken := make(map[string]bool, len(codes))
+	for _, c := range codes {
+		if c != "" {
+			codeTaken[c] = true
+		}
 	}
 
 	// 预加载协议名 → ID 映射
@@ -820,9 +875,10 @@ func (s *DeviceService) ImportDevices(ctx context.Context, data []byte) (*vo.Exc
 
 	now := time.Now().Format("2006-01-02 15:04:05")
 	return excelutil.Import(ctx, s.sqliteDB, data, excelutil.Options[po.Device]{
+		// 只校验前三列：旧模板没有「编码」列，导入时按名称生成。
 		Headers:      []string{"名称", "协议", "描述"},
 		ExistingKeys: names,
-		Cols:         3,
+		Cols:         4,
 		DupMsg:       enums.DeviceExistsEnum.GetMessage(),
 		Parse: func(row []string) (*po.Device, string, string) {
 			name := excelutil.Cell(row, 0)
@@ -831,7 +887,24 @@ func (s *DeviceService) ImportDevices(ctx context.Context, data []byte) (*vo.Exc
 			if reason := validateImportRow(name, protocolName, protocolMap); reason != "" {
 				return nil, name, reason
 			}
+
+			code := excelutil.Cell(row, 3)
+			if code == "" {
+				code = uniqueEntityCode(generatedEntityCode(name, "dev"), func(c string) bool {
+					return codeTaken[c]
+				})
+			} else {
+				if !validateEntityCode(code) {
+					return nil, name, enums.DeviceCodeInvalidEnum.GetMessage()
+				}
+				if codeTaken[code] {
+					return nil, name, enums.DeviceCodeExistsEnum.GetMessage()
+				}
+			}
+			codeTaken[code] = true
+
 			return &po.Device{
+				Code:         code,
 				Name:         name,
 				ProtocolID:   protocolMap[protocolName],
 				ProtocolJSON: "{}",
@@ -862,11 +935,12 @@ func validateImportRow(name, protocolName string, protocolMap map[string]string)
 	return ""
 }
 
-// GenerateImportTemplate 生成设备导入模板（.xlsx）：表头「名称/协议/描述」+ 示例行 + 冻结首行。
+// GenerateImportTemplate 生成设备导入模板（.xlsx）：
+// 表头「名称/协议/描述/编码」+ 示例行 + 冻结首行。编码列可留空，留空时按名称生成。
 func (s *DeviceService) GenerateImportTemplate() (*bytes.Buffer, error) {
 	return excelutil.BuildTemplate(
-		[]string{"名称", "协议", "描述"},
-		[]string{"示例：1号注塑机", "ModBus.TCP", "示例数据，可删除或覆盖"},
-		[]float64{32, 22, 40},
+		[]string{"名称", "协议", "描述", "编码"},
+		[]string{"示例：1号注塑机", "ModBus.TCP", "示例数据，可删除或覆盖", "injection-1"},
+		[]float64{32, 22, 40, 22},
 	)
 }

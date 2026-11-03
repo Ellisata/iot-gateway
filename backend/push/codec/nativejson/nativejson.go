@@ -18,7 +18,11 @@ import (
 // PushPoint 推送到 MQTT 的单条点位数据。
 // 字段顺序即 JSON 输出顺序，不要调整。
 type PushPoint struct {
-	DeviceID          string `json:"deviceId"`
+	DeviceID string `json:"deviceId"`
+	// DeviceCode 设备编码（device.code），未编码的旧数据为空串。
+	// 与 CollectedRecord 同名同义，供下游稳定关联设备（设备 ID 不可读、
+	// 编码创建后不可修改）。新增字段，既有字段的顺序与取值不变。
+	DeviceCode        string `json:"deviceCode"`
 	DeviceName        string `json:"deviceName"`
 	DeviceAddressID   string `json:"deviceAddressId"`
 	DeviceAddressName string `json:"deviceAddressName"`
@@ -65,6 +69,7 @@ func MarshalBatch(records []collector.CollectedRecord, now string) ([]byte, erro
 		}
 		points = append(points, PushPoint{
 			DeviceID:          r.DeviceID,
+			DeviceCode:        r.DeviceCode,
 			DeviceName:        r.DeviceName,
 			DeviceAddressID:   r.DeviceAddressID,
 			DeviceAddressName: r.DeviceAddressName,

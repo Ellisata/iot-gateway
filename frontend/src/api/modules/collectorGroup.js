@@ -32,7 +32,7 @@ export function listCollectorGroups(deviceId) {
 
 /**
  * 创建采集组
- * @param {{deviceId:string,name:string,intervalMs:number,description?:string}} data
+ * @param {{deviceId:string,code:string,name:string,intervalMs:number,description?:string}} data
  */
 export function createCollectorGroup(data) {
   return request({
@@ -44,7 +44,7 @@ export function createCollectorGroup(data) {
 
 /**
  * 更新采集组
- * @param {{id:string,name?:string,intervalMs?:number,description?:string,status?:number}} data
+ * @param {{id:string,code?:string,name?:string,intervalMs?:number,description?:string,status?:number}} data
  */
 export function updateCollectorGroup(data) {
   return request({

@@ -22,6 +22,9 @@ type AggregateWriter struct {
 	MaxRows int
 	// Interval 未达行数时的强制刷出间隔，约束写入延迟。
 	Interval time.Duration
+	// Observe 可选：每次刷出后回调（成功与失败都调用），供通道记录最近写入。
+	// 回调运行在写协程上，必须快速且非阻塞。
+	Observe func(WriteObservation)
 }
 
 // Run 运行写协程，直至 Outbox 停止。
@@ -84,7 +87,20 @@ func (w *AggregateWriter) flush(o *Outbox, agg Aggregator, pending []PushBatch) 
 	if agg.Empty() {
 		return
 	}
-	if w.Write(agg.Payload()) {
+	// 负载与行数只取一次：Observe 与 Write 必须看到同一份负载。
+	payload := agg.Payload()
+	rows := agg.Rows()
+	started := time.Now()
+	ok := w.Write(payload)
+	if w.Observe != nil {
+		w.Observe(WriteObservation{
+			Payload:  payload,
+			Rows:     rows,
+			OK:       ok,
+			Duration: time.Since(started),
+		})
+	}
+	if ok {
 		return
 	}
 	if o.SpoolEnabled() {

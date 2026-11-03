@@ -54,6 +54,15 @@ type PreviewPushChannelMappingDTO struct {
 	Mapping json.RawMessage `json:"mapping" binding:"required"`
 }
 
+// RecentPushMessagesDTO 查询某个通道最近推送的报文。
+//
+// ChannelID 是通道主键（列表行 / GET /push/status 返回的 id），不是名称。
+// Limit 省略 = 返回全部；上限与 push 包的环形缓冲大小保持一致。
+type RecentPushMessagesDTO struct {
+	ChannelID string `form:"channelId" binding:"required"`
+	Limit     int    `form:"limit"     binding:"omitempty,min=1,max=100"`
+}
+
 // PagePushChannelDTO 数据推送通道分页查询
 type PagePushChannelDTO struct {
 	Page int    `form:"page" binding:"required,min=1"`

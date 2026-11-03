@@ -16,7 +16,8 @@ type ChannelStatusVO struct {
 	Topic        string `json:"topic"`
 	QueueDepth   uint64 `json:"queueDepth"`
 	SpoolDepth   uint64 `json:"spoolDepth"` // 断网本地缓存待补发批次
-	PublishCount uint64 `json:"publishCount"`
+	PublishCount uint64 `json:"publishCount"` // 下发次数（时序库通道即写入批次/刷盘次数）
+	RowsCount    uint64 `json:"rowsCount"`    // 成功写出的记录行数（仅时序库通道统计）
 	DroppedCount uint64 `json:"droppedCount"`
 	LastPublish  string `json:"lastPublishTime"`
 	LastSuccess  string `json:"lastSuccessTime"`

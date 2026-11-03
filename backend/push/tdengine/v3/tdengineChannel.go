@@ -78,6 +78,11 @@ type tdengineChannel struct {
 
 	ob *push.Outbox
 
+	// recent 最近写入（仅内存、仅观测），见 push.RecentRing。
+	recent *push.RecentRing
+	// rowsCount 成功写出的累计记录行数（publishCount 是刷盘批次次数）。
+	rowsCount atomic.Uint64
+
 	db        *sql.DB
 	connected atomic.Bool
 
@@ -121,6 +126,7 @@ func newTdengineChannel(db *gorm.DB, ch *po.PushChannel) (*tdengineChannel, erro
 		channelType: channelType,
 		cfg:         cfg,
 		sig:         ch.ID + "|" + ch.Name + "|" + ch.ConfigJSON,
+		recent:      push.NewRecentRing(push.RecentPushRingSize),
 	}
 	tch.ob = push.NewOutbox(push.OutboxConfig{
 		Tag:          "tdengine",
@@ -207,6 +213,7 @@ func (ch *tdengineChannel) run() {
 		Write:    ch.write,
 		MaxRows:  ch.cfg.batchRows(),
 		Interval: ch.cfg.batchInterval(),
+		Observe:  ch.observeWrite,
 	}
 	var wg sync.WaitGroup
 	for i := 0; i < ch.cfg.batchWorkers(); i++ {
@@ -223,6 +230,7 @@ func (ch *tdengineChannel) run() {
 			New:     func() push.Aggregator { return newInsertBuilder(ch.cfg.safeDB, ch.cfg.safeStable) },
 			Write:   ch.write,
 			MaxRows: ch.cfg.batchRows(),
+			Observe: ch.observeWrite,
 		}
 		wg.Add(1)
 		go func() {
@@ -456,7 +464,40 @@ func (ch *tdengineChannel) Snapshot() push.ChannelStatusVO {
 		Topic:  ch.cfg.Database,
 	}
 	ch.ob.FillStatus(&vo)
+	vo.RowsCount = ch.rowsCount.Load()
 	return vo
+}
+
+// observeWrite 记录一次写入（实时刷盘或补发分组），供管理端监控查看。
+func (ch *tdengineChannel) observeWrite(o push.WriteObservation) {
+	if ch.recent == nil {
+		return
+	}
+	errMsg := ""
+	if o.OK {
+		ch.rowsCount.Add(uint64(o.Rows))
+	} else {
+		errMsg = ch.ob.LastErr()
+		if errMsg == "" {
+			errMsg = "write failed"
+		}
+	}
+	ch.recent.AddString(push.RecentPushMessage{
+		At:         time.Now(),
+		Target:     ch.cfg.Database,
+		Records:    o.Rows,
+		DurationMs: o.Duration.Milliseconds(),
+		Error:      errMsg,
+		FromDrain:  o.FromDrain,
+	}, o.Payload)
+}
+
+// RecentMessages 实现 push.RecentMessagesProvider：最近写入（新→旧）。
+func (ch *tdengineChannel) RecentMessages(limit int) []push.RecentPushMessage {
+	if ch.recent == nil {
+		return []push.RecentPushMessage{}
+	}
+	return ch.recent.Snapshot(limit)
 }
 
 // ==================== push.Aggregator 适配 ====================

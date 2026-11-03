@@ -5,7 +5,10 @@ package dto
 
 // CreateCollectorGroupDTO 创建采集组请求。
 type CreateCollectorGroupDTO struct {
-	DeviceID    string `json:"deviceId" binding:"required"`
+	DeviceID string `json:"deviceId" binding:"required"`
+	// Code 采集组编码：字母开头，仅字母/数字/下划线/短横线，最长 64；
+	// 设备内唯一、创建后不可修改，供 MQTT 主题使用。
+	Code        string `json:"code" binding:"required,max=64"`
 	Name        string `json:"name" binding:"required,min=1,max=64"`
 	IntervalMs  int    `json:"intervalMs" binding:"required,min=100,max=600000"`
 	Description string `json:"description" binding:"max=500"`
@@ -15,8 +18,10 @@ type CreateCollectorGroupDTO struct {
 //
 // 更新是部分更新：Name 空 = 不改；IntervalMs <= 0 = 不改；Status 为 nil = 不改。
 // DeviceID 不在 DTO 中 —— 组一旦创建就不允许换设备，服务层使用库中的 device_id。
+// Code 只用于校验不可变性：传了且与库中不同会被拒绝；空串 = 不校验。
 type UpdateCollectorGroupDTO struct {
 	ID          string `json:"id" binding:"required"`
+	Code        string `json:"code"`
 	Name        string `json:"name" binding:"max=64"`
 	IntervalMs  int    `json:"intervalMs" binding:"omitempty,min=100,max=600000"`
 	Description string `json:"description" binding:"max=500"`
@@ -28,7 +33,7 @@ type PageCollectorGroupDTO struct {
 	Page     int    `form:"page" binding:"required,min=1"`
 	Size     int    `form:"size" binding:"required,min=1,max=100"`
 	DeviceID string `form:"deviceId" binding:"required"` // 所属设备ID
-	Name     string `form:"name"`                        // 组名模糊查询
+	Name     string `form:"name"`                        // 组名或编码模糊查询
 }
 
 // ListCollectorGroupsDTO 采集组下拉列表。

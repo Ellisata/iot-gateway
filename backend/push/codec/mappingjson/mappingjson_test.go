@@ -64,6 +64,35 @@ func encodeOne(t *testing.T, enc *Encoder, b push.PushBatch) string {
 	return string(msgs[0].Payload)
 }
 
+// TestDeviceAndGroupCodes 记录与批次两级都能读到设备编码和采集组编码。
+func TestDeviceAndGroupCodes(t *testing.T) {
+	enc := mustEncoder(t, `{
+		"version": 1,
+		"batchFields": {
+			"batchCode": {"source": "path", "value": "deviceCode"},
+			"groupCode": {"source": "path", "value": "groupCode"}
+		},
+		"fields": {
+			"device": {"source": "path", "value": "deviceCode"},
+			"group":  {"source": "path", "value": "groupCode"}
+		}
+	}`)
+
+	b := sampleBatch()
+	b.DeviceCode = "plc-a"
+	b.GroupCode = "fast"
+	for i := range b.Records {
+		b.Records[i].DeviceCode = "plc-a"
+		b.Records[i].GroupCode = "fast"
+	}
+
+	got := encodeOne(t, enc, b)
+	want := `{"batchCode":"plc-a","groupCode":"fast","records":[{"device":"plc-a","group":"fast"},{"device":"plc-a","group":"fast"}]}`
+	if got != want {
+		t.Errorf("payload:\n got: %s\nwant: %s", got, want)
+	}
+}
+
 func TestBatchArrayAndTypedValues(t *testing.T) {
 	enc := mustEncoder(t, `{
 		"version": 1,

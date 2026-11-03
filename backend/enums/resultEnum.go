@@ -67,6 +67,11 @@ var (
 	DeviceExistsEnum    = NewBusinessEnum("40001", "设备名称已存在", "err.device_exists")
 	DeviceNotExistsEnum = NewBusinessEnum("40002", "设备不存在", "err.device_not_found")
 	DevicePingFailEnum  = NewBusinessEnum("40003", "设备连接测试失败", "err.device_ping_fail")
+	// 设备编码是面向 MQTT 主题/外部引用的稳定标识：格式受约束、全局唯一、
+	// 创建后不可修改（与物模型 code 同一套语义）。
+	DeviceCodeInvalidEnum   = NewBusinessEnum("40004", "设备编码不合法（字母开头，仅字母数字下划线短横线）", "err.device_code_invalid")
+	DeviceCodeExistsEnum    = NewBusinessEnum("40005", "设备编码已存在", "err.device_code_exists")
+	DeviceCodeImmutableEnum = NewBusinessEnum("40006", "设备编码不可修改", "err.device_code_immutable")
 
 	// 采集相关错误码
 	CollectionStartFailEnum = NewBusinessEnum("30001", "开始采集失败", "collection.start.failed")
@@ -134,6 +139,10 @@ var (
 	CollectorGroupDeviceMismatchEnum  = NewBusinessEnum("40044", "采集组不属于该设备", "err.collector_group_device_mismatch")
 	CollectorGroupNameInvalidEnum     = NewBusinessEnum("40045", "采集组名称不合法（不能为空、不能含 / + #，且不能为 legacy）", "err.collector_group_name_invalid")
 	CollectorGroupIntervalInvalidEnum = NewBusinessEnum("40046", "采集组周期不合法（100-600000 毫秒）", "err.collector_group_interval_invalid")
+	// 组编码是主题里的稳定段：设备内唯一、创建后不可修改，且同样不能占用 legacy。
+	CollectorGroupCodeInvalidEnum   = NewBusinessEnum("40047", "采集组编码不合法（字母开头，仅字母数字下划线短横线，且不能为 legacy）", "err.collector_group_code_invalid")
+	CollectorGroupCodeExistsEnum    = NewBusinessEnum("40048", "采集组编码已存在", "err.collector_group_code_exists")
+	CollectorGroupCodeImmutableEnum = NewBusinessEnum("40049", "采集组编码不可修改", "err.collector_group_code_immutable")
 
 	// 物模型相关错误码（归属设备域，沿用 4000x 分段）
 	ThingModelExistsEnum                 = NewBusinessEnum("41001", "物模型标识或名称已存在", "err.thing_model_exists")

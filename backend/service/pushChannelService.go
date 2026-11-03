@@ -340,15 +340,16 @@ func (s *PushChannelService) samplePushBatch(ctx context.Context) push.PushBatch
 	}
 	// 采集组身份与运行期记录同源：预览/测试发送要能看到 groupId/groupName，
 	// 否则 group-json 预览会是一帧没有组头的空壳。
-	groupID, groupName, groupInterval := "", "", 0
+	groupID, groupName, groupCode, groupInterval := "", "", "", 0
 	if addr.GroupID != "" {
 		var group po.CollectorGroup
 		if err := s.sqliteDB.WithContext(ctx).Where("id = ?", addr.GroupID).First(&group).Error; err == nil {
-			groupID, groupName, groupInterval = group.ID, group.Name, group.IntervalMs
+			groupID, groupName, groupCode, groupInterval = group.ID, group.Name, group.Code, group.IntervalMs
 		}
 	}
 	rec := collector.CollectedRecord{
 		DeviceID:           dev.ID,
+		DeviceCode:         dev.Code,
 		DeviceName:         dev.Name,
 		DeviceAddressID:    addr.ID,
 		DeviceAddressName:  addr.Name,
@@ -362,12 +363,16 @@ func (s *PushChannelService) samplePushBatch(ctx context.Context) push.PushBatch
 		ThingModelCode:     model.Code,
 		PropertyCode:       property.Identifier,
 		GroupID:            groupID,
+		GroupCode:          groupCode,
 		GroupName:          groupName,
 		GroupIntervalMs:    groupInterval,
 	}
 	return push.PushBatch{
 		DeviceID:        dev.ID,
+		DeviceCode:      dev.Code,
+		ThingModelCode:  model.Code,
 		GroupID:         groupID,
+		GroupCode:       groupCode,
 		GroupName:       groupName,
 		GroupIntervalMs: groupInterval,
 		CollectedAt:     now,
@@ -378,6 +383,7 @@ func (s *PushChannelService) samplePushBatch(ctx context.Context) push.PushBatch
 func builtinSample(now string) push.PushBatch {
 	rec := collector.CollectedRecord{
 		DeviceID:           "demo-device",
+		DeviceCode:         "demo-device",
 		DeviceName:         "样例设备",
 		DeviceAddressID:    "demo-point",
 		DeviceAddressName:  "temperature",
@@ -393,12 +399,16 @@ func builtinSample(now string) push.PushBatch {
 		PropertyCode:   "temperature",
 		// 内置样例带一个示例采集组，让空库也能预览 group-json 的帧头。
 		GroupID:         "demo-group",
+		GroupCode:       "fast",
 		GroupName:       "fast",
 		GroupIntervalMs: 500,
 	}
 	return push.PushBatch{
 		DeviceID:        rec.DeviceID,
+		DeviceCode:      rec.DeviceCode,
+		ThingModelCode:  rec.ThingModelCode,
 		GroupID:         rec.GroupID,
+		GroupCode:       rec.GroupCode,
 		GroupName:       rec.GroupName,
 		GroupIntervalMs: rec.GroupIntervalMs,
 		CollectedAt:     now,

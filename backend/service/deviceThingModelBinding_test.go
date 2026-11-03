@@ -38,7 +38,7 @@ func TestThingModelDeviceAndAddressBinding(t *testing.T) {
 
 	// 设备绑定模型，详情回带模型名
 	if err := deviceSvc.CreateDevice(ctx, &dto.CreateDeviceDTO{
-		Name: "绑定测试设备", ProtocolID: "proto-1",
+		Code: "bind-test-dev", Name: "绑定测试设备", ProtocolID: "proto-1",
 		ProtocolJSON: json.RawMessage(`{}`), ModelID: model.ID,
 	}); err != nil {
 		t.Fatalf("create device: %v", err)

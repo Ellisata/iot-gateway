@@ -297,15 +297,21 @@ func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(C
 // splitBatches 将同一 (设备, 采集组) 的记录切片为 ≤maxRecordsPerBatch 的小批次。
 // 对底层数组零拷贝切片，各批次共享同一采集时间戳与组身份。
 func splitBatches(deviceID, groupID, collectedAt string, records []collector.CollectedRecord) []PushBatch {
-	groupName, groupInterval := "", 0
+	deviceCode, thingModelCode, groupCode, groupName, groupInterval := "", "", "", "", 0
 	if len(records) > 0 {
+		deviceCode = records[0].DeviceCode
+		thingModelCode = records[0].ThingModelCode
+		groupCode = records[0].GroupCode
 		groupName = records[0].GroupName
 		groupInterval = records[0].GroupIntervalMs
 	}
 	if len(records) <= maxRecordsPerBatch {
 		return []PushBatch{{
 			DeviceID:        deviceID,
+			DeviceCode:      deviceCode,
+			ThingModelCode:  thingModelCode,
 			GroupID:         groupID,
+			GroupCode:       groupCode,
 			GroupName:       groupName,
 			GroupIntervalMs: groupInterval,
 			CollectedAt:     collectedAt,
@@ -320,7 +326,10 @@ func splitBatches(deviceID, groupID, collectedAt string, records []collector.Col
 		}
 		batches = append(batches, PushBatch{
 			DeviceID:        deviceID,
+			DeviceCode:      deviceCode,
+			ThingModelCode:  thingModelCode,
 			GroupID:         groupID,
+			GroupCode:       groupCode,
 			GroupName:       groupName,
 			GroupIntervalMs: groupInterval,
 			CollectedAt:     collectedAt,
@@ -341,6 +350,24 @@ func (e *Engine) GetStatus() []ChannelStatusVO {
 	}
 	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Name < statuses[j].Name })
 	return statuses
+}
+
+// RecentMessages 返回某个通道最近推送的报文（新→旧，仅内存）。
+//
+// active=false 表示该通道当前不在引擎里（未启用或正在热加载），
+// 与订阅侧的 recentMessages 语义一致：比返回「通道不存在」更准确。
+func (e *Engine) RecentMessages(channelID string, limit int) (msgs []RecentPushMessage, active bool) {
+	e.mu.RLock()
+	ch, ok := e.channels[channelID]
+	e.mu.RUnlock()
+	if !ok {
+		return []RecentPushMessage{}, false
+	}
+	provider, ok := ch.(RecentMessagesProvider)
+	if !ok {
+		return []RecentPushMessage{}, true
+	}
+	return provider.RecentMessages(limit), true
 }
 
 // refresh 重建通道列表并原子替换，未变化的通道保留运行实例

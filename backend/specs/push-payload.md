@@ -29,6 +29,7 @@ MQTT 通道按**设备分组**推送，payload 为 JSON 数组，数组内每条
 [
   {
     "deviceId": "019fabd15a9176dda844147d98d38f9b",
+    "deviceCode": "ac-1-code",
     "deviceName": "空调-modbus-tcp",
     "deviceAddressId": "019fb1137da076a4ac97af5e51f2e22c",
     "deviceAddressName": "411115",
@@ -55,6 +56,7 @@ MQTT 通道按**设备分组**推送，payload 为 JSON 数组，数组内每条
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `deviceId` / `deviceName` | string | 设备标识与名称 |
+| `deviceCode` | string | 设备编码（`device.code`），未编码的旧数据为空串。创建后不可修改，适合做跨环境的稳定关联；读取时按字段名取值，不要依赖字段位置 |
 | `deviceAddressId` / `deviceAddressName` | string | 点位标识与地址名（如 `411115`） |
 | `value` | string | **已解码**的采集值字符串（协议、字节序、字序已在网关侧完成） |
 | `protocol` | string | 协议名称（`iot_protocol.name`，如 `ModBus.TCP`），命名空间标识，见 §4 |
@@ -65,9 +67,10 @@ MQTT 通道按**设备分组**推送，payload 为 JSON 数组，数组内每条
 | `thingModelCode` | string | 设备绑定的物模型编码（`thing_model.code`）；未绑定为空串。创建后不可修改，可作稳定维度 |
 | `propertyCode` | string | 点位绑定的物模型属性标识符（`thing_model_property.identifier`）；未绑定为空串。绑定时已校验属性属于设备的物模型 |
 
-`thingModelCode` / `propertyCode` 是**追加字段**（位于 JSON 末尾），既有字段的名称、顺序与
-取值逐字节不变；未绑定时字段仍然存在，值为空串。外部 MQTT 订阅产生的记录没有本地绑定，
-这两个字段同样为空串。
+`deviceCode` 位于 `deviceId` 之后；`thingModelCode` / `propertyCode` 是**追加字段**（位于
+JSON 末尾）。三者都始终存在，缺失时为空串；既有字段的名称、相对顺序与取值不变。
+外部 MQTT 订阅产生的记录没有本地绑定，
+这三个字段同样为空串。
 时序库通道（TDengine / InfluxDB）把两者作为 tag 写入（`thing_model_code` / `property_code`）。
 
 ## 3. value 解析：按 `kind` 分派

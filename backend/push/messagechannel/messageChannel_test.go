@@ -230,6 +230,47 @@ func TestMessageChannelPreviewAndTestSend(t *testing.T) {
 	}
 }
 
+func TestMessageChannelRecordsRecentMessages(t *testing.T) {
+	tr := &fakeTransport{}
+	tr.setOutcomes(
+		Outcome{Kind: FailureNone, StatusCode: 200},
+		Outcome{Kind: FailurePoison, StatusCode: 422, Err: errors.New("bad")},
+	)
+	c := New(Config{
+		Tag:       "test",
+		ID:        "c1",
+		Name:      "test",
+		Type:      "test",
+		Target:    "https://example.test/hook",
+		Encoder:   fakeEncoder{},
+		Transport: tr,
+		Timeout:   time.Second,
+	})
+	c.ctx = context.Background()
+
+	if got := c.sendBatch(sampleBatch(), false); got != FailureNone {
+		t.Fatalf("first sendBatch = %v, want FailureNone", got)
+	}
+	if got := c.sendBatch(sampleBatch(), true); got != FailurePoison {
+		t.Fatalf("second sendBatch = %v, want FailurePoison", got)
+	}
+
+	msgs := c.RecentMessages(0)
+	if len(msgs) != 2 {
+		t.Fatalf("recent len = %d, want 2", len(msgs))
+	}
+	// 新→旧：失败的那次在前。
+	if msgs[0].StatusCode != 422 || msgs[0].Error == "" || !msgs[0].FromDrain {
+		t.Fatalf("newest = %+v, want poison from drain", msgs[0])
+	}
+	if msgs[1].StatusCode != 200 || msgs[1].Error != "" {
+		t.Fatalf("oldest = %+v, want success", msgs[1])
+	}
+	if msgs[1].Target != "https://example.test/hook" || msgs[1].Payload != "payload" || msgs[1].Size != 7 {
+		t.Fatalf("oldest payload/target = %+v", msgs[1])
+	}
+}
+
 func spoolCount(c *Channel) int64 {
 	n, _ := c.ob.Spool().Count()
 	return n

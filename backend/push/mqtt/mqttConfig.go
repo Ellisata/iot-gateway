@@ -151,36 +151,48 @@ func (c *mqttConfig) brokerURL() string {
 	return fmt.Sprintf("tcp://%s:%s", c.Broker, port)
 }
 
+// topicTokens 主题模板的取值来源。用结构体而不是继续加参数：模板占位符会随
+// 采集维度增长，位置参数很难在调用点看出谁对应谁。
+type topicTokens struct {
+	DeviceCode     string
+	ThingModelCode string
+	GroupCode      string
+}
+
 // buildTopics 根据配置主题模板生成实际发布主题。
 //
-// MQTT 发布禁止含通配符（+/#）的主题，因此：
-//   - 旧语义：配置中的 + 替换为设备 ID（如 /IIoT/+/+/read →
-//     /IIoT/{deviceId}/{deviceId}/read），接收端订阅 /IIoT/+/+/read 仍可收到全量；
-//   - 新增命名占位符：${deviceId}、${group}（组名）、${groupId}。
-//     未分组批次（legacy）的 ${group} 与 ${groupId} 都替换为 "legacy"。
+// 只支持编码占位符，不保留旧模板的 `+` / `${deviceId}` / `${group}` /
+// `${groupId}` 语义。主题层级必须由模板固定：缺失维度用固定占位段补齐，
+// 而不是少一层——
+//   - ${thingModelCode} 未绑定物模型 → "_unmodeled"
+//   - ${groupCode} 未分组 → "legacy"
+//   - ${deviceCode} 未编码（只可能出现在旧数据/直接写库）→ "_unencoded"
 //
-// 替换顺序必须是 ${deviceId} → ${groupId} → ${group}：${group} 是 ${groupId}
-// 的前缀，先换它会留下一个多余的大括号。
 // 逗号分隔视作多个主题分别发布。
-func buildTopics(template, deviceID, groupName, groupID string) []string {
-	groupToken := groupName
-	if groupToken == "" {
-		groupToken = "legacy"
+func buildTopics(template string, tok topicTokens) []string {
+	deviceCode := tok.DeviceCode
+	if deviceCode == "" {
+		deviceCode = "_unencoded"
 	}
-	groupIDToken := groupID
-	if groupIDToken == "" {
-		groupIDToken = "legacy"
+	thingModelCode := tok.ThingModelCode
+	if thingModelCode == "" {
+		thingModelCode = "_unmodeled"
 	}
+	groupCode := tok.GroupCode
+	if groupCode == "" {
+		groupCode = "legacy"
+	}
+
 	var topics []string
 	for _, t := range strings.Split(template, ",") {
 		t = strings.TrimSpace(t)
 		if t == "" {
 			continue
 		}
-		t = strings.ReplaceAll(t, "${deviceId}", deviceID)
-		t = strings.ReplaceAll(t, "${groupId}", groupIDToken)
-		t = strings.ReplaceAll(t, "${group}", groupToken)
-		topics = append(topics, strings.ReplaceAll(t, "+", deviceID))
+		t = strings.ReplaceAll(t, "${deviceCode}", deviceCode)
+		t = strings.ReplaceAll(t, "${thingModelCode}", thingModelCode)
+		t = strings.ReplaceAll(t, "${groupCode}", groupCode)
+		topics = append(topics, t)
 	}
 	return topics
 }

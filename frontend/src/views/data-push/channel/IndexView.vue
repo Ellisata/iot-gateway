@@ -91,9 +91,20 @@
           width="160"
           class-name="iot-col-time"
         />
-        <el-table-column :label="t('common.action')" width="110" align="center" fixed="right">
+        <el-table-column :label="t('common.action')" width="150" align="center" fixed="right">
           <template #default="{ row }">
             <div class="iot-row-actions">
+              <el-tooltip :content="t('channel.monitor.action')" placement="top">
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="Monitor"
+                  :aria-label="t('channel.monitor.action')"
+                  @click="handleMonitor(row)"
+                />
+              </el-tooltip>
               <el-tooltip :content="t('common.edit')" placement="top">
                 <el-button
                   class="iot-row-btn"
@@ -254,6 +265,49 @@
         <p v-if="formData.type === 'http'" class="channel-preview-hint">
           {{ t('channel.httpConnectivityHint') }}
         </p>
+        <p v-if="formData.type === 'mqtt'" class="channel-preview-hint">
+          {{ t('channel.mqttTopicHintPrefix') }}<code>{{ mqttTopicTokens }}</code>{{ t('channel.mqttTopicHintSuffix') }}
+        </p>
+      </div>
+
+      <!-- 采集组订阅：空 = 收全量（含未分组）；非空 = 只收所选组。
+           它是“收哪些数据”的运行期路由，排在连接配置之后、输出格式之前：
+           先确定数据范围，再决定怎么编码。 -->
+      <div v-if="selectedTypeMeta?.messageBased" class="channel-section">
+        <div class="channel-section-head">
+          <div class="channel-section-headline">
+            <span class="channel-section-mark" aria-hidden="true">
+              <el-icon><LayersLinked /></el-icon>
+            </span>
+            <div>
+              <p class="channel-section-name">{{ t('channel.groupSubscription.title') }}</p>
+              <p class="channel-section-sub">{{ t('channel.groupSubscription.subtitle') }}</p>
+            </div>
+          </div>
+        </div>
+        <el-select
+          v-model="subscribedGroupIds"
+          multiple
+          filterable
+          clearable
+          :loading="groupOptionsLoading"
+          :placeholder="t('channel.groupSubscription.placeholder')"
+          style="width: 100%"
+        >
+          <el-option-group
+            v-for="dev in groupOptionGroups"
+            :key="dev.deviceId"
+            :label="dev.deviceName || dev.deviceId"
+          >
+            <el-option
+              v-for="g in dev.groups"
+              :key="g.id"
+              :label="g.status === 1 ? g.name : `${g.name} (${t('collectorGroup.disabledShort')})`"
+              :value="g.id"
+            />
+          </el-option-group>
+        </el-select>
+        <p class="iot-form-hint is-block">{{ t('channel.groupSubscription.hint') }}</p>
       </div>
 
       <!-- 载荷格式 / 出站映射 / 预览与测试发送：仅消息类通道显示。
@@ -343,45 +397,6 @@
         >{{ previewText }}</pre>
       </div>
 
-      <!-- 采集组订阅：空 = 收全量（含未分组）；非空 = 只收所选组。
-           属于运行期路由语义，不放进 form-create 连接配置。 -->
-      <div v-if="selectedTypeMeta?.messageBased" class="channel-section">
-        <div class="channel-section-head">
-          <div class="channel-section-headline">
-            <span class="channel-section-mark" aria-hidden="true">
-              <el-icon><LayersLinked /></el-icon>
-            </span>
-            <div>
-              <p class="channel-section-name">{{ t('channel.groupSubscription.title') }}</p>
-              <p class="channel-section-sub">{{ t('channel.groupSubscription.subtitle') }}</p>
-            </div>
-          </div>
-        </div>
-        <el-select
-          v-model="subscribedGroupIds"
-          multiple
-          filterable
-          clearable
-          :loading="groupOptionsLoading"
-          :placeholder="t('channel.groupSubscription.placeholder')"
-          style="width: 100%"
-        >
-          <el-option-group
-            v-for="dev in groupOptionGroups"
-            :key="dev.deviceId"
-            :label="dev.deviceName || dev.deviceId"
-          >
-            <el-option
-              v-for="g in dev.groups"
-              :key="g.id"
-              :label="g.status === 1 ? g.name : `${g.name} (${t('collectorGroup.disabledShort')})`"
-              :value="g.id"
-            />
-          </el-option-group>
-        </el-select>
-        <p class="iot-form-hint is-block">{{ t('channel.groupSubscription.hint') }}</p>
-      </div>
-
       <template #footer>
         <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="submitting" :disabled="detailLoading" @click="handleSubmit">
@@ -389,6 +404,143 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 通道监控：运行状态 + 最近推送报文。数据只来自内存，重启即清空；
+         抽屉打开期间每 3 秒刷新一次，关闭即停止轮询。 -->
+    <el-drawer
+      v-model="monitorVisible"
+      class="channel-monitor-drawer"
+      size="min(980px, 96vw)"
+      :with-header="false"
+      @open="handleMonitorOpen"
+      @closed="handleMonitorClosed"
+    >
+      <div v-loading="monitorLoading" class="channel-monitor">
+        <header class="channel-monitor-head">
+          <div>
+            <p class="iot-eyebrow">
+              <span class="iot-eyebrow-dot" aria-hidden="true" />
+              {{ t('channel.monitor.title') }}
+            </p>
+            <h2 class="channel-monitor-name">{{ monitorRow?.name || '—' }}</h2>
+            <p class="channel-monitor-sub">{{ monitorSubtitle }}</p>
+          </div>
+          <el-button :icon="Refresh" :loading="monitorLoading" @click="refreshMonitor(true)">
+            {{ t('common.refresh') }}
+          </el-button>
+        </header>
+
+        <div class="channel-monitor-stats">
+          <div class="monitor-stat">
+            <span class="monitor-stat-label">{{ t('channel.monitor.connection') }}</span>
+            <span class="iot-pill" :class="monitorConnectionClass">
+              <span class="iot-pill-dot" aria-hidden="true" />
+              {{ monitorConnectionText }}
+            </span>
+          </div>
+          <div v-for="item in monitorStats" :key="item.key" class="monitor-stat">
+            <span class="monitor-stat-label">{{ item.label }}</span>
+            <span class="monitor-stat-value" :class="{ 'monitor-stat-error': item.isError }">
+              {{ item.value }}
+            </span>
+          </div>
+        </div>
+
+        <p v-if="!monitorActive" class="channel-monitor-hint">
+          {{ t('channel.monitor.inactiveHint') }}
+        </p>
+
+        <div class="channel-monitor-section">
+          <div class="channel-monitor-section-head">
+            <div>
+              <p class="channel-monitor-section-title">{{ monitorRecentTitle }}</p>
+              <p class="channel-monitor-section-sub">{{ monitorRecentSubtitle }}</p>
+            </div>
+            <span
+              class="channel-monitor-refresh-hint"
+              :class="{ 'is-paused': hasExpandedRow }"
+            >
+              {{ hasExpandedRow
+                ? t('channel.monitor.autoRefreshPaused')
+                : t('channel.monitor.autoRefresh') }}
+            </span>
+          </div>
+
+          <!-- 轮询会整体替换 messages 数组，Element Plus 默认按行对象引用记展开状态，
+               换对象就收起。用 expand-row-keys 按 seq 显式保持展开，否则每 3 秒
+               载荷预览都会被折叠掉。 -->
+          <el-table
+            :data="monitorMessages"
+            row-key="seq"
+            :expand-row-keys="expandedSeqKeys"
+            class="iot-table monitor-table"
+            size="small"
+            max-height="460"
+            @expand-change="handleExpandChange"
+          >
+            <el-table-column type="expand" width="36">
+              <template #default="{ row }">
+                <pre class="mapping-preview monitor-payload">{{ row.payload || t('channel.monitor.payloadEmpty') }}</pre>
+                <p v-if="row.truncated" class="channel-monitor-hint">
+                  {{ t('channel.monitor.truncated', { size: formatBytes(row.size) }) }}
+                </p>
+              </template>
+            </el-table-column>
+            <el-table-column prop="time" :label="t('channel.monitor.colTime')" width="176" />
+            <el-table-column :label="t('channel.monitor.colTarget')" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">
+                <!-- 补发标记放在目标前面：列宽不够时被截断的是目标文本，
+                     而不是说明这条来源的标记。 -->
+                <span v-if="row.fromDrain" class="iot-pill is-gray monitor-drain-pill">
+                  {{ t('channel.monitor.fromDrain') }}
+                </span>
+                <span class="monitor-target">{{ row.target || '—' }}</span>
+              </template>
+            </el-table-column>
+            <!-- 时序库一次写入可能跨多台设备，不显示「设备 / 组」，改为看行数。 -->
+            <el-table-column
+              v-if="monitorMessageBased"
+              :label="t('channel.monitor.colDevice')"
+              min-width="110"
+              show-overflow-tooltip
+            >
+              <template #default="{ row }">{{ deviceGroupText(row) }}</template>
+            </el-table-column>
+            <el-table-column
+              prop="records"
+              :label="monitorMessageBased
+                ? t('channel.monitor.colRecords')
+                : t('channel.monitor.colRows')"
+              width="76"
+              align="right"
+            />
+            <el-table-column :label="t('channel.monitor.colStatus')" width="92" align="center">
+              <template #default="{ row }">
+                <span class="iot-pill" :class="row.error ? 'is-rose' : 'is-green'">
+                  <span class="iot-pill-dot" aria-hidden="true" />
+                  {{ messageStatusText(row) }}
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('channel.monitor.colCost')" width="132" align="right">
+              <template #default="{ row }">{{ row.durationMs }} ms · {{ formatBytes(row.size) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('channel.monitor.colError')" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span :class="{ 'monitor-error-text': row.error }">{{ row.error || '—' }}</span>
+              </template>
+            </el-table-column>
+
+            <template #empty>
+              <div class="iot-empty">
+                <p class="iot-empty-title">{{ monitorEmptyTitle }}</p>
+                <p class="iot-empty-hint">{{ monitorEmptyHint }}</p>
+              </div>
+            </template>
+          </el-table>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -396,12 +548,14 @@
 import { ref, reactive, computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  IconActivity as Monitor,
   IconAffiliate as Connection,
   IconBraces as Braces,
   IconBroadcast as Broadcast,
   IconLayersLinked as LayersLinked,
   IconPencil as EditPen,
   IconPlus as Plus,
+  IconRefresh as Refresh,
   IconSearch as Search,
   IconTrash as Delete,
 } from '@tabler/icons-vue'
@@ -411,6 +565,8 @@ import {
   updateChannel,
   deleteChannel,
   getChannelById,
+  getPushRecentMessages,
+  getPushStatus,
   testConnectivity,
   previewPushChannel,
   previewPushMapping,
@@ -436,6 +592,10 @@ import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
 const { load: loadChannelTypes, metaOf } = usePushChannelTypes()
+
+// 占位符放在普通 JS 字符串里，不写进 i18n 文案：vue-i18n 会把 {deviceCode}
+// 当成命名插值，${...} 会渲染成空串。模板里用 code 元素拼接展示。
+const mqttTopicTokens = '${deviceCode} ${thingModelCode} ${groupCode}'
 
 // ---------- 查询表单 ----------
 const queryForm = reactive({
@@ -1345,9 +1505,196 @@ function handleDialogClose() {
   loadDynamicForm('')
 }
 
+// ---------- 通道监控 ----------
+// 运行状态来自 /push/status（同一份仪表盘数据），最近报文来自
+// /push/recentMessages（每通道内存环形缓冲，最近 100 条）。抽屉打开期间轮询。
+const monitorVisible = ref(false)
+const monitorRow = ref(null)
+const monitorStatus = ref(null)
+const monitorRecent = ref({ active: false, messages: [] })
+const monitorLoading = ref(false)
+// 已展开的报文行（按 seq）：轮询替换数组后仍保持展开。
+const expandedSeqKeys = ref([])
+let monitorTimer = null
+
+const monitorActive = computed(() => monitorRecent.value?.active ?? false)
+const monitorMessages = computed(() => monitorRecent.value?.messages ?? [])
+// 有展开行时暂停拉取报文：新报文从顶部插入会把正在查看的载荷不断往下顶。
+const hasExpandedRow = computed(() => expandedSeqKeys.value.length > 0)
+
+// 消息类通道（mqtt/http）：一次下发即一条报文；时序库（tdengine/influxdb）：
+// 一次下发是一个聚合写入批次。元数据未加载时按消息类展示（保持旧行为）。
+const monitorMessageBased = computed(() => {
+  const meta = metaOf(monitorRow.value?.type)
+  return meta ? meta.messageBased !== false : true
+})
+
+// 消息通道说「报文」，时序库说「写入批次」——一次写入是聚合窗，不是单条报文。
+const monitorSubtitle = computed(() =>
+  monitorMessageBased.value
+    ? t('channel.monitor.subtitle')
+    : t('channel.monitor.subtitleBatch'),
+)
+const monitorRecentTitle = computed(() =>
+  monitorMessageBased.value
+    ? t('channel.monitor.recentTitle')
+    : t('channel.monitor.recentTitleBatch'),
+)
+const monitorRecentSubtitle = computed(() =>
+  monitorMessageBased.value
+    ? t('channel.monitor.recentSubtitle')
+    : t('channel.monitor.recentSubtitleBatch'),
+)
+const monitorEmptyTitle = computed(() =>
+  monitorMessageBased.value
+    ? t('channel.monitor.noMessages')
+    : t('channel.monitor.noMessagesBatch'),
+)
+const monitorEmptyHint = computed(() =>
+  monitorMessageBased.value
+    ? t('channel.monitor.noMessagesHint')
+    : t('channel.monitor.noMessagesHintBatch'),
+)
+
+const monitorConnectionText = computed(() => {
+  const s = monitorStatus.value
+  if (!s?.running) return t('channel.monitor.stopped')
+  return s.connected ? t('channel.monitor.connected') : t('channel.monitor.disconnected')
+})
+
+const monitorConnectionClass = computed(() =>
+  monitorStatus.value?.running && monitorStatus.value?.connected ? 'is-green' : 'is-gray',
+)
+
+const monitorStats = computed(() => {
+  const s = monitorStatus.value || {}
+  const value = (v) => (v == null || v === '' ? '—' : String(v))
+  const stats = [
+    { key: 'queue', label: t('channel.monitor.queueDepth'), value: value(s.queueDepth) },
+    { key: 'spool', label: t('channel.monitor.spoolDepth'), value: value(s.spoolDepth) },
+  ]
+  if (monitorMessageBased.value) {
+    stats.push({
+      key: 'publish',
+      label: t('channel.monitor.publishCount'),
+      value: value(s.publishCount),
+    })
+  } else {
+    // 时序库：publishCount 是刷盘批次次数，行数单独统计。
+    stats.push({
+      key: 'publish',
+      label: t('channel.monitor.writeBatches'),
+      value: value(s.publishCount),
+    })
+    stats.push({
+      key: 'rows',
+      label: t('channel.monitor.rowCount'),
+      value: value(s.rowsCount),
+    })
+  }
+  stats.push(
+    { key: 'dropped', label: t('channel.monitor.droppedCount'), value: value(s.droppedCount) },
+    { key: 'lastSuccess', label: t('channel.monitor.lastSuccess'), value: value(s.lastSuccessTime) },
+    {
+      key: 'lastError',
+      label: t('channel.monitor.lastError'),
+      value: value(s.error),
+      isError: !!s.error,
+    },
+  )
+  return stats
+})
+
+// showLoading 只用于首次加载与手动刷新：每 3 秒的自动轮询不应反复盖遮罩，
+// 否则画面会周期性闪一下。
+// skipMessages 用于「有展开行」的自动轮询：只刷新状态卡，不动报文表，
+// 避免新报文把正在查看的载荷往下顶。手动刷新始终拉取报文。
+async function refreshMonitor(showLoading = false, { skipMessages = false } = {}) {
+  if (!monitorRow.value) return
+  if (showLoading) monitorLoading.value = true
+  try {
+    const [statusRes, recentRes] = await Promise.all([
+      getPushStatus(),
+      skipMessages
+        ? Promise.resolve(null)
+        : getPushRecentMessages({ channelId: monitorRow.value.id, limit: 100 }),
+    ])
+    const list = Array.isArray(statusRes) ? statusRes : (statusRes?.records ?? [])
+    monitorStatus.value = list.find((s) => s.id === monitorRow.value.id) ?? null
+    if (skipMessages || !recentRes) return
+
+    monitorRecent.value = {
+      active: !!recentRes?.active,
+      messages: recentRes?.messages ?? [],
+    }
+    // 展开行滑出 100 条窗口后清掉对应 key，避免集合无限增长。
+    const seqs = new Set(monitorRecent.value.messages.map((m) => m.seq))
+    expandedSeqKeys.value = expandedSeqKeys.value.filter((key) => seqs.has(key))
+  } catch {
+    // 全局拦截器已提示；保留上一次结果，避免轮询失败时清空画面
+  } finally {
+    if (showLoading) monitorLoading.value = false
+  }
+}
+
+function handleMonitor(row) {
+  monitorRow.value = row
+  monitorStatus.value = null
+  monitorRecent.value = { active: false, messages: [] }
+  expandedSeqKeys.value = []
+  monitorVisible.value = true
+}
+
+/** 同步展开行：expand-change 第二个参数是当前仍展开的行集合。 */
+function handleExpandChange(row, expandedRows) {
+  const key = row?.seq
+  if (key == null) return
+  const keys = new Set(expandedSeqKeys.value)
+  if ((expandedRows || []).some((r) => r.seq === key)) keys.add(key)
+  else keys.delete(key)
+  expandedSeqKeys.value = [...keys]
+}
+
+function handleMonitorOpen() {
+  refreshMonitor(true)
+  stopMonitorTimer()
+  monitorTimer = setInterval(
+    () => refreshMonitor(false, { skipMessages: hasExpandedRow.value }),
+    3000,
+  )
+}
+
+function handleMonitorClosed() {
+  stopMonitorTimer()
+}
+
+function stopMonitorTimer() {
+  if (monitorTimer) {
+    clearInterval(monitorTimer)
+    monitorTimer = null
+  }
+}
+
+function deviceGroupText(row) {
+  return [row.deviceCode, row.groupCode].filter(Boolean).join(' / ') || '—'
+}
+
+function messageStatusText(row) {
+  if (row.statusCode) return String(row.statusCode)
+  return row.error ? t('channel.monitor.failed') : t('channel.monitor.ok')
+}
+
+function formatBytes(n) {
+  const size = Number(n) || 0
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
 onBeforeUnmount(() => {
   cancelAutoPreview()
   previewRequestId.value += 1
+  stopMonitorTimer()
 })
 
 async function handleSubmit() {
@@ -1478,6 +1825,11 @@ onMounted(() => {
   color: var(--ink-4);
 }
 
+.channel-preview-hint code {
+  font-family: var(--font-mono);
+  color: var(--ink-3);
+}
+
 .mapping-preview {
   max-height: 240px;
   margin: 10px 0 0;
@@ -1492,5 +1844,133 @@ onMounted(() => {
   background: var(--surface-2, #f8fafc);
   border: 1px solid var(--line-soft);
   border-radius: 10px;
+}
+
+/* ---- 通道监控抽屉 ---- */
+.channel-monitor {
+  padding: 4px 4px 12px;
+}
+
+.channel-monitor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.channel-monitor-name {
+  margin: 2px 0 0;
+  font-size: 20px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.channel-monitor-sub {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-4);
+}
+
+.channel-monitor-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.monitor-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--surface-2, #f8fafc);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+}
+
+.monitor-stat-label {
+  font-size: 11.5px;
+  color: var(--ink-4);
+}
+
+.monitor-stat-value {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.monitor-stat-error {
+  color: #be123c;
+}
+
+.channel-monitor-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+.channel-monitor-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.channel-monitor-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.channel-monitor-section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.channel-monitor-section-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+.channel-monitor-refresh-hint {
+  font-size: 11.5px;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+
+.channel-monitor-refresh-hint.is-paused {
+  color: var(--warning, #b45309);
+}
+
+.monitor-payload {
+  max-height: 220px;
+  margin: 4px 12px 8px !important;
+}
+
+.monitor-target {
+  margin-left: 6px;
+}
+
+.monitor-drain-pill {
+  transform: scale(0.92);
+  transform-origin: left center;
+}
+
+.monitor-error-text {
+  color: #be123c;
+}
+
+@media (max-width: 720px) {
+  .channel-monitor-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>

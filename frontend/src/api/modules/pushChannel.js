@@ -174,3 +174,20 @@ export function getPushStatus() {
     method: 'get',
   })
 }
+
+/**
+ * 获取某个通道最近推送的报文（仅内存，最近 100 条）。
+ *
+ * 载荷是 2 KiB 预览，不是完整报文；`active=false` 表示该通道当前不在
+ * 推送引擎里（未启用或正在热加载），前端据此提示「通道当前未运行」。
+ *
+ * @param {Object} params - { channelId, limit }
+ * @returns {Promise<{active: boolean, messages: Array}>}
+ */
+export function getPushRecentMessages(params) {
+  return request({
+    url: '/push/recentMessages',
+    method: 'get',
+    params,
+  })
+}

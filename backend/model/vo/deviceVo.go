@@ -7,6 +7,8 @@ package vo
 type DeviceVO struct {
 	ID           string `json:"id"`
 	IotGatewayID string `json:"iotGatewayId"`
+	// Code 设备编码（外部稳定标识，主题模板使用）。
+	Code         string `json:"code"`
 	Name         string `json:"name"`
 	ProtocolID   string `json:"protocolId"`
 	ProtocolName string `json:"protocolName"`
@@ -55,20 +57,20 @@ type DeviceAddressVO struct {
 	PropertyAccessMode string `json:"propertyAccessMode"`
 	// 采集组绑定（空 = 未分组）。GroupName/GroupIntervalMs/GroupStatus 是展示用冗余字段，
 	// 由服务层按 groupId 批量补全，避免前端为每一行再查一次。
-	GroupID         string `json:"groupId"`
-	GroupName       string `json:"groupName"`
-	GroupIntervalMs int    `json:"groupIntervalMs"`
-	GroupStatus     int    `json:"groupStatus"`
-	Name            string `json:"name"`
-	Label              string `json:"label"` // 地址 name 的中文说明（如温度、电流）
-	CommonDataType     string `json:"commonDataType"`
-	DataType           string `json:"dataType"`
-	RwPermission       string `json:"rwPermission"`
-	ScanFrequency      int    `json:"scanFrequency"`
-	Description        string `json:"description"`
-	Status             int    `json:"status"`
-	ThresholdEnabled   int    `json:"thresholdEnabled"` // 0/1
-	ThresholdOp        string `json:"thresholdOp"`      // range|gt|ge|lt|le|eq|ne|in
+	GroupID          string `json:"groupId"`
+	GroupName        string `json:"groupName"`
+	GroupIntervalMs  int    `json:"groupIntervalMs"`
+	GroupStatus      int    `json:"groupStatus"`
+	Name             string `json:"name"`
+	Label            string `json:"label"` // 地址 name 的中文说明（如温度、电流）
+	CommonDataType   string `json:"commonDataType"`
+	DataType         string `json:"dataType"`
+	RwPermission     string `json:"rwPermission"`
+	ScanFrequency    int    `json:"scanFrequency"`
+	Description      string `json:"description"`
+	Status           int    `json:"status"`
+	ThresholdEnabled int    `json:"thresholdEnabled"` // 0/1
+	ThresholdOp      string `json:"thresholdOp"`      // range|gt|ge|lt|le|eq|ne|in
 	// ThresholdValue 操作数的 JSON 数组字符串（如 ["10","40"]），由前端自行解析展示 ——
 	// 与库里存的原样一致，不做二次包装（包装成对象会让 PO→VO 的映射多一层无谓转换）。
 	ThresholdValue string `json:"thresholdValue"`

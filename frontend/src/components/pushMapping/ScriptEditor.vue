@@ -207,6 +207,11 @@ const schemaGroups = computed(() => {
       key: 'batch',
       fields: [
         { name: 'deviceId', type: 'string', desc: field('deviceId') },
+        { name: 'deviceCode', type: 'string', desc: field('deviceCode') },
+        { name: 'groupId', type: 'string', desc: field('groupId') },
+        { name: 'groupCode', type: 'string', desc: field('groupCode') },
+        { name: 'groupName', type: 'string', desc: field('groupName') },
+        { name: 'intervalMs', type: 'number', desc: field('intervalMs') },
         { name: 'collectedAt', type: 'string', desc: field('collectedAt') },
         { name: 'records', type: 'record[]', desc: field('records') },
       ],
@@ -215,6 +220,7 @@ const schemaGroups = computed(() => {
       key: 'records[]',
       fields: [
         { name: 'deviceId', type: 'string', desc: field('recordDeviceId') },
+        { name: 'deviceCode', type: 'string', desc: field('recordDeviceCode') },
         { name: 'deviceName', type: 'string', desc: field('recordDeviceName') },
         { name: 'deviceAddressId', type: 'string', desc: field('recordAddressId') },
         { name: 'deviceAddressName', type: 'string', desc: field('recordAddressName') },
@@ -227,6 +233,10 @@ const schemaGroups = computed(() => {
         { name: 'collectedAt', type: 'string', desc: field('recordCollectedAt') },
         { name: 'thingModelCode', type: 'string', desc: field('recordThingModelCode') },
         { name: 'propertyCode', type: 'string', desc: field('recordPropertyCode') },
+        { name: 'groupId', type: 'string', desc: field('recordGroupId') },
+        { name: 'groupCode', type: 'string', desc: field('recordGroupCode') },
+        { name: 'groupName', type: 'string', desc: field('recordGroupName') },
+        { name: 'groupIntervalMs', type: 'number', desc: field('recordGroupIntervalMs') },
       ],
     },
   ]

@@ -325,6 +325,14 @@ func (o *Outbox) SetLastErr(msg string) {
 	o.mu.Unlock()
 }
 
+// LastErr 返回最近一次错误文案（并发安全）。
+// 供通道在写失败后生成观测记录：真正的错误由各通道 write 设置，回调本身拿不到。
+func (o *Outbox) LastErr() string {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.lastErr
+}
+
 // FillStatus 用队列与缓存的实时状态填充状态快照的公共字段
 // （ID/Name/Running/Connected/队列深度/缓存积压/计数/时间/错误）。
 // 通道负责先补齐自身类型相关的字段（Type/Broker/Topic）。

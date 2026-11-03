@@ -80,19 +80,21 @@
              描述是次要信息；两者都在宽屏回归。 -->
         <el-table-column v-if="!compact" type="index" :label="t('common.index')" width="68" align="center" />
 
-        <!-- ID 是 UUID，用等宽字体压低存在感；复制按钮常驻但低对比，悬停整行才完全显形 -->
-        <el-table-column label="ID" width="150">
+        <!-- 编码是对外稳定标识（导入导出、主题模板、外部引用都用它），
+             比内部 UUID 更值得占这一列；复制按钮常驻但低对比，悬停整行才完全显形。 -->
+        <el-table-column :label="t('deviceObject.code')" width="150">
           <template #default="{ row }">
-            <div class="id-cell">
-              <el-tooltip :content="String(row.id)" placement="top">
-                <span class="id-text">{{ row.id }}</span>
+            <div class="code-cell">
+              <el-tooltip v-if="row.code" :content="row.code" placement="top">
+                <span class="code-text">{{ row.code }}</span>
               </el-tooltip>
-              <el-tooltip :content="t('common.copy')" placement="top">
+              <span v-else class="cell-muted">—</span>
+              <el-tooltip v-if="row.code" :content="t('common.copy')" placement="top">
                 <button
                   type="button"
                   class="copy-btn"
                   :aria-label="t('common.copy')"
-                  @click="copyId(row.id)"
+                  @click="copyCode(row.code)"
                 >
                   <el-icon><CopyDocument /></el-icon>
                 </button>
@@ -175,14 +177,14 @@
         <el-table-column :label="t('common.action')" width="148" align="center" fixed="right">
           <template #default="{ row }">
             <div class="row-actions">
-              <el-tooltip :content="t('deviceObject.addressManage')" placement="top">
+              <el-tooltip :content="t('deviceObject.deviceConfig')" placement="top">
                 <el-button
                   class="row-btn"
                   type="primary"
                   link
                   size="small"
                   :icon="Position"
-                  :aria-label="t('deviceObject.addressManage')"
+                  :aria-label="t('deviceObject.deviceConfig')"
                   @click="handleViewAddresses(row)"
                 />
               </el-tooltip>
@@ -293,6 +295,18 @@
           label-position="right"
           status-icon
         >
+          <el-form-item :label="t('deviceObject.code')" prop="code">
+            <el-input
+              v-model="formData.code"
+              :placeholder="t('deviceObject.codePlaceholder')"
+              :disabled="isEdit && !!formData.code"
+              maxlength="64"
+              show-word-limit
+            />
+            <div class="iot-form-hint is-block">
+              {{ isEdit && formData.code ? t('deviceObject.codeImmutableHint') : t('deviceObject.codeHint') }}
+            </div>
+          </el-form-item>
           <el-form-item :label="t('common.name')" prop="name">
             <el-input
               v-model="formData.name"
@@ -495,11 +509,11 @@ function handleViewRealtime(row) {
   })
 }
 
-// ---------- 复制 ID ----------
-async function copyId(id) {
+// ---------- 复制编码 ----------
+async function copyCode(code) {
   try {
-    await navigator.clipboard.writeText(String(id))
-    ElMessage.success(t('deviceObject.idCopied'))
+    await navigator.clipboard.writeText(String(code))
+    ElMessage.success(t('deviceObject.codeCopied'))
   } catch {
     ElMessage.error(t('deviceObject.copyFailed'))
   }
@@ -614,6 +628,7 @@ function stepPassed(step) {
 // ---------- 表单数据 ----------
 const formData = reactive({
   id: '',
+  code: '',
   name: '',
   modelId: '',
   protocol: '',
@@ -636,6 +651,14 @@ async function fetchModelOptions() {
 
 // ---------- 表单校验规则 ----------
 const formRules = {
+  code: [
+    { required: true, message: () => t('deviceObject.codeRequired'), trigger: 'blur' },
+    {
+      pattern: /^[A-Za-z][A-Za-z0-9_-]{0,63}$/,
+      message: () => t('deviceObject.codeInvalid'),
+      trigger: 'blur',
+    },
+  ],
   name: [
     { required: true, message: () => t('deviceObject.searchNameRequired'), trigger: 'blur' },
     { min: 1, max: 100, message: () => t('deviceObject.nameLength'), trigger: 'blur' },
@@ -831,6 +854,7 @@ function handleAdd() {
   step1Passed.value = false
 
   formData.id = ''
+  formData.code = ''
   formData.name = ''
   formData.modelId = ''
   formData.protocol = ''
@@ -852,6 +876,7 @@ async function handleEdit(row) {
   step1Passed.value = true // 已有数据，第一步已完成
 
   formData.id = row.id
+  formData.code = row.code ?? ''
   formData.name = row.name
   formData.modelId = row.modelId ?? ''
   // 列表/详情接口回传的协议字段是 protocolName，没有 protocol；
@@ -863,6 +888,7 @@ async function handleEdit(row) {
   // 先获取完整详情（含 protocolConfig），保证在对话框打开前数据就绪
   try {
     const detail = await getDeviceObjectById(row.id)
+    formData.code = detail?.code ?? formData.code
     formData.modelId = detail?.modelId ?? formData.modelId
     formData.protocolJson = detail?.protocolJson ?? ''
     formData.protocolId = detail?.protocolId ?? ''
@@ -1018,6 +1044,7 @@ async function handleSubmit() {
     // 收集动态表单数据
     const protocolConfig = collectProtocolConfig()
     const payload = {
+      code: formData.code.trim(),
       name: formData.name.trim(),
       modelId: formData.modelId || '',
       protocolId: formData.protocolId,
@@ -1300,20 +1327,20 @@ onBeforeUnmount(() => {
   color: var(--ink-4);
 }
 
-/* ID：等宽字体压低存在感，复制按钮常驻但低对比，悬停整行才完全显形 */
-.id-cell {
+/* 编码：等宽字体压低存在感，复制按钮常驻但低对比，悬停整行才完全显形 */
+.code-cell {
   display: flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
 }
 
-.id-text {
+.code-text {
   overflow: hidden;
   max-width: 96px;
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--ink-4);
+  color: var(--ink-3);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

@@ -14,6 +14,7 @@ func PushRoutes(r gin.IRouter, pc *controller.PushController) {
 	group := r.Group("/push")
 	{
 		group.GET("/status", pc.Status)
+		group.GET("/recentMessages", pc.RecentMessages)
 		group.POST("/refresh", pc.Refresh)
 	}
 }

@@ -819,6 +819,16 @@
   color: var(--ink-2);
 }
 
+/* Element Plus 的校验错误是绝对定位（top:100%），不占高度：错误文案一折行
+   （编码这类长规则很容易两行）就会压到下一个表单项上，看起来像被“挡住”。
+   改成流式行，让错误出现时把后续内容推开；行高按文案实际高度增长。 */
+.iot-dialog .el-form-item__content > .el-form-item__error {
+  position: static;
+  flex: 0 0 100%;
+  padding-top: 4px;
+  line-height: 1.5;
+}
+
 .iot-dialog-hint {
   margin: 0 0 14px;
   padding: 10px 12px;

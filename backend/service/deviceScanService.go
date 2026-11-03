@@ -191,7 +191,7 @@ func (s *DeviceScanService) CreateDevices(ctx context.Context, req *dto.CreateDe
 	// 名字那一半与 ImportDevices 同源。
 	var rows []po.Device
 	if err := s.sqliteDB.WithContext(ctx).Model(&po.Device{}).
-		Select("name", "scan_identity").Find(&rows).Error; err != nil {
+		Select("name", "scan_identity", "code").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	protocolMap := make(map[string]string)
@@ -205,6 +205,7 @@ func (s *DeviceScanService) CreateDevices(ctx context.Context, req *dto.CreateDe
 
 	result := &vo.ExcelImportResultVO{Errors: []vo.ExcelImportErrorVO{}}
 	existing := make(map[string]bool, len(rows))
+	codeTaken := make(map[string]bool, len(rows))
 	// takenIdentity 签名 → 占用它的设备名（只为人读的提示文案）。
 	// 空签名不入表：那是"不是扫描建的"或"建完改过配置"的标记，不参与比对 ——
 	// 拿一群空串互相撞会把毫不相干的设备报成重复。
@@ -216,6 +217,9 @@ func (s *DeviceScanService) CreateDevices(ctx context.Context, req *dto.CreateDe
 	takenIdentity := make(map[string]string, len(rows))
 	for _, r := range rows {
 		existing[r.Name] = true
+		if r.Code != "" {
+			codeTaken[r.Code] = true
+		}
 		if r.ScanIdentity != "" {
 			takenIdentity[r.ScanIdentity] = r.Name
 		}
@@ -284,7 +288,13 @@ func (s *DeviceScanService) CreateDevices(ctx context.Context, req *dto.CreateDe
 				}
 			}
 
+			// 扫描建库没有编码输入：按设备名生成，必要时追加序号避让。
+			code := uniqueEntityCode(generatedEntityCode(name, "dev"), func(c string) bool {
+				return codeTaken[c]
+			})
+
 			record := po.Device{
+				Code:         code,
 				Name:         name,
 				ProtocolID:   protocolMap[snap.Protocol],
 				ProtocolJSON: dev.ProtocolJSON,
@@ -302,6 +312,7 @@ func (s *DeviceScanService) CreateDevices(ctx context.Context, req *dto.CreateDe
 			}
 			existing[name] = true
 			seen[name] = true
+			codeTaken[code] = true
 			// 批内也要记：同一批里两条结果指向同一个地址时，后一条同样要提示。
 			if identity != "" {
 				takenIdentity[identity] = name

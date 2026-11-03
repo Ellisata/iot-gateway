@@ -47,6 +47,7 @@ func forEachBatch(addrs []po.DeviceAddress, fn func(batch []po.DeviceAddress) er
 type groupInfo struct {
 	deviceID   string
 	name       string
+	code       string
 	intervalMs int
 	status     int
 }
@@ -1011,15 +1012,17 @@ func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, result
 			}
 			groupID = t.addrGroupIDs[r.DeviceAddressID]
 		}
-		groupName, groupInterval := "", 0
+		groupName, groupCode, groupInterval := "", "", 0
 		if groupID != "" {
 			if g, ok := t.groupByID[groupID]; ok {
 				groupName = g.name
+				groupCode = g.code
 				groupInterval = g.intervalMs
 			}
 		}
 		records = append(records, CollectedRecord{
 			DeviceID:           dev.ID,
+			DeviceCode:         dev.Code,
 			DeviceName:         dev.Name,
 			DeviceAddressID:    r.DeviceAddressID,
 			DeviceAddressName:  name,
@@ -1032,6 +1035,7 @@ func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, result
 			ThingModelCode:     modelCode,
 			PropertyCode:       t.addrPropCodes[r.DeviceAddressID],
 			GroupID:            groupID,
+			GroupCode:          groupCode,
 			GroupName:          groupName,
 			GroupIntervalMs:    groupInterval,
 		})
@@ -1112,7 +1116,7 @@ func loadThingModelCodes(db *gorm.DB, devices []po.Device) (map[string]string, m
 func loadCollectorGroups(db *gorm.DB) map[string]groupInfo {
 	out := make(map[string]groupInfo)
 	var rows []po.CollectorGroup
-	if err := db.Select("id", "device_id", "name", "interval_ms", "status").Find(&rows).Error; err != nil {
+	if err := db.Select("id", "device_id", "name", "code", "interval_ms", "status").Find(&rows).Error; err != nil {
 		logger.Warn("collector: load collector groups failed, points will use scan_frequency: %v", err)
 		return out
 	}
@@ -1120,6 +1124,7 @@ func loadCollectorGroups(db *gorm.DB) map[string]groupInfo {
 		out[g.ID] = groupInfo{
 			deviceID:   g.DeviceID,
 			name:       g.Name,
+			code:       g.Code,
 			intervalMs: g.IntervalMs,
 			status:     g.Status,
 		}

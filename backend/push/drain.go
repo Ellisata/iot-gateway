@@ -3,7 +3,11 @@
 
 package push
 
-import "iot-gateway/logger"
+import (
+	"time"
+
+	"iot-gateway/logger"
+)
 
 // DrainFunc 补发策略：把补发窗口内的批次按入队序写向下游，写成功的批次
 // 由策略自身调用 Spool().DeleteBatch 删除（就地推进，不必等整窗结束）。
@@ -127,6 +131,9 @@ type GroupedDrainer struct {
 	New     func() Aggregator // 每个新负载重建聚合器
 	Write   func(string) bool // 下发一次负载，返回是否成功
 	MaxRows int               // 单个负载的最大记录行数
+	// Observe 可选：每次补发写入后回调（成功与失败都调用），供通道记录最近写入。
+	// 回调运行在补发协程上，必须快速且非阻塞。
+	Observe func(WriteObservation)
 }
 
 // Drain 实现 DrainFunc。
@@ -163,8 +170,23 @@ func (d *GroupedDrainer) Drain(pend []SpoolBatch, narrow bool) (ok bool, failID 
 			return false, pend[0].ID // 防御：首个批次即无法追加，交由上层等待重试
 		}
 
-		if !agg.Empty() && !d.Write(agg.Payload()) {
-			return false, group[0].ID
+		if !agg.Empty() {
+			payload := agg.Payload()
+			rows := agg.Rows()
+			started := time.Now()
+			ok := d.Write(payload)
+			if d.Observe != nil {
+				d.Observe(WriteObservation{
+					Payload:   payload,
+					Rows:      rows,
+					OK:        ok,
+					Duration:  time.Since(started),
+					FromDrain: true,
+				})
+			}
+			if !ok {
+				return false, group[0].ID
+			}
 		}
 		ids := make([]int64, 0, len(group))
 		for i := range group {

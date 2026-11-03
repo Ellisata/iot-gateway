@@ -249,6 +249,32 @@ func TestEncodeThingModelCodes(t *testing.T) {
 	}
 }
 
+// TestEncodeDeviceAndGroupCodes 脚本在批次与记录两级都能读到设备编码与采集组编码。
+func TestEncodeDeviceAndGroupCodes(t *testing.T) {
+	enc := newTestEncoder(t, map[string]any{
+		"script": `function encode(batch) {
+			return JSON.stringify({
+				batch: batch.deviceCode + "/" + batch.groupCode,
+				record: batch.records[0].deviceCode + "/" + batch.records[0].groupCode
+			})
+		}`,
+	})
+	b := sampleBatch()
+	b.DeviceCode = "plc-a"
+	b.GroupCode = "fast"
+	b.Records[0].DeviceCode = "plc-a"
+	b.Records[0].GroupCode = "fast"
+
+	msgs, err := enc.Encode(b)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	want := `{"batch":"plc-a/fast","record":"plc-a/fast"}`
+	if string(msgs[0].Payload) != want {
+		t.Errorf("payload = %s, want %s", msgs[0].Payload, want)
+	}
+}
+
 // TestRecordCollectedAtFallsBackToBatch 脚本里的 r.collectedAt 与 native-json /
 // mapping-json 同一条回落规则：本地采集的记录级时间为空时取 batch.collectedAt。
 func TestRecordCollectedAtFallsBackToBatch(t *testing.T) {

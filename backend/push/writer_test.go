@@ -152,6 +152,88 @@ func TestAggregateWriterFlushesOnInterval(t *testing.T) {
 	waitFor(t, func() bool { return len(s.got()) == 1 }, "时间窗刷出")
 }
 
+func TestAggregateWriterObservesFlush(t *testing.T) {
+	// Observe 回调必须拿到与 Write 相同的负载、准确的行数与成败。
+	o, _ := newTestOutbox(t, connStub(true), 16)
+	s := &sink{}
+	var mu sync.Mutex
+	var obs []WriteObservation
+	w := &AggregateWriter{
+		New:      func() Aggregator { return &fakeAgg{} },
+		Write:    s.write,
+		MaxRows:  2,
+		Interval: time.Hour,
+		Observe: func(v WriteObservation) {
+			mu.Lock()
+			obs = append(obs, v)
+			mu.Unlock()
+		},
+	}
+	stop := runWriter(o, w)
+	defer stop()
+
+	o.Enqueue(batch("d1", 1))
+	o.Enqueue(batch("d2", 1))
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(obs) == 1
+	}, "observe successful flush")
+
+	mu.Lock()
+	got := obs[0]
+	mu.Unlock()
+	if got.Payload != "d1,d2" || got.Rows != 2 || !got.OK || got.FromDrain {
+		t.Fatalf("observation = %+v, want payload d1,d2 rows=2 ok", got)
+	}
+}
+
+// ==================== 补发观察回调 ====================
+
+func TestGroupedDrainerObservesWrites(t *testing.T) {
+	_, spool := newTestOutbox(t, connStub(true), 16)
+	for _, dev := range []string{"d1", "d2"} {
+		if err := spool.Insert(PushBatch{
+			DeviceID: dev,
+			Records:  []collector.CollectedRecord{{DeviceID: dev, DeviceAddressID: "a1", Value: "1"}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pend, err := spool.FetchOldest(16)
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+
+	var mu sync.Mutex
+	var obs []WriteObservation
+	d := &GroupedDrainer{
+		Tag:     "test",
+		Spool:   spool,
+		New:     func() Aggregator { return &fakeAgg{} },
+		Write:   func(string) bool { return true },
+		MaxRows: 1000,
+		Observe: func(v WriteObservation) {
+			mu.Lock()
+			obs = append(obs, v)
+			mu.Unlock()
+		},
+	}
+	if ok, failID := d.Drain(pend, false); !ok || failID != 0 {
+		t.Fatalf("Drain = (%v, %d), want (true, 0)", ok, failID)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(obs) != 1 {
+		t.Fatalf("observations = %d, want 1", len(obs))
+	}
+	got := obs[0]
+	if got.Payload != "d1,d2" || got.Rows != 2 || !got.OK || !got.FromDrain {
+		t.Fatalf("observation = %+v, want payload d1,d2 rows=2 ok fromDrain", got)
+	}
+}
+
 func TestAggregateWriterCountsRecordsNotBatches(t *testing.T) {
 	// 行数上限按记录数而非批次数计：一批 3 条即达上限，不得攒到 3 批才刷
 	o, _ := newTestOutbox(t, connStub(true), 16)

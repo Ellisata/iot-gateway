@@ -5,7 +5,10 @@ package collector
 
 // CollectedRecord 采集记录
 type CollectedRecord struct {
-	DeviceID           string `json:"deviceID"`
+	DeviceID string `json:"deviceID"`
+	// DeviceCode 设备编码（device.code），未编码的旧数据为空。
+	// 带 json tag 保证断网缓存回放后仍能拼出以编码为主题段的 topic。
+	DeviceCode         string `json:"deviceCode,omitempty"`
 	DeviceName         string `json:"deviceName"`
 	DeviceAddressID    string `json:"deviceAddressID"`
 	DeviceAddressName  string `json:"deviceAddressName"`
@@ -42,7 +45,10 @@ type CollectedRecord struct {
 	//
 	// 带 json tag 保证断网缓存（push/spool）序列化回放后不丢失 —— 推送侧靠它
 	// 按 (device, group) 分帧、选择 topic 与通道订阅。组周期对绑定点位权威。
-	GroupID         string `json:"groupID,omitempty"`
+	GroupID string `json:"groupID,omitempty"`
+	// GroupCode 采集组编码（collector_group.code），未分组为空。
+	// 主题模板用编码而不是组名，组改名不会改变下游订阅。
+	GroupCode       string `json:"groupCode,omitempty"`
 	GroupName       string `json:"groupName,omitempty"`
 	GroupIntervalMs int    `json:"groupIntervalMs,omitempty"`
 }

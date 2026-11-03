@@ -324,6 +324,10 @@ func TestCreateDevicesFromScan(t *testing.T) {
 	if rows[0].Status != 1 {
 		t.Errorf("新建设备应为启用，实际 status=%d", rows[0].Status)
 	}
+	// 扫描建库没有编码输入：自动生成且批内唯一。
+	if rows[0].Code == "" || rows[1].Code == "" || rows[0].Code == rows[1].Code {
+		t.Errorf("扫描建库编码 = (%q, %q)，期望非空且互不相同", rows[0].Code, rows[1].Code)
+	}
 	// 连接配置必须是服务端从扫描结果里取的那一份，与插件给的一致。
 	var cfg struct {
 		Host string `json:"host"`

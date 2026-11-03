@@ -42,8 +42,9 @@ const (
 
 // validateCollectorGroupName 校验组名。
 //
-// 组名会进入 MQTT 主题（${group} 占位符），因此拒绝 / + # 与控制字符；
-// legacy 是未分组记录的保留 topic 值，也不能占用。允许中文与空格。
+// 组名只用于展示，MQTT 主题已改用组编码。这里仍拒绝 / + # 与控制字符，
+// 避免组名被误当成主题标识；legacy 是未分组批次的主题保留段，也不能占用。
+// 允许中文与空格。
 func validateCollectorGroupName(name string) bool {
 	if name == "" || utf8.RuneCountInString(name) > collectorGroupMaxNameRunes {
 		return false
@@ -87,6 +88,20 @@ func (s *CollectorGroupService) CreateCollectorGroup(ctx context.Context, req *d
 		return err
 	}
 
+	code := strings.TrimSpace(req.Code)
+	if !validateEntityCode(code) || isReservedEntityCode(code) {
+		return collectorGroupCodeInvalidErr()
+	}
+	var codeDup po.CollectorGroup
+	if err := db.Where("device_id = ? AND code = ?", req.DeviceID, code).First(&codeDup).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+	}
+	if codeDup.ID != "" {
+		return collectorGroupCodeExistsErr()
+	}
+
 	name := strings.TrimSpace(req.Name)
 	if !validateCollectorGroupName(name) {
 		return collectorGroupNameInvalidErr()
@@ -109,6 +124,7 @@ func (s *CollectorGroupService) CreateCollectorGroup(ctx context.Context, req *d
 	now := time.Now().Format("2006-01-02 15:04:05")
 	group := &po.CollectorGroup{
 		DeviceID:    req.DeviceID,
+		Code:        code,
 		Name:        name,
 		IntervalMs:  req.IntervalMs,
 		Description: req.Description,
@@ -131,7 +147,31 @@ func (s *CollectorGroupService) UpdateCollectorGroup(ctx context.Context, req *d
 		return err
 	}
 
+	code := strings.TrimSpace(req.Code)
+	if code != "" && (!validateEntityCode(code) || isReservedEntityCode(code)) {
+		return collectorGroupCodeInvalidErr()
+	}
+
 	updates := make(map[string]interface{})
+	if code != "" {
+		// 编码创建后不可修改。仅允许给历史空编码补一次（迁移已回填，正常
+		// 不会走到这里；直接写库/测试库的老数据仍可自愈）。
+		if existing.Code != "" {
+			if code != existing.Code {
+				return collectorGroupCodeImmutableErr()
+			}
+		} else {
+			var codeDup po.CollectorGroup
+			if err := db.Where("device_id = ? AND code = ? AND id != ?", existing.DeviceID, code, req.ID).
+				First(&codeDup).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if codeDup.ID != "" {
+				return collectorGroupCodeExistsErr()
+			}
+			updates["code"] = code
+		}
+	}
 	if name := strings.TrimSpace(req.Name); name != "" {
 		if !validateCollectorGroupName(name) {
 			return collectorGroupNameInvalidErr()
@@ -210,7 +250,8 @@ func (s *CollectorGroupService) GetCollectorGroupByID(ctx context.Context, id st
 func (s *CollectorGroupService) PageCollectorGroup(ctx context.Context, req *dto.PageCollectorGroupDTO) (*response.PageVo[vo.CollectorGroupVO], error) {
 	db := s.sqliteDB.WithContext(ctx).Model(&po.CollectorGroup{}).Where("device_id = ?", req.DeviceID)
 	if req.Name != "" {
-		db = db.Where("name LIKE ?", "%"+req.Name+"%")
+		pattern := "%" + req.Name + "%"
+		db = db.Where("name LIKE ? OR code LIKE ?", pattern, pattern)
 	}
 
 	var total int64
@@ -300,6 +341,7 @@ func (s *CollectorGroupService) enrichCollectorGroupVOs(ctx context.Context, gro
 			ID:          g.ID,
 			DeviceID:    g.DeviceID,
 			DeviceName:  deviceNames[g.DeviceID],
+			Code:        g.Code,
 			Name:        g.Name,
 			IntervalMs:  g.IntervalMs,
 			Description: g.Description,

@@ -81,6 +81,50 @@ func TestSqliteSpoolInsertFetchOrder(t *testing.T) {
 	}
 }
 
+// TestSpoolReplayPreservesTopicCodes 断网缓存回放时也要能拼出与在线时相同的
+// topic：设备编码/物模型编码/组编码必须随 records_json 一起往返。
+func TestSpoolReplayPreservesTopicCodes(t *testing.T) {
+	s := NewSqliteSpool(newTestSpoolDB(t), "c1")
+
+	batch := PushBatch{
+		DeviceID:    "d1",
+		CollectedAt: "t1",
+		Records: []collector.CollectedRecord{{
+			DeviceID: "d1", DeviceCode: "plc-a", ThingModelCode: "th_sensor",
+			DeviceAddressID: "a1", Value: "1", Kind: "int", Quality: 192,
+			GroupID: "g1", GroupCode: "fast", GroupName: "快组", GroupIntervalMs: 500,
+		}},
+	}
+	if err := s.Insert(batch); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// 批次级编码也要落盘：没有记录可回退时（防御性场景），topic 仍能重建。
+	batchOnly := PushBatch{
+		DeviceID: "d2", DeviceCode: "plc-b", ThingModelCode: "th_meter",
+		GroupID: "g2", GroupCode: "slow", GroupName: "慢组", GroupIntervalMs: 5000,
+		CollectedAt: "t2",
+	}
+	if err := s.Insert(batchOnly); err != nil {
+		t.Fatalf("insert batch-only: %v", err)
+	}
+
+	rows, err := s.FetchOldest(2)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("fetch = %+v, err = %v", rows, err)
+	}
+	replayed := rows[0].ToPushBatch()
+	if replayed.DeviceCode != "plc-a" || replayed.ThingModelCode != "th_sensor" ||
+		replayed.GroupCode != "fast" || replayed.GroupID != "g1" || replayed.GroupName != "快组" {
+		t.Fatalf("replayed identity (from records) = %+v", replayed)
+	}
+	replayed = rows[1].ToPushBatch()
+	if replayed.DeviceCode != "plc-b" || replayed.ThingModelCode != "th_meter" ||
+		replayed.GroupCode != "slow" || replayed.GroupID != "g2" || replayed.GroupName != "慢组" {
+		t.Fatalf("replayed identity (batch columns) = %+v", replayed)
+	}
+}
+
 // InsertMany 一次提交写入多批，入队序与 JSON 往返与逐条 Insert 完全一致。
 func TestSqliteSpoolInsertMany(t *testing.T) {
 	s := NewSqliteSpool(newTestSpoolDB(t), "c1")

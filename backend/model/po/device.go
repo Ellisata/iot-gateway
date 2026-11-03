@@ -11,7 +11,11 @@ import (
 
 // Device 物联网设备持久化对象
 type Device struct {
-	ID           string `gorm:"primaryKey;column:id" json:"id"`
+	ID string `gorm:"primaryKey;column:id" json:"id"`
+	// Code 设备编码：面向 MQTT 主题、导入导出与外部引用的稳定标识。
+	// 创建后不可修改（服务层校验），全局唯一；唯一性由迁移里的部分唯一索引
+	// 兜底（排除空串，兼容旧数据/测试库直接写入的行）。
+	Code         string `gorm:"column:code;not null;default:''" json:"code"`
 	Name         string `gorm:"column:name;uniqueIndex;not null" json:"name"`
 	ProtocolID   string `gorm:"column:protocol_id;not null" json:"protocolId"`
 	ProtocolJSON string `gorm:"column:protocol_json;not null" json:"protocolJson"`

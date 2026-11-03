@@ -26,6 +26,35 @@ type PushChannelPreviewVO struct {
 	Error    string   `json:"error,omitempty"`
 }
 
+// PushRecentMessagesVO 某个通道最近推送的报文（新→旧）。
+//
+// Active 表示该通道当前是否在推送引擎里。未启用或正在热加载时用它区分，
+// 比返回「通道不存在」更准确；前端据此显示「通道当前未运行」。
+type PushRecentMessagesVO struct {
+	Active   bool                  `json:"active"`
+	Messages []PushRecentMessageVO `json:"messages"`
+}
+
+// PushRecentMessageVO 一条最近推送的报文。
+//
+// Payload 是预览文本（最多 2 KiB），不是完整载荷；Size 是原始字节数。
+// StatusCode 仅 HTTP/Webhook 类通道有意义，MQTT 恒为 0。
+type PushRecentMessageVO struct {
+	Seq        uint64 `json:"seq"`
+	Time       string `json:"time"`
+	Target     string `json:"target"`
+	DeviceCode string `json:"deviceCode"`
+	GroupCode  string `json:"groupCode"`
+	Records    int    `json:"records"`
+	StatusCode int    `json:"statusCode"`
+	DurationMs int64  `json:"durationMs"`
+	Size       int    `json:"size"`
+	Payload    string `json:"payload"`
+	Truncated  bool   `json:"truncated"`
+	Error      string `json:"error"`
+	FromDrain  bool   `json:"fromDrain"`
+}
+
 // PushChannelTestSendVO 测试发送结果。
 type PushChannelTestSendVO struct {
 	Success    bool   `json:"success"`

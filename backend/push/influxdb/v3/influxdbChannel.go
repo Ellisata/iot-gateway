@@ -65,6 +65,13 @@ type influxdbChannel struct {
 
 	ob *push.Outbox
 
+	// recent 最近写入（仅内存、仅观测），见 push.RecentRing。
+	recent *push.RecentRing
+	// rowsCount 成功写出的累计记录行数（publishCount 是刷盘批次次数）。
+	rowsCount atomic.Uint64
+	// lastStatus 最近一次写入的 HTTP 状态码；网络错误/未连接为 0。
+	lastStatus atomic.Int32
+
 	client    *http.Client
 	connected atomic.Bool
 
@@ -109,6 +116,7 @@ func newInfluxdbChannel(db *gorm.DB, ch *po.PushChannel) (*influxdbChannel, erro
 		cfg:         cfg,
 		sig:         ch.ID + "|" + ch.Name + "|" + ch.ConfigJSON,
 		client:      newHTTPClient(cfg),
+		recent:      push.NewRecentRing(push.RecentPushRingSize),
 	}
 	ich.ob = push.NewOutbox(push.OutboxConfig{
 		Tag:          "influxdb",
@@ -206,6 +214,7 @@ func (ch *influxdbChannel) run() {
 		Write:    ch.write,
 		MaxRows:  ch.cfg.batchRows(),
 		Interval: ch.cfg.batchInterval(),
+		Observe:  ch.observeWrite,
 	}
 	var wg sync.WaitGroup
 	for i := 0; i < ch.cfg.batchWorkers(); i++ {
@@ -222,6 +231,7 @@ func (ch *influxdbChannel) run() {
 			New:     func() push.Aggregator { return newLineBuilder(ch.cfg.Measurement) },
 			Write:   ch.write,
 			MaxRows: ch.cfg.batchRows(),
+			Observe: ch.observeWrite,
 		}
 		// 写入被拒(4xx)属数据类错误,判毒避免队头永久阻塞;窄化把坏点从组里
 		// 隔离出来,避免连坐误删同组好数据。
@@ -315,6 +325,9 @@ func (ch *influxdbChannel) write(body string) bool {
 	if body == "" {
 		return true // 无可写入行,视为成功
 	}
+	// 每次写入先清空上次状态码：未连接/构建请求失败/网络错误都应显示为 0，
+	// 不能让上一次的 2xx/4xx 留在观测记录里。
+	ch.lastStatus.Store(0)
 	if !ch.connected.Load() {
 		return false
 	}
@@ -342,6 +355,7 @@ func (ch *influxdbChannel) write(body string) bool {
 		return false
 	}
 	defer resp.Body.Close()
+	ch.lastStatus.Store(int32(resp.StatusCode))
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		ch.ob.MarkPublished(1)
@@ -371,7 +385,41 @@ func (ch *influxdbChannel) Snapshot() push.ChannelStatusVO {
 		Topic:  ch.cfg.Database + "/" + ch.cfg.Measurement,
 	}
 	ch.ob.FillStatus(&vo)
+	vo.RowsCount = ch.rowsCount.Load()
 	return vo
+}
+
+// observeWrite 记录一次写入（实时刷盘或补发分组），供管理端监控查看。
+func (ch *influxdbChannel) observeWrite(o push.WriteObservation) {
+	if ch.recent == nil {
+		return
+	}
+	errMsg := ""
+	if o.OK {
+		ch.rowsCount.Add(uint64(o.Rows))
+	} else {
+		errMsg = ch.ob.LastErr()
+		if errMsg == "" {
+			errMsg = "write failed"
+		}
+	}
+	ch.recent.AddString(push.RecentPushMessage{
+		At:         time.Now(),
+		Target:     ch.cfg.Database + "/" + ch.cfg.Measurement,
+		Records:    o.Rows,
+		StatusCode: int(ch.lastStatus.Load()),
+		DurationMs: o.Duration.Milliseconds(),
+		Error:      errMsg,
+		FromDrain:  o.FromDrain,
+	}, o.Payload)
+}
+
+// RecentMessages 实现 push.RecentMessagesProvider：最近写入（新→旧）。
+func (ch *influxdbChannel) RecentMessages(limit int) []push.RecentPushMessage {
+	if ch.recent == nil {
+		return []push.RecentPushMessage{}
+	}
+	return ch.recent.Snapshot(limit)
 }
 
 // ==================== push.Aggregator 适配 ====================

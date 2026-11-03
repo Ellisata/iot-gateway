@@ -154,6 +154,7 @@ func TestImportDevices(t *testing.T) {
 	if len(devices) != 2 {
 		t.Fatalf("设备数 = %d, want 2", len(devices))
 	}
+	codes := make(map[string]bool, len(devices))
 	for _, d := range devices {
 		if d.ProtocolID != "proto-1" {
 			t.Errorf("设备 %s 协议ID = %s, want proto-1", d.Name, d.ProtocolID)
@@ -164,6 +165,11 @@ func TestImportDevices(t *testing.T) {
 		if d.Status != 1 {
 			t.Errorf("设备 %s status = %d, want 1", d.Name, d.Status)
 		}
+		// 旧的三列模板没有编码列：按名称生成，且文件内/库内唯一。
+		if d.Code == "" || codes[d.Code] {
+			t.Errorf("设备 %s 编码 = %q（为空或重复）", d.Name, d.Code)
+		}
+		codes[d.Code] = true
 	}
 
 	// 再次导入同文件 → 全部失败（库内已存在 / 协议仍未知）
@@ -196,7 +202,7 @@ func TestGenerateImportTemplate(t *testing.T) {
 	if len(rows) < 2 {
 		t.Fatalf("模板行数 = %d, want >= 2", len(rows))
 	}
-	if rows[0][0] != "名称" || rows[0][1] != "协议" || rows[0][2] != "描述" {
-		t.Errorf("表头 = %v, want [名称 协议 描述]", rows[0])
+	if rows[0][0] != "名称" || rows[0][1] != "协议" || rows[0][2] != "描述" || rows[0][3] != "编码" {
+		t.Errorf("表头 = %v, want [名称 协议 描述 编码]", rows[0])
 	}
 }

@@ -9,6 +9,8 @@ import "encoding/json"
 
 // CreateDeviceDTO 创建设备请求
 type CreateDeviceDTO struct {
+	// Code 设备编码：字母开头，仅字母/数字/下划线/短横线，最长 64，创建后不可修改。
+	Code         string          `json:"code" binding:"required,max=64"`
 	Name         string          `json:"name" binding:"required,min=1,max=100"`
 	ProtocolID   string          `json:"protocolId" binding:"required"`
 	ProtocolJSON json.RawMessage `json:"protocolJson" binding:"required"`
@@ -19,7 +21,9 @@ type CreateDeviceDTO struct {
 
 // UpdateDeviceDTO 更新设备请求
 type UpdateDeviceDTO struct {
-	ID           string          `json:"id"`
+	ID string `json:"id"`
+	// Code 只用于校验不可变性：传了且与库中不同会被拒绝；空串 = 不校验。
+	Code         string          `json:"code"`
 	Name         string          `json:"name"`
 	ProtocolID   string          `json:"protocolId"`
 	ProtocolJSON json.RawMessage `json:"protocolJson"`
@@ -121,7 +125,7 @@ type BatchDeleteDeviceAddressDTO struct {
 type PageDeviceDTO struct {
 	Page int    `form:"page" binding:"required,min=1"`
 	Size int    `form:"size" binding:"required,min=1,max=100"`
-	Name string `form:"name"` // 匹配设备名称或扫描身份签名 scan_identity（模糊查询）
+	Name string `form:"name"` // 匹配设备名称、编码或扫描身份签名 scan_identity（模糊查询）
 }
 
 // PageDeviceAddressDTO 设备地址分页查询（按设备ID + 名称模糊检索）

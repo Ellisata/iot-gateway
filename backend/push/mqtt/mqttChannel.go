@@ -93,6 +93,9 @@ type mqttChannel struct {
 
 	ob *push.Outbox
 
+	// recent 最近推送报文（仅内存、仅观测），见 push.RecentRing。
+	recent *push.RecentRing
+
 	// done 由 run 关闭：发布 worker 与补发协程全部退出。
 	done chan struct{}
 
@@ -147,6 +150,7 @@ func newMqttChannel(db *gorm.DB, ch *po.PushChannel) (*mqttChannel, error) {
 		sig:         ch.ID + "|" + ch.Name + "|" + ch.ConfigJSON,
 		encoder:     enc,
 		clientID:    resolveClientID(cfg.ClientID),
+		recent:      push.NewRecentRing(push.RecentPushRingSize),
 	}
 	mch.ob = push.NewOutbox(push.OutboxConfig{
 		Tag:          "mqtt",
@@ -258,7 +262,7 @@ func (ch *mqttChannel) publishLoop(client mqtt.Client) {
 		case <-ch.ob.Quit():
 			return
 		case b := <-ch.ob.Batches():
-			if !ch.publish(client, b) && ch.ob.SpoolEnabled() {
+			if !ch.publish(client, b, false) && ch.ob.SpoolEnabled() {
 				ch.ob.SpoolEnqueue(b)
 			}
 		}
@@ -296,14 +300,21 @@ func (ch *mqttChannel) waitFirstConnect(token mqtt.Token) bool {
 // publish 向配置的所有主题发布一批数据。
 // 返回是否全部主题发布成功（断连/超时/错误均视为失败），
 // 供补发协程决定该批次是删除还是保留重试。
-func (ch *mqttChannel) publish(client mqtt.Client, b push.PushBatch) bool {
+func (ch *mqttChannel) publish(client mqtt.Client, b push.PushBatch, fromDrain bool) bool {
 	if client == nil || !client.IsConnected() {
+		// 不记录「未连接」：断连期间每个批次都会走到这里，会把环形缓冲刷满
+		// 无载荷条目；连接状态由 /push/status 直接给出。
 		ch.ob.Drop(1)
 		return false
 	}
 
-	topics := buildTopics(ch.cfg.Topic, b.DeviceID, b.GroupName, b.GroupID)
+	topics := buildTopics(ch.cfg.Topic, topicTokens{
+		DeviceCode:     b.DeviceCode,
+		ThingModelCode: b.ThingModelCode,
+		GroupCode:      b.GroupCode,
+	})
 	if len(topics) == 0 {
+		ch.recordRecent(b, "", nil, 0, time.Now(), "no topics resolved from config", fromDrain)
 		ch.ob.Drop(1)
 		return false
 	}
@@ -312,6 +323,7 @@ func (ch *mqttChannel) publish(client mqtt.Client, b push.PushBatch) bool {
 	if err != nil {
 		errMsg := fmt.Sprintf("encode batch: %v", err)
 		logger.Error("%s", errMsg)
+		ch.recordRecent(b, "", nil, 0, time.Now(), errMsg, fromDrain)
 		ch.ob.SetLastErr(errMsg)
 		ch.ob.Drop(1)
 		return false
@@ -324,10 +336,12 @@ func (ch *mqttChannel) publish(client mqtt.Client, b push.PushBatch) bool {
 	ok := true
 	for _, msg := range messages {
 		for _, topic := range topics {
+			started := time.Now()
 			tok := client.Publish(topic, ch.cfg.QoS, false, msg.Payload)
 			if !tok.WaitTimeout(publishTimeout) {
 				errMsg := fmt.Sprintf("publish %s timed out", topic)
 				logger.Error("%s", errMsg)
+				ch.recordRecent(b, topic, msg.Payload, 0, started, errMsg, fromDrain)
 				ch.ob.SetLastErr(errMsg)
 				ch.ob.Drop(1)
 				ok = false
@@ -336,15 +350,52 @@ func (ch *mqttChannel) publish(client mqtt.Client, b push.PushBatch) bool {
 			if err := tok.Error(); err != nil {
 				errMsg := fmt.Sprintf("publish %s: %v", topic, err)
 				logger.Error("%s", errMsg)
+				ch.recordRecent(b, topic, msg.Payload, 0, started, errMsg, fromDrain)
 				ch.ob.SetLastErr(errMsg)
 				ch.ob.Drop(1)
 				ok = false
 				continue
 			}
+			ch.recordRecent(b, topic, msg.Payload, 0, started, "", fromDrain)
 			ch.ob.MarkPublished(1)
 		}
 	}
 	return ok
+}
+
+// recordRecent 记录一条出站报文（仅内存观测）。recent 为 nil 的零值通道直接跳过，
+// 保证测试里手工构造的通道不需要额外初始化。
+func (ch *mqttChannel) recordRecent(
+	b push.PushBatch,
+	target string,
+	payload []byte,
+	statusCode int,
+	started time.Time,
+	errMsg string,
+	fromDrain bool,
+) {
+	if ch.recent == nil {
+		return
+	}
+	ch.recent.Add(push.RecentPushMessage{
+		At:         time.Now(),
+		Target:     target,
+		DeviceCode: b.DeviceCode,
+		GroupCode:  b.GroupCode,
+		Records:    len(b.Records),
+		StatusCode: statusCode,
+		DurationMs: time.Since(started).Milliseconds(),
+		Error:      errMsg,
+		FromDrain:  fromDrain,
+	}, payload)
+}
+
+// RecentMessages 实现 push.RecentMessagesProvider：最近推送报文（新→旧）。
+func (ch *mqttChannel) RecentMessages(limit int) []push.RecentPushMessage {
+	if ch.recent == nil {
+		return []push.RecentPushMessage{}
+	}
+	return ch.recent.Snapshot(limit)
 }
 
 // encode 使用配置的编码器；零值通道（测试直接构造）回退 native，保证兼容。
@@ -380,7 +431,7 @@ func (ch *mqttChannel) drainWindow(client mqtt.Client, pend []push.SpoolBatch) (
 	var failID int64
 	for _, p := range pend {
 		batch := p.ToPushBatch()
-		if !ch.publish(client, batch) {
+		if !ch.publish(client, batch, true) {
 			failID = p.ID
 			break
 		}

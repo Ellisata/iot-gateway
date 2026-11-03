@@ -308,6 +308,7 @@ func recordDoc(r collector.CollectedRecord, batchAt string) map[string]any {
 	}
 	return map[string]any{
 		"deviceId":           r.DeviceID,
+		"deviceCode":         r.DeviceCode,
 		"deviceName":         r.DeviceName,
 		"deviceAddressId":    r.DeviceAddressID,
 		"deviceAddressName":  r.DeviceAddressName,
@@ -323,6 +324,7 @@ func recordDoc(r collector.CollectedRecord, batchAt string) map[string]any {
 		"propertyCode":   r.PropertyCode,
 		// 采集组身份：未分组时为空串/0，路径仍可取值。
 		"groupId":         r.GroupID,
+		"groupCode":       r.GroupCode,
 		"groupName":       r.GroupName,
 		"groupIntervalMs": r.GroupIntervalMs,
 	}
@@ -335,7 +337,9 @@ func batchDocument(batch push.PushBatch) map[string]any {
 	}
 	return map[string]any{
 		"deviceId":    batch.DeviceID,
+		"deviceCode":  batch.DeviceCode,
 		"groupId":     batch.GroupID,
+		"groupCode":   batch.GroupCode,
 		"groupName":   batch.GroupName,
 		"intervalMs":  batch.GroupIntervalMs,
 		"collectedAt": at,

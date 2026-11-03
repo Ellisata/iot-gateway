@@ -144,44 +144,36 @@ func TestBrokerURL(t *testing.T) {
 }
 
 func TestBuildTopics(t *testing.T) {
-	// 通配符替换（未分组批次）
-	got := buildTopics("/IIoT/+/+/read", "dev-1", "", "")
-	want := []string{"/IIoT/dev-1/dev-1/read"}
+	// 固定三层：三个编码全部存在。
+	got := buildTopics("iot/${thingModelCode}/${deviceCode}/${groupCode}", topicTokens{
+		DeviceCode: "plc-a", ThingModelCode: "th_sensor", GroupCode: "fast",
+	})
+	want := []string{"iot/th_sensor/plc-a/fast"}
 	if !equalTopics(got, want) {
 		t.Errorf("buildTopics = %v, want %v", got, want)
 	}
 
-	// 逗号分隔多主题
-	got = buildTopics("/IIoT/+/+/read,wer", "dev-1", "", "")
-	want = []string{"/IIoT/dev-1/dev-1/read", "wer"}
+	// 固定层级：缺失维度用占位段补齐，而不是少一层。
+	got = buildTopics("iot/${thingModelCode}/${deviceCode}/${groupCode}", topicTokens{})
+	want = []string{"iot/_unmodeled/_unencoded/legacy"}
 	if !equalTopics(got, want) {
-		t.Errorf("buildTopics = %v, want %v", got, want)
+		t.Errorf("fallback buildTopics = %v, want %v", got, want)
 	}
 
-	// 空白过滤
-	got = buildTopics("  a, ,b  ,c,", "d", "", "")
-	want = []string{"a", "b", "c"}
+	// 不保留旧模板语义：`+`、${deviceId}、${group}、${groupId} 原样保留。
+	got = buildTopics("${deviceId}/+/${group}/${groupId}", topicTokens{DeviceCode: "plc-a"})
+	want = []string{"${deviceId}/+/${group}/${groupId}"}
 	if !equalTopics(got, want) {
-		t.Errorf("buildTopics = %v, want %v", got, want)
+		t.Errorf("legacy tokens should stay literal, got %v, want %v", got, want)
 	}
 
-	// 组占位符：${group} 是组名，${groupId} 是 UUID；未分组批次都回落为 legacy。
-	got = buildTopics("/iot/${deviceId}/${group}/${groupId}", "dev-1", "", "")
-	want = []string{"/iot/dev-1/legacy/legacy"}
+	// 逗号分隔多主题与空白过滤。
+	got = buildTopics("  iot/${deviceCode}/${groupCode} , , iot/_unmodeled/${deviceCode}/${groupCode}  ,  ", topicTokens{
+		DeviceCode: "plc-a", GroupCode: "fast",
+	})
+	want = []string{"iot/plc-a/fast", "iot/_unmodeled/plc-a/fast"}
 	if !equalTopics(got, want) {
-		t.Errorf("legacy buildTopics = %v, want %v", got, want)
-	}
-	got = buildTopics("/iot/${deviceId}/${group}/${groupId}", "dev-1", "fast", "g-1")
-	want = []string{"/iot/dev-1/fast/g-1"}
-	if !equalTopics(got, want) {
-		t.Errorf("group buildTopics = %v, want %v", got, want)
-	}
-
-	// 替换顺序：${groupId} 必须先于 ${group}，否则会留下一个多余的大括号。
-	got = buildTopics("${group}", "dev-1", "fast", "g-1")
-	want = []string{"fast"}
-	if !equalTopics(got, want) {
-		t.Errorf("token order buildTopics = %v, want %v", got, want)
+		t.Errorf("multi-topic buildTopics = %v, want %v", got, want)
 	}
 }
 
@@ -430,10 +422,10 @@ func (c *stubClient) Unsubscribe(...string) mqtt.Token { return stubToken{} }
 func TestDrainWindowDeletesOnlyPublishedBatches(t *testing.T) {
 	// 逐批发布：成功的批次必须删除，首个失败的批次及其后保留待重连重试，
 	// 且 failID 必须精确定位到失败批次（而非组头），否则上层会误判毒批次。
-	ch, spool := newTestChannelWithSpool(t, &mqttConfig{Topic: "/t/+/read"})
+	ch, spool := newTestChannelWithSpool(t, &mqttConfig{Topic: "/t/${deviceCode}/read"})
 
 	for _, dev := range []string{"d1", "d2", "d3"} {
-		if err := spool.Insert(push.PushBatch{DeviceID: dev, CollectedAt: "t"}); err != nil {
+		if err := spool.Insert(push.PushBatch{DeviceID: dev, DeviceCode: dev, CollectedAt: "t"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -461,10 +453,10 @@ func TestDrainWindowDeletesOnlyPublishedBatches(t *testing.T) {
 }
 
 func TestDrainWindowAllSuccess(t *testing.T) {
-	ch, spool := newTestChannelWithSpool(t, &mqttConfig{Topic: "/t/+/read"})
+	ch, spool := newTestChannelWithSpool(t, &mqttConfig{Topic: "/t/${deviceCode}/read"})
 
 	for _, dev := range []string{"d1", "d2"} {
-		if err := spool.Insert(push.PushBatch{DeviceID: dev, CollectedAt: "t"}); err != nil {
+		if err := spool.Insert(push.PushBatch{DeviceID: dev, DeviceCode: dev, CollectedAt: "t"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -484,5 +476,61 @@ func TestDrainWindowAllSuccess(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("spool count = %d, want 0", n)
+	}
+}
+
+func TestPublishRecordsRecentMessages(t *testing.T) {
+	ch, _ := newTestChannelWithSpool(t, &mqttConfig{Topic: "/t/${deviceCode}/read"})
+	ch.recent = push.NewRecentRing(push.RecentPushRingSize)
+	b := push.PushBatch{
+		DeviceID:    "d1",
+		DeviceCode:  "d1",
+		CollectedAt: "2026-10-24 10:00:00.000",
+		Records:     []collector.CollectedRecord{{DeviceID: "d1", DeviceAddressID: "a1", Value: "1"}},
+	}
+
+	client := &stubClient{connected: true}
+	if !ch.publish(client, b, false) {
+		t.Fatal("publish should succeed")
+	}
+	if !ch.publish(client, b, true) {
+		t.Fatal("drain publish should succeed")
+	}
+
+	msgs := ch.RecentMessages(0)
+	if len(msgs) != 2 {
+		t.Fatalf("recent len = %d, want 2", len(msgs))
+	}
+	if !msgs[0].FromDrain || msgs[1].FromDrain {
+		t.Fatalf("fromDrain = (%v, %v), want (true, false) newest first", msgs[0].FromDrain, msgs[1].FromDrain)
+	}
+	if msgs[1].Target != "/t/d1/read" || msgs[1].Records != 1 || msgs[1].Error != "" {
+		t.Fatalf("recent = %+v, want successful publish to /t/d1/read", msgs[1])
+	}
+	if msgs[1].Payload == "" || msgs[1].Size == 0 {
+		t.Fatalf("recent payload = %+v, want preview and size", msgs[1])
+	}
+}
+
+func TestPublishFailureIsRecorded(t *testing.T) {
+	ch, _ := newTestChannelWithSpool(t, &mqttConfig{Topic: "/t/${deviceCode}/read"})
+	ch.recent = push.NewRecentRing(push.RecentPushRingSize)
+	b := push.PushBatch{
+		DeviceID:    "d1",
+		DeviceCode:  "d1",
+		CollectedAt: "2026-10-24 10:00:00.000",
+		Records:     []collector.CollectedRecord{{DeviceID: "d1", DeviceAddressID: "a1", Value: "1"}},
+	}
+
+	if ch.publish(&stubClient{connected: true, failOn: "/t/d1/read"}, b, false) {
+		t.Fatal("publish should fail on rejected topic")
+	}
+
+	msgs := ch.RecentMessages(0)
+	if len(msgs) != 1 {
+		t.Fatalf("recent len = %d, want 1", len(msgs))
+	}
+	if msgs[0].Target != "/t/d1/read" || msgs[0].Error == "" {
+		t.Fatalf("recent = %+v, want failure with topic and error", msgs[0])
 	}
 }

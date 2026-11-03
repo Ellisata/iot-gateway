@@ -67,23 +67,40 @@
 - 省略/空数组：接收全部记录（含未分组）；
 - 非空：只接收这些组，未分组记录被排除。
 
-MQTT 主题模板支持以下占位符（旧 `+` → 设备 ID 的语义不变）：
+MQTT 主题模板只支持以下编码占位符：
 
-| 占位符 | 值 |
-|---|---|
-| `${deviceId}` | 设备 ID |
-| `${group}` | 采集组名称 |
-| `${groupId}` | 采集组 ID |
-| `+` | 设备 ID（兼容旧模板） |
+| 占位符 | 值 | 缺失时 |
+|---|---|---|
+| `${deviceCode}` | 设备编码 `device.code` | `_unencoded` |
+| `${thingModelCode}` | 设备绑定的物模型编码 `thing_model.code` | `_unmodeled` |
+| `${groupCode}` | 采集组编码 `collector_group.code` | `legacy`（未分组） |
 
-未分组批次的 `${group}` 与 `${groupId}` 都替换为 `legacy`。示例：
+控制台的主题字段是一个“模板下拉 + 手动输入”的选择框：下拉提供下面的典型模板，
+也可以直接键入任意主题（多个主题用英文逗号分隔）。
 
+`+`、`${deviceId}`、`${group}`、`${groupId}` 不再替换，原样保留。**主题层级必须由模板固定，缺失维度用占位段补齐，不要少一层。** 典型模板：
+
+```text
+# 需要按物模型订阅/授权
+iot/${thingModelCode}/${deviceCode}/${groupCode}
+
+# 不需要按物模型订阅/授权
+iot/${deviceCode}/${groupCode}
 ```
-/iot/${deviceId}/${group}
+
+未绑定物模型的设备发布到 `iot/_unmodeled/...`；未分组点位发布到 `.../legacy`；
+未编码的旧设备（正常不会出现）发布到 `.../_unencoded/...`。
+这样无论设备是否绑定模型、点位是否分组，主题深度都不变，下游只需一套通配符规则：
+
+```text
+iot/+/+/+        # 全量
+iot/modelA/+/+   # 某个物模型
+iot/+/dev001/+   # 某台设备
+iot/+/+/fast     # 某个组（跨设备）
 ```
 
-> 组名会进入主题，创建时禁止 `/`、`+`、`#`、控制字符与保留字 `legacy`。
-> 组改名会改变主题；下游订阅需同步调整。
+> 组编码、设备编码创建后不可修改；物模型编码创建后也不可变。
+> 主题里不要使用组名或 ID，组名只是展示字段。
 
 时序库通道把**设备的物模型编码与点位的属性编码**也作为 tag 写入：
 
@@ -152,7 +169,7 @@ TDengine 的超级表用 `CREATE STABLE IF NOT EXISTS` 建表：**已部署实�
 
 | 键 | 说明 |
 |---|---|
-| `deviceId` / `deviceName` | 设备标识与名称 |
+| `deviceId` / `deviceCode` / `deviceName` | 设备 ID、编码、名称（编码未设置时为空串） |
 | `deviceAddressId` / `deviceAddressName` / `deviceAddressLabel` | 点位 ID、地址名、说明 |
 | `value` | 已解码的采集值（字符串） |
 | `dataType` / `kind` / `protocol` | 协议内部类型、类型类别、协议名 |
@@ -160,8 +177,9 @@ TDengine 的超级表用 `CREATE STABLE IF NOT EXISTS` 建表：**已部署实�
 | `collectedAt` | 采集时间；记录为空时回落为批次时间 |
 | `thingModelCode` | 设备绑定的物模型编码（`thing_model.code`）；未绑定为空串 |
 | `propertyCode` | 点位绑定的物模型属性标识符（`thing_model_property.identifier`）；未绑定为空串 |
+| `groupId` / `groupCode` / `groupName` | 采集组 ID、编码、名称；未分组为空串 |
 
-`batchFields` 额外可读：`deviceId`、`collectedAt`、`count`（本批记录数）。
+`batchFields` 额外可读：`deviceId`、`deviceCode`、`groupId`、`groupCode`、`groupName`、`collectedAt`、`count`（本批记录数）。
 
 ### 3.3 取值方式
 
@@ -229,8 +247,11 @@ HTTP 的 `emit=record` 会一个批次发多次请求。若其中一条失败并
 | 输入 | 说明 |
 |---|---|
 | `batch.deviceId` | 批次设备 ID |
+| `batch.deviceCode` | 批次设备编码（未编码为空串） |
+| `batch.groupId` / `batch.groupCode` / `batch.groupName` | 批次采集组 ID、编码、名称（未分组为空串） |
+| `batch.intervalMs` | 批次采集组周期（毫秒，未分组为 0） |
 | `batch.collectedAt` | 批次采集时间（可能为空） |
-| `batch.records[]` | 记录数组，字段与 CollectedRecord 一致：`deviceId`、`deviceName`、`deviceAddressId`、`deviceAddressName`、`deviceAddressLabel`、`value`、`dataType`、`kind`、`protocol`、`quality`、`collectedAt`、`thingModelCode`、`propertyCode` |
+| `batch.records[]` | 记录数组，字段与 CollectedRecord 一致：`deviceId`、`deviceCode`、`deviceName`、`deviceAddressId`、`deviceAddressName`、`deviceAddressLabel`、`value`、`dataType`、`kind`、`protocol`、`quality`、`collectedAt`、`thingModelCode`、`propertyCode`、`groupId`、`groupCode`、`groupName` |
 | `ctx.log(...)` | 写网关日志（每实例最多 100 行） |
 
 - `records[].collectedAt` 与 `batch.collectedAt` 遵循同一条回落规则：本地点位采集的记录级时间为空，此时取 `batch.collectedAt`（毫秒精度本地时间）。外部订阅记录带 `collectedAt` 时优先用记录自己的。

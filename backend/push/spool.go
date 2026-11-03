@@ -20,7 +20,10 @@ import (
 type SpoolBatch struct {
 	ID              int64
 	DeviceID        string
+	DeviceCode      string
+	ThingModelCode  string
 	GroupID         string
+	GroupCode       string
 	GroupName       string
 	GroupIntervalMs int
 	CollectedAt     string
@@ -33,15 +36,31 @@ type SpoolBatch struct {
 // （新版本写入的 records 才有；更早的连记录也没有）—— 因此组列为空时从首条
 // 记录回退推导，仍然取不到就按 legacy（空组）发布。
 func (b SpoolBatch) ToPushBatch() PushBatch {
-	groupID, groupName, groupInterval := b.GroupID, b.GroupName, b.GroupIntervalMs
-	if groupID == "" && len(b.Records) > 0 {
-		groupID = b.Records[0].GroupID
-		groupName = b.Records[0].GroupName
-		groupInterval = b.Records[0].GroupIntervalMs
+	deviceCode, thingModelCode := b.DeviceCode, b.ThingModelCode
+	groupID, groupCode, groupName, groupInterval := b.GroupID, b.GroupCode, b.GroupName, b.GroupIntervalMs
+	if len(b.Records) > 0 {
+		// 旧行没有编码列；新写入的记录本身带编码，可从这里回退。
+		if deviceCode == "" {
+			deviceCode = b.Records[0].DeviceCode
+		}
+		if thingModelCode == "" {
+			thingModelCode = b.Records[0].ThingModelCode
+		}
+		if groupCode == "" {
+			groupCode = b.Records[0].GroupCode
+		}
+		if groupID == "" {
+			groupID = b.Records[0].GroupID
+			groupName = b.Records[0].GroupName
+			groupInterval = b.Records[0].GroupIntervalMs
+		}
 	}
 	return PushBatch{
 		DeviceID:        b.DeviceID,
+		DeviceCode:      deviceCode,
+		ThingModelCode:  thingModelCode,
 		GroupID:         groupID,
+		GroupCode:       groupCode,
 		GroupName:       groupName,
 		GroupIntervalMs: groupInterval,
 		CollectedAt:     b.CollectedAt,
@@ -117,7 +136,10 @@ func (s *SqliteSpool) InsertMany(batches []PushBatch) error {
 		rows = append(rows, po.PushOutbox{
 			ChannelID:       s.channelID,
 			DeviceID:        batches[i].DeviceID,
+			DeviceCode:      batches[i].DeviceCode,
+			ThingModelCode:  batches[i].ThingModelCode,
 			GroupID:         batches[i].GroupID,
+			GroupCode:       batches[i].GroupCode,
 			GroupName:       batches[i].GroupName,
 			GroupIntervalMs: batches[i].GroupIntervalMs,
 			CollectedAt:     batches[i].CollectedAt,
@@ -170,7 +192,10 @@ func (s *SqliteSpool) FetchOldest(limit int) ([]SpoolBatch, error) {
 		batches = append(batches, SpoolBatch{
 			ID:              rows[i].ID,
 			DeviceID:        rows[i].DeviceID,
+			DeviceCode:      rows[i].DeviceCode,
+			ThingModelCode:  rows[i].ThingModelCode,
 			GroupID:         groupID,
+			GroupCode:       rows[i].GroupCode,
 			GroupName:       groupName,
 			GroupIntervalMs: groupInterval,
 			CollectedAt:     rows[i].CollectedAt,

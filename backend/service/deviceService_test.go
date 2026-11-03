@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"iot-gateway/enums"
 	"iot-gateway/model/dto"
 	"iot-gateway/model/po"
 )
@@ -319,6 +320,59 @@ func TestUpdateDeviceClearsScanIdentityOnlyOnRealConfigChange(t *testing.T) {
 	}
 	if got := scanIdentityOfRow(); got != "" {
 		t.Fatalf("换协议后 scanIdentity = %q, want 空串", got)
+	}
+}
+
+// TestCreateDeviceCodeRules 覆盖设备编码：创建必填、全局唯一、格式校验、
+// 创建后不可修改，以及列表检索能命中编码。
+func TestCreateDeviceCodeRules(t *testing.T) {
+	db := newDeviceAddressImportTestDB(t)
+	svc := NewDeviceService(db, nil, nil)
+	ctx := context.Background()
+
+	if err := svc.CreateDevice(ctx, &dto.CreateDeviceDTO{
+		Code: "plc-line-a", Name: "A线PLC", ProtocolID: "proto-1", ProtocolJSON: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// 编码重复（名称不同也必须拒绝）。
+	err := svc.CreateDevice(ctx, &dto.CreateDeviceDTO{
+		Code: "plc-line-a", Name: "另一台PLC", ProtocolID: "proto-1", ProtocolJSON: json.RawMessage(`{}`),
+	})
+	if got := errCode(t, err); got != enums.DeviceCodeExistsEnum.GetCode() {
+		t.Errorf("duplicate code = %s, want %s", got, enums.DeviceCodeExistsEnum.GetCode())
+	}
+
+	// 编码格式不合法。
+	err = svc.CreateDevice(ctx, &dto.CreateDeviceDTO{
+		Code: "1bad", Name: "坏编码PLC", ProtocolID: "proto-1", ProtocolJSON: json.RawMessage(`{}`),
+	})
+	if got := errCode(t, err); got != enums.DeviceCodeInvalidEnum.GetCode() {
+		t.Errorf("invalid code = %s, want %s", got, enums.DeviceCodeInvalidEnum.GetCode())
+	}
+
+	var device po.Device
+	if err := db.Where("code = ?", "plc-line-a").First(&device).Error; err != nil {
+		t.Fatalf("load device: %v", err)
+	}
+
+	// 创建后不可修改；原样回传不算修改。
+	err = svc.UpdateDevice(ctx, &dto.UpdateDeviceDTO{ID: device.ID, Code: "plc-line-b"})
+	if got := errCode(t, err); got != enums.DeviceCodeImmutableEnum.GetCode() {
+		t.Errorf("immutable code = %s, want %s", got, enums.DeviceCodeImmutableEnum.GetCode())
+	}
+	if err := svc.UpdateDevice(ctx, &dto.UpdateDeviceDTO{ID: device.ID, Code: "plc-line-a", Name: "A线PLC-改名"}); err != nil {
+		t.Fatalf("update with same code: %v", err)
+	}
+
+	// 列表检索命中编码。
+	page, err := svc.PageDevice(ctx, &dto.PageDeviceDTO{Page: 1, Size: 10, Name: "plc-line-a"})
+	if err != nil {
+		t.Fatalf("PageDevice: %v", err)
+	}
+	if page.Total != 1 || page.Records[0].Code != "plc-line-a" {
+		t.Fatalf("page = %+v", page)
 	}
 }
 

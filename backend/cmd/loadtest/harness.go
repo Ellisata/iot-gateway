@@ -358,6 +358,7 @@ func seedDB(pa protocolAdapter, opts Options, servers []*fake.Server, devices, p
 		devID := fmt.Sprintf("dev-%d", d)
 		devs = append(devs, po.Device{
 			ID:           devID,
+			Code:         devID,
 			Name:         devID,
 			ProtocolID:   protoID,
 			ProtocolJSON: pa.deviceJSON(srv.Port(), opts),

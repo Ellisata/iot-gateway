@@ -12,8 +12,13 @@ import "iot-gateway/collector"
 // 组身份是批次级冗余（同一批次内的记录共享同一个组），供通道做 topic 选择、
 // group-json 帧头与断网补发；未分组批次 GroupID/GroupName 为空、Interval 为 0。
 type PushBatch struct {
-	DeviceID        string
+	DeviceID string
+	// DeviceCode / ThingModelCode / GroupCode 供主题模板的编码占位符使用；
+	// 空值由通道按约定回落（_unencoded / _unmodeled / legacy）。
+	DeviceCode      string
+	ThingModelCode  string
 	GroupID         string
+	GroupCode       string
 	GroupName       string
 	GroupIntervalMs int
 	CollectedAt     string

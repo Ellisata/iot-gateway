@@ -8,6 +8,7 @@
 
 export const RECORD_DOC_KEYS = [
   'deviceId',
+  'deviceCode',
   'deviceName',
   'deviceAddressId',
   'deviceAddressName',
@@ -20,9 +21,21 @@ export const RECORD_DOC_KEYS = [
   'collectedAt',
   'thingModelCode',
   'propertyCode',
+  'groupId',
+  'groupCode',
+  'groupName',
+  'groupIntervalMs',
 ]
 
-export const BATCH_DOC_KEYS = ['deviceId', 'collectedAt', 'count']
+export const BATCH_DOC_KEYS = [
+  'deviceId',
+  'deviceCode',
+  'groupId',
+  'groupCode',
+  'groupName',
+  'collectedAt',
+  'count',
+]
 
 export const SOURCES = ['path', 'const', 'template', 'map']
 export const FIELD_TYPES = ['auto', 'string', 'number', 'boolean']
@@ -134,10 +147,12 @@ export function isEmptyMappingState(state) {
 }
 
 // 新建通道 / 切到 mapping-json / 点「常用字段一键填充」时的默认输出字段。
+// 设备编码紧挨设备 ID：ID 不可读且不同环境不同，下游通常按编码做稳定关联。
 // 物模型编码与属性编码紧随点位 ID：它们是下游做语义关联最常用的两个维度，
 // 运行期未绑定时为空串（字段仍会输出）。
 const COMMON_ROWS = [
   { key: 'deviceId', value: 'deviceId' },
+  { key: 'deviceCode', value: 'deviceCode' },
   { key: 'deviceAddressId', value: 'deviceAddressId' },
   { key: 'thingModelCode', value: 'thingModelCode' },
   { key: 'propertyCode', value: 'propertyCode' },

@@ -1,1 +1,0 @@
-import{Qt as e,ln as t}from"./vendor-DcFGMms5.js";import{t as n}from"./AlarmTable-DOu5cF5C.js";var r={__name:`IndexView`,setup(r){return(r,i)=>(t(),e(n,{"target-type":`point`}))}};export{r as default};
