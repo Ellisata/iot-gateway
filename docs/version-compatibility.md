@@ -2,7 +2,7 @@
 
 > 适用于三个仓库：网关主程序 [`iot-gateway-premium`](../README.md)、官方驱动
 > [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers)、驱动 SDK
-> [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk)。最后更新：2026-11-02。
+> [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk)。最后更新：2026-11-03。
 
 ## 1. 结论
 
@@ -22,7 +22,7 @@
 
 | 版本 | 真源 | 当前值 | 参与兼容判定 |
 |---|---|---|---|
-| 网关发行版本 | git tag；构建脚本以 `-X main.version` 注入，写入 `iot_gateway.firmware_version` 并随局域网发现广播 | `v0.5.0` | 否 |
+| 网关发行版本 | git tag；构建脚本以 `-X main.version` 注入，写入 `iot_gateway.firmware_version` 并随局域网发现广播 | `v0.6.0` | 否 |
 | 官方驱动发行版本 | 仓库根的 `drivers.version`；构建时经 `-X main.version` 写入每个插件的 `Meta.Version` | `v0.3.0` | 否 |
 | 驱动 SDK 版本 | 网关 `backend/go.mod`、驱动仓库 `go.mod` | `v0.3.0` | 否 |
 | 线协议版本 | `driversdk.APIVersion`（[SDK 源码](https://github.com/Ellisata/iot-gateway-sdk/blob/main/driversdk/meta.go)） | `4` | **是，必须相等** |
@@ -46,7 +46,8 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 | v0.2.0 | v0.1.0 | v0.1.0 | 4 | 9 / 15 | 发行版 |
 | v0.3.0 | v0.1.0 | v0.1.0 | 4 | 9 / 15 | SDK 与官方驱动拆仓、`/agentApi` 运行开关 |
 | v0.4.0 | v0.2.0 | v0.2.0 | 4 | 9 / 15 | 驱动动态表单与扫描元数据支持中英切换 |
-| v0.5.0 | v0.3.0 | v0.3.0 | 4 | 9 / 15 | 在线控制下发、物模型绑定、分批续扫（当前离线发行版） |
+| v0.5.0 | v0.3.0 | v0.3.0 | 4 | 9 / 15 | 在线控制下发、物模型绑定、分批续扫 |
+| v0.6.0 | v0.3.0 | v0.3.0 | 4 | 9 / 15 | 采集组与分组推送、稳定编码与主题模板、物模型导入、推送监控（当前离线发行版） |
 
 维护规则：
 
@@ -107,7 +108,7 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 1. **网关启动日志**（启动时打印解析后的版本与插件线协议版本）：
 
    ```
-   application starting... (version v0.5.0, plugin APIVersion 4)
+   application starting... (version v0.6.0, plugin APIVersion 4)
    ```
 
 2. **插件加载日志**（每个插件一条，版本来自 `Meta.Version`）：
@@ -123,10 +124,10 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 
    ```json
    {
-     "gateway": "v0.5.0",
+     "gateway": "v0.6.0",
      "os": "windows",
      "arch": "amd64",
-     "buildTime": "2026-11-02T08:00:00Z",
+     "buildTime": "2026-11-03T08:00:00Z",
      "sdk": "v0.3.0",
      "apiVersion": 4,
      "frameMagic": "IGP2",
