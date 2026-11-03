@@ -17,7 +17,7 @@ type DeviceAddress struct {
 	PropertyID string `gorm:"column:property_id;not null;default:'';index:idx_device_address_property" json:"propertyId"`
 	// GroupID 绑定的采集组 ID（collector_group.id）。空串 = 未分组，
 	// 继续按 ScanFrequency 采集；非空时由组的 interval_ms 决定采集周期。
-	GroupID      string `gorm:"column:group_id;not null;default:'';index:idx_device_address_group" json:"groupId"`
+	GroupID        string `gorm:"column:group_id;not null;default:'';index:idx_device_address_group" json:"groupId"`
 	Name           string `gorm:"column:name;uniqueIndex;not null" json:"name"`
 	Label          string `gorm:"column:label;not null" json:"label"`                     // 地址 name 的中文说明（如温度、电流）
 	CommonDataType string `gorm:"column:common_data_type;not null" json:"commonDataType"` // 通用数据类型名（配置界面展示）

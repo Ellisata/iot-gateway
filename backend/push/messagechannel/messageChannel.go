@@ -54,12 +54,12 @@ type Config struct {
 	Encoder             push.Encoder
 	Transport           Transport
 	// GroupIDs 采集组订阅（空 = 接收全部，含未分组记录）。
-	GroupIDs            []string
-	Workers             int
-	Timeout             time.Duration
-	SpoolEnabled        bool
-	SpoolCap            int
-	ReconnectInterval   time.Duration
+	GroupIDs          []string
+	Workers           int
+	Timeout           time.Duration
+	SpoolEnabled      bool
+	SpoolCap          int
+	ReconnectInterval time.Duration
 }
 
 // Channel 通用消息通道，实现 push.Channel / push.Connectivity /
