@@ -33,6 +33,7 @@ export const BATCH_DOC_KEYS = [
   'groupId',
   'groupCode',
   'groupName',
+  'intervalMs',
   'collectedAt',
   'count',
 ]

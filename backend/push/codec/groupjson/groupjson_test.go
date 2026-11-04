@@ -11,16 +11,23 @@ import (
 	"iot-gateway/push"
 )
 
-func TestEncodeFrameSplitsByQuality(t *testing.T) {
+func TestEncodeFrameKeepsAllPoints(t *testing.T) {
 	batch := push.PushBatch{
 		DeviceID:        "dev-1",
+		DeviceCode:      "dev-code-1",
+		ThingModelCode:  "th_sensor",
 		GroupID:         "g-1",
+		GroupCode:       "fast",
 		GroupName:       "fast",
 		GroupIntervalMs: 500,
 		CollectedAt:     "2026-11-02 20:00:00.123",
 		Records: []collector.CollectedRecord{
-			{DeviceID: "dev-1", DeviceName: "一号机", DeviceAddressID: "a1", DeviceAddressName: "temperature", Value: "23.5", Quality: 192},
-			{DeviceID: "dev-1", DeviceName: "一号机", DeviceAddressID: "a2", DeviceAddressName: "pressure", Value: "", Quality: 1},
+			{DeviceID: "dev-1", DeviceName: "一号机", Protocol: "ModBus.TCP",
+				DeviceAddressID: "a1", DeviceAddressName: "temperature",
+				Value: "23.5", DataType: "float", Kind: "number", Quality: 192, PropertyCode: "temp"},
+			{DeviceID: "dev-1", DeviceName: "一号机", Protocol: "ModBus.TCP",
+				DeviceAddressID: "a2", DeviceAddressName: "pressure",
+				Value: "", DataType: "int16", Kind: "number", Quality: 1},
 		},
 	}
 
@@ -36,18 +43,94 @@ func TestEncodeFrameSplitsByQuality(t *testing.T) {
 	if err := json.Unmarshal(msgs[0].Payload, &frame); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if frame.Timestamp != batch.CollectedAt || frame.DeviceID != "dev-1" || frame.GroupID != "g-1" ||
-		frame.GroupName != "fast" || frame.IntervalMs != 500 || frame.DeviceName != "一号机" {
+	if frame.CollectedAt != batch.CollectedAt || frame.DeviceID != "dev-1" || frame.GroupID != "g-1" ||
+		frame.GroupCode != "fast" || frame.GroupName != "fast" || frame.GroupIntervalMs != 500 || frame.DeviceName != "一号机" ||
+		frame.DeviceCode != "dev-code-1" || frame.ThingModelCode != "th_sensor" || frame.Protocol != "ModBus.TCP" {
 		t.Errorf("frame header = %+v", frame)
 	}
-	if got := frame.Values["temperature"]; got != "23.5" {
-		t.Errorf("values[temperature] = %q, want 23.5", got)
+
+	// 坏质量点不剔除：与正常点同在一个数组，顺序与批次一致，下游按 quality 区分。
+	if len(frame.Points) != 2 {
+		t.Fatalf("points = %d, want 2: %+v", len(frame.Points), frame.Points)
 	}
-	if _, ok := frame.Values["pressure"]; ok {
-		t.Errorf("bad-quality point leaked into values: %v", frame.Values)
+	good := frame.Points[0]
+	if good.DeviceAddressName != "temperature" || good.Value != "23.5" || good.Quality != 192 ||
+		good.DataType != "float" || good.Kind != "number" || good.PropertyCode != "temp" {
+		t.Errorf("points[0] = %+v", good)
 	}
-	if got := frame.Errors["pressure"]; got != 1 {
-		t.Errorf("errors[pressure] = %d, want 1", got)
+	bad := frame.Points[1]
+	if bad.DeviceAddressID != "a2" || bad.Value != "" || bad.Quality != 1 {
+		t.Errorf("points[1] = %+v", bad)
+	}
+}
+
+// 点位字段名必须与 native-json 的 PushPoint 一致；设备级字段不得随点位重复。
+func TestEncodePointFieldNamesMatchNativeJSON(t *testing.T) {
+	batch := push.PushBatch{
+		DeviceID:    "dev-1",
+		CollectedAt: "2026-11-02 20:00:00.123",
+		Records: []collector.CollectedRecord{
+			{DeviceID: "dev-1", DeviceAddressID: "a1", DeviceAddressName: "speed",
+				Value: "1450", DataType: "int32", Kind: "number", Quality: 192, PropertyCode: "speed"},
+		},
+	}
+	msgs, err := New().Encode(batch)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(msgs[0].Payload, &doc); err != nil {
+		t.Fatalf("unmarshal frame: %v", err)
+	}
+	wantFrame := []string{"collectedAt", "deviceId", "deviceCode", "deviceName", "protocol",
+		"thingModelCode", "groupId", "groupCode", "groupName", "groupIntervalMs", "points"}
+	if len(doc) != len(wantFrame) {
+		t.Fatalf("frame keys = %v, want exactly %v", doc, wantFrame)
+	}
+	for _, k := range wantFrame {
+		if _, ok := doc[k]; !ok {
+			t.Errorf("frame missing key %q: %v", k, doc)
+		}
+	}
+	var points []map[string]json.RawMessage
+	if err := json.Unmarshal(doc["points"], &points); err != nil {
+		t.Fatalf("unmarshal points: %v", err)
+	}
+	if len(points) != 1 {
+		t.Fatalf("points = %d, want 1", len(points))
+	}
+	want := []string{"deviceAddressId", "deviceAddressName", "value", "dataType", "kind", "quality", "propertyCode"}
+	if len(points[0]) != len(want) {
+		t.Fatalf("point keys = %v, want exactly %v", points[0], want)
+	}
+	for _, k := range want {
+		if _, ok := points[0][k]; !ok {
+			t.Errorf("point missing key %q: %v", k, points[0])
+		}
+	}
+}
+
+// 断网补发重建的批次可能只有记录带设备编码：帧头须与 spool.ToPushBatch 同口径回退。
+func TestEncodeHeaderFallsBackToRecordDeviceFields(t *testing.T) {
+	batch := push.PushBatch{
+		DeviceID: "dev-1",
+		Records: []collector.CollectedRecord{
+			{DeviceID: "dev-1", DeviceCode: "dev-code-1", ThingModelCode: "th_sensor",
+				GroupCode: "fast", Protocol: "S7", DeviceAddressID: "a1", Value: "1", Quality: 192},
+		},
+	}
+	msgs, err := New().Encode(batch)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	var frame Frame
+	if err := json.Unmarshal(msgs[0].Payload, &frame); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if frame.DeviceCode != "dev-code-1" || frame.ThingModelCode != "th_sensor" ||
+		frame.Protocol != "S7" || frame.GroupCode != "fast" {
+		t.Errorf("frame header = %+v, want fields from record", frame)
 	}
 }
 
@@ -62,6 +145,8 @@ func TestEncodeIncludesTriggerMetadata(t *testing.T) {
 		Records: []collector.CollectedRecord{
 			{DeviceID: "dev-1", DeviceAddressID: "a1", DeviceAddressName: "temperature",
 				Value: "23.5", Quality: 192, Trigger: trigger},
+			{DeviceID: "dev-1", DeviceAddressID: "a2", DeviceAddressName: "speed",
+				Value: "1450", Quality: 192, Trigger: trigger},
 		},
 	}
 	msgs, err := New().Encode(batch)
@@ -104,11 +189,10 @@ func TestEncodeUngroupedFrame(t *testing.T) {
 	if err := json.Unmarshal(msgs[0].Payload, &frame); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if frame.GroupID != "" || frame.GroupName != "" || frame.IntervalMs != 0 {
+	if frame.GroupID != "" || frame.GroupCode != "" || frame.GroupName != "" || frame.GroupIntervalMs != 0 {
 		t.Errorf("ungrouped header = %+v, want empty group", frame)
 	}
-	// 空字典必须序列化为 {} 而不是 null，下游不必做空值判空。
-	if frame.Values == nil || frame.Errors == nil {
-		t.Errorf("values/errors = %v/%v, want empty maps", frame.Values, frame.Errors)
+	if len(frame.Points) != 1 || frame.Points[0].DeviceAddressName != "speed" {
+		t.Errorf("points = %+v, want one ungrouped point", frame.Points)
 	}
 }

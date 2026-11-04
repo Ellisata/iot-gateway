@@ -2,13 +2,18 @@
 
 [English](push-payload.en.md) | [简体中文](push-payload.md)
 
-> This spec defines the field semantics of each point-record JSON and the **self-describing parsing conventions** for the `value` field when collected data is pushed to external channels (currently MQTT). External consumers should parse according to this contract and must not depend on gateway internals.
+> This spec defines the field semantics and the **self-describing parsing conventions**
+> for the `value` field of payloads pushed to external message channels (MQTT /
+> HTTP-Webhook). It covers both `native-json` (§1 / §2) and `group-json` (§1.1);
+> external consumers should parse according to this contract and must not depend on
+> gateway internals.
 
 ## 0. Payload formats
 
-Message-based push channels now support three payload formats, selected by the channel config's `format`:
+Message-based push channels now support four payload formats, selected by the channel config's `format`:
 
-- `native-json` (default, may be omitted): the contract described in this document. Enabling format selection **does not change** its fields, order, or value semantics.
+- `native-json` (default, may be omitted): the contract described in §1 / §2. Enabling format selection **does not change** its fields, order, or value semantics.
+- `group-json`: a self-describing frame per (device, collector group), with device and group identity at the frame header and points in a `points` array (§1.1). Point field names match `native-json`, and the `value` parsing rules in §3 / §4 apply equally.
 - `mapping-json`: emits a customer-defined JSON payload from an outbound mapping. See [push-channels.md](../docs/push-channels.md).
 - `script`: emits arbitrary text produced by a goja script (a string for one message, a string[] for several). See [push-channels.md](../docs/push-channels.md).
 
@@ -16,9 +21,9 @@ Channels using `mapping-json` or `script` are not described by the field table b
 
 ---
 
-## 1. Payload structure
+## 1. native-json payload structure
 
-The MQTT channel pushes grouped **per device**; the payload is a JSON array where each element = one point:
+Message-based channels push **per collection batch** (a batch is one (device, collector group)); the `native-json` payload is a JSON array where each element = one point:
 
 ```json
 [
@@ -48,6 +53,79 @@ The MQTT channel pushes grouped **per device**; the payload is a JSON array wher
 > snapshot; a quality transition (e.g. 192 → 2) counts as a change too. Set the switch to
 > false when evenly spaced samples are required (switchable on the Runtime Switches page;
 > it applies from the next collection batch).
+
+### 1.1 group-json frame structure
+
+`group-json` hoists device- and group-level information into the frame header and puts
+all points of the group in `points`. One message = one collection snapshot of a
+(device, collector group):
+
+```json
+{
+  "collectedAt": "2026-11-02 20:00:00.123",
+  "deviceId": "019fabd15a9176dda844147d98d38f9b",
+  "deviceCode": "ac-1-code",
+  "deviceName": "空调-modbus-tcp",
+  "protocol": "ModBus.TCP",
+  "thingModelCode": "th_ac",
+  "groupId": "019fb110000000000000000000000001",
+  "groupCode": "fast",
+  "groupName": "fast",
+  "groupIntervalMs": 500,
+  "points": [
+    {
+      "deviceAddressId": "019fb1137da076a4ac97af5e51f2e22c",
+      "deviceAddressName": "411115",
+      "value": "0",
+      "dataType": "word",
+      "kind": "uint",
+      "quality": 192,
+      "propertyCode": "temperature"
+    },
+    {
+      "deviceAddressId": "019fb1137da076a4ac97af5e51f2e23d",
+      "deviceAddressName": "411116",
+      "value": "",
+      "dataType": "word",
+      "kind": "uint",
+      "quality": 2,
+      "propertyCode": ""
+    }
+  ]
+}
+```
+
+Frame header fields:
+
+| Field | Type | Description |
+|------|------|------|
+| `collectedAt` | string | Same as `collectedAt` in §2; **frame-level**, shared by all points in the frame |
+| `deviceId` / `deviceCode` / `deviceName` | string | Same as §2; present once per frame, not repeated per point |
+| `protocol` | string | Same as §2; a batch contains one device only, so this is frame-level. `dataType` remains a per-point field |
+| `thingModelCode` | string | Same as §2; device-level, present once |
+| `groupId` | string | Collector group internal key; empty string when ungrouped |
+| `groupCode` | string | Collector group code (`collector_group.code`), immutable after creation; **downstream should use it to correlate business data**. Empty string when ungrouped |
+| `groupName` | string | Collector group display name; empty string when ungrouped |
+| `groupIntervalMs` | int | Group collection interval (milliseconds); 0 when ungrouped |
+| `points` | array | All points of the group, see below |
+| `trigger` | object | Same as §2.1; **frame-level** (all records in the batch share the same trigger), present only for event-triggered pushes, `omitempty` |
+
+Each `points[]` element uses exactly the names and semantics of §2 (`deviceAddressId` /
+`deviceAddressName` / `value` / `dataType` / `kind` / `quality` / `propertyCode`) and
+is not repeated here; parse `value` by §3, and `protocol` is still the namespace of
+`dataType` (§4).
+
+**Bad points are not dropped**: `points` contains every point of the group, including
+points with `quality < 128` (whose `value` is usually an empty string). **Test for
+"bad" with `quality < 128`, never with an empty `value`** — an empty string can be a
+legitimate text value.
+
+Delivery cadence follows the change-only rule in §1: unchanged points are omitted from
+`points`, and no message is emitted when every point in the frame is unchanged. A frame
+may therefore contain only part of the group; downstream must not assume a full
+snapshot. Except for `trigger`, fields are always present and fall back to an empty
+string or 0; read by field name, not by position. Topic templates and `groupIds`
+subscription filtering are covered in [push-channels.md §2.1](../docs/push-channels.md).
 
 ## 2. Field semantics
 

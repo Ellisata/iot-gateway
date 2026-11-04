@@ -951,7 +951,7 @@ export default {
     mqttTopicHintPrefix: '主题支持以下占位符：',
     mqttTopicHintSuffix: '。未编码/未绑模型/未分组分别用 _unencoded、_unmodeled、legacy 补齐固定层级；多个主题用英文逗号分隔。',
     outputFormat: '输出格式',
-    outputFormatHint: 'native-json 保持网关默认契约；group-json 按采集组输出帧；mapping-json 按自定义规则生成下游 JSON；script 用脚本编码任意报文。',
+    outputFormatHint: 'native-json 保持网关默认契约；group-json 按 (设备, 采集组) 输出自描述帧（设备/组信息在帧头，点位在 points）；mapping-json 按自定义规则生成下游 JSON；script 用脚本编码任意报文。',
     groupSubscription: {
       title: '采集组订阅',
       subtitle: '只把选中的采集组推送到本通道',
@@ -1068,7 +1068,7 @@ export default {
       value: '取值',
       typeLabel: '类型',
       batchFields: '批次字段',
-      batchFieldsHint: '与单条记录无关的顶层字段，如站点、批次数量；可用字段：deviceId、collectedAt、count。',
+      batchFieldsHint: '与单条记录无关的顶层字段，如站点、批次数量；可用字段：deviceId、deviceCode、groupId、groupCode、groupName、intervalMs、collectedAt、count。',
       noBatchFields: '暂无批次字段（可选）。',
       addBatchField: '添加批次字段',
       source: {

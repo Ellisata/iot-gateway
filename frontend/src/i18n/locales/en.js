@@ -961,7 +961,7 @@ export default {
     mqttTopicHintPrefix: 'Topics support these placeholders: ',
     mqttTopicHintSuffix: '. Missing code/model/group are filled with _unencoded / _unmodeled / legacy so the topic depth stays fixed; separate multiple topics with commas.',
     outputFormat: 'Output Format',
-    outputFormatHint: 'native-json keeps the gateway contract; group-json emits one frame per collector group; mapping-json emits a custom JSON payload; script encodes any payload with a script.',
+    outputFormatHint: 'native-json keeps the gateway contract; group-json emits a self-describing frame per (device, collector group) with device/group identity at the header and points in a points array; mapping-json emits a custom JSON payload; script encodes any payload with a script.',
     groupSubscription: {
       title: 'Collector group subscription',
       subtitle: 'Only push the selected collector groups to this channel',
@@ -1078,7 +1078,7 @@ export default {
       value: 'Value',
       typeLabel: 'Type',
       batchFields: 'Batch Fields',
-      batchFieldsHint: 'Top-level fields independent of a record, e.g. site or count. Available: deviceId, collectedAt, count.',
+      batchFieldsHint: 'Top-level fields independent of a record, e.g. site or count. Available: deviceId, deviceCode, groupId, groupCode, groupName, intervalMs, collectedAt, count.',
       noBatchFields: 'No batch fields (optional).',
       addBatchField: 'Add Batch Field',
       source: {

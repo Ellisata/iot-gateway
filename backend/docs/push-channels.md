@@ -29,7 +29,7 @@
 | format | 说明 |
 |---|---|
 | `native-json`（默认，可省略） | 网关默认契约，字段语义见 [push-payload.md](../specs/push-payload.md)。**切换本功能不会改变它的任何字节。** |
-| `group-json` | 按采集组输出的帧格式（见 §2.1）。不接受 `mapping`。 |
+| `group-json` | 按 (设备, 采集组) 输出的自描述帧（见 §2.1），字段语义见 [push-payload.md §1.1](../specs/push-payload.md)。不接受 `mapping`。 |
 | `mapping-json` | 按下面的映射规则生成客户自定义 JSON。必须配置 `mapping`。 |
 | `script` | 用 goja 脚本生成任意文本载荷，适合声明式映射表达不了的结构。必须配置 `mapping` 里的脚本。 |
 
@@ -48,19 +48,47 @@
 
 ```json
 {
-  "timestamp": "2026-11-02 20:00:00.123",
+  "collectedAt": "2026-11-02 20:00:00.123",
   "deviceId": "dev-1",
+  "deviceCode": "dev001",
   "deviceName": "一号机",
+  "protocol": "ModBus.TCP",
+  "thingModelCode": "th_sensor",
   "groupId": "g-1",
+  "groupCode": "fast",
   "groupName": "fast",
-  "intervalMs": 500,
-  "values": { "temperature": "23.5", "speed": "1450" },
-  "errors": { "pressure": 1 }
+  "groupIntervalMs": 500,
+  "points": [
+    {
+      "deviceAddressId": "a1",
+      "deviceAddressName": "temperature",
+      "value": "23.5",
+      "dataType": "float",
+      "kind": "number",
+      "quality": 192,
+      "propertyCode": ""
+    },
+    {
+      "deviceAddressId": "a2",
+      "deviceAddressName": "pressure",
+      "value": "",
+      "dataType": "int16",
+      "kind": "number",
+      "quality": 1,
+      "propertyCode": ""
+    }
+  ]
 }
 ```
 
-质量码 `>= 128`（正常/不确定）进 `values`，`< 128`（坏）进 `errors`，值为质量码。
-未分组批次的 `groupId`/`groupName` 为空串、`intervalMs` 为 0。
+`points` 是本组**全部**点位（正常与坏质量点都在其中），顺序与批次记录一致，
+下游按 `quality` 区分：`>= 128` 为正常/不确定，`< 128` 为坏。坏点的 `value`
+通常为空串，但**不能用空串判坏**。点位字段名与 `native-json` 的逐点契约一致
+（`deviceAddressId` / `deviceAddressName` / `value` / `dataType` / `kind` /
+`quality` / `propertyCode`）；`deviceId` / `deviceCode` / `deviceName` /
+`protocol` / `thingModelCode` 只出现在帧头（`protocol` 是 `dataType` 的命名空间），
+`collectedAt` 与 `trigger` 是帧级、同帧点位共享，均不随点位重复。
+未分组批次的 `groupId`/`groupCode`/`groupName` 为空串、`groupIntervalMs` 为 0。
 
 **通道订阅采集组**：`config_json.groupIds` 是组 ID 数组。
 
@@ -211,7 +239,7 @@ TDengine 的超级表用 `CREATE STABLE IF NOT EXISTS` 建表：**已部署实�
 | `propertyCode` | 点位绑定的物模型属性标识符（`thing_model_property.identifier`）；未绑定为空串 |
 | `groupId` / `groupCode` / `groupName` | 采集组 ID、编码、名称；未分组为空串 |
 
-`batchFields` 额外可读：`deviceId`、`deviceCode`、`groupId`、`groupCode`、`groupName`、`collectedAt`、`count`（本批记录数）。
+`batchFields` 额外可读：`deviceId`、`deviceCode`、`groupId`、`groupCode`、`groupName`、`intervalMs`（组周期，未分组为 0）、`collectedAt`、`count`（本批记录数）。
 
 ### 3.3 取值方式
 

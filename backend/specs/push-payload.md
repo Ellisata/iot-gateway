@@ -2,15 +2,19 @@
 
 [简体中文](push-payload.md) | [English](push-payload.en.md)
 
-> 本规范定义采集数据推送到外部通道（当前为 MQTT）时，每条点位 JSON 的字段语义与
-> `value` 值的**自描述解析约定**。外部消费端应据此解析，不依赖网关内部实现。
+> 本规范定义采集数据推送到外部消息通道（MQTT / HTTP-Webhook）时，载荷的字段语义与
+> `value` 值的**自描述解析约定**。`native-json`（§1 / §2）与 `group-json`（§1.1）
+> 都适用；外部消费端应据此解析，不依赖网关内部实现。
 
 ## 0. 载荷格式
 
-推送通道现在支持三种载荷格式，由通道配置的 `format` 决定：
+推送通道现在支持四种载荷格式，由通道配置的 `format` 决定：
 
-- `native-json`（默认，可省略）：即本文描述的契约。引入格式选择**不会改变**它
-  的字段、顺序或取值。
+- `native-json`（默认，可省略）：即 §1 / §2 描述的契约。引入格式选择**不会改变**
+  它的字段、顺序或取值。
+- `group-json`：按 (设备, 采集组) 输出的自描述帧，设备与组身份在帧头、点位在
+  `points` 数组（§1.1）。点位字段名与 `native-json` 一致，`value` 的解析规则
+  同样适用于 §3 / §4。
 - `mapping-json`：按用户配置的出站映射生成客户自定义 JSON。见
   [push-channels.md](../docs/push-channels.md)。
 - `script`：用 goja 脚本生成任意文本载荷（string 一条 / string[] 多条）。见
@@ -21,9 +25,10 @@
 
 ---
 
-## 1. 载荷结构
+## 1. native-json 载荷结构
 
-MQTT 通道按**设备分组**推送，payload 为 JSON 数组，数组内每条 = 一个点位：
+消息类通道按**采集批次**推送（批次以 (设备, 采集组) 为单位），`native-json` 的 payload
+为 JSON 数组，数组内每条 = 一个点位：
 
 ```json
 [
@@ -50,6 +55,74 @@ MQTT 通道按**设备分组**推送，payload 为 JSON 数组，数组内每条
 > "收到一条记录"当作设备在线心跳（在线状态请看设备断联报警）。网关启动、
 > 推送通道新增或改配后的首轮总是全量，且质量码变化（如 192 → 2）本身也算变化。
 > 需要等间隔采样时把该开关置为 false（可在「运行开关」页动态切换，从下一批采集起生效）。
+
+### 1.1 group-json 帧结构
+
+`group-json` 把设备级与组级信息提到帧头，`points` 放本组全部点位；一条消息 =
+一个 (设备, 采集组) 的一次采集快照：
+
+```json
+{
+  "collectedAt": "2026-11-02 20:00:00.123",
+  "deviceId": "019fabd15a9176dda844147d98d38f9b",
+  "deviceCode": "ac-1-code",
+  "deviceName": "空调-modbus-tcp",
+  "protocol": "ModBus.TCP",
+  "thingModelCode": "th_ac",
+  "groupId": "019fb110000000000000000000000001",
+  "groupCode": "fast",
+  "groupName": "fast",
+  "groupIntervalMs": 500,
+  "points": [
+    {
+      "deviceAddressId": "019fb1137da076a4ac97af5e51f2e22c",
+      "deviceAddressName": "411115",
+      "value": "0",
+      "dataType": "word",
+      "kind": "uint",
+      "quality": 192,
+      "propertyCode": "temperature"
+    },
+    {
+      "deviceAddressId": "019fb1137da076a4ac97af5e51f2e23d",
+      "deviceAddressName": "411116",
+      "value": "",
+      "dataType": "word",
+      "kind": "uint",
+      "quality": 2,
+      "propertyCode": ""
+    }
+  ]
+}
+```
+
+帧头字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `collectedAt` | string | 同 §2 的 `collectedAt`；**帧级**，同一帧内的点位共享 |
+| `deviceId` / `deviceCode` / `deviceName` | string | 同 §2；每帧只出现一次，不随点位重复 |
+| `protocol` | string | 同 §2；同一批次只含一台设备，因此是帧级字段；`dataType` 仍是逐点字段 |
+| `thingModelCode` | string | 同 §2；设备级，只出现一次 |
+| `groupId` | string | 采集组内部主键；未分组为空串 |
+| `groupCode` | string | 采集组编码（`collector_group.code`），创建后不可修改，**下游优先用它关联业务**；未分组为空串 |
+| `groupName` | string | 采集组名称，仅展示用；未分组为空串 |
+| `groupIntervalMs` | int | 组采集周期（毫秒）；未分组为 0 |
+| `points` | array | 本组全部点位，见下 |
+| `trigger` | object | 同 §2.1；**帧级**（同一批次内的记录共享同一个 trigger），仅事件触发推送时存在，正常帧没有这个键 |
+
+`points[]` 元素与 §2 完全同名同义（`deviceAddressId` / `deviceAddressName` /
+`value` / `dataType` / `kind` / `quality` / `propertyCode`），不再重复；`value`
+的解析规则见 §3，`protocol` 仍是 `dataType` 的命名空间（§4）。
+
+**坏点不剔除**：`points` 包含本组全部点位，质量码 `< 128` 的点保留在数组里
+（`value` 通常为空串）。**判坏用 `quality < 128`，不能用 `value` 是否为空判断**
+——空串也可能是合法的文本值。
+
+投递时机与 §1 的 change-only 规则一致：未变化的点位不会出现在 `points` 里，整帧
+点位都未变化时不产出消息。因此一帧可能只含部分点位，下游不能假设每次都是全量。
+除 `trigger` 外字段始终存在，缺失时为空串或 0；读取按字段名，不要依赖位置。
+主题模板与 `groupIds` 订阅过滤见 [push-channels.md §2.1](../docs/push-channels.md)。
 
 ## 2. 字段语义
 

@@ -6,6 +6,16 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
+## [未发布]
+
+### 变更
+
+- **`group-json` 载荷重构（破坏性）**：`values`/`errors` 字典合并为 `points` 数组，坏点保留并携带 `quality`（`< 128` 判坏）；帧头新增 `deviceCode`/`protocol`/`thingModelCode`/`groupCode`，`timestamp` 更名为 `collectedAt`、`intervalMs` 更名为 `groupIntervalMs`。字段契约见 `specs/push-payload.md` §1.1；映射编辑器同步补充批次字段 `intervalMs`。
+
+### Changed
+
+- **`group-json` payload redesign (breaking)**: the `values`/`errors` dictionaries are replaced by a single `points` array that keeps bad-quality points (`quality < 128`); the frame header now carries `deviceCode` / `protocol` / `thingModelCode` / `groupCode`, `timestamp` is renamed to `collectedAt`, and `intervalMs` to `groupIntervalMs`. The field contract lives in `specs/push-payload.md` §1.1; the mapping editor also exposes the `intervalMs` batch field.
+
 ## [0.7.0] - 2026-11-04
 
 ### 新增
