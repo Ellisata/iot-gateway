@@ -223,6 +223,13 @@ func TestCollectionContinuesAcrossPluginCrash(t *testing.T) {
 	// 缩短重启退避，让崩溃恢复在测试时限内完成。
 	m.opts.RestartMin = 10 * time.Millisecond
 	m.opts.RestartMax = 50 * time.Millisecond
+	// 退避压到毫秒级后，重启预算也必须一起放大：在「让 crash 模式失效」的
+	// 改库生效前（采集引擎 watcher 最长 10s），采集侧每一轮都会把刚拉起的
+	// 进程再打崩一次。默认 MaxRestarts=10 会在 10s 窗口内就被烧完，监管永久
+	// 放弃拉起，之后无论配置怎么改都等不到恢复 —— 这正是本测试在 CI 上偶发
+	// 失败的原因（见 process.go recordFail）。生产退避是 1s→30s，同样的预算
+	// 能撑数分钟；测试只是把所有时间压短了。
+	m.opts.MaxRestarts = 10_000
 
 	if err := m.Start(); err != nil {
 		t.Fatalf("manager Start: %v", err)
@@ -253,23 +260,17 @@ func TestCollectionContinuesAcrossPluginCrash(t *testing.T) {
 	}
 	t.Cleanup(engine.Stop)
 
-	// 第一轮会把插件进程打崩。
-	waitFor(t, 15*time.Second, "插件进程崩溃", func() bool {
+	// 第一轮会把插件进程打崩，监管随即重新拉起它 —— 世代号只在 markUp
+	// （握手成功）时递增，因此 epoch > 1 同时证明了「崩溃」与「重新拉起」。
+	// 不要再单独轮询 isUp()：crash 模式下进程会被采集侧反复打崩，up 窗口
+	// 只有毫秒级，这种轮询本身就是竞态。
+	waitFor(t, 15*time.Second, "插件进程崩溃并被重新拉起", func() bool {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		for _, lp := range m.plugins {
 			if lp.link.epoch() > 1 {
 				return true
 			}
-		}
-		return false
-	})
-	// 进程已被监管重新拉起（世代号递增）。
-	waitFor(t, 15*time.Second, "插件进程被重新拉起", func() bool {
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		for _, lp := range m.plugins {
-			return lp.link.isUp()
 		}
 		return false
 	})
