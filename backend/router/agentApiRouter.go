@@ -61,6 +61,7 @@ func AgentApiRoutes(
 	dc *controller.DeviceController,
 	ac *controller.DeviceAddressController,
 	cgc *controller.CollectorGroupController,
+	trc *controller.TriggerRuleController,
 	tmc *controller.ThingModelController,
 	cc *controller.CollectionController,
 	rc *controller.RealtimeController,
@@ -98,6 +99,7 @@ func AgentApiRoutes(
 		DeviceRoutes(g, dc)
 		DeviceAddressRoutes(g, ac)
 		CollectorGroupRoutes(g, cgc)
+		TriggerRuleRoutes(g, trc)
 		ThingModelRoutes(g, tmc)
 
 		// 采集与实时值

@@ -42,6 +42,11 @@
             <Expand v-else />
           </el-icon>
           <el-breadcrumb separator="/">
+            <!-- 钻取页（hidden 路由）用 meta.parentTitleKey/parentName 补一级可点击的父页面，
+                 否则用户只看到当前页名，既不知道层级也没有回程入口。 -->
+            <el-breadcrumb-item v-if="parentTitle" :to="parentRoute">
+              {{ parentTitle }}
+            </el-breadcrumb-item>
             <el-breadcrumb-item v-if="pageTitle">{{ pageTitle }}</el-breadcrumb-item>
           </el-breadcrumb>
         </div>
@@ -192,6 +197,14 @@ onBeforeUnmount(() => {
 // 面包屑标题：取路由 titleKey 实时翻译，切换语言时跟随更新
 const pageTitle = computed(() =>
   route.meta.titleKey ? t(route.meta.titleKey) : ''
+)
+
+// 钻取页的父级面包屑（可选）：parentTitleKey 给文案，parentName 给跳转目标
+const parentTitle = computed(() =>
+  route.meta.parentTitleKey ? t(route.meta.parentTitleKey) : ''
+)
+const parentRoute = computed(() =>
+  route.meta.parentName ? { name: route.meta.parentName } : undefined
 )
 
 function toggleSidebar() {

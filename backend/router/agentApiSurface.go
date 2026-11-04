@@ -273,6 +273,59 @@ var agentApiSurface = map[string]SurfaceEntry{
 		Note:   "**用 GET 实现**。组仍被点位绑定时拒绝删除，必须先解绑",
 	},
 
+	// ==================== 事件触发采集规则 ====================
+	"GET /triggerRule/pageTriggerRule": {
+		Access: AccessRead,
+		Params: argQuery(dto.PageTriggerRuleDTO{}, map[string]string{
+			"code":   "规则编码模糊匹配",
+			"name":   "规则名模糊匹配",
+			"status": "1 只看启用，0 只看停用；不传 = 全部",
+		}),
+	},
+	"GET /triggerRule/getTriggerRuleById/:id": {Access: AccessRead, Params: argNone()},
+	"GET /triggerRule/pageTriggerRuleRecord": {
+		Access: AccessRead,
+		Params: argQuery(dto.PageTriggerRuleRecordDTO{}, map[string]string{
+			"ruleId":    "按规则过滤",
+			"ruleCode":  "规则编码快照模糊匹配（规则删除后仍可查）",
+			"ruleName":  "规则名快照模糊匹配（规则删除后仍可查）",
+			"status":    "success / offline / timeout / read_failed / push_failed / dropped",
+			"startTime": "起始时间 YYYY-MM-DD HH:mm:ss（含）",
+			"endTime":   "结束时间 YYYY-MM-DD HH:mm:ss（含）",
+		}),
+		Note: "触发历史：success 只表示已进入通道 outbox 队列，不代表已送达下游",
+	},
+	"GET /triggerRule/recentTriggers": {
+		Access: AccessRead,
+		Params: argQuery(dto.RecentTriggerDTO{}, map[string]string{
+			"ruleId": "按规则过滤",
+			"limit":  "1-100，默认 100",
+		}),
+		Note: "最近触发仅内存（重启即清空），新→旧；含实际读到的点位值",
+	},
+	"POST /triggerRule/createTriggerRule": {
+		Access: AccessWrite,
+		Params: argBody(dto.CreateTriggerRuleDTO{}, map[string]string{
+			"code":             "业务编码，必填，创建后不可修改；字母开头，最长 64",
+			"conditionsJson":   "DNF：groups 之间 OR、组内条件 AND；每个条件 {addressId, op, values}",
+			"actionAddressIds": "触发后读取的点位；必须属于 actionDeviceId 且有读权限",
+			"targetChannelId":  "推送通道实例 id",
+		}),
+		Note: "条件点位必须处于采集状态（启用、有读权限、采集组可用）",
+	},
+	"POST /triggerRule/updateTriggerRule": {
+		Access: AccessWrite,
+		Params: argBody(dto.UpdateTriggerRuleDTO{}, map[string]string{
+			"status": "省略/null = 保持原状态；其余配置整份覆盖",
+			"code":   "留空 = 保持原编码；传不同值会被拒绝（编码不可修改）",
+		}),
+	},
+	"GET /triggerRule/deleteTriggerRule/:id": {
+		Access: AccessWrite,
+		Params: argNone(),
+		Note:   "**用 GET 实现**。删除规则不删除触发历史记录",
+	},
+
 	// ==================== 物模型 ====================
 	"GET /thingModel/pageThingModel": {
 		Access: AccessRead,

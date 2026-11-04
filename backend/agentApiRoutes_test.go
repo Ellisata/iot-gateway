@@ -48,6 +48,7 @@ func newTestEngineWithReader(cfg runtimecfg.Reader) *gin.Engine {
 		(*controller.DeviceController)(nil),
 		(*controller.DeviceAddressController)(nil),
 		(*controller.CollectorGroupController)(nil),
+		(*controller.TriggerRuleController)(nil),
 		(*controller.ThingModelController)(nil),
 		(*controller.CollectionController)(nil),
 		(*controller.RealtimeController)(nil),

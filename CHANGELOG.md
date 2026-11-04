@@ -6,6 +6,66 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
+## [0.7.0] - 2026-11-04
+
+### 新增
+
+- **OPC UA 通道监控**：服务端通道记录最近写入地址空间的批次，`publishCount` / `rowsCount` 改为更新批次 / 更新点位，`extra` 展示点位覆盖度、订阅与监控项数及重建次数；`Connected` 表示监听已就绪。
+- **事件触发采集规则**：新增规则管理与触发历史（迁移 `033_trigger_rule.sql`）。条件为 DNF（组间 OR、组内 AND），可配冷却与读取超时；采集样本出现上升沿后异步读取动作设备指定点位并定向推送到一个通道，结果按 `success` / `offline` / `timeout` / `read_failed` / `push_failed` / `dropped` 落库，保留规则、条件与结果快照（7 天或 2 万行）。控制台新增「事件触发规则」「触发历史」页，接口整组镜像到 `/agentApi`，新增错误码 `40051`–`40062`。
+- **触发规则读取超时**：设备锁等待改为 context 感知。设备正被慢采集或重连占用时，规则读取在超时（默认 5s，最大 60s）后放弃等待并记录新状态 `timeout`；已开始但超时后才返回的读取不再推送迟到结果。控制下发同样按调用方 ctx 放弃等锁。
+- **触发执行按设备隔离**：规则引擎把读点/推送交给动作设备各自的串行执行者，全局分发协程不再直接执行 I/O。单台慢设备只会占住自己的执行队列，其他设备的规则照常执行；同一设备仍严格串行，单设备队列满时记 `dropped` 并释放规则的单飞标记。
+- **触发规则编码**：`trigger_rule` 新增全局唯一的业务编码 `code`（迁移 `034_trigger_rule_code.sql`），创建必填、创建后不可修改，格式与设备/采集组编码一致；存量规则按 ID 回填。事件载荷的 `trigger` 对象新增 `ruleCode`，触发历史新增 `rule_code` 快照；列表支持按编码检索。
+- **事件触发载荷元数据**：事件触发规则定向推送的动作记录新增可选 `trigger` 对象（`source` / `ruleId` / `ruleCode` / `ruleName` / `triggerId` / `firedAt`），`firedAt` 为条件上升沿时刻。仅事件推送携带，正常采集与外部订阅载荷逐字节不变；断网缓存补发保留该元数据。native-json / group-json 直接输出，mapping-json / script 可按需取用。
+- **触发规则实时监控**：规则引擎在内存保留最近 100 次已结束的触发（成功/离线/超时/读失败/推送失败/丢弃），新增只读 `GET /triggerRule/recentTriggers`（可按规则过滤，镜像到 `/agentApi`）；控制台「事件触发规则」页新增实时监控抽屉，展示触发时间、规则、状态、目标通道、动作设备、耗时与错误，展开可看本次实际读到的点位值，打开期间每 3 秒刷新。仅内存、重启即清空；持久化历史与条件快照仍走触发历史页。
+
+### Added
+
+- **OPC UA channel monitoring**: the server channel keeps its recent
+  address-space batches; `publishCount` / `rowsCount` now mean update batches /
+  updated points, `extra` exposes point coverage, subscription and
+  monitored-item counts plus rebuild count, and `Connected` means the listener
+  is up.
+- **Event-triggered collection rules**: adds rule management and trigger history
+  (migration `033_trigger_rule.sql`). Conditions are DNF (OR across groups, AND
+  within a group) with optional cooldown and read timeout; on a rising edge in
+  collected samples the engine asynchronously reads the action device's points
+  and pushes them to one channel, recording `success` / `offline` / `timeout` /
+  `read_failed` / `push_failed` / `dropped` with rule, condition and result
+  snapshots (7 days or 20,000 rows). The console gains Event Trigger Rules and
+  Trigger History pages; routes are mirrored to `/agentApi` and error codes
+  `40051`–`40062` are added.
+- **Trigger-rule read timeout**: device-lock acquisition is now
+  context-aware. When a slow poll or reconnect owns the device, a rule read
+  gives up waiting at its timeout (default 5s, max 60s) and records the new
+  `timeout` status; a read that was already in flight and finishes late is no
+  longer pushed. Control writes also give up waiting on the caller's ctx.
+- **Per-device trigger execution**: the rule engine now hands reads and pushes
+  to a serial executor per action device; global dispatch goroutines no longer
+  perform I/O. A slow device only occupies its own queue, while rules for other
+  devices keep running. The same device remains strictly serial; a full
+  per-device queue records `dropped` and clears the rule's single-flight flag.
+- **Trigger rule code**: `trigger_rule` gains a globally unique business code
+  `code` (migration `034_trigger_rule_code.sql`), required on creation,
+  immutable afterwards, using the same format as device and collector-group
+  codes; existing rows are backfilled from their IDs. Event payload `trigger`
+  objects gain `ruleCode`, trigger history stores a `rule_code` snapshot, and
+  the rule list can be searched by code.
+- **Trigger metadata in event payloads**: action records pushed by a trigger
+  rule carry an optional `trigger` object (`source` / `ruleId` / `ruleCode` /
+  `ruleName` / `triggerId` / `firedAt`, where `firedAt` is the rising-edge
+  time). Only event pushes include it, so normal collection and
+  external-subscription payloads stay byte-for-byte unchanged; offline spool
+  replay preserves the metadata. native-json and group-json expose it directly,
+  while mapping-json and script can opt in by referencing `trigger.*`.
+- **Live trigger-rule monitoring**: the rule engine keeps the last 100 completed
+  triggers in memory (success / offline / timeout / read failed / push failed / dropped)
+  behind the read-only `GET /triggerRule/recentTriggers` (optional rule filter,
+  mirrored to `/agentApi`). The Event Trigger Rules page gains a live monitor
+  drawer showing fired time, rule, status, target channel, action device,
+  duration and error; expanding a row shows the point values actually read,
+  refreshing every 3 seconds while open. Memory-only — cleared on restart;
+  persisted history and condition snapshots remain on the Trigger History page.
+
 ## [0.6.0] - 2026-11-03
 
 ### 新增

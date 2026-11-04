@@ -35,6 +35,7 @@ import (
 	"iot-gateway/runtimecfg"
 	"iot-gateway/service"
 	"iot-gateway/subscribe"
+	"iot-gateway/triggerrule"
 	"iot-gateway/workerPool"
 )
 
@@ -61,6 +62,10 @@ type AppDependencies struct {
 	// RuntimeConfig 运行期配置开关（default.yaml 作默认值，system_config 表作覆盖）。
 	// 停机时先 Close 关闭更新入口，再按既有顺序停各组件。
 	RuntimeConfig *runtimecfg.Manager
+	// TriggerEngine 事件触发采集规则引擎。实现 collector.RecordSink（条件判定）
+	// 与 service.TriggerRuleReloader（规则 CRUD 后热加载）。
+	// 它需要在 main 中 BindCollector(CollectorEngine) 后才能读点（late binding 破环）。
+	TriggerEngine *triggerrule.Engine
 	// DashboardSampler 大盘遥测采样器：每分钟把在线率、采集吞吐与推送积压
 	// 合成一个内存采样点，供 /dashboard/trend 查询。
 	DashboardSampler *metrics.Sampler
@@ -89,6 +94,13 @@ func InitializeApp() (*AppDependencies, func()) {
 
 		// 推送引擎（实现 collector.RecordSink，接收采集数据）
 		push.NewEngineWithPolicy,
+		// 事件触发规则引擎：既是 collector.RecordSink（判定条件），又是
+		// service.TriggerRuleReloader（CRUD 后热加载）。读点能力由 main 绑定，
+		// 因为 collector.Engine → RecordSink → triggerrule → collector.Engine 是构造环。
+		triggerrule.NewEngine,
+		wire.Bind(new(triggerrule.Pusher), new(*push.Engine)),
+		wire.Bind(new(service.TriggerRuleReloader), new(*triggerrule.Engine)),
+		wire.Bind(new(service.TriggerRuleLiveReader), new(*triggerrule.Engine)),
 		// 外部 MQTT 订阅管理器：订阅数据经映射转换后只投递到时序数据库通道。
 		// Sink 绑定到推送引擎的 PushRecordsToTimeSeries（见 push/engine.go）。
 		subscribe.NewManager,
@@ -106,8 +118,8 @@ func InitializeApp() (*AppDependencies, func()) {
 		wire.Bind(new(metrics.OverviewSource), new(*service.DeviceService)),
 		wire.Bind(new(metrics.CollectionSource), new(*service.CollectionService)),
 		wire.Bind(new(metrics.PushSource), new(*push.Engine)),
-		// 采集记录的扇出：快照 + 遥测计数 + 推送。采集引擎只接受单个 RecordSink，
-		// 三个消费方由 NewRecordSink 组装，各自不必感知对方。
+		// 采集记录的扇出：快照 + 遥测计数 + 事件触发规则判定 + 推送。
+		// 采集引擎只接受单个 RecordSink，四个消费方由 NewRecordSink 组装，各自不必感知对方。
 		NewRecordSink,
 		// 断联报警引擎（实现 collector.DeviceStateSink，接收设备在线状态）
 		alarm.NewEngine,
@@ -175,10 +187,11 @@ func InitializeApp() (*AppDependencies, func()) {
 //
 // 顺序：实时值快照在前 —— 它是纯内存写，先落快照再交推送引擎，
 // 下游入队/落盘变慢时快照也不会滞后。
-func NewRecordSink(store *realtime.Store, recorder *metrics.Recorder, pushEngine *push.Engine) collector.RecordSink {
-	// 计数器排在推送之前：推送阻塞或丢弃时，采集吞吐仍然准确 ——
-	// 这两个数字回答的是不同的问题（读到了多少 / 发出去多少）。
-	return collector.MultiSink{store, recorder, pushEngine}
+func NewRecordSink(store *realtime.Store, recorder *metrics.Recorder,
+	triggerEngine *triggerrule.Engine, pushEngine *push.Engine) collector.RecordSink {
+	// 规则引擎是纯内存判定，排在推送之前：推送阻塞/丢弃不能拖慢事件检测。
+	// 计数器也排在推送之前：推送阻塞或丢弃时，采集吞吐仍然准确。
+	return collector.MultiSink{store, recorder, triggerEngine, pushEngine}
 }
 
 // NewWorkerPool 从配置创建 Worker 池
@@ -197,6 +210,7 @@ func ProvideRouteOptions(
 	dc *controller.DeviceController,
 	ac *controller.DeviceAddressController,
 	cgc *controller.CollectorGroupController,
+	trc *controller.TriggerRuleController,
 	tmc *controller.ThingModelController,
 	cc *controller.CollectionController,
 	rc *controller.RealtimeController,
@@ -224,6 +238,7 @@ func ProvideRouteOptions(
 		router.WithDeviceRoutes(dc),
 		router.WithDeviceAddressRoutes(ac),
 		router.WithCollectorGroupRoutes(cgc),
+		router.WithTriggerRuleRoutes(trc),
 		router.WithThingModelRoutes(tmc),
 		router.WithCollectionRoutes(cc),
 		router.WithRealtimeRoutes(rc),
@@ -248,6 +263,6 @@ func ProvideRouteOptions(
 		// 出厂关闭**，由运行期开关 agentApi.enabled 控制）。
 		// 刻意放在最后 —— 它复用同一批 controller，与前面各 With* 无顺序依赖。
 		// 风险与暴露清单见 router/agentApiRouter.go。
-		router.WithAgentApiRoutes(rcfg, uc, dc, ac, cgc, tmc, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc, ctrl),
+		router.WithAgentApiRoutes(rcfg, uc, dc, ac, cgc, trc, tmc, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc, ctrl),
 	}
 }

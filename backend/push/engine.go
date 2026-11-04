@@ -5,6 +5,7 @@ package push
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -28,6 +29,14 @@ import (
 // （防止整台设备百万级点位打包成超大批次入队）。
 // 后续可提升为配置项（configFile.Config）。
 const maxRecordsPerBatch = 500
+
+// 定向推送（事件触发规则）的失败分类，供调用方落触发记录。
+var (
+	// ErrPushNotRunning 推送引擎尚未启动或已停止。
+	ErrPushNotRunning = errors.New("push: engine not running")
+	// ErrChannelNotFound 目标通道不存在（未启用、被删除或尚未加载）。
+	ErrChannelNotFound = errors.New("push: channel not found")
+)
 
 // Engine 数据推送引擎，管理所有活跃推送通道。
 //
@@ -191,7 +200,7 @@ func (e *Engine) Refresh() error {
 // 点位会再投递一次。过滤发生在实时值快照之后（MultiSink 的顺序见 wire.go），
 // 快照因此每轮都能更新。
 func (e *Engine) PushRecords(records []collector.CollectedRecord) {
-	e.pushRecords(records, nil, true)
+	e.pushRecords(records, nil, true, false)
 }
 
 // PushRecordsToTimeSeries 将外部来源（MQTT 订阅）的记录定向投递给时序数据库通道。
@@ -206,12 +215,46 @@ func (e *Engine) PushRecordsToTimeSeries(records []collector.CollectedRecord) {
 	e.pushRecords(records, func(ch Channel) bool {
 		tsc, ok := ch.(TimeSeriesChannel)
 		return ok && tsc.IsTimeSeries()
-	}, false)
+	}, false, false)
+}
+
+// PushRecordsToChannel 把一批记录定向投递给指定的通道实例（事件触发规则使用）。
+//
+// 与 PushRecords 的差异：
+//   - 只投给 channelID 对应的通道；
+//   - **不参与变化才推送**：事件触发读到的点是显式事实，不能被 changeOnly 抑制；
+//   - **绕过通道的 GroupSelector**：规则里已经明确选了这条通道，不应再被通道的
+//     groupIds 过滤静默丢弃。
+//
+// 返回的 success 语义是"已进入通道的 outbox 队列"，不是"已送达下游"。
+// 通道不存在或推送引擎未运行时返回相应的导出错误，供调用方落触发记录。
+func (e *Engine) PushRecordsToChannel(channelID string, records []collector.CollectedRecord) (bool, error) {
+	if !e.IsRunning() {
+		return false, ErrPushNotRunning
+	}
+	e.mu.RLock()
+	_, ok := e.channels[channelID]
+	e.mu.RUnlock()
+	if !ok {
+		return false, ErrChannelNotFound
+	}
+	e.pushRecords(records, func(ch Channel) bool {
+		return ch.ChannelID() == channelID
+	}, false, true)
+	return true, nil
+}
+
+// IsRunning 推送引擎是否已启动且未停止。
+func (e *Engine) IsRunning() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.running
 }
 
 // pushRecords 按设备分组并分片后分发给满足 include 的通道（include 为 nil 表示全部）。
 // filterChanges 为真且开启了 changeOnly 时，先滤掉值/质量码未变的记录。
-func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(Channel) bool, filterChanges bool) {
+// skipGroupFilter 为真时不做 GroupSelector 过滤（定向推送事件记录时使用）。
+func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(Channel) bool, filterChanges, skipGroupFilter bool) {
 	if len(records) == 0 {
 		return
 	}
@@ -267,8 +310,10 @@ func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(C
 		// 没有任何通道接收时，绝不能把点位记为"已投递"（见 changeTracker.filter）。
 		targets := make([]Channel, 0, len(chans))
 		for _, ch := range chans {
-			if gs, ok := ch.(GroupSelector); ok && !gs.AcceptsGroup(k.deviceID, k.groupID) {
-				continue
+			if !skipGroupFilter {
+				if gs, ok := ch.(GroupSelector); ok && !gs.AcceptsGroup(k.deviceID, k.groupID) {
+					continue
+				}
 			}
 			targets = append(targets, ch)
 		}

@@ -232,3 +232,39 @@ func TestThingModelCodesInDoc(t *testing.T) {
 		t.Errorf("payload mismatch:\n got: %s\nwant: %s", got, want)
 	}
 }
+
+func TestTriggerMetadataReachableByPath(t *testing.T) {
+	enc := mustEncoder(t, `{
+		"version": 1,
+		"batchFields": {
+			"rule": {"source": "path", "value": "trigger.ruleId"},
+			"tid":  {"source": "path", "value": "trigger.triggerId"}
+		},
+		"fields": {
+			"point": {"source": "path", "value": "deviceAddressId"},
+			"rule":  {"source": "path", "value": "trigger.ruleId"}
+		}
+	}`)
+	b := sampleBatch()
+	b.Records[0].Trigger = &collector.RecordTrigger{
+		Source: "trigger", RuleID: "r1", RuleName: "批次完成",
+		TriggerID: "t1", FiredAt: "2026-11-04 10:00:00.000",
+	}
+	out := encodeOne(t, enc, b)
+
+	var root map[string]any
+	if err := json.Unmarshal([]byte(out), &root); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if root["rule"] != "r1" || root["tid"] != "t1" {
+		t.Fatalf("batchFields trigger = %v/%v", root["rule"], root["tid"])
+	}
+	records, ok := root["records"].([]any)
+	if !ok || len(records) != 2 {
+		t.Fatalf("records = %v", root["records"])
+	}
+	first, _ := records[0].(map[string]any)
+	if first["rule"] != "r1" {
+		t.Fatalf("record trigger = %v", first["rule"])
+	}
+}

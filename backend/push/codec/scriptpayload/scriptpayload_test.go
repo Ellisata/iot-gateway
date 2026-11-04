@@ -304,3 +304,32 @@ func TestRecordCollectedAtFallsBackToBatch(t *testing.T) {
 		t.Errorf("payload = %s, want %s", msgs[0].Payload, want)
 	}
 }
+
+func TestEncodeTriggerMetadata(t *testing.T) {
+	enc := newTestEncoder(t, map[string]any{
+		"script": `function encode(batch) {
+			return JSON.stringify({
+				rule: batch.trigger.ruleId,
+				pointRule: batch.records[0].trigger.ruleId,
+				firedAt: batch.trigger.firedAt
+			})
+		}`,
+	})
+	b := sampleBatch()
+	b.Records[0].Trigger = &collector.RecordTrigger{
+		Source: "trigger", RuleID: "r1", RuleName: "批次完成",
+		TriggerID: "t1", FiredAt: "2026-11-04 10:00:00.000",
+	}
+	msgs, err := enc.Encode(b)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(msgs[0].Payload, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["rule"] != "r1" || got["pointRule"] != "r1" ||
+		got["firedAt"] != "2026-11-04 10:00:00.000" {
+		t.Fatalf("payload = %v", got)
+	}
+}

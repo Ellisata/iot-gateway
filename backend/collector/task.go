@@ -109,11 +109,12 @@ type gatewayTask struct {
 	pointValueSink PointValueSink
 	pool           *workerPool.WorkerPool
 
-	// devMuMap: deviceID -> 设备级互斥锁。串行化对同一设备驱动的重连与读取。
+	// devMuMap: deviceID -> 设备级互斥门。串行化对同一设备驱动的重连与读取。
 	// 独占串行总线驱动（RTU）整轮持锁；线程安全驱动（TCP/S7）仅对重连+单次 Read 加锁，
 	// 避免不同频率分组的并发轮询在驱动上互相干扰（见 pollDevice）。
+	// 用 deviceGate 而不是 sync.Mutex：触发规则/控制下发可按超时放弃等待慢采集。
 	devMuMapMu sync.Mutex
-	devMuMap   map[string]*sync.Mutex
+	devMuMap   map[string]*deviceGate
 
 	// wg 统计在途轮询任务，Stop 时先排空再关闭驱动，保证无轮询访问已关闭连接。
 	wg sync.WaitGroup
@@ -248,19 +249,19 @@ func (t *gatewayTask) shouldLogReconnect(deviceID string, now time.Time) (n int,
 	return n, true
 }
 
-// deviceLock 返回指定设备的互斥锁（懒初始化，供手工构造的 task 直接使用）。
-func (t *gatewayTask) deviceLock(deviceID string) *sync.Mutex {
+// deviceLock 返回指定设备的互斥门（懒初始化，供手工构造的 task 直接使用）。
+func (t *gatewayTask) deviceLock(deviceID string) *deviceGate {
 	t.devMuMapMu.Lock()
 	defer t.devMuMapMu.Unlock()
 	if t.devMuMap == nil {
-		t.devMuMap = make(map[string]*sync.Mutex)
+		t.devMuMap = make(map[string]*deviceGate)
 	}
-	m, ok := t.devMuMap[deviceID]
+	g, ok := t.devMuMap[deviceID]
 	if !ok {
-		m = &sync.Mutex{}
-		t.devMuMap[deviceID] = m
+		g = newDeviceGate()
+		t.devMuMap[deviceID] = g
 	}
-	return m
+	return g
 }
 
 // findDevice 按 ID 查找设备（活跃设备列表线性查找，数量少、频率低，可接受）。
@@ -896,7 +897,7 @@ func (g *frequencyGroup) doPollDevice(deviceID string, addrs []po.DeviceAddress)
 //
 // 驱动底层连接需线程安全：Modbus TCP 的 tcpTransporter.Send、gos7 的 transporter.Send
 // 均对单次请求+响应内部持锁，并发 Read 安全（见 pollDevice 注释）。
-func (g *frequencyGroup) doPollDeviceConcurrent(deviceID string, addrs []po.DeviceAddress, dm *sync.Mutex) {
+func (g *frequencyGroup) doPollDeviceConcurrent(deviceID string, addrs []po.DeviceAddress, dm *deviceGate) {
 	t := g.task
 
 	t.mu.Lock()

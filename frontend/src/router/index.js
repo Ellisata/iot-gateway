@@ -67,6 +67,25 @@ const routes = [
         component: () => import('@/views/industrial/device-scan/IndexView.vue'),
         meta: { titleKey: 'menu.deviceScan', icon: 'Search' },
       },
+      {
+        path: 'industrial/trigger-rule',
+        name: 'GatewayTriggerRule',
+        component: () => import('@/views/industrial/trigger-rule/IndexView.vue'),
+        meta: { titleKey: 'menu.triggerRule', icon: 'Bolt' },
+      },
+      {
+        path: 'industrial/trigger-rule-record',
+        name: 'GatewayTriggerRuleRecord',
+        component: () => import('@/views/industrial/trigger-rule-record/IndexView.vue'),
+        // 从规则列表行内钻取进入：面包屑补一级父页面，返回入口由页面头部的
+        // 「返回事件触发规则」链接提供（hidden 路由没有菜单项，不留这两处就回不去）。
+        meta: {
+          titleKey: 'menu.triggerRuleRecord',
+          parentTitleKey: 'menu.triggerRule',
+          parentName: 'GatewayTriggerRule',
+          hidden: true,
+        },
+      },
 
       {
         path: 'industrial/protocol',

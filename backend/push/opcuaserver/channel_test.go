@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -488,6 +489,37 @@ func TestChannelEndToEnd(t *testing.T) {
 	if status.PublishCount == 0 || !status.Running || !status.Connected {
 		t.Errorf("snapshot = %+v, want running/connected with publishes", status)
 	}
+	// 监控口径：PublishCount 是写入地址空间的批次数，RowsCount 是点位记录数。
+	if status.PublishCount != 2 || status.RowsCount != 2 {
+		t.Errorf("snapshot batches/rows = %d/%d, want 2/2", status.PublishCount, status.RowsCount)
+	}
+	if status.Extra == nil {
+		t.Fatal("snapshot extra is nil, want OPC UA specific stats")
+	}
+	if got := status.Extra["points"]; got != 1 {
+		t.Errorf("extra points = %v, want 1", got)
+	}
+	if got := status.Extra["pointsWithData"]; got != 1 {
+		t.Errorf("extra pointsWithData = %v, want 1", got)
+	}
+	if got := status.Extra["addressSpaceDevices"]; got != 1 {
+		t.Errorf("extra addressSpaceDevices = %v, want 1", got)
+	}
+	if got := status.Extra["subscriptions"]; got != 0 {
+		t.Errorf("extra subscriptions = %v, want 0", got)
+	}
+
+	// 最近写入批次：一次 apply 一条，载荷是「设备/点位=原始值」预览。
+	msgs := ch.RecentMessages(0)
+	if len(msgs) != 2 {
+		t.Fatalf("recent batches = %d, want 2", len(msgs))
+	}
+	if msgs[0].Records != 1 || msgs[0].Target != ch.cfg.endpoint() {
+		t.Errorf("recent[0] = %+v, want 1 record targeting %s", msgs[0], ch.cfg.endpoint())
+	}
+	if !strings.Contains(msgs[1].Payload, "PLC-1/温度=21.5") {
+		t.Errorf("recent payload = %q, want point/value preview", msgs[1].Payload)
+	}
 
 	// 停止后端口必须释放，否则重建/重启会一直撞 EADDRINUSE。
 	_ = client.Close(ctx)
@@ -497,4 +529,100 @@ func TestChannelEndToEnd(t *testing.T) {
 		t.Fatalf("port not released after Stop: %v", err)
 	}
 	_ = ln.Close()
+}
+
+// TestSnapshotTracksClientSubscriptions 覆盖监控里的订阅数/监控项数。
+//
+// gopcua v0.9.1 不暴露会话/连接计数，订阅与监控项是唯一能反映
+// 「有没有客户端在真正使用这棵地址空间」的可观测信号。
+func TestSnapshotTracksClientSubscriptions(t *testing.T) {
+	db := newTestDB(t)
+	seedDevice(t, db, "d1", "PLC-1", 1, "a1", "Temperature", "温度", "Double", 1)
+
+	port := freePort(t)
+	rawCfg := fmt.Sprintf(`{"listenHost":"127.0.0.1","listenPort":%d}`, port)
+	chIface, err := newChannel(db, &po.PushChannel{ID: "ch-sub", Name: "opcua-sub", Type: "opcua", ConfigJSON: rawCfg})
+	if err != nil {
+		t.Fatalf("newChannel: %v", err)
+	}
+	ch := chIface.(*channel)
+	ch.Start()
+	t.Cleanup(ch.Stop)
+
+	ch.mu.RLock()
+	st := ch.state
+	ch.mu.RUnlock()
+	if st == nil {
+		t.Fatal("channel did not build an address space")
+	}
+	nodeID := ua.NewStringNodeID(st.nsID, "pt:d1:a1")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client, err := opcua.NewClient(ch.cfg.endpoint(),
+		opcua.SecurityPolicy("None"),
+		opcua.SecurityMode(ua.MessageSecurityModeNone),
+		opcua.AuthAnonymous(),
+		opcua.AutoReconnect(false),
+	)
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if err := client.Connect(ctx); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close(ctx) })
+
+	notifs := make(chan *opcua.PublishNotificationData, 16)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-notifs:
+			}
+		}
+	}()
+
+	sub, err := client.Subscribe(ctx, &opcua.SubscriptionParameters{Interval: 100 * time.Millisecond}, notifs)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	if _, err := sub.Monitor(ctx, ua.TimestampsToReturnBoth, &ua.MonitoredItemCreateRequest{
+		// DataEncoding 必须显式给非 nil：gopcua v0.9.1 的 Client.Read 会补默认值，
+		// 但 Subscription.Monitor 不会，nil 会被编码器整个跳过、服务端解码 body
+		// 时读到 unexpected EOF 并静默断开连接。
+		ItemToMonitor:  &ua.ReadValueID{NodeID: nodeID, AttributeID: ua.AttributeIDValue, DataEncoding: &ua.QualifiedName{}},
+		MonitoringMode: ua.MonitoringModeReporting,
+		RequestedParameters: &ua.MonitoringParameters{
+			ClientHandle:     1,
+			SamplingInterval: 100,
+			QueueSize:        1,
+			DiscardOldest:    true,
+		},
+	}); err != nil {
+		t.Fatalf("monitor: %v", err)
+	}
+
+	waitForCounts := func(want int) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			extra := ch.Snapshot().Extra
+			if extra != nil && extra["subscriptions"] == want && extra["monitoredItems"] == want {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("subscriptions/monitoredItems did not reach %d: %+v", want, extra)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+
+	waitForCounts(1)
+	if err := sub.Cancel(ctx); err != nil {
+		t.Fatalf("cancel subscription: %v", err)
+	}
+	waitForCounts(0)
 }

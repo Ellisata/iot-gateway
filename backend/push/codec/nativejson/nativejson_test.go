@@ -4,6 +4,7 @@
 package nativejson
 
 import (
+	"strings"
 	"testing"
 
 	"iot-gateway/collector"
@@ -40,5 +41,29 @@ func TestEncoderProducesOneMessage(t *testing.T) {
 	const want = `[{"deviceId":"d1","deviceCode":"dev-1-code","deviceName":"Device 1","deviceAddressId":"a1","deviceAddressName":"temp","value":"23.5","dataType":"float32","kind":"float","protocol":"ModBus.TCP","quality":192,"collectedAt":"2026-10-24 10:00:00.000","thingModelCode":"th_sensor","propertyCode":"temperature"}]`
 	if string(msgs[0].Payload) != want {
 		t.Errorf("payload:\n got: %s\nwant: %s", msgs[0].Payload, want)
+	}
+}
+
+func TestEncoderIncludesTriggerMetadataOnlyWhenPresent(t *testing.T) {
+	enc := New()
+	trigger := &collector.RecordTrigger{
+		Source: "trigger", RuleID: "r1", RuleCode: "batch-done", RuleName: "批次完成",
+		TriggerID: "t1", FiredAt: "2026-11-04 10:00:00.000",
+	}
+	msgs, err := enc.Encode(push.PushBatch{
+		DeviceID:    "d1",
+		CollectedAt: "2026-11-04 10:00:01.000",
+		Records: []collector.CollectedRecord{{
+			DeviceID: "d1", DeviceAddressID: "a1", Value: "1",
+			Kind: "float", Quality: 192, Trigger: trigger,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	payload := string(msgs[0].Payload)
+	const want = `"trigger":{"source":"trigger","ruleId":"r1","ruleCode":"batch-done","ruleName":"批次完成","triggerId":"t1","firedAt":"2026-11-04 10:00:00.000"}`
+	if !strings.Contains(payload, want) {
+		t.Fatalf("payload 缺少触发元数据:\n%s", payload)
 	}
 }

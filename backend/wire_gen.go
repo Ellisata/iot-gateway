@@ -24,6 +24,7 @@ import (
 	"iot-gateway/runtimecfg"
 	"iot-gateway/service"
 	"iot-gateway/subscribe"
+	"iot-gateway/triggerrule"
 	"iot-gateway/workerPool"
 	"runtime"
 )
@@ -50,7 +51,8 @@ func InitializeApp() (*AppDependencies, func()) {
 	store := realtime.NewStore()
 	recorder := metrics.NewRecorder()
 	engine := push.NewEngineWithPolicy(db, config, manager)
-	recordSink := NewRecordSink(store, recorder, engine)
+	triggerruleEngine := triggerrule.NewEngine(db, engine)
+	recordSink := NewRecordSink(store, recorder, triggerruleEngine, engine)
 	dispatcher := notify.NewDispatcher(db)
 	alarmEngine := alarm.NewEngine(db, dispatcher)
 	pointEngine := alarm.NewPointEngine(db, dispatcher)
@@ -63,6 +65,8 @@ func InitializeApp() (*AppDependencies, func()) {
 	deviceAddressController := controller.NewDeviceAddressController(deviceAddressService)
 	collectorGroupService := service.NewCollectorGroupService(db)
 	collectorGroupController := controller.NewCollectorGroupController(collectorGroupService)
+	triggerRuleService := service.NewTriggerRuleService(db, triggerruleEngine, triggerruleEngine)
+	triggerRuleController := controller.NewTriggerRuleController(triggerRuleService)
 	thingModelService := service.NewThingModelService(db)
 	thingModelController := controller.NewThingModelController(thingModelService)
 	collectionService := service.NewCollectionService(collectorEngine)
@@ -104,7 +108,7 @@ func InitializeApp() (*AppDependencies, func()) {
 	dashboardService := service.NewDashboardService(recorder)
 	dashboardController := controller.NewDashboardController(dashboardService)
 	controlController := controller.NewControlController(controlService)
-	v := ProvideRouteOptions(manager, userController, deviceController, deviceAddressController, collectorGroupController, thingModelController, collectionController, realtimeController, protocolController, pushChannelController, pushChannelFormController, mqttSubscriptionController, pushController, alarmController, alarmWebhookController, alarmWebhookFormController, logFileController, openApiSecretController, openApiSecretService, openApiController, gatewayController, pluginController, deviceScanController, systemConfigController, dashboardController, controlController)
+	v := ProvideRouteOptions(manager, userController, deviceController, deviceAddressController, collectorGroupController, triggerRuleController, thingModelController, collectionController, realtimeController, protocolController, pushChannelController, pushChannelFormController, mqttSubscriptionController, pushController, alarmController, alarmWebhookController, alarmWebhookFormController, logFileController, openApiSecretController, openApiSecretService, openApiController, gatewayController, pluginController, deviceScanController, systemConfigController, dashboardController, controlController)
 	ginEngine := router.SetupRouter(v)
 	channelMonitor := alarm.NewChannelMonitor(db, engine, dispatcher)
 	announcer := discovery.NewAnnouncerWithPolicy(config, serviceGatewayService, openApiSecretService, manager)
@@ -121,6 +125,7 @@ func InitializeApp() (*AppDependencies, func()) {
 		DeviceScan:       devicescanEngine,
 		Subscription:     subscribeManager,
 		RuntimeConfig:    manager,
+		TriggerEngine:    triggerruleEngine,
 		DashboardSampler: sampler,
 		WALCheckpointer:  walCheckpointer,
 	}
@@ -153,6 +158,10 @@ type AppDependencies struct {
 	// RuntimeConfig 运行期配置开关（default.yaml 作默认值，system_config 表作覆盖）。
 	// 停机时先 Close 关闭更新入口，再按既有顺序停各组件。
 	RuntimeConfig *runtimecfg.Manager
+	// TriggerEngine 事件触发采集规则引擎。实现 collector.RecordSink（条件判定）
+	// 与 service.TriggerRuleReloader（规则 CRUD 后热加载）。
+	// 它需要在 main 中 BindCollector(CollectorEngine) 后才能读点（late binding 破环）。
+	TriggerEngine *triggerrule.Engine
 	// DashboardSampler 大盘遥测采样器：每分钟把在线率、采集吞吐与推送积压
 	// 合成一个内存采样点，供 /dashboard/trend 查询。
 	DashboardSampler *metrics.Sampler
@@ -165,9 +174,10 @@ type AppDependencies struct {
 //
 // 顺序：实时值快照在前 —— 它是纯内存写，先落快照再交推送引擎，
 // 下游入队/落盘变慢时快照也不会滞后。
-func NewRecordSink(store *realtime.Store, recorder *metrics.Recorder, pushEngine *push.Engine) collector.RecordSink {
+func NewRecordSink(store *realtime.Store, recorder *metrics.Recorder,
+	triggerEngine *triggerrule.Engine, pushEngine *push.Engine) collector.RecordSink {
 
-	return collector.MultiSink{store, recorder, pushEngine}
+	return collector.MultiSink{store, recorder, triggerEngine, pushEngine}
 }
 
 // NewWorkerPool 从配置创建 Worker 池
@@ -185,6 +195,7 @@ func ProvideRouteOptions(
 	dc *controller.DeviceController,
 	ac *controller.DeviceAddressController,
 	cgc *controller.CollectorGroupController,
+	trc *controller.TriggerRuleController,
 	tmc *controller.ThingModelController,
 	cc *controller.CollectionController,
 	rc *controller.RealtimeController,
@@ -207,5 +218,5 @@ func ProvideRouteOptions(
 	dbc *controller.DashboardController,
 	ctrl *controller.ControlController,
 ) []router.RouteOption {
-	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectorGroupRoutes(cgc), router.WithThingModelRoutes(tmc), router.WithCollectionRoutes(cc), router.WithRealtimeRoutes(rc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithMqttSubscriptionRoutes(msc), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithAlarmWebhookRoutes(awc), router.WithAlarmWebhookFormRoutes(awfc), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac), router.WithGatewayRoutes(gc), router.WithPluginRoutes(plc), router.WithDeviceScanRoutes(dsc), router.WithSystemConfigRoutes(scc), router.WithDashboardRoutes(dbc), router.WithControlRoutes(ctrl), router.WithAgentApiRoutes(rcfg, uc, dc, ac, cgc, tmc, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc, ctrl)}
+	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectorGroupRoutes(cgc), router.WithTriggerRuleRoutes(trc), router.WithThingModelRoutes(tmc), router.WithCollectionRoutes(cc), router.WithRealtimeRoutes(rc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithMqttSubscriptionRoutes(msc), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithAlarmWebhookRoutes(awc), router.WithAlarmWebhookFormRoutes(awfc), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac), router.WithGatewayRoutes(gc), router.WithPluginRoutes(plc), router.WithDeviceScanRoutes(dsc), router.WithSystemConfigRoutes(scc), router.WithDashboardRoutes(dbc), router.WithControlRoutes(ctrl), router.WithAgentApiRoutes(rcfg, uc, dc, ac, cgc, trc, tmc, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc, ctrl)}
 }

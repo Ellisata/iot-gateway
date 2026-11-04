@@ -41,6 +41,9 @@ type PushPoint struct {
 	// 字段名读取不受影响（见 nativejson 包头的字节契约说明）。
 	ThingModelCode string `json:"thingModelCode"`
 	PropertyCode   string `json:"propertyCode"`
+	// Trigger 事件触发来源。只有事件触发规则定向推送的动作记录才有；
+	// 正常采集与外部订阅为 nil，omitempty 保证既有报文逐字节不变。
+	Trigger *collector.RecordTrigger `json:"trigger,omitempty"`
 }
 
 // Encoder native-json 编码器。
@@ -81,6 +84,7 @@ func MarshalBatch(records []collector.CollectedRecord, now string) ([]byte, erro
 			CollectedAt:       collectedAt,
 			ThingModelCode:    r.ThingModelCode,
 			PropertyCode:      r.PropertyCode,
+			Trigger:           r.Trigger,
 		})
 	}
 	payload, err := json.Marshal(points)

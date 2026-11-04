@@ -30,15 +30,16 @@ import (
 // 上挂子节点会与 Browse 并发读写同一 slice。重建代价是一次启动，换来的是
 // 没有数据竞争、删除也生效。
 type serverState struct {
-	cfg    *config
-	srv    *server.Server
-	ns     *server.NodeNameSpace
-	nsID   uint16
-	root   *server.Node
-	points map[string]*pointNode
-	browse *browseIndex
-	sig    string
-	cancel context.CancelFunc
+	cfg         *config
+	srv         *server.Server
+	ns          *server.NodeNameSpace
+	nsID        uint16
+	root        *server.Node
+	points      map[string]*pointNode
+	browse      *browseIndex
+	sig         string
+	deviceCount int
+	cancel      context.CancelFunc
 
 	closeOnce sync.Once
 }
@@ -61,14 +62,15 @@ func newServerState(cfg *config, topo *topology) (*serverState, error) {
 		translateBrowsePathsHandler(index))
 
 	return &serverState{
-		cfg:    cfg,
-		srv:    srv,
-		ns:     ns,
-		nsID:   nsID,
-		root:   root,
-		points: points,
-		browse: index,
-		sig:    topo.sig,
+		cfg:         cfg,
+		srv:         srv,
+		ns:          ns,
+		nsID:        nsID,
+		root:        root,
+		points:      points,
+		browse:      index,
+		sig:         topo.sig,
+		deviceCount: len(topo.devices),
 	}, nil
 }
 
@@ -287,17 +289,25 @@ func (st *serverState) close() {
 	})
 }
 
+// applyPreviewMaxLines 最近写入预览最多列出多少个点位。
+// 一批最多 500 条记录，预览最终还会被 RecentRing 按 2 KiB 截断；
+// 这里先设一个行数上限，避免高频率采集下为必然被截断的内容反复拼接。
+const applyPreviewMaxLines = 200
+
 // apply 把一批采集记录写入地址空间，并通知发生变化点位的订阅者。
 //
 // 值更新是无锁原子写；ChangeNotification 可能因慢客户端阻塞，所以本方法
 // 只在通道自己的 apply goroutine 里调用，绝不占用采集协程。
-func (st *serverState) apply(b push.PushBatch) (applied, dropped int) {
+//
+// preview 是「设备/点位=原始值」的逐行预览，供监控页的最近写入批次展示。
+func (st *serverState) apply(b push.PushBatch) (applied, dropped int, preview string) {
 	if len(b.Records) == 0 {
-		return 0, 0
+		return 0, 0, ""
 	}
 	at := parseCollectedAt(b.CollectedAt)
 	changed := make([]*pointNode, 0, len(b.Records))
 	seen := make(map[*pointNode]struct{}, len(b.Records))
+	var sb strings.Builder
 
 	for i := range b.Records {
 		r := &b.Records[i]
@@ -312,6 +322,12 @@ func (st *serverState) apply(b push.PushBatch) (applied, dropped int) {
 		dv := buildDataValue(p.codec, r.Value, prev, r.Quality, at)
 		p.val.Store(dv)
 		applied++
+		if applied <= applyPreviewMaxLines {
+			sb.WriteString(p.display)
+			sb.WriteByte('=')
+			sb.WriteString(r.Value)
+			sb.WriteByte('\n')
+		}
 		if sameDataValue(prev, dv) {
 			continue
 		}
@@ -325,7 +341,7 @@ func (st *serverState) apply(b push.PushBatch) (applied, dropped int) {
 	for _, p := range changed {
 		st.ns.ChangeNotification(p.node.ID())
 	}
-	return applied, dropped
+	return applied, dropped, sb.String()
 }
 
 // seedFrom 在重建时沿用旧树里同一点位、同一类型的最后一个值，

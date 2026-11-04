@@ -29,9 +29,11 @@ import (
 type pointNode struct {
 	deviceID  string
 	addressID string
-	node      *server.Node
-	codec     valueCodec
-	val       atomic.Pointer[ua.DataValue]
+	// display 是「设备 / 点位」的可读名，仅用于监控里的最近写入预览。
+	display string
+	node    *server.Node
+	codec   valueCodec
+	val     atomic.Pointer[ua.DataValue]
 }
 
 // browseNode 地址空间里的一个可浏览节点，仅用于 TranslateBrowsePaths。
@@ -174,9 +176,14 @@ func newObjectNode(nodeID *ua.NodeID, name, description string) *server.Node {
 // newPointNode 把 device_address 建成一个 Variable 节点。
 func newPointNode(cfg *config, nsID uint16, dev po.Device, addr po.DeviceAddress) *pointNode {
 	codec := codecFor(addr.CommonDataType, "")
+	label := addr.Label
+	if label == "" {
+		label = addr.Name
+	}
 	p := &pointNode{
 		deviceID:  dev.ID,
 		addressID: addr.ID,
+		display:   dev.Name + "/" + label,
 		codec:     codec,
 	}
 	p.val.Store(&ua.DataValue{
@@ -211,10 +218,6 @@ func newPointNode(cfg *config, nsID uint16, dev po.Device, addr po.DeviceAddress
 	readOnly := server.DataValueFromValue(uint8(ua.AccessLevelTypeCurrentRead))
 	_ = p.node.SetAttribute(ua.AttributeIDAccessLevel, readOnly)
 	_ = p.node.SetAttribute(ua.AttributeIDUserAccessLevel, readOnly)
-	label := addr.Label
-	if label == "" {
-		label = addr.Name
-	}
 	// 空 Locale 表示“适用于任何语言”，避免只接受本地区域的客户端把它过滤掉。
 	p.node.SetDisplayName(label, "")
 	p.node.SetDescription(fmt.Sprintf("%s / %s", dev.Name, label), "")

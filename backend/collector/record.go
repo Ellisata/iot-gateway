@@ -51,4 +51,21 @@ type CollectedRecord struct {
 	GroupCode       string `json:"groupCode,omitempty"`
 	GroupName       string `json:"groupName,omitempty"`
 	GroupIntervalMs int    `json:"groupIntervalMs,omitempty"`
+	// Trigger 事件触发来源。只有事件触发规则定向推送的动作记录才携带；
+	// 正常轮询与外部订阅恒为 nil，因此不会改变既有载荷。
+	// 随记录一起序列化进断网缓存（records_json），补发不丢元数据。
+	Trigger *RecordTrigger `json:"trigger,omitempty"`
+}
+
+// RecordTrigger 一条事件触发记录的业务来源。
+//
+// FiredAt 是条件上升沿时刻（不是读取完成时刻），用于下游把消息与触发历史、
+// 业务事件对齐。Source 当前恒为 "trigger"，为将来其它事件源留出区分位。
+type RecordTrigger struct {
+	Source    string `json:"source"`
+	RuleID    string `json:"ruleId"`
+	RuleCode  string `json:"ruleCode"`
+	RuleName  string `json:"ruleName"`
+	TriggerID string `json:"triggerId"`
+	FiredAt   string `json:"firedAt"`
 }

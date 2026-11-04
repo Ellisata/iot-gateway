@@ -446,6 +446,29 @@
           </div>
         </div>
 
+        <!-- OPC UA 是服务端通道：没有「下游连接」，真正要盯的是地址空间与点位
+             数据新鲜度。这些字段来自后端 ChannelStatusVO.Extra。 -->
+        <div v-if="monitorOpcua && monitorOpcuaDetails.length" class="channel-monitor-section">
+          <div class="channel-monitor-section-head">
+            <div>
+              <p class="channel-monitor-section-title">{{ t('channel.monitor.addressSpace') }}</p>
+              <p class="channel-monitor-section-sub">{{ t('channel.monitor.addressSpaceHint') }}</p>
+            </div>
+          </div>
+          <div class="channel-monitor-stats is-details">
+            <div v-for="item in monitorOpcuaDetails" :key="item.key" class="monitor-stat">
+              <span class="monitor-stat-label">{{ item.label }}</span>
+              <span class="monitor-stat-value" :class="{ 'monitor-stat-error': item.isError }">
+                {{ item.value }}
+              </span>
+            </div>
+          </div>
+          <div v-if="monitorEndpoints.length" class="channel-monitor-endpoints">
+            <span class="monitor-stat-label">{{ t('channel.monitor.endpoints') }}</span>
+            <code v-for="ep in monitorEndpoints" :key="ep" class="channel-monitor-endpoint">{{ ep }}</code>
+          </div>
+        </div>
+
         <p v-if="!monitorActive" class="channel-monitor-hint">
           {{ t('channel.monitor.inactiveHint') }}
         </p>
@@ -523,7 +546,11 @@
               </template>
             </el-table-column>
             <el-table-column :label="t('channel.monitor.colCost')" width="132" align="right">
-              <template #default="{ row }">{{ row.durationMs }} ms · {{ formatBytes(row.size) }}</template>
+              <template #default="{ row }">
+                <!-- OPC UA 没有出站载荷，size 只是预览字符串长度，展示毫秒数即可。 -->
+                <template v-if="monitorOpcua">{{ row.durationMs }} ms</template>
+                <template v-else>{{ row.durationMs }} ms · {{ formatBytes(row.size) }}</template>
+              </template>
             </el-table-column>
             <el-table-column :label="t('channel.monitor.colError')" min-width="150" show-overflow-tooltip>
               <template #default="{ row }">
@@ -1522,6 +1549,13 @@ const monitorMessages = computed(() => monitorRecent.value?.messages ?? [])
 // 有展开行时暂停拉取报文：新报文从顶部插入会把正在查看的载荷不断往下顶。
 const hasExpandedRow = computed(() => expandedSeqKeys.value.length > 0)
 
+const monitorType = computed(() => monitorRow.value?.type || monitorRow.value?.name || '')
+// OPC UA 是「服务端」通道：没有下游连接，也不做断网缓存。
+// 它的运行状态、地址空间与客户端订阅走单独一套展示。
+const monitorOpcua = computed(() => monitorType.value === 'opcua')
+const monitorExtra = computed(() => monitorStatus.value?.extra || {})
+const monitorSupportsSpool = computed(() => !monitorOpcua.value)
+
 // 消息类通道（mqtt/http）：一次下发即一条报文；时序库（tdengine/influxdb）：
 // 一次下发是一个聚合写入批次。元数据未加载时按消息类展示（保持旧行为）。
 const monitorMessageBased = computed(() => {
@@ -1530,35 +1564,46 @@ const monitorMessageBased = computed(() => {
 })
 
 // 消息通道说「报文」，时序库说「写入批次」——一次写入是聚合窗，不是单条报文。
-const monitorSubtitle = computed(() =>
-  monitorMessageBased.value
+// OPC UA 的记录是「一批采集数据写入地址空间」，措辞再单独一套。
+const monitorSubtitle = computed(() => {
+  if (monitorOpcua.value) return t('channel.monitor.subtitleOpcua')
+  return monitorMessageBased.value
     ? t('channel.monitor.subtitle')
-    : t('channel.monitor.subtitleBatch'),
-)
-const monitorRecentTitle = computed(() =>
-  monitorMessageBased.value
+    : t('channel.monitor.subtitleBatch')
+})
+const monitorRecentTitle = computed(() => {
+  if (monitorOpcua.value) return t('channel.monitor.recentTitleOpcua')
+  return monitorMessageBased.value
     ? t('channel.monitor.recentTitle')
-    : t('channel.monitor.recentTitleBatch'),
-)
-const monitorRecentSubtitle = computed(() =>
-  monitorMessageBased.value
+    : t('channel.monitor.recentTitleBatch')
+})
+const monitorRecentSubtitle = computed(() => {
+  if (monitorOpcua.value) return t('channel.monitor.recentSubtitleOpcua')
+  return monitorMessageBased.value
     ? t('channel.monitor.recentSubtitle')
-    : t('channel.monitor.recentSubtitleBatch'),
-)
-const monitorEmptyTitle = computed(() =>
-  monitorMessageBased.value
+    : t('channel.monitor.recentSubtitleBatch')
+})
+const monitorEmptyTitle = computed(() => {
+  if (monitorOpcua.value) return t('channel.monitor.noMessagesOpcua')
+  return monitorMessageBased.value
     ? t('channel.monitor.noMessages')
-    : t('channel.monitor.noMessagesBatch'),
-)
-const monitorEmptyHint = computed(() =>
-  monitorMessageBased.value
+    : t('channel.monitor.noMessagesBatch')
+})
+const monitorEmptyHint = computed(() => {
+  if (monitorOpcua.value) return t('channel.monitor.noMessagesHintOpcua')
+  return monitorMessageBased.value
     ? t('channel.monitor.noMessagesHint')
-    : t('channel.monitor.noMessagesHintBatch'),
-)
+    : t('channel.monitor.noMessagesHintBatch')
+})
 
 const monitorConnectionText = computed(() => {
   const s = monitorStatus.value
   if (!s?.running) return t('channel.monitor.stopped')
+  if (monitorOpcua.value) {
+    return s.connected
+      ? t('channel.monitor.listening')
+      : t('channel.monitor.notListening')
+  }
   return s.connected ? t('channel.monitor.connected') : t('channel.monitor.disconnected')
 })
 
@@ -1568,12 +1613,24 @@ const monitorConnectionClass = computed(() =>
 
 const monitorStats = computed(() => {
   const s = monitorStatus.value || {}
+  const extra = monitorExtra.value
   const value = (v) => (v == null || v === '' ? '—' : String(v))
   const stats = [
     { key: 'queue', label: t('channel.monitor.queueDepth'), value: value(s.queueDepth) },
-    { key: 'spool', label: t('channel.monitor.spoolDepth'), value: value(s.spoolDepth) },
   ]
-  if (monitorMessageBased.value) {
+  // OPC UA 没有断网缓存，spoolDepth 恒 0，展示它只会误导。
+  if (monitorSupportsSpool.value) {
+    stats.push({ key: 'spool', label: t('channel.monitor.spoolDepth'), value: value(s.spoolDepth) })
+  }
+  if (monitorOpcua.value) {
+    // publishCount/rowsCount 在后端已对齐为「写入批次 / 更新点位」。
+    stats.push(
+      { key: 'publish', label: t('channel.monitor.updateBatches'), value: value(s.publishCount) },
+      { key: 'rows', label: t('channel.monitor.updatePoints'), value: value(s.rowsCount) },
+      { key: 'subscriptions', label: t('channel.monitor.subscriptions'), value: value(extra.subscriptions) },
+      { key: 'monitoredItems', label: t('channel.monitor.monitoredItems'), value: value(extra.monitoredItems) },
+    )
+  } else if (monitorMessageBased.value) {
     stats.push({
       key: 'publish',
       label: t('channel.monitor.publishCount'),
@@ -1604,6 +1661,43 @@ const monitorStats = computed(() => {
   )
   return stats
 })
+
+// OPC UA 地址空间与点位新鲜度（后端 statusExtra）。
+const monitorOpcuaDetails = computed(() => {
+  const extra = monitorExtra.value
+  // 通道未运行时后端不返回 Extra，整块地址空间信息一起隐藏，避免一屏 '—'。
+  if (!monitorOpcua.value || !Object.keys(extra).length) return []
+  const value = (v) => (v == null || v === '' ? '—' : String(v))
+  const badQuality = Number(extra.pointsBadQuality) || 0
+  return [
+    { key: 'devices', label: t('channel.monitor.addressSpaceDevices'), value: value(extra.addressSpaceDevices) },
+    { key: 'points', label: t('channel.monitor.points'), value: value(extra.points) },
+    { key: 'withData', label: t('channel.monitor.pointsWithData'), value: value(extra.pointsWithData) },
+    {
+      key: 'badQuality',
+      label: t('channel.monitor.pointsBadQuality'),
+      value: value(extra.pointsBadQuality),
+      isError: badQuality > 0,
+    },
+    {
+      key: 'stale',
+      label: t('channel.monitor.pointsStale'),
+      value: value(extra.pointsStale),
+      isError: (Number(extra.pointsStale) || 0) > 0,
+    },
+    {
+      key: 'oldest',
+      label: t('channel.monitor.oldestValueAge'),
+      value: extra.oldestValueAgeSec == null ? '—' : `${extra.oldestValueAgeSec} s`,
+    },
+    { key: 'rebuilds', label: t('channel.monitor.rebuildCount'), value: value(extra.rebuildCount) },
+    { key: 'lastRebuild', label: t('channel.monitor.lastRebuildTime'), value: value(extra.lastRebuildTime) },
+  ]
+})
+
+const monitorEndpoints = computed(() =>
+  Array.isArray(monitorExtra.value.endpoints) ? monitorExtra.value.endpoints : [],
+)
 
 // showLoading 只用于首次加载与手动刷新：每 3 秒的自动轮询不应反复盖遮罩，
 // 否则画面会周期性闪一下。
@@ -1887,6 +1981,30 @@ onMounted(() => {
   background: var(--surface-2, #f8fafc);
   border: 1px solid var(--line-soft);
   border-radius: 10px;
+}
+
+/* 地址空间指标块：与顶部状态卡同一张卡面，只是换了一组字段 */
+.channel-monitor-stats.is-details {
+  margin-top: 12px;
+}
+
+.channel-monitor-endpoints {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.channel-monitor-endpoint {
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  word-break: break-all;
+  background: var(--surface-2, #f8fafc);
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
 }
 
 .monitor-stat-label {

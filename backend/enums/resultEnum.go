@@ -144,6 +144,20 @@ var (
 	CollectorGroupCodeExistsEnum    = NewBusinessEnum("40048", "采集组编码已存在", "err.collector_group_code_exists")
 	CollectorGroupCodeImmutableEnum = NewBusinessEnum("40049", "采集组编码不可修改", "err.collector_group_code_immutable")
 
+	// 事件触发采集规则错误码（同属采集/设备域，接在 40049 之后）
+	TriggerRuleExistsEnum                   = NewBusinessEnum("40051", "触发规则名称已存在", "err.trigger_rule_exists")
+	TriggerRuleNotExistsEnum                = NewBusinessEnum("40052", "触发规则不存在", "err.trigger_rule_not_found")
+	TriggerRuleNameInvalidEnum              = NewBusinessEnum("40053", "触发规则名称不合法（不能为空，最长 64 字符）", "err.trigger_rule_name_invalid")
+	TriggerRuleConditionInvalidEnum         = NewBusinessEnum("40054", "触发条件不合法", "err.trigger_rule_condition_invalid")
+	TriggerRuleAddressNotFoundEnum          = NewBusinessEnum("40055", "触发规则引用的点位不存在或未启用", "err.trigger_rule_address_not_found")
+	TriggerRuleActionDeviceMismatchEnum     = NewBusinessEnum("40056", "动作点位不属于动作设备", "err.trigger_rule_action_device_mismatch")
+	TriggerRuleActionAddressNotReadableEnum = NewBusinessEnum("40057", "动作点位没有读权限", "err.trigger_rule_action_address_not_readable")
+	TriggerRuleChannelNotExistsEnum         = NewBusinessEnum("40058", "目标推送通道不存在或未启用", "err.trigger_rule_channel_not_found")
+	TriggerRuleDeviceNotExistsEnum          = NewBusinessEnum("40059", "触发规则引用的设备不存在或未启用", "err.trigger_rule_device_not_found")
+	TriggerRuleCodeInvalidEnum              = NewBusinessEnum("40060", "触发规则编码不合法（字母开头，仅字母/数字/下划线/短横线，最长 64）", "err.trigger_rule_code_invalid")
+	TriggerRuleCodeExistsEnum               = NewBusinessEnum("40061", "触发规则编码已存在", "err.trigger_rule_code_exists")
+	TriggerRuleCodeImmutableEnum            = NewBusinessEnum("40062", "触发规则编码创建后不可修改", "err.trigger_rule_code_immutable")
+
 	// 物模型相关错误码（归属设备域，沿用 4000x 分段）
 	ThingModelExistsEnum                 = NewBusinessEnum("41001", "物模型标识或名称已存在", "err.thing_model_exists")
 	ThingModelNotExistsEnum              = NewBusinessEnum("41002", "物模型不存在", "err.thing_model_not_found")

@@ -146,6 +146,24 @@
 - **生命周期有硬顺序**:`Start` → 通道跑自己的 worker 组 → `Close`(关 quit)→ 等 worker 组退出 →
   `Wait`(等落盘协程排空)。**worker 停服前还会把 outbox 中写失败的批次转投缓存**,提前收尾会丢数据。
 
+### 通道监控([push/status.go](push/status.go), [push/recent.go](push/recent.go))
+- `ChannelStatusVO` 是**所有通道共用**的状态字段;类型特有指标放 `Extra map[string]any`
+  (键稳定、文案由前端翻译,没有特有指标的通道留空)。前端监控抽屉每 3 秒轮询 `/push/status`,
+  因此 `Snapshot` 只做原子读与短暂锁,不遍历数据库、不做 I/O。
+- `RecentMessagesProvider` 是可选观测接口(不扩 `Channel`):MQTT/HTTP 记「发送报文」,
+  时序库记「聚合写入批次」,**OPC UA 记「写入地址空间的采集批次」**——它是服务端通道,
+  没有出站报文,`Target` 填监听端点、载荷填「设备/点位=值」预览。
+- OPC UA 的 `Connected` 表示**监听已就绪**(`serverState != nil`),不是下游连接;
+  监控页文案用「监听中/未监听」,不展示断网缓存。点位覆盖度、订阅数与监控项数见
+  [push/opcuaserver/stats.go](push/opcuaserver/stats.go)。
+- **gopcua v0.9.1 不暴露客户端会话/连接数**(`sessionBroker`、`channelBroker` 私有,
+  `Server.Status()` 的 `CurrentSessionCount` 恒 0)。能拿到的只有导出的
+  `SubscriptionService.Subs` / `MonitoredItemService.Items`(各自持导出的 `Mu` 读 len)。
+  不要试图用 `RegisterHandler` 包装默认服务来计数:它只写不覆盖,且没有中间件链。
+- 同版本客户端 `Subscription.Monitor` **不会**像 `Client.Read` 那样给 `ReadValueID.DataEncoding`
+  补默认值;nil 会被编码器跳过,服务端解码 body 报 unexpected EOF 并**静默断开连接**。
+  写订阅测试时必须显式传 `DataEncoding: &ua.QualifiedName{}`。
+
 ### MQTT 订阅([subscribe/](subscribe/))
 - 管理外部 broker 上的多条订阅:每行 `mqtt_subscription` = 一个独立 paho 客户端 +
   一个解析器实例。收包后解析成 `collector.CollectedRecord`,再经

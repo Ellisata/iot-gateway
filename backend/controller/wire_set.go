@@ -11,6 +11,7 @@ var ControllerProviderSet = wire.NewSet(
 	NewDeviceController,
 	NewDeviceAddressController,
 	NewCollectorGroupController,
+	NewTriggerRuleController,
 	NewThingModelController,
 	NewCollectionController,
 	NewRealtimeController,

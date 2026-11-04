@@ -159,6 +159,14 @@ func (e *Encoder) Encode(b push.PushBatch) ([]push.EncodedMessage, error) {
 	_ = batchObj.Set("groupName", b.GroupName)
 	_ = batchObj.Set("intervalMs", b.GroupIntervalMs)
 	_ = batchObj.Set("collectedAt", b.CollectedAt)
+	// 只有事件触发批次才暴露 trigger；正常批次不新增任何键，
+	// 避免脚本 JSON.stringify(batch/records) 时改变既有载荷。
+	for i := range b.Records {
+		if b.Records[i].Trigger != nil {
+			_ = batchObj.Set("trigger", triggerMap(b.Records[i].Trigger))
+			break
+		}
+	}
 	records := make([]map[string]any, len(b.Records))
 	for i := range b.Records {
 		records[i] = recordMap(b.Records[i], b.CollectedAt)
@@ -213,7 +221,7 @@ func recordMap(r collector.CollectedRecord, batchAt string) map[string]any {
 	if at == "" {
 		at = batchAt
 	}
-	return map[string]any{
+	doc := map[string]any{
 		"deviceId":           r.DeviceID,
 		"deviceCode":         r.DeviceCode,
 		"deviceName":         r.DeviceName,
@@ -232,6 +240,22 @@ func recordMap(r collector.CollectedRecord, batchAt string) map[string]any {
 		"groupCode":          r.GroupCode,
 		"groupName":          r.GroupName,
 		"groupIntervalMs":    int64(r.GroupIntervalMs),
+	}
+	// 只有事件触发记录才带 trigger；正常记录不新增键，既有脚本输出不变。
+	if r.Trigger != nil {
+		doc["trigger"] = triggerMap(r.Trigger)
+	}
+	return doc
+}
+
+func triggerMap(t *collector.RecordTrigger) map[string]any {
+	return map[string]any{
+		"source":    t.Source,
+		"ruleId":    t.RuleID,
+		"ruleCode":  t.RuleCode,
+		"ruleName":  t.RuleName,
+		"triggerId": t.TriggerID,
+		"firedAt":   t.FiredAt,
 	}
 }
 

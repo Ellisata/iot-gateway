@@ -84,6 +84,10 @@ func runGateway(stop <-chan struct{}) error {
 	deps, cleanup := InitializeApp()
 	defer cleanup()
 
+	// 规则引擎的读点能力只能在采集引擎构造之后绑定（两者构成 Wire 构造环）。
+	// 必须在采集启动前完成：首个 sink 回调到达时就要能判定与读点。
+	deps.TriggerEngine.BindCollector(deps.CollectorEngine)
+
 	// 5. 启动推送引擎（接收采集数据并推送到各通道）。
 	// 先同步完成通道加载，再启动采集：否则采集首轮早于通道就绪时，
 	// PushRecords 会因 len(chans)==0 直接 return 而丢弃首轮数据（见 push/engine.go）。
@@ -137,6 +141,15 @@ func runGateway(stop <-chan struct{}) error {
 		logger.Error("driver plugin manager start failed: %v", err)
 	}
 
+	// 8.1 启动事件触发规则引擎。
+	//
+	// 必须在采集引擎之前：第一条采集记录到达时规则集合已经就绪。
+	// 读点能力已在步骤 4 绑定；推送引擎也已启动，触发结果可以直接入队。
+	// 加载失败只记日志，不影响采集（规则页仍可修改后由 watcher/Refresh 生效）。
+	if err := deps.TriggerEngine.Start(); err != nil {
+		logger.Error("trigger rule engine start failed: %v", err)
+	}
+
 	// 9. 启动采集引擎
 	go func() {
 		if err := deps.CollectorEngine.Start(); err != nil {
@@ -155,32 +168,27 @@ func runGateway(stop <-chan struct{}) error {
 		logger.Error("lan discovery start failed: %v", err)
 	}
 
-	// 停止顺序：先停自动发现，再停报警巡检（避免扫描关闭中的通道），然后停推送、
-	// 停采集，最后停插件管理器。
-	// defer 后进先出，所以这里从后往前注册：先注册的后执行、最后注册的最先执行。
+	// 停止顺序（LIFO，从后往前注册）：自动发现 → 报警巡检 → 采集 → 规则引擎 →
+	// 订阅 → 推送 → 设备扫描 → 插件管理器 → 报警通知器。
 	//
-	// Discovery 注册在靠后位置，因此很早停止：网关一开始停机就先安静下来，
-	// 而不是继续向平台广播一台正在关闭的自己。
-	// DriverManager 注册在最前，因此最后执行 —— 那时采集已完全停止
-	//（驱动已 Close、无 Read 在途），杀插件进程才安全。
-	//
-	// AlarmNotifier 在它之前注册，因此比它更晚停止：此时采集与报警巡检都已停，
-	// 不可能再有新事件进来，Stop 内部再花至多 5s 排空在途投递。
-	// **这一条不能挪到本块末尾** —— defer 后进先出，挪过去它就会最先停，
-	// 而巡检与采集仍在运行，期间的报警只能被计为丢弃。
+	// Discovery 很早停止：网关一开始停机就先安静下来，而不是继续广播自己。
+	// 采集最先于「规则/订阅/推送」停止：不再有新的轮询与 sink 回调。
+	// 规则引擎随后停止：此时不会再有新的触发读，但推送仍可接收它已入队的结果。
+	// DeviceScan 在插件管理器之前停止：在飞探测要赶在插件退役前收尾。
+	// DriverManager 最后停：那时采集与扫描都已完全停止，杀插件进程才安全。
 	defer deps.AlarmNotifier.Stop()
 	defer deps.DriverManager.Stop()
-	// DeviceScan 注册在 DriverManager **之后**，因此比它先停止：
-	// 扫描的在飞探测是直接发给插件进程的，必须在插件被退役之前取消并收尾，
-	// 否则那些请求会写进一个正在关闭的管道。
-	//
-	// 它没有 Start()（没人发起扫描之前不持有任何资源），所以这里只有 Stop。
+	// DeviceScan 注册在 DriverManager 之后，因此比它先停止。
 	defer deps.DeviceScan.Stop()
-	defer deps.CollectorEngine.Stop()
-	// Subscription 注册在 PushEngine 之后，因此比它先停止：先断开订阅、
-	// 不再有新的外部记录进入推送队列，再停推送引擎排空在途批次。
-	defer deps.Subscription.Stop()
+	// 以下四个的注册顺序是反的，执行顺序才是正的：Push → Subscription → Trigger → Collector。
+	// PushEngine 最先注册（最后执行）：排空所有已入队批次，包括规则引擎刚推入的。
 	defer deps.PushEngine.Stop()
+	// Subscription 在 Push 之后注册（比 Push 先停）：先断开订阅、不再产生外部记录。
+	defer deps.Subscription.Stop()
+	// TriggerEngine 在 Subscription 之后注册（比订阅先停）：触发读点停止。
+	defer deps.TriggerEngine.Stop()
+	// CollectorEngine 最后注册（最先执行）：停轮询与 sink 回调，规则引擎不再收到新样本。
+	defer deps.CollectorEngine.Stop()
 	defer deps.AlarmMonitor.Stop()
 	defer deps.Discovery.Stop()
 	// RuntimeConfig 注册在靠后位置，因此很早就执行：先关掉「运行开关」的更新入口，

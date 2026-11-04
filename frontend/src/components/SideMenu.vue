@@ -61,6 +61,10 @@
           <el-icon><MenuIcon name="deviceScan" /></el-icon>
           <template #title>{{ t('menu.deviceScan') }}</template>
         </el-menu-item>
+        <el-menu-item index="/industrial/trigger-rule">
+          <el-icon><MenuIcon name="triggerRule" /></el-icon>
+          <template #title>{{ t('menu.triggerRule') }}</template>
+        </el-menu-item>
         <el-menu-item index="/industrial/protocol">
           <el-icon><MenuIcon name="protocol" /></el-icon>
           <template #title>{{ t('menu.protocol') }}</template>

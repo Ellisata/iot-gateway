@@ -11,6 +11,7 @@ var ServiceProviderSet = wire.NewSet(
 	NewDeviceService,
 	NewDeviceAddressService,
 	NewCollectorGroupService,
+	NewTriggerRuleService,
 	NewThingModelService,
 	NewCollectionService,
 	NewRealtimeService,

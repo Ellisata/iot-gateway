@@ -306,7 +306,7 @@ func recordDoc(r collector.CollectedRecord, batchAt string) map[string]any {
 	if at == "" {
 		at = batchAt
 	}
-	return map[string]any{
+	doc := map[string]any{
 		"deviceId":           r.DeviceID,
 		"deviceCode":         r.DeviceCode,
 		"deviceName":         r.DeviceName,
@@ -328,6 +328,11 @@ func recordDoc(r collector.CollectedRecord, batchAt string) map[string]any {
 		"groupName":       r.GroupName,
 		"groupIntervalMs": r.GroupIntervalMs,
 	}
+	// trigger 始终存在：事件触发记录带真实值，正常采集是空串。
+	// 这样引用 "trigger.ruleId" 的映射在正常批次上也不会因"路径不存在"整批失败；
+	// 未引用它的映射仍不会输出该字段，载荷不变。
+	doc["trigger"] = triggerDocument(r.Trigger)
+	return doc
 }
 
 func batchDocument(batch push.PushBatch) map[string]any {
@@ -335,7 +340,7 @@ func batchDocument(batch push.PushBatch) map[string]any {
 	if len(batch.Records) > 0 && at == "" {
 		at = batch.Records[0].CollectedAt
 	}
-	return map[string]any{
+	doc := map[string]any{
 		"deviceId":    batch.DeviceID,
 		"deviceCode":  batch.DeviceCode,
 		"groupId":     batch.GroupID,
@@ -344,6 +349,31 @@ func batchDocument(batch push.PushBatch) map[string]any {
 		"intervalMs":  batch.GroupIntervalMs,
 		"collectedAt": at,
 		"count":       len(batch.Records),
+	}
+	var trigger *collector.RecordTrigger
+	for i := range batch.Records {
+		if batch.Records[i].Trigger != nil {
+			trigger = batch.Records[i].Trigger
+			break
+		}
+	}
+	doc["trigger"] = triggerDocument(trigger)
+	return doc
+}
+
+func triggerDocument(t *collector.RecordTrigger) map[string]any {
+	if t == nil {
+		return map[string]any{
+			"source": "", "ruleId": "", "ruleCode": "", "ruleName": "", "triggerId": "", "firedAt": "",
+		}
+	}
+	return map[string]any{
+		"source":    t.Source,
+		"ruleId":    t.RuleID,
+		"ruleCode":  t.RuleCode,
+		"ruleName":  t.RuleName,
+		"triggerId": t.TriggerID,
+		"firedAt":   t.FiredAt,
 	}
 }
 

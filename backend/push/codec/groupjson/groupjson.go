@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"iot-gateway/collector"
 	"iot-gateway/push"
 )
 
@@ -28,6 +29,8 @@ type Frame struct {
 	IntervalMs int               `json:"intervalMs"`
 	Values     map[string]string `json:"values"`
 	Errors     map[string]int    `json:"errors"`
+	// Trigger 事件触发来源；仅事件触发定向推送的帧携带，正常采集帧为 nil。
+	Trigger *collector.RecordTrigger `json:"trigger,omitempty"`
 }
 
 // Encoder group-json 编码器。
@@ -47,6 +50,13 @@ func (e *Encoder) Encode(batch push.PushBatch) ([]push.EncodedMessage, error) {
 		timestamp = batch.Records[0].CollectedAt
 	}
 	deviceName := batch.Records[0].DeviceName
+	var trigger *collector.RecordTrigger
+	for i := range batch.Records {
+		if batch.Records[i].Trigger != nil {
+			trigger = batch.Records[i].Trigger
+			break
+		}
+	}
 
 	values := make(map[string]string, len(batch.Records))
 	errs := make(map[string]int)
@@ -71,6 +81,7 @@ func (e *Encoder) Encode(batch push.PushBatch) ([]push.EncodedMessage, error) {
 		IntervalMs: batch.GroupIntervalMs,
 		Values:     values,
 		Errors:     errs,
+		Trigger:    trigger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("groupjson: marshal frame failed: %w", err)

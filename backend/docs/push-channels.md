@@ -115,6 +115,38 @@ TDengine 的超级表用 `CREATE STABLE IF NOT EXISTS` 建表：**已部署实�
 并静默丢数据（启动日志会报出缺哪个 tag）。已有子表的新 tag 值为 NULL，新写入不会回填，
 需要时按子表 `ALTER TABLE ... SET TAG ...`。
 
+### 2.2 事件触发的载荷元数据
+
+事件触发规则定向推送动作点位时，每条记录额外携带 `trigger` 对象：
+
+```json
+{
+  "source": "trigger",
+  "ruleId": "019...",
+  "ruleCode": "batch_done",
+  "ruleName": "批次完成取数",
+  "triggerId": "019...",
+  "firedAt": "2026-11-04 10:00:00.000"
+}
+```
+
+- `ruleCode` 是规则创建时填写的业务编码，创建后不可修改，下游应优先用它；
+  `ruleId` 仅是网关内部主键。
+- `firedAt` 是**条件上升沿时刻**，不是读取完成时刻；可与触发历史对齐。
+- 只有事件触发定向推送的批次才有该字段。**正常采集、外部订阅的载荷逐字节不变。**
+- 元数据随记录写入断网缓存（`push_outbox.records_json`），补发不丢失。
+
+各格式的暴露方式：
+
+| 格式 | 位置 |
+|---|---|
+| `native-json` | 每个 point 末尾的 `trigger` 字段（正常点位无此字段） |
+| `group-json` | 帧顶层的 `trigger` 字段（正常帧无此字段） |
+| `mapping-json` | 输入文档新增 `trigger` 对象，用 `{"source":"path","value":"trigger.ruleId"}` 取用；正常记录的 `trigger.*` 为空串 |
+| `script` | `batch.trigger.*` 与 `batch.records[i].trigger.*`；正常批次不新增键 |
+
+时序库通道（TDengine / InfluxDB）与 OPC UA Server 通道不使用该对象，不会改变表结构或地址空间。
+
 ## 3. 出站映射（mapping-json）
 
 ### 3.1 完整示例

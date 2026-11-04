@@ -699,6 +699,8 @@ func mapCollectorErr(err error) error {
 		return controlErrMsg(enums.ControlDeviceOfflineEnum, "采集引擎未运行")
 	case errors.Is(err, collector.ErrDeviceOffline):
 		return controlErr(enums.ControlDeviceOfflineEnum)
+	case errors.Is(err, collector.ErrDeviceBusy):
+		return controlErrMsg(enums.ControlWriteFailedEnum, "设备正忙（采集占用中），等待超时")
 	case errors.Is(err, collector.ErrWriteUnsupported):
 		return controlErr(enums.ControlProtocolNotWritableEnum)
 	case errors.Is(err, collector.ErrDeviceNotActive):

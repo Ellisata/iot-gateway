@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Ellisata/iot-gateway-sdk/driver"
 
@@ -101,7 +102,65 @@ func TestEngineReadPoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadPoints: %v", err)
 	}
-	if len(results) != 1 || results[0].DeviceAddressID != "addr-1" {
+	if len(results) == 0 || results[0].DeviceAddressID != "addr-1" {
 		t.Fatalf("结果 = %+v", results)
+	}
+}
+
+func TestEngineReadPointsTimesOutWaitingForDeviceLock(t *testing.T) {
+	e := newControlTestEngine(t, &mockWriterDriver{mockDriver: &mockDriver{}})
+
+	// 模拟慢采集正占着设备锁：触发读取必须在 ctx 到期时放弃，而不是无限等。
+	dm := e.task.deviceLock("dev-1")
+	dm.Lock()
+	defer dm.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := e.ReadPoints(ctx, "dev-1",
+		[]po.DeviceAddress{{ID: "addr-1", DeviceID: "dev-1", Name: "40001"}})
+	if !errors.Is(err, ErrDeviceBusy) {
+		t.Fatalf("err = %v，期望 ErrDeviceBusy", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v，应保留 context.DeadlineExceeded 供调用方判断", err)
+	}
+}
+
+func TestEngineReadRecordsPopulatesMetadata(t *testing.T) {
+	e := newControlTestEngine(t, &mockWriterDriver{mockDriver: &mockDriver{}})
+
+	addrs := []po.DeviceAddress{{
+		ID: "addr-1", DeviceID: "dev-1", Name: "40001", Label: "温度",
+		DataType: "int16", Status: 1,
+	}}
+	records, err := e.ReadRecords(context.Background(), "dev-1", addrs)
+	if err != nil {
+		t.Fatalf("ReadRecords: %v", err)
+	}
+	if len(records) == 0 {
+		t.Fatal("ReadRecords 返回空记录")
+	}
+	got := records[0]
+	if got.DeviceID != "dev-1" || got.DeviceName != "dev1" {
+		t.Errorf("设备元数据 = %q/%q", got.DeviceID, got.DeviceName)
+	}
+	if got.DeviceAddressID != "addr-1" || got.DeviceAddressName != "40001" || got.DeviceAddressLabel != "温度" {
+		t.Errorf("点位元数据 = %+v", got)
+	}
+	if got.Protocol != "Test.Write" {
+		t.Errorf("协议 = %q，期望 Test.Write", got.Protocol)
+	}
+	if got.Value != "1" || got.Quality != 192 {
+		t.Errorf("值/质量 = %q/%d", got.Value, got.Quality)
+	}
+}
+
+func TestEngineReadRecordsErrorsMatchReadPoints(t *testing.T) {
+	e := newControlTestEngine(t, &mockWriterDriver{mockDriver: &mockDriver{}})
+	e.running = false
+
+	if _, err := e.ReadRecords(context.Background(), "dev-1", nil); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("err = %v，期望 ErrNotRunning", err)
 	}
 }

@@ -66,12 +66,33 @@ MQTT 通道按**设备分组**推送，payload 为 JSON 数组，数组内每条
 | `collectedAt` | string | 采集时间，格式 `2006-01-02 15:04:05.000`（毫秒精度），**本地时区** |
 | `thingModelCode` | string | 设备绑定的物模型编码（`thing_model.code`）；未绑定为空串。创建后不可修改，可作稳定维度 |
 | `propertyCode` | string | 点位绑定的物模型属性标识符（`thing_model_property.identifier`）；未绑定为空串。绑定时已校验属性属于设备的物模型 |
+| `trigger` | object | **仅事件触发定向推送时存在**，正常采集/外部订阅**没有这个键**。结构见 §2.1 |
 
 `deviceCode` 位于 `deviceId` 之后；`thingModelCode` / `propertyCode` 是**追加字段**（位于
 JSON 末尾）。三者都始终存在，缺失时为空串；既有字段的名称、相对顺序与取值不变。
 外部 MQTT 订阅产生的记录没有本地绑定，
 这三个字段同样为空串。
 时序库通道（TDengine / InfluxDB）把两者作为 tag 写入（`thing_model_code` / `property_code`）。
+
+### 2.1 trigger：事件触发元数据
+
+事件触发规则定向推送动作点位时，每条 point 末尾追加：
+
+```json
+"trigger": {
+  "source": "trigger",
+  "ruleId": "019...",
+  "ruleCode": "batch_done",
+  "ruleName": "批次完成取数",
+  "triggerId": "019...",
+  "firedAt": "2026-11-04 10:00:00.000"
+}
+```
+
+`ruleCode` 是规则的业务编码（创建后不可修改），下游优先用它关联业务；`ruleId`
+仅是网关内部主键。`firedAt` 是**条件上升沿时刻**，不是读取完成时刻。该对象随记录写入断网缓存
+（`push_outbox.records_json`），补发不丢失。正常采集与外部订阅的记录 `trigger` 为 nil，
+因 `omitempty` 而**完全不出现在 JSON 里**——既有报文逐字节不变。
 
 ## 3. value 解析：按 `kind` 分派
 

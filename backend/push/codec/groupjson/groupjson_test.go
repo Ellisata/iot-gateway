@@ -51,6 +51,33 @@ func TestEncodeFrameSplitsByQuality(t *testing.T) {
 	}
 }
 
+func TestEncodeIncludesTriggerMetadata(t *testing.T) {
+	trigger := &collector.RecordTrigger{
+		Source: "trigger", RuleID: "r1", RuleCode: "batch-done", RuleName: "批次完成",
+		TriggerID: "t1", FiredAt: "2026-11-04 10:00:00.000",
+	}
+	batch := push.PushBatch{
+		DeviceID:    "dev-1",
+		CollectedAt: "2026-11-04 10:00:01.000",
+		Records: []collector.CollectedRecord{
+			{DeviceID: "dev-1", DeviceAddressID: "a1", DeviceAddressName: "temperature",
+				Value: "23.5", Quality: 192, Trigger: trigger},
+		},
+	}
+	msgs, err := New().Encode(batch)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	var frame Frame
+	if err := json.Unmarshal(msgs[0].Payload, &frame); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if frame.Trigger == nil || frame.Trigger.RuleID != "r1" || frame.Trigger.RuleCode != "batch-done" ||
+		frame.Trigger.TriggerID != "t1" || frame.Trigger.FiredAt != "2026-11-04 10:00:00.000" {
+		t.Fatalf("trigger = %+v", frame.Trigger)
+	}
+}
+
 func TestEncodeEmptyBatchProducesNothing(t *testing.T) {
 	msgs, err := New().Encode(push.PushBatch{DeviceID: "dev-1"})
 	if err != nil {

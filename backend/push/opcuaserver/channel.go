@@ -69,9 +69,17 @@ type channel struct {
 	lastErr        string
 	lastRebuildErr string
 	lastSuccess    time.Time
+	lastRebuild    time.Time
 
-	applied atomic.Uint64
-	dropped atomic.Uint64
+	// batches 是成功写入地址空间的采集批次数，applied 是其中的点位记录数。
+	// 监控页分别按「更新批次 / 更新点位」展示；dropped 按记录数计。
+	batches  atomic.Uint64
+	applied  atomic.Uint64
+	dropped  atomic.Uint64
+	rebuilds atomic.Uint64
+
+	// recent 仅内存、仅观测：每次写入地址空间记一条批次快照。
+	recent *push.RecentRing
 }
 
 func newChannel(db *gorm.DB, ch *po.PushChannel) (push.Channel, error) {
@@ -91,6 +99,7 @@ func newChannel(db *gorm.DB, ch *po.PushChannel) (push.Channel, error) {
 		cfg:       cfg,
 		db:        db,
 		queue:     make(chan push.PushBatch, enqueueDepth),
+		recent:    push.NewRecentRing(push.RecentPushRingSize),
 	}, nil
 }
 
@@ -193,18 +202,48 @@ func (c *channel) applyLoop(ctx context.Context) {
 				c.dropped.Add(uint64(len(b.Records)))
 				continue
 			}
-			applied, dropped := st.apply(b)
+			started := time.Now()
+			applied, dropped, preview := st.apply(b)
 			if dropped > 0 {
 				c.dropped.Add(uint64(dropped))
 			}
 			if applied > 0 {
 				c.applied.Add(uint64(applied))
+				c.batches.Add(1)
 				c.mu.Lock()
 				c.lastSuccess = time.Now()
 				c.mu.Unlock()
 			}
+			// 只有确实处理过记录的批次才留观测记录：队列满丢掉的批次由
+			// dropped 计数反映，不占用最近窗口。
+			if applied > 0 || dropped > 0 {
+				c.recordBatch(b, applied, dropped, time.Since(started), preview)
+			}
 		}
 	}
+}
+
+// recordBatch 把一次地址空间写入记入最近窗口（仅内存、仅观测）。
+//
+// OPC UA 是服务端通道，没有「出站报文」，这里的 Target 是监听端点，
+// 每条记录对应一次采集批次写入（applied 为真正落到节点上的点位数）。
+func (c *channel) recordBatch(b push.PushBatch, applied, dropped int, d time.Duration, preview string) {
+	if c.recent == nil {
+		return
+	}
+	errMsg := ""
+	if dropped > 0 {
+		errMsg = fmt.Sprintf("%d 个点位未匹配（等待地址空间重建）", dropped)
+	}
+	c.recent.AddString(push.RecentPushMessage{
+		At:         time.Now(),
+		Target:     c.cfg.endpoint(),
+		DeviceCode: b.DeviceCode,
+		GroupCode:  b.GroupCode,
+		Records:    applied,
+		DurationMs: d.Milliseconds(),
+		Error:      errMsg,
+	}, preview)
 }
 
 func (c *channel) reconcileLoop(ctx context.Context) {
@@ -279,8 +318,10 @@ func (c *channel) rebuild(parent context.Context, topo *topology) {
 	c.mu.Unlock()
 
 	c.setLastErr(nil)
+	c.rebuilds.Add(1)
 	c.mu.Lock()
 	c.lastRebuildErr = ""
+	c.lastRebuild = time.Now()
 	c.mu.Unlock()
 
 	// 客户端必须使用这里列出的地址之一（CreateSession 按 URL 精确匹配），
@@ -359,26 +400,41 @@ func (c *channel) TestConnectivity() error {
 func (c *channel) Snapshot() push.ChannelStatusVO {
 	c.mu.RLock()
 	running := c.running
-	connected := c.state != nil
+	st := c.state
 	lastErr := c.lastErr
 	lastSuccess := c.lastSuccess
+	lastRebuild := c.lastRebuild
 	c.mu.RUnlock()
 
-	return push.ChannelStatusVO{
-		ID:           c.id,
-		Name:         c.name,
-		Type:         c.typeName,
+	vo := push.ChannelStatusVO{
+		ID:   c.id,
+		Name: c.name,
+		Type: c.typeName,
+		// OPC UA 的 Connected 表示「监听已就绪」，不是「下游连接成功」。
 		Running:      running,
-		Connected:    connected,
+		Connected:    st != nil,
 		Broker:       c.cfg.endpoint(),
 		Topic:        c.cfg.NamespaceURI,
 		QueueDepth:   uint64(len(c.queue)),
-		PublishCount: c.applied.Load(),
+		PublishCount: c.batches.Load(),
+		RowsCount:    c.applied.Load(),
 		DroppedCount: c.dropped.Load(),
 		LastPublish:  push.FormatTime(lastSuccess),
 		LastSuccess:  push.FormatTime(lastSuccess),
 		LastErr:      lastErr,
 	}
+	if st != nil {
+		vo.Extra = st.statusExtra(c.rebuilds.Load(), lastRebuild)
+	}
+	return vo
+}
+
+// RecentMessages 实现 push.RecentMessagesProvider：最近写入地址空间的批次（新→旧）。
+func (c *channel) RecentMessages(limit int) []push.RecentPushMessage {
+	if c.recent == nil {
+		return []push.RecentPushMessage{}
+	}
+	return c.recent.Snapshot(limit)
 }
 
 func isAddrInUse(err error) bool {
