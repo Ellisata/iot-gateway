@@ -1,1 +1,0 @@
-import{t as e}from"./api-CZ72iH3j.js";function t(t){return e.get(`/control/capability`,{params:{deviceId:t}})}function n(t){return e.post(`/control/write`,t,{timeout:3e4})}function r(t){return e.get(`/control/pageControlLog`,{params:t})}export{r as n,n as r,t};

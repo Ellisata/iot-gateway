@@ -65,6 +65,11 @@
           <span v-if="job && scanning" class="estimate">
             {{ t('deviceScan.estimated', { s: Math.ceil((job.estimateMaxMs || 0) / 1000) }) }}
           </span>
+          <!-- 批与批之间的自动续扫窗口：任务已终态、下一批已发出但还没开始跑，
+               此时没有"运行中"可显示，给一句明确的进度，避免看起来卡住了。 -->
+          <span v-else-if="autoContinuing" class="estimate">
+            {{ t('deviceScan.autoContinueRunning') }}
+          </span>
           <el-button v-if="scanning" :loading="canceling" @click="handleCancel">
             {{ t('deviceScan.cancel') }}
           </el-button>
@@ -216,18 +221,13 @@
         <p v-if="job.reason" class="progress-reason">{{ job.reason }}</p>
 
         <!-- 截断必须说出来：否则用户会从"没扫到设备"得出"这个网段没有设备"的错误结论。
-             文案只说事实，动作由工具条上的「继续扫描」承担（口径见 handleContinue）。 -->
+             正常结束（done）时剩余地址由 maybeAutoContinue 自动接着扫；取消、失败或
+             自动续扫失败时不会再有下一批，文案回到"点继续扫描"，见 truncatedMessage。 -->
         <div v-if="job.truncated" class="notice is-warning is-inline">
           <span class="notice-mark" aria-hidden="true">
             <el-icon><AlertTriangle /></el-icon>
           </span>
-          <p class="notice-text">
-            {{ t('deviceScan.truncated', {
-              requested: job.requestedTargets,
-              scanned: job.scannedTotal,
-              remaining: job.remainingTargets,
-            }) }}
-          </p>
+          <p class="notice-text">{{ truncatedMessage }}</p>
         </div>
 
         <!-- 探测本身失败的目标：与"没扫到"是两回事，需要单独列出来。
@@ -507,8 +507,9 @@ import {
 
 const { t, locale } = useI18n()
 
-// 轮询间隔与上限。上限是防御性的：任务若因某种原因停在 running（后端 bug），
-// 无限轮询会一直占着这个页面。
+// 轮询间隔与**单批**上限。上限是防御性的：任务若因某种原因停在 running
+// （后端 bug），无限轮询会一直占着这个页面。自动续扫会跨很多批，所以这个上限
+// 每批重新计时、并按本批的估算耗时放宽（见 startPolling），不是整次扫描的总时长。
 const POLL_INTERVAL_MS = 800
 const POLL_MAX_MS = 30 * 60 * 1000
 
@@ -520,6 +521,11 @@ const continuing = ref(false)
 const canceling = ref(false)
 const creating = ref(false)
 const jobExpired = ref(false)
+// 自动续扫的停止标记：由「取消扫描」置位。取消是明确的用户意图，不能让下一拍
+// 的 done 快照又把它拉起来；新一轮扫描或用户手动点「继续扫描」时复位。
+const autoContinueStopped = ref(false)
+// 当前这次续扫是不是自动发起的：只用于工具条上那句"正在自动续扫下一批"。
+const autoContinuing = ref(false)
 
 const form = reactive({
   protocol: '',
@@ -568,6 +574,8 @@ const importResult = ref({ total: 0, success: 0, failed: 0, errors: [] })
 
 let pollTimer = null
 let pollStartedAt = 0
+// 本批轮询的截止时长：startPolling 每批重算，见那里的说明。
+let pollDeadlineMs = POLL_MAX_MS
 
 // ---------- 派生 ----------
 // 插件声明的标题/描述是普通字符串，译文在同级 titleI18n / descriptionI18n 里；
@@ -598,15 +606,40 @@ const canStart = computed(
     && !continuing.value,
 )
 // 还有未扫的地址 → 工具条上出现「继续扫描」。只在任务终态出现：运行中按它
-// 只会拿到"已有扫描任务在运行"。
+// 只会拿到"已有扫描任务在运行"。取消进行中也压住，避免按钮在状态回写前闪一下。
 const canContinue = computed(
   () => !!job.value
     && !scanning.value
     && job.value.truncated
     && (job.value.remainingTargets ?? 0) > 0
     && !starting.value
-    && !continuing.value,
+    && !continuing.value
+    && !canceling.value,
 )
+// 批末自动续扫的触发条件。只认 `done`：取消与失败是明确的终止意图，不能自动
+// 拉起；autoContinueStopped 兜住"取消请求与某一拍 done 撞车"的窗口。
+const canAutoContinue = computed(
+  () => !!job.value
+    && job.value.state === 'done'
+    && job.value.truncated
+    && (job.value.remainingTargets ?? 0) > 0
+    && !autoContinueStopped.value
+    && !starting.value
+    && !continuing.value
+    && !canceling.value,
+)
+// 截断提示有两种口径：还会自动续扫时说"会自动继续"，否则（取消 / 失败 /
+// 自动续扫失败）说"点继续扫描" —— 后者才需要用户手动接上。
+const truncatedMessage = computed(() => {
+  if (!job.value) return ''
+  const params = {
+    requested: job.value.requestedTargets,
+    scanned: job.value.scannedTotal,
+    remaining: job.value.remainingTargets,
+  }
+  const auto = job.value.state === 'done' && !autoContinueStopped.value
+  return t(auto ? 'deviceScan.truncatedAuto' : 'deviceScan.truncated', params)
+})
 // 页头计数：还没有任务时显示占位符 —— "0 台"会被误读成"这个网段没有设备"
 const displayFound = computed(() =>
   job.value ? job.value.found ?? 0 : '—',
@@ -695,6 +728,8 @@ async function handleProtocolChange() {
   job.value = null
   jobExpired.value = false
   selectedRows.value = []
+  autoContinueStopped.value = false
+  autoContinuing.value = false
   applyProtocolDefaults(currentProtocol.value)
   await renderScanForm()
 }
@@ -766,6 +801,9 @@ async function handleStart() {
   starting.value = true
   jobExpired.value = false
   selectedRows.value = []
+  // 新一轮扫描是新意图：解除上一轮取消留下的自动续扫停止标记。
+  autoContinueStopped.value = false
+  autoContinuing.value = false
   // 分页回第一页、清掉表里的勾选标记：新一轮是另一份清单，而下面那份 devices
   // 若恰好与上一轮**长度相同**，applySnapshot 会保留数组实例、el-table 也不换
   // data，勾选标记就会跨轮残留（勾着一批已经不属于本次结果的序号）。
@@ -788,29 +826,64 @@ async function handleStart() {
 }
 
 /**
+ * 批末自动续扫。
+ *
+ * 分批的意义是安全阀（每批仍是 maxTargets 个目标、每批都能刷新进度、出错能
+ * 及时发现），而不是让用户每批点一次按钮。因此任务**正常结束**且还有剩余
+ * 目标时自动发起下一批，直到 remainingTargets=0。
+ */
+function maybeAutoContinue() {
+  if (!canAutoContinue.value) return
+  void continueBatch({ auto: true })
+}
+
+/**
  * 续扫下一批目标。**任务不换、结果不清**：service 端用同一个 jobId 把目标换成
  * 虚拟列表的下一段，已发现的设备与失败明细原样保留 —— 因此这里不能走
  * handleStart 那套"清空勾选、回第一页"的收尾。
  *
- * 工具条上的按钮已由 canContinue 拦住运行态；这里再判一次是为了兜住
- * "点下去的同时上一批刚被取消、在飞探测还在收尾"的窗口（后端会回 busy）。
+ * auto 为 true 时是批末自动续扫；失败（任务过期、上一批仍在收尾等）后停掉
+ * 自动续扫并把按钮留给用户，否则每一拍都会重发同一次失败请求。
  */
-async function handleContinue() {
-  if (!canContinue.value) return
+async function continueBatch({ auto = false } = {}) {
+  if (auto ? !canAutoContinue.value : !canContinue.value) return
   continuing.value = true
+  autoContinuing.value = auto
   try {
     const snap = await continueScan(job.value.jobId)
     applySnapshot(snap)
     startPolling(snap.jobId)
+    // 用户可能在请求在飞时点了取消：取消优先，把刚拉起的这一批也停掉，
+    // 而不是让它继续跑到下一批。
+    if (auto && autoContinueStopped.value) {
+      try {
+        await cancelScan(snap.jobId)
+      } catch {
+        // 拦截器已提示
+      }
+      await pollOnce(snap.jobId)
+    }
   } catch {
-    // 拦截器已提示（任务过期、上一批仍在收尾等都由后端给出可执行的原因）
+    // 拦截器已提示（任务过期、上一批仍在收尾等都由后端给出可执行的原因）。
+    // 自动续扫停在这里，工具条上的「继续扫描」会重新出现供手动重试。
+    if (auto) autoContinueStopped.value = true
   } finally {
     continuing.value = false
+    autoContinuing.value = false
   }
+}
+
+/** 用户手动点「继续扫描」= 明确要继续：解除自动续扫的停止标记。 */
+async function handleContinue() {
+  if (!canContinue.value) return
+  autoContinueStopped.value = false
+  await continueBatch()
 }
 
 async function handleCancel() {
   if (!job.value) return
+  // 先停自动续扫：取消是明确的用户意图，不能让下一拍的 done 快照把它拉起来。
+  autoContinueStopped.value = true
   canceling.value = true
   try {
     await cancelScan(job.value.jobId)
@@ -826,8 +899,15 @@ async function handleCancel() {
 function startPolling(jobId) {
   stopPolling()
   pollStartedAt = Date.now()
+  // 自动续扫会跨很多批，30 分钟的总上限会把正常推进的任务误判成卡死。
+  // 这里按**本批**的最坏耗时推导（估算本身已含预筛 + 探测），每批重新计时，
+  // 跨批的总时长不设上限。
+  pollDeadlineMs = Math.max(
+    POLL_MAX_MS,
+    (job.value?.estimateMaxMs || 0) + 2 * 60 * 1000,
+  )
   pollTimer = setInterval(async () => {
-    if (Date.now() - pollStartedAt > POLL_MAX_MS) {
+    if (Date.now() - pollStartedAt > pollDeadlineMs) {
       stopPolling()
       ElMessage.warning(t('deviceScan.pollTimeout'))
       return
@@ -874,6 +954,9 @@ async function pollOnce(jobId = job.value?.jobId) {
 
     if (job.value?.state !== 'running') {
       stopPolling()
+      // 正常结束且还有剩余地址时由这里接上下一批；取消 / 失败不会触发
+      //（见 canAutoContinue）。
+      maybeAutoContinue()
     }
   } catch {
     // 网络/TCP 层错误会 reject（silent 只吞业务错误的提示，见 api/index.js）。

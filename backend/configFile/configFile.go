@@ -234,7 +234,8 @@ type DeviceScanConfig struct {
 	PrefilterTimeoutMs int `mapstructure:"prefilterTimeoutMs"`
 
 	// MaxTargets **单批**扫描的目标数上限（默认 1024，上限 65536）。超出时只扫
-	// 前一批，剩余地址由用户点「继续扫描」沿用同一个任务接着扫。
+	// 前一批，剩余地址由扫描页**自动续扫**（每批结束自动调 /deviceScan/continue，
+	// 沿用同一个任务），取消或自动续扫失败时工具条上提供「继续扫描」手动重试。
 	//
 	// 存在的意义是防手滑：一个 /16 展开是 65534 个目标，配上 1.5s 的拨号超时
 	// 就是按小时计的扫描。**截断不是静默的** —— 任务快照里带 requestedTargets /
