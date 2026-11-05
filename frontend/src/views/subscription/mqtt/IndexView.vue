@@ -126,7 +126,7 @@
           width="160"
           class-name="iot-col-time"
         />
-        <el-table-column :label="t('common.action')" width="150" align="center" fixed="right">
+        <el-table-column :label="t('common.action')" width="180" align="center" fixed="right">
           <template #default="{ row }">
             <div class="iot-row-actions">
               <!-- 只有启用中的订阅才在管理器里，停用行点开只会得到空列表 -->
@@ -150,6 +150,17 @@
                   :icon="EditPen"
                   :aria-label="t('common.edit')"
                   @click="handleEdit(row)"
+                />
+              </el-tooltip>
+              <el-tooltip :content="t('common.copy')" placement="top">
+                <el-button
+                  class="iot-row-btn"
+                  type="primary"
+                  link
+                  size="small"
+                  :icon="CopyDocument"
+                  :aria-label="t('common.copy')"
+                  @click="handleCopy(row)"
                 />
               </el-tooltip>
               <el-tooltip :content="t('common.delete')" placement="top">
@@ -256,7 +267,12 @@
                 />
               </el-form-item>
               <el-form-item :label="t('subscription.topic')" prop="topic" class="col-span-2">
-                <el-input v-model="formData.topic" :placeholder="t('subscription.topicPlaceholder')">
+                <el-input
+                  v-model="formData.topic"
+                  :placeholder="t('subscription.topicPlaceholder')"
+                  maxlength="2000"
+                  show-word-limit
+                >
                   <template #append>
                     <span class="text-xs">{{ t('subscription.topicWildcardHint') }}</span>
                   </template>
@@ -266,6 +282,7 @@
                 <el-input
                   v-model="formData.controlTopic"
                   :placeholder="t('subscription.controlTopicPlaceholder')"
+                  maxlength="500"
                 >
                   <template #append>
                     <span class="text-xs">{{ t('subscription.controlTopicHint') }}</span>
@@ -989,6 +1006,7 @@ import {
   getSubscriptionById,
   addSubscription,
   updateSubscription,
+  copySubscription,
   deleteSubscription,
   testSubscriptionConnectivity,
   previewSubscriptionMapping,
@@ -2061,6 +2079,17 @@ async function handleSubmit() {
     // 错误提示已由 axios 拦截器统一展示
   } finally {
     submitting.value = false
+  }
+}
+
+async function handleCopy(row) {
+  try {
+    const data = await copySubscription(row.id)
+    ElMessage.success(t('subscription.copySuccess', { name: data?.name || '' }))
+    fetchList()
+    fetchStatus()
+  } catch {
+    // 错误提示已由 axios 拦截器统一展示
   }
 }
 

@@ -15,6 +15,7 @@ func MqttSubscriptionRoutes(r gin.IRouter, mc *controller.MqttSubscriptionContro
 	{
 		sub.POST("/createMqttSubscription", mc.CreateMqttSubscription)
 		sub.POST("/updateMqttSubscription", mc.UpdateMqttSubscription)
+		sub.POST("/copyMqttSubscription", mc.CopyMqttSubscription)
 		sub.GET("/getMqttSubscriptionById/:id", mc.GetMqttSubscriptionById)
 		sub.GET("/deleteMqttSubscription/:id", mc.DeleteMqttSubscription)
 		sub.GET("/pageMqttSubscription", mc.PageMqttSubscription)

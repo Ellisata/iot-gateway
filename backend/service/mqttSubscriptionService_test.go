@@ -142,6 +142,104 @@ func TestMqttSubscriptionCRUD(t *testing.T) {
 	}
 }
 
+func TestMqttSubscriptionCopy(t *testing.T) {
+	svc := newTestSubscriptionService(t)
+	ctx := context.Background()
+
+	create := &dto.CreateMqttSubscriptionDTO{
+		Name:         "line-1",
+		Description:  "一号线遥测",
+		Broker:       "127.0.0.1",
+		Port:         "1883",
+		ClientID:     "sub-1",
+		Username:     "u",
+		Password:     "p",
+		Topic:        "factory/+/telemetry",
+		ControlTopic: "factory/control",
+		QoS:          1,
+		Sort:         3,
+		MappingJSON:  json.RawMessage(testSubscriptionMapping),
+		SampleJSON:   json.RawMessage(testSubscriptionSample),
+		SampleTopic:  "factory/line1/telemetry",
+	}
+	if err := svc.CreateMqttSubscription(ctx, create); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	page, err := svc.PageMqttSubscription(ctx, &dto.PageMqttSubscriptionDTO{Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("Page: %v", err)
+	}
+	srcID := page.Records[0].ID
+
+	copied, err := svc.CopyMqttSubscription(ctx, srcID)
+	if err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+	if copied.ID == "" || copied.ID == srcID {
+		t.Fatalf("copy id = %q, want a new non-empty id", copied.ID)
+	}
+	if copied.Name != "line-1-copy" {
+		t.Errorf("copy name = %q, want line-1-copy", copied.Name)
+	}
+
+	got, err := svc.GetMqttSubscriptionById(ctx, copied.ID)
+	if err != nil {
+		t.Fatalf("Get copy: %v", err)
+	}
+	if got.Status != 0 {
+		t.Errorf("copy status = %d, want 0 (disabled)", got.Status)
+	}
+	// 配置列原样保留（含前端表单不认识的字段与样例）。
+	if got.Description != create.Description || got.Broker != create.Broker ||
+		got.Port != create.Port || got.ClientID != create.ClientID ||
+		got.Username != create.Username || got.Password != create.Password ||
+		got.Topic != create.Topic || got.ControlTopic != create.ControlTopic ||
+		got.QoS != create.QoS || got.Sort != create.Sort ||
+		got.SampleTopic != create.SampleTopic {
+		t.Errorf("copy fields not preserved: %+v", got)
+	}
+	if string(got.MappingJSON) != testSubscriptionMapping {
+		t.Errorf("copy mappingJson = %q, want source bytes", string(got.MappingJSON))
+	}
+
+	// 原记录不受影响（仍启用）。
+	src, err := svc.GetMqttSubscriptionById(ctx, srcID)
+	if err != nil {
+		t.Fatalf("Get source: %v", err)
+	}
+	if src.Status != 1 {
+		t.Errorf("source status = %d, want 1", src.Status)
+	}
+
+	// 再次复制：名称自动避让。
+	second, err := svc.CopyMqttSubscription(ctx, srcID)
+	if err != nil {
+		t.Fatalf("second Copy: %v", err)
+	}
+	if second.Name != "line-1-copy2" {
+		t.Errorf("second copy name = %q, want line-1-copy2", second.Name)
+	}
+
+	if _, err := svc.CopyMqttSubscription(ctx, "missing"); appErrorCode(t, err) != enums.MqttSubscriptionNotExistsEnum.GetCode() {
+		t.Fatalf("missing source code = %s", appErrorCode(t, err))
+	}
+}
+
+// TestCopyNameKeepsLimit 名称拼上后缀后仍须满足 100 字符上限。
+func TestCopyNameKeepsLimit(t *testing.T) {
+	long := strings.Repeat("订", subscriptionNameMaxRunes)
+	name := copyName(long, 1)
+	if got := len([]rune(name)); got > subscriptionNameMaxRunes {
+		t.Errorf("copy name length = %d runes, want <= %d", got, subscriptionNameMaxRunes)
+	}
+	if !strings.HasSuffix(name, copyNameSuffix) {
+		t.Errorf("copy name = %q, want suffix %q", name, copyNameSuffix)
+	}
+	if strings.HasPrefix(name, long) {
+		t.Errorf("copy name = %q, base was not truncated", name)
+	}
+}
+
 func TestMqttSubscriptionCreateRejectsInvalidMapping(t *testing.T) {
 	svc := newTestSubscriptionService(t)
 

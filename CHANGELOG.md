@@ -6,11 +6,27 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
-## [Unreleased]
+## [0.7.2] - 2026-11-05
+
+### 新增
+
+- **MQTT 订阅复制**：新增 `POST /mqttSubscription/copyMqttSubscription`，按 ID 复制为一条**默认停用**的副本（避免同一 topic 重复入库），配置列原样取自库中原行、不经前端表单往返；名称自动加 `-copy` / `-copy2` 后缀并查重，拼缀后仍受 100 字符上限约束。控制台列表新增复制按钮，接口镜像到 `/agentApi`。
+
+### 变更
+
+- **订阅 Topic 长度上限 500 → 2000**：创建、编辑与连通性测试同步放宽，表单输入框显示字数；控制下行 Topic 仍保持 500。
 
 ### 修复
 
 - **pluginhost：已取消的 RPC 立即失败**：`client.call` 在写帧前先检查 `ctx.Err()`，已取消/超时的调用不再发送请求，修复取消扫描时探测偶发"成功"的问题。
+
+### Added
+
+- **MQTT subscription duplication**: `POST /mqttSubscription/copyMqttSubscription` copies a subscription by ID into a **disabled-by-default** copy (so the same topic is not ingested twice); config columns come straight from the stored row with no form round-trip. The name gets a `-copy` / `-copy2` suffix with collision avoidance and is truncated to stay within the 100-character limit. The console list gains a copy action and the route is mirrored to `/agentApi`.
+
+### Changed
+
+- **Subscription topic limit raised from 500 to 2000 characters**: create, update and connectivity-test validation are relaxed together and the form shows a character counter; the control downlink topic stays capped at 500.
 
 ### Fixed
 

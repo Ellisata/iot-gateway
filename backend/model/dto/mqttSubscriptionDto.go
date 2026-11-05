@@ -17,7 +17,7 @@ type CreateMqttSubscriptionDTO struct {
 	ClientID    string `json:"clientId"`
 	Username    string `json:"username"`
 	Password    string `json:"password"`
-	Topic       string `json:"topic"        binding:"required,min=1,max=500"`
+	Topic       string `json:"topic"        binding:"required,min=1,max=2000"`
 	QoS         int    `json:"qos"`
 	// ControlTopic 控制下发主题；为空 = 不做下行控制。
 	ControlTopic string          `json:"controlTopic" binding:"omitempty,max=500"`
@@ -42,7 +42,7 @@ type UpdateMqttSubscriptionDTO struct {
 	ClientID    string `json:"clientId"`
 	Username    string `json:"username"`
 	Password    string `json:"password"`
-	Topic       string `json:"topic"        binding:"required,min=1,max=500"`
+	Topic       string `json:"topic"        binding:"required,min=1,max=2000"`
 	QoS         int    `json:"qos"`
 	// ControlTopic 控制下发主题；空串 = 清空（与 parserConfig 的"空 = 沿用"不同，
 	// 列表页只改启停时会回传整份表单，空串就是要关掉下行控制）。
@@ -54,6 +54,13 @@ type UpdateMqttSubscriptionDTO struct {
 	SampleTopic  string          `json:"sampleTopic"`
 	Sort         int             `json:"sort"`
 	Status       *int            `json:"status"`
+}
+
+// CopyMqttSubscriptionDTO 复制 MQTT 订阅请求。
+//
+// 只按 id 复制：副本的字段全部来自库里的原行，不接受调用方覆盖。
+type CopyMqttSubscriptionDTO struct {
+	ID string `json:"id" binding:"required"`
 }
 
 // PageMqttSubscriptionDTO MQTT 订阅分页查询
@@ -143,7 +150,7 @@ type TestMqttSubscriptionDTO struct {
 	ClientID string `json:"clientId"`
 	Username string `json:"username"`
 	Password string `json:"password"`
-	Topic    string `json:"topic"    binding:"required,min=1,max=500"`
+	Topic    string `json:"topic"    binding:"required,min=1,max=2000"`
 }
 
 // PreviewMqttSubscriptionDTO 解析预览请求（不落库）。

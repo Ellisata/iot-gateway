@@ -153,6 +153,18 @@ export function updateSubscription(data) {
 }
 
 /**
+ * 复制订阅为新的停用副本（配置原样保留，名称自动加 -copy 后缀并查重）
+ * @param {string} id
+ */
+export function copySubscription(id) {
+  return request({
+    url: '/mqttSubscription/copyMqttSubscription',
+    method: 'post',
+    data: { id },
+  })
+}
+
+/**
  * 删除订阅
  * @param {string} id
  */

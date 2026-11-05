@@ -250,6 +250,91 @@ func (s *MqttSubscriptionService) DeleteMqttSubscription(ctx context.Context, id
 	return nil
 }
 
+// 复制订阅的名称后缀。用 ASCII 而不是「副本」：名称是数据值，不该随界面语言变化。
+const (
+	copyNameSuffix           = "-copy"
+	subscriptionNameMaxRunes = 100 // 与 Create/Update DTO 的 name max=100 一致
+)
+
+// CopyMqttSubscription 复制一条订阅为新的停用副本。
+//
+// 副本默认停用：两条启用中的订阅连同一个 broker、订阅同一个 topic 时，
+// 同一条报文会被各转一份，时序库里出现重复数据。运维改完参数后再显式启用。
+//
+// 配置列按库里的原行原样复制，不经过前端表单往返，因此界面未覆盖的字段也不会丢。
+func (s *MqttSubscriptionService) CopyMqttSubscription(ctx context.Context, id string) (*vo.MqttSubscriptionCopyVO, error) {
+	var src po.MqttSubscription
+	if err := s.sqliteDB.WithContext(ctx).Where("id = ?", id).First(&src).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appError.NewAppErrorCtx(enums.MqttSubscriptionNotExistsEnum.GetCode(),
+				enums.MqttSubscriptionNotExistsEnum.GetMessage(), enums.MqttSubscriptionNotExistsEnum.GetMsgKey())
+		}
+		return nil, err
+	}
+
+	now := time.Now().Format("2006-01-02 15:04:05")
+	clone := src
+	clone.ID = "" // 交给 BeforeCreate 生成 UUIDv7
+	clone.Status = 0
+	clone.CreatedAt = now
+	clone.UpdatedAt = now
+
+	// 查重与插入放同一事务：SQLite 单写者会把两者串行化，避免并发复制撞名。
+	err := s.sqliteDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		name, err := uniqueCopyName(tx, src.Name)
+		if err != nil {
+			return err
+		}
+		clone.Name = name
+		if err := tx.Create(&clone).Error; err != nil {
+			return err
+		}
+		// status 的 struct tag 带 default:1：GORM 创建时会省略零值，让数据库回落到
+		// 默认值 1，副本就变成启用了。插入后显式改回停用（没有可用的字段级办法
+		// 让 Create 写入零值，除非把 PO 的 Status 改成指针，代价太大）。
+		return tx.Model(&po.MqttSubscription{}).Where("id = ?", clone.ID).
+			Update("status", 0).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.reload()
+	return &vo.MqttSubscriptionCopyVO{ID: clone.ID, Name: clone.Name}, nil
+}
+
+// uniqueCopyName 依次尝试「原名-copy」「原名-copy2」…，返回第一个未占用的名称。
+// 基础名先截断到 100 字符减去后缀长度，保证拼上后缀后仍满足 DTO 的长度约束。
+func uniqueCopyName(tx *gorm.DB, base string) (string, error) {
+	for seq := 1; seq <= 100; seq++ {
+		name := copyName(base, seq)
+		var count int64
+		if err := tx.Model(&po.MqttSubscription{}).Where("name = ?", name).Count(&count).Error; err != nil {
+			return "", err
+		}
+		if count == 0 {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("无法为 %q 生成不重复的副本名称", base)
+}
+
+// copyName 生成第 seq 个候选名称（seq 从 1 开始）。
+func copyName(base string, seq int) string {
+	suffix := copyNameSuffix
+	if seq > 1 {
+		suffix = fmt.Sprintf("%s%d", copyNameSuffix, seq)
+	}
+	runes := []rune(base)
+	limit := subscriptionNameMaxRunes - len([]rune(suffix))
+	if limit < 0 {
+		limit = 0
+	}
+	if len(runes) > limit {
+		runes = runes[:limit]
+	}
+	return string(runes) + suffix
+}
+
 // GetMqttSubscriptionById 根据 ID 查询 MQTT 订阅
 func (s *MqttSubscriptionService) GetMqttSubscriptionById(ctx context.Context, id string) (*vo.MqttSubscriptionVO, error) {
 	var row po.MqttSubscription

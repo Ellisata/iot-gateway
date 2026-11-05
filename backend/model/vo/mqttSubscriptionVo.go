@@ -33,6 +33,14 @@ type MqttSubscriptionVO struct {
 	UpdatedAt    string          `json:"updatedAt"`
 }
 
+// MqttSubscriptionCopyVO 复制订阅的结果。
+//
+// 只回新记录的主键与自动生成的名称：前端用名称做提示，其余字段靠刷新列表获取。
+type MqttSubscriptionCopyVO struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // MqttSubscriptionStatusVO MQTT 订阅运行状态
 type MqttSubscriptionStatusVO struct {
 	ID           string `json:"id"`

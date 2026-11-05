@@ -53,6 +53,22 @@ func (ctr *MqttSubscriptionController) UpdateMqttSubscription(c *gin.Context) {
 	c.JSON(200, response.Success(nil))
 }
 
+// CopyMqttSubscription 复制 MQTT 订阅为一条默认停用的新记录
+func (ctr *MqttSubscriptionController) CopyMqttSubscription(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.CopyMqttSubscriptionDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.service.CopyMqttSubscription(ctx, req.ID)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
 // GetMqttSubscriptionById 根据 ID 查询 MQTT 订阅
 func (ctr *MqttSubscriptionController) GetMqttSubscriptionById(c *gin.Context) {
 	ctx := c.Request.Context()

@@ -695,6 +695,14 @@ var agentApiSurface = map[string]SurfaceEntry{
 			"status":      "1 启用 0 停用；省略/null = 不改",
 		}),
 	},
+	"POST /mqttSubscription/copyMqttSubscription": {
+		Access: AccessWrite,
+		Params: argBody(dto.CopyMqttSubscriptionDTO{}, map[string]string{
+			"id": "被复制的订阅 ID",
+		}),
+		Note: "副本默认**停用**（避免同一 topic 重复入库），名称自动加 -copy 后缀并查重；" +
+			"配置原样保留，返回 {id, name}",
+	},
 	"GET /mqttSubscription/deleteMqttSubscription/:id": {
 		Access: AccessWrite,
 		Params: argNone(),
