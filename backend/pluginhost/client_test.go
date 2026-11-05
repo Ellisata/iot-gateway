@@ -256,6 +256,38 @@ func TestTimeoutDropsPendingEntry(t *testing.T) {
 	}
 }
 
+// TestCallRejectsAlreadyCancelledContext 已取消的 ctx 必须在写帧之前失败。
+//
+// 只断言"返回错误"不够：旧实现先写帧、再 select 应答与 ctx.Done。插件回包
+// 先一步进了 ch 时两个分支同时就绪，select 会**随机**选一个，于是已取消的
+// 调用仍可能返回成功（CI 上的 TestProbeTargetsHonoursContextCancel 就是这么
+// 偶发失败的）。这里进一步断言请求帧根本没有发出去。
+func TestCallRejectsAlreadyCancelledContext(t *testing.T) {
+	clientSide, serverSide := net.Pipe()
+	t.Cleanup(func() { _ = serverSide.Close() })
+	sent := make(chan struct{}, 1)
+	go func() {
+		if _, err := pluginwire.ReadFrame(serverSide); err == nil {
+			sent <- struct{}{}
+		}
+	}()
+	c := newTestClient(t, clientSide)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := c.call(ctx, pluginwire.MethodProbe, driversdk.ProbeParams{}, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("已取消的 ctx 应返回 context.Canceled，得到 %v", err)
+	}
+
+	select {
+	case <-sent:
+		t.Fatal("已取消的调用不应把请求帧发给插件")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
 // TestProcessDownWakesAllWaiters 管道中途关闭：所有在途调用立即拿到
 // ErrProcessDown（而不是各自等到超时），且不留下读协程。
 func TestProcessDownWakesAllWaiters(t *testing.T) {

@@ -6,6 +6,16 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
+## [Unreleased]
+
+### 修复
+
+- **pluginhost：已取消的 RPC 立即失败**：`client.call` 在写帧前先检查 `ctx.Err()`，已取消/超时的调用不再发送请求，修复取消扫描时探测偶发"成功"的问题。
+
+### Fixed
+
+- **pluginhost: cancelled RPCs fail fast**: `client.call` now checks `ctx.Err()` before writing a frame, so cancelled/timed-out calls are never sent — fixes probes intermittently "succeeding" after a scan was cancelled.
+
 ## [0.7.1] - 2026-11-05
 
 ### 变更

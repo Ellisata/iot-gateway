@@ -202,6 +202,20 @@ func (c *client) wait() { c.wg.Wait() }
 //
 // result 非 nil 时，即使帧里带 Error 也会尝试解码 Result。
 func (c *client) call(ctx context.Context, method string, params, result any) error {
+	// 入口先判 ctx：**已经取消/超时的调用不能再发出去**。
+	//
+	// 不能只靠下面的 select —— 当调用方传入的 ctx 在 call 之前就已取消时
+	//（设备扫描的取消就是这么传的），写帧之后插件可能已经回包进 ch，此时
+	// select 的两个分支同时就绪，Go 会**均匀随机**选一个，于是"已取消的调用"
+	// 有约一半概率返回成功。这不是理论问题：Race 检测下调度变慢就会暴露，
+	// 见 TestProbeTargetsHonoursContextCancel。
+	if err := ctx.Err(); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			c.noteTimeout()
+		}
+		return fmt.Errorf("pluginhost: %s canceled or timed out: %w", method, err)
+	}
+
 	// 载荷编码由类型决定：实现了 BinaryEncoder 的走二进制，其余走 JSON。
 	// 这里刻意不做「哪些方法走哪种编码」的判断 —— 那种对照表迟早与实现漂移。
 	body, codec, err := pluginwire.EncodeBody(params)
