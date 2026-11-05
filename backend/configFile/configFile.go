@@ -204,10 +204,34 @@ type DeviceScanConfig struct {
 	// 动态切换。关闭只拦截新扫描，运行中的任务照常结束或由用户取消。
 	Enabled bool `mapstructure:"enabled"`
 
-	// MaxConcurrentProbes 同时在飞的目标探测数（默认 8，上限 32）。
-	// 乘上单目标耗时就是扫一个网段的墙钟时间，同时也是插件进程一侧的并发压力：
-	// 每个在飞探测在插件里占一个 goroutine 与一条到目标的连接。
+	// MaxConcurrentProbes 同时在飞的目标探测数（默认 32，上限 128）。
+	// 扫描墙钟时间 ≈ ceil(目标数 / 本值) × 单目标耗时；网段里不可达地址占绝大
+	// 多数，每个都要等满插件侧的拨号超时，所以这是最直观的加速旋钮。
+	// 调大也会让交换机与插件进程同时承受更多连接尝试：每个在飞探测在插件里
+	// 占一个 goroutine 与一条到目标的连接。**本项改动需重启网关**。
 	MaxConcurrentProbes int `mapstructure:"maxConcurrentProbes"`
+
+	// PrefilterEnabled 启用网关侧的 TCP 可达性预筛（默认 true）。
+	//
+	// 只对**插件声明了 Discovery.Transport = "tcp"** 的协议生效：先用自己的
+	// 并发与短超时拨一遍扫描端口，连不上的目标直接判死，只把端口开着的主机交给
+	// 插件 probe。广播目标永远绕过。UDP 协议或未声明传输层的协议不受影响。
+	//
+	// 判死的目标计入进度（scanned）但不产生错误 —— 与插件"拨号失败 = 没扫到"
+	// 同语义。**本项改动需重启网关**。怀疑漏扫时可关闭它或调大超时。
+	PrefilterEnabled bool `mapstructure:"prefilterEnabled"`
+
+	// PrefilterConcurrency 预筛阶段同时在飞的 TCP 连接数（默认 256，上限 1024）。
+	// 它独立于 MaxConcurrentProbes：预筛只是一次裸 TCP connect，不占插件进程，
+	// 所以可以比插件探测并发高一个量级。受本机文件描述符上限约束。
+	PrefilterConcurrency int `mapstructure:"prefilterConcurrency"`
+
+	// PrefilterTimeoutMs 预筛单目标的连接超时（默认 500ms，范围 [100,1000]）。
+	//
+	// **这不是 probe 预算**：它不参与 `MaxBudgetMs + probeRPCGrace` 的 RPC 超时
+	// 推导，只用于决定"多久连不上就当这个地址没人"。局域网 RTT 远小于 500ms；
+	// 上限压在 1s 以内，是为了不让预筛拖住停机（Stop 等待上限 2s）。
+	PrefilterTimeoutMs int `mapstructure:"prefilterTimeoutMs"`
 
 	// MaxTargets **单批**扫描的目标数上限（默认 1024，上限 65536）。超出时只扫
 	// 前一批，剩余地址由用户点「继续扫描」沿用同一个任务接着扫。

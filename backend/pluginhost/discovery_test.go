@@ -48,6 +48,10 @@ func TestDiscoverySpecsFollowPluginMeta(t *testing.T) {
 	if s.Spec.DefaultPort != 502 || s.Spec.MaxBudgetMs != 2000 {
 		t.Errorf("端口/预算 = %d/%d，期望 502/2000", s.Spec.DefaultPort, s.Spec.MaxBudgetMs)
 	}
+	// Transport 决定网关能否做 TCP 预筛，必须无损过线。
+	if s.Spec.Transport != driver.ProbeTransportTCP {
+		t.Errorf("Transport = %q，期望 %q", s.Spec.Transport, driver.ProbeTransportTCP)
+	}
 	if len(s.Spec.FormJSON) == 0 || !json.Valid(s.Spec.FormJSON) {
 		t.Errorf("FormJSON 应随 Meta 一起过线，实际 %q", s.Spec.FormJSON)
 	}
@@ -241,6 +245,10 @@ func TestDiscoverySpecsRefreshAfterHotUpgrade(t *testing.T) {
 	after := m.DiscoverySpecs()
 	if after[0].Spec.DefaultPort != 1502 || after[0].Spec.MaxBudgetMs != 3000 {
 		t.Fatalf("升级后的规格 = %+v，期望端口 1502 / 预算 3000", after[0].Spec)
+	}
+	// Transport 也必须现算：缓存能力表会让网关继续按旧传输层做预筛。
+	if after[0].Spec.Transport != driver.ProbeTransportUDP {
+		t.Fatalf("升级后 Transport = %q，期望 %q", after[0].Spec.Transport, driver.ProbeTransportUDP)
 	}
 }
 

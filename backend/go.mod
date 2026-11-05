@@ -40,7 +40,7 @@ require (
 )
 
 require (
-	github.com/Ellisata/iot-gateway-sdk v0.3.0
+	github.com/Ellisata/iot-gateway-sdk v0.4.0
 	github.com/Ellisata/iot-gateway-sdk/testkit v0.2.0
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect

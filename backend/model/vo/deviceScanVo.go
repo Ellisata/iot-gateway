@@ -58,6 +58,14 @@ type ScanDeviceVO struct {
 	Model   string `json:"model,omitempty"`
 	Version string `json:"version,omitempty"`
 
+	// SuggestedCode 新建这一台时的建议设备编码。前端在"添加为设备"弹窗里
+	// 预填、用户可改；创建时留空则会按名称重新生成（与未给编码的历史行为一致）。
+	//
+	// 它只是**建议**：由网关按默认设备名（IP / IP-站号）派生，批内互不相同，
+	// 但不保证与库内已有编码不撞 —— 用户改过几台之后，提交时按行校验，
+	// 撞了只让该行失败并给出原因（编码创建后不可改，不能悄悄改成 xxx-2）。
+	SuggestedCode string `json:"suggestedCode,omitempty"`
+
 	// ProtocolJSON 建 device 行时要用的连接配置，**由插件给出**。
 	// 前端原样展示（能让运维核对），但提交创建时不必回传 —— 服务端从
 	// 自己持有的任务快照里取，不采信客户端。
@@ -97,7 +105,8 @@ type ScanJobVO struct {
 	// RemainingTargets 尚未扫描的目标数，0 表示整个网段已扫完。
 	RemainingTargets int `json:"remainingTargets"`
 
-	// Total 本批目标数；Scanned 本批已完成数 —— 进度条用这两个。
+	// Total 本批目标数；Scanned 本批已评估完成数（TCP 预筛判死 + 插件探测完成）
+	// —— 进度条用这两个。
 	Total   int `json:"total"`
 	Scanned int `json:"scanned"`
 	// ScannedTotal 本次扫描累计完成的目标数（跨批次），配 RequestedTargets
@@ -106,7 +115,7 @@ type ScanJobVO struct {
 	Found        int `json:"found"`
 
 	ElapsedMs int `json:"elapsedMs"`
-	// EstimateMaxMs 最坏耗时的上界估算（全部目标走满插件预算）。
+	// EstimateMaxMs 最坏耗时的上界估算（TCP 预筛上界 + 全部目标走满插件预算）。
 	EstimateMaxMs int `json:"estimateMaxMs"`
 
 	// Devices 已发现的设备。**可能为 null** —— 轻量快照（轮询用的

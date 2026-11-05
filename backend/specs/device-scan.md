@@ -27,8 +27,8 @@
 ```
 前端扫描页 ──POST /deviceScan/start──▶ DeviceScanService ──▶ devicescan.Engine
    ▲                                                              │ 规划目标（本机网段展开）
-   │ GET /deviceScan/status?jobId=（轮询）                         │ 并发 worker（上限可配）
-   └──────────────────────────────────────────────────────────────┤
+   │ GET /deviceScan/status?jobId=（轮询）                         │ 阶段 1：TCP 可达性预筛（Transport=tcp）
+   └──────────────────────────────────────────────────────────────┤ 阶段 2：并发 worker（上限可配）
                                                                   ▼
                                             pluginhost.Manager.ProbeTargets(ctx, protocol, options, target)
                                                                   │  RPC「probe」，**无会话**
@@ -47,6 +47,23 @@
 与 worker 池。广播型协议（EtherNet/IP 的 ListIdentity、FINS/UDP 的节点查询）
 由网关把各网段的**子网广播地址**也加进目标列表即可覆盖，不需要插件自己扫网段。
 
+### 阶段 1：TCP 可达性预筛
+
+一个网段里绝大多数地址不可达，而插件对每个目标都要先拨号、等满自己的超时。
+为了让大网段不至于"每个空地址都走一遍完整 probe"，网关在插件声明
+`Discovery.Transport = "tcp"` 时先做一次**高并发、短超时**的裸 TCP connect：
+
+- 连不上 ⇒ 该目标判死，计入进度（`scanned`）但**不产生错误** —— 与插件
+  "拨号失败 = 没扫到"同语义，否则一次 /24 扫描会冒出两百多条噪声；
+- 连得上 ⇒ 才把目标交给插件 probe（阶段 2）；
+- **广播目标永远绕过**（对广播地址做 TCP connect 没有意义）；
+- `Transport` 为 `"udp"` 或空（旧插件）整批不预筛，行为与旧版本完全一致。
+
+预筛**不是设备判定**：端口开着不等于对端是该协议的设备，插件仍是唯一判据；
+反过来，插件要成功也必须先连通，所以"连不上"是可靠的否定证据。网关在这一步
+不读协议载荷、不产出 `DiscoveredDevice`，只是决定"要不要把目标交给插件"。
+预筛与阶段 2 之间是**屏障**：一批目标的预筛全部结束后才开始探测。
+
 **为什么任务状态机在网关侧**：目标由网关规划，所以进度、结果、取消全都留在网关
 内存里；对插件的 `probe` 是一次短调用，不引入长 RPC。
 
@@ -64,12 +81,18 @@
 | `FormJSON` | 扫描选项表单（form-create schema），用户填的内容原样透给 prober |
 | `DefaultPort` | 默认探测端口，前端据此回填端口输入框 |
 | `TargetMode` | `unicast` / `broadcast` / `both`，决定网关生成什么目标（留空按 unicast） |
+| `Transport` | `tcp` / `udp` / 留空。声明单播 probe 的传输层，决定网关能否做 TCP 预筛（见第 1 节）。**留空 ≠ udp**：留空表示不声明，网关同样不预筛 |
 | `MaxBudgetMs` | **单目标硬预算**，见第 4 节 |
 
 启动期校验（`driversdk.Meta.Validate`）会拒绝：Title 为空、端口越界、
-TargetMode 非法、`MaxBudgetMs` 不在 `[500, 60000]`、FormJSON 不是合法 JSON、
-以及**串口协议声明扫描能力**（目标模型是 host/port，表达不了 comPort；
-串口上"总线上有哪些站号"是另一个功能）。
+TargetMode 非法、`Transport` 不是空串 / `tcp` / `udp`、`MaxBudgetMs` 不在
+`[500, 60000]`、FormJSON 不是合法 JSON、以及**串口协议声明扫描能力**
+（目标模型是 host/port，表达不了 comPort；串口上"总线上有哪些站号"是另一个功能）。
+
+`Transport` 是**承诺而不是提示**：声明 `tcp` 而实际探的是 UDP，会让网关把所有
+单播目标在预筛阶段判死，表现为"扫描飞快结束、0 设备、0 错误"。广播与单播走
+不同传输的协议应留空。现有官方驱动的取值：Modbus TCP / S7 / FINS-TCP / OPC UA /
+MC 声明 `tcp`；FINS-UDP / Omron CIP / Rockwell CIP 声明 `udp`（ListIdentity 是 UDP）。
 
 声明了 `Discovery` 的协议**必须有对应的 prober**（`driversdk.Probers`），
 否则插件进程启动即失败 —— 与"每个协议都必须有工厂"是同一条校验，理由也一样：
@@ -244,6 +267,8 @@ FINS 也有一个"决定连上看不看得到设备"的参数：帧头里的 **D
 - 网关侧：`Cancel` 立即把任务置为 `canceled` 并 `cancel()` 任务的 ctx。
   `client.call` 在 `ctx.Done` 上立刻返回，迟到的应答被 `dispatch` 静默丢弃。
 - **已扫到的结果保留** —— 用户点了取消不代表那些结果没用。
+- 预筛阶段的拨号同样受任务 ctx 控制（`Dialer.DialContext`）：取消后在飞的
+  TCP 连接立即返回，已判死的目标保留计数，未开始/被取消的不计数。
 - **被取消的目标不计入进度、也不计入错误明细**：那个目标并没有被扫过，
   把它算进 `scanned` 会让进度条假装扫完了，把它的错误报给用户更是误导
   （用户已经知道自己点了取消）。
@@ -285,6 +310,9 @@ FINS 也有一个"决定连上看不看得到设备"的参数：帧头里的 **D
 **广播目标排在最前是有意的**：它一个就覆盖整个网段，排在两百多个逐主机目标之后，
 一个大网段触顶时就可能永远轮不到它 —— 而它恰恰是最廉价、最可能先出结果的那一个。
 分批续扫时它只出现在**第一批**（虚拟列表的最前面），后续批次从它之后接着取。
+
+**广播目标永远绕过 TCP 预筛**：对广播地址做 TCP connect 没有意义，而且会把
+`TargetMode=both` 的广播路径整条掐掉。预筛只作用于 `Broadcast=false` 的目标。
 
 **曾经有个缺口**：`TargetMode` 写在契约里、由 `driversdk.Meta.Validate` 校验，
 但引擎侧的展开逻辑从来没有读它 —— 于是"声明了广播的插件"拿到的仍是逐主机目标，
@@ -351,6 +379,11 @@ FINS 也有一个"决定连上看不看得到设备"的参数：帧头里的 **D
   一份坏 JSON 写进 `device` 行之后，症状是"设备采不到值"，完全指不到根因。
 - 逐行校验复用 `service.validateImportRow`，与 Excel 导入**逐字同规则**，
   否则两条路径会对同一份数据给出不同判定。
+- **设备编码可选**：`items[].code` 留空时按名称自动生成（与历史行为一致），
+  显式给出时必须合法（字母开头、字母数字下划线短横线、最长 64）且在库内/批内唯一；
+  不合法或重复只让该行失败，**不自动避让**（编码创建后不可改，悄悄改成 `-2`
+  比报错更糟）。扫描结果里的 `devices[].suggestedCode` 是网关按默认名（IP / IP-站号）
+  派生的建议值，前端预填进添加弹窗供用户修改 —— 它只是建议，不与库内比对。
 - **不自动 ping**：批量建 N 台设备各发一次探测，又是一次卡死计数风险。
   改为创建后引导用户手动点"测试连接"。
 
@@ -385,6 +418,8 @@ FINS 也有一个"决定连上看不看得到设备"的参数：帧头里的 **D
 | OPC UA 服务器扫出来型号/厂商为空 | **必然为空，这是设计如此**：`GetEndpoints` 是发现服务、不需要会话，服务器不报厂商/型号/固件（那要走 `ServerStatus`，代价是建一次会话）。`Name` 取的是服务器自述的 `ApplicationName` |
 | OPC UA 设备扫出来却连不上 | 结果里那条「提示」会说明原因，最常见的是**只提供加密端点**（无 None 安全策略）：网关当前未实现客户端证书，选 Sign/SignAndEncrypt 必然失败。其次是不接受匿名登录（提示会要求填用户名密码）。**探测本身不校验认证** —— 用户名密码错的服务器照样会被列出来，那要到采集时才暴露 |
 | OPC UA 服务器被列出来了，却从没读过它的任何数据 | **刻意如此**：判据是"读回一份自洽的端点表"，不是"建会话成功"。与 FINS/MC 的"结束码错误也算设备"同一条取舍 —— **拒绝应答也证明对面是 OPC UA** |
+| 扫描飞快结束，0 设备、0 错误 | 插件把 `Transport` 声明成了 `tcp`，实际 probe 走 UDP：网关的 TCP 预筛把所有单播目标判死了。核对插件声明；临时处置是设 `deviceScan.prefilterEnabled: false` 并重启。这也是为什么 `Transport` 在插件指南里被写成**承诺** |
+| 个别响应很慢的设备偶尔扫不到 | 预筛的单目标连接超时（`prefilterTimeoutMs`，默认 500ms）比这些设备接受连接的时间短。调大它，或关闭预筛回退到插件自己的拨号超时 |
 
 | DL/T 645 的两个协议都扫不到设备 | **刻意不做，不是漏配**。`DLT645.Serial` 按契约不得声明 `Discovery`（目标模型是 host/port，表达不了 comPort）；`DLT645.TCP` 虽然可以，但它连的是**串口服务器 / DTU**，与 `Omron.FINS.HostLinkTCP` 同形（FINS 也刻意不声明）。DL/T 645-2007 确有广播「读通信地址」(控制码 13H → 应答 93H，应答帧地址域回填真实表号) 能枚举**一条 RS-485 总线上的表**，但那回答的是"这条总线上挂着哪些表"，不是"网段里有哪些主机"——是另一个功能（对应"串口上总线上有哪些站号"那一格），且 1997 版的广播语义无依据、无真机可验证。按"不做而不是猜着做"：留 nil，由 `driversrc/dlt645/main_test.go` 的 `TestNoDeviceScan` 钉住。**它的点位扫描是两个协议都声明的**，见 [point-discovery.md](point-discovery.md) §3 第五种形态 |
 
@@ -400,7 +435,8 @@ FINS 也有一个"决定连上看不看得到设备"的参数：帧头里的 **D
 比漏报更费用户的时间。回归：`opcuadrv/probe_test.go` 的 `TestClassifyProbeErr`。
 
 **合规提醒**：扫描会主动向整个网段发起 TCP 连接（广播类协议还会发 UDP 广播），
-某些生产网络对此有明确的禁止条款。`deviceScan.enabled` 是为此准备的开关。
+TCP 预筛同样属于主动连接。某些生产网络对此有明确的禁止条款。
+`deviceScan.enabled` 是总开关；只想关掉预筛则用 `deviceScan.prefilterEnabled`。
 
 ---
 
@@ -412,7 +448,7 @@ FINS 也有一个"决定连上看不看得到设备"的参数：帧头里的 **D
 | [../sdk/driversdk/rpc.go](../sdk/driversdk/rpc.go) | `ProbeParams` / `ProbeReply`（过线载荷） |
 | [../sdk/driversdk/serve.go](../sdk/driversdk/serve.go) | `Probers` / `ProbeFunc` / `ProbeRequest`、启动期校验、`handleProbe`、预算钳制 |
 | [../pluginhost/discovery.go](../pluginhost/discovery.go) | 驱动侧适配：`DiscoverySpecs`（现算，不缓存）/ `ProbeTargets`（RPC 超时推导） |
-| [../devicescan/](../devicescan/) | 任务引擎：目标规划（`targets.go`）、任务与快照（`job.go`）、并发/取消/过期（`engine.go`） |
+| [../devicescan/](../devicescan/) | 任务引擎：目标规划（`targets.go`）、任务与快照（`job.go`）、并发/取消/过期（`engine.go`）、TCP 预筛（`prefilter.go`） |
 | [../discovery/netif.go](../discovery/netif.go) | `eachUsableIPv4`（两处共用的网卡过滤）+ `LocalSubnets` |
 | [../service/deviceScanService.go](../service/deviceScanService.go) | 错误码映射、VO 转换、批量建设备 |
 | [../controller/deviceScanController.go](../controller/deviceScanController.go) | `/deviceScan/*` |
@@ -469,6 +505,8 @@ FINS 也有一个"决定连上看不看得到设备"的参数：帧头里的 **D
 - 计数（`found` / `scanned` / `scannedTotal`）与完整快照**同源**
   （都是 `len(j.devices)` / 本批计数 / 累计计数），两份计数一旦各算一套，
   补请求的时机就会漏 —— 症状是"扫到的东西一直不出现"。
+- `scanned` 的语义是「本批**已评估完成**的目标数」（TCP 预筛判死 + 插件探测完成），
+  不是「插件探测完成数」；预筛判死的目标同样被检查过了，进度条必须把它们算进去。
 
 回归测试：`devicescan` 的 `TestProgressOmitsResults`、`service` 的
 `TestScanProgressOmitsDevices`。
@@ -480,20 +518,27 @@ FINS 也有一个"决定连上看不看得到设备"的参数：帧头里的 **D
 ```yaml
 deviceScan:
   enabled: true             # 出厂 true；关掉后 /deviceScan/* 全部返回"功能未启用"
-  maxConcurrentProbes: 8    # 同时在飞的目标探测数（上限 32）
+  maxConcurrentProbes: 32   # 同时在飞的目标探测数（上限 128）；扫描耗时 ≈ ceil(目标数/本值) × 单目标耗时
+  prefilterEnabled: true    # TCP 可达性预筛；仅对声明 Transport=tcp 的协议，广播目标永远绕过
+  prefilterConcurrency: 256 # 预筛并发（上限 1024），独立于 maxConcurrentProbes
+  prefilterTimeoutMs: 500   # 预筛单目标连接超时 [100,1000]；不是 probe 预算
   maxTargets: 1024          # 单批扫描的目标数上限（上限 65536），超出即截断并如实上报；剩余地址可续扫
   jobTTLMinutes: 10         # 终态任务的保留时长；任务不落库，重启即丢
 ```
 
-各项都在**每次扫描时实时生效**。探测超时**不在本段** —— 它是每协议的属性，
-由插件声明（见第 4 节）。
+`enabled` 之外的数值（并发、预筛、批大小、保留时长）在**网关启动时冻结**
+（改动需重启）；`enabled` 走 [runtimecfg](../runtimecfg/)，每次扫描现读。
+探测超时**不在本段** —— 它是每协议的属性，由插件声明（见第 4 节）。
 
 ---
 
 ## 13. 给插件作者的最小清单
 
 1. 在 `Meta.Protocols[]` 的那一项上填 `Discovery`（`Title` / `DefaultPort` /
-   `MaxBudgetMs` / 扫描表单）。
+   `MaxBudgetMs` / 扫描表单）。若单播 probe 走 TCP，填 `Transport: tcp`
+   （可让网关先做短超时的可达性预筛）；走 UDP 就填 `udp`，广播与单播不同传输
+   则留空。**填错比不填更糟**：`tcp` 声明配上 UDP 实现会让全部单播目标在预筛
+   阶段被静默判死。
 2. 在 `driversdk.Main` 的第三个参数（`driversdk.Capabilities`）的 `Probers`
    字段里给出 `Probers{协议名: 探测函数}`：
 

@@ -67,6 +67,7 @@
 │   └── announcer.go     # Announcer:Start/Stop、周期广播、探询应答与限流
 ├── devicescan/          # 局域网设备扫描发现(**与 discovery 方向相反**):主动扫本机网段找 PLC
 │   ├── targets.go       # 网段展开成逐主机目标 + maxTargets 截断(纯函数)
+│   ├── prefilter.go     # 阶段 1:TCP 可达性预筛(仅 Transport=tcp;广播目标绕过)
 │   ├── job.go           # job/Snapshot:进度、结果、终态(见 specs/device-scan.md)
 │   └── engine.go        # Engine:Submit/Status/Cancel/Stop、并发探测、惰性过期
 ├── web/                 # 前端构建产物(仅 dist/,go:embed 嵌入,无前端源码)
@@ -281,6 +282,11 @@
   包名刻意分开,共用 discovery 词根会让日志与文档里出现两个含义相反的名字。
 - **职责边界是本功能的支点**:网关规划目标(枚举本机网段、展开主机地址)、控制并发、
   限速、统计进度、取消;插件只回答"你给我的这个 IP:端口,是不是我的设备"。
+- **两阶段**:插件声明 `Discovery.Transport="tcp"` 时,网关先用高并发短超时做一次
+  裸 TCP connect 预筛(`deviceScan.prefilter*`),连不上的目标判死(计入 `scanned`、
+  不写 errors),只把端口开着的主机交给插件。广播目标永远绕过;`udp`/未声明整批不预筛。
+  `Transport` 是**承诺**:填错(实际探 UDP)会让单播目标被静默判死。
+  预筛超时**不是** probe 预算,不参与 `MaxBudgetMs+probeRPCGrace` 的推导。
   广播型协议(OPC UA? 不,EtherNet/IP 的 ListIdentity、FINS/UDP 的节点查询)
   由网关把各网段的**子网广播地址**也加进目标列表即可覆盖。
 - **能力与实现都由插件给**:`Meta.Protocols[].Discovery` 声明(可选字段,故不递增

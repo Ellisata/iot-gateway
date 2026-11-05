@@ -1,5 +1,7 @@
 github.com/Ellisata/iot-gateway-sdk v0.3.0 h1:WFMBLNDerH3Sf72uECxfkQnmA+svhn5ArKe+f41y1eM=
 github.com/Ellisata/iot-gateway-sdk v0.3.0/go.mod h1:2iq2mDm5UCI6/UFWgZYOQPxVsJdqCYG1nUnLc95PMh4=
+github.com/Ellisata/iot-gateway-sdk v0.4.0 h1:eBrtj6rffaJGWzsPwEHwGSYZbOhN0uVmwjJ7ItvkSRg=
+github.com/Ellisata/iot-gateway-sdk v0.4.0/go.mod h1:2iq2mDm5UCI6/UFWgZYOQPxVsJdqCYG1nUnLc95PMh4=
 github.com/Ellisata/iot-gateway-sdk/testkit v0.2.0 h1:D56DcKAinBP8PVwFAmzk0EgA82xyKtSrg55XSTlWMSE=
 github.com/Ellisata/iot-gateway-sdk/testkit v0.2.0/go.mod h1:HgzLIBoT5ciCjaWfCcaS6o3jMXG71kGpBmYbyMOoEOk=
 github.com/Masterminds/semver/v3 v3.5.0 h1:kQceYJfbupGfZOKZQg0kou0DgAKhzDg2NZPAwZ/2OOE=

@@ -398,11 +398,11 @@
       v-model="addDialogVisible"
       class="scan-dialog"
       :title="t('deviceScan.addDialogTitle')"
-      width="760px"
+      width="960px"
       :close-on-click-modal="false"
     >
       <p class="dialog-hint">{{ t('deviceScan.addDialogHint') }}</p>
-      <!-- 这里也必须分页：勾了 1000 行就是 1000 × 2 个 el-input 一起挂上来，
+      <!-- 这里也必须分页：勾了 1000 行就是 1000 × 3 个 el-input 一起挂上来，
            输入框的挂载成本远高于普通单元格。分页不丢编辑 —— 输入框绑的是
            addRows 里的真实行对象，翻页只是换显示哪一段。 -->
       <el-table :data="pagedAddRows" class="mini-table" size="small" max-height="420">
@@ -410,6 +410,14 @@
           <template #default="{ row }">
             <span class="host-text">{{ row.host }}</span>
             <span v-if="row.unitId" class="unit-suffix">#{{ row.unitId }}</span>
+          </template>
+        </el-table-column>
+        <!-- 编码：预填后端给的建议值（按地址派生），可改。留空仍会按名称
+             自动生成 —— 编码创建后不可修改，所以这里不是"逼用户现编一个"，
+             而是把默认值摆出来让他能改。格式/唯一性由后端逐行校验。 -->
+        <el-table-column :label="t('deviceObject.code')" min-width="190">
+          <template #default="{ row }">
+            <el-input v-model="row.code" :placeholder="t('deviceScan.codePlaceholder')" />
           </template>
         </el-table-column>
         <el-table-column :label="t('common.name')" min-width="220">
@@ -914,6 +922,9 @@ function handleOpenAddDialog() {
     // 留空时代后端会按地址生成；这里把那个默认值当占位符显示出来，
     // 用户一眼能看出不填会发生什么。
     suggestedName: row.unitId > 1 ? `${row.host}-${row.unitId}` : row.host,
+    // 编码预填后端给的建议值（与自动生成同一份口径），用户可改；
+    // 清空则回落为"按名称自动生成"。
+    code: row.suggestedCode || '',
     name: '',
     description: '',
   }))
@@ -922,7 +933,12 @@ function handleOpenAddDialog() {
 
 // itemsOf 把待建行投影成提交载荷（不回传 protocolJson，见 api 模块的说明）。
 function itemsOf(rows) {
-  return rows.map((r) => ({ index: r.index, name: r.name, description: r.description }))
+  return rows.map((r) => ({
+    index: r.index,
+    code: r.code,
+    name: r.name,
+    description: r.description,
+  }))
 }
 
 // submitCreate 提交一批待建行。confirmDuplicate 为 true 表示"地址重复也已经

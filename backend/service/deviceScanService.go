@@ -271,6 +271,33 @@ func (s *DeviceScanService) CreateDevices(ctx context.Context, req *dto.CreateDe
 				continue
 			}
 
+			// 编码：用户给了就必须合法且唯一；留空沿用自动生成（按名称派生
+			// 并追加序号避让）。
+			//
+			// 显式编码**不自动避让**：编码创建后不可修改，用户写的就是他要的，
+			// 悄悄改成 xxx-2 比直接报错更糟（他以为自己建成了想要的编码）。
+			// 唯一性检查同时覆盖库内与批内 —— codeTaken 在事务外从库里预载，
+			// 建成一条就补一条。
+			code := strings.TrimSpace(item.Code)
+			if code != "" {
+				if !validateEntityCode(code) {
+					result.Errors = append(result.Errors, vo.ExcelImportErrorVO{
+						Row: row, Name: name, Reason: enums.DeviceCodeInvalidEnum.GetMessage(),
+					})
+					continue
+				}
+				if codeTaken[code] {
+					result.Errors = append(result.Errors, vo.ExcelImportErrorVO{
+						Row: row, Name: name, Reason: enums.DeviceCodeExistsEnum.GetMessage(),
+					})
+					continue
+				}
+			} else {
+				code = uniqueEntityCode(generatedEntityCode(name, "dev"), func(c string) bool {
+					return codeTaken[c]
+				})
+			}
+
 			// 地址重复：**软提示，不拦**。用户确认后带上 ConfirmDuplicate
 			// 重提同一批即可建成（见 dto.CreateDevicesFromScanDTO 的说明）。
 			//
@@ -287,11 +314,6 @@ func (s *DeviceScanService) CreateDevices(ctx context.Context, req *dto.CreateDe
 					continue
 				}
 			}
-
-			// 扫描建库没有编码输入：按设备名生成，必要时追加序号避让。
-			code := uniqueEntityCode(generatedEntityCode(name, "dev"), func(c string) bool {
-				return codeTaken[c]
-			})
 
 			record := po.Device{
 				Code:         code,
@@ -452,18 +474,30 @@ func scanJobVO(snap *devicescan.Snapshot) *vo.ScanJobVO {
 		return out
 	}
 	out.Devices = make([]vo.ScanDeviceVO, 0, len(snap.Devices))
+	// 建议编码的批内去重：同一份结果里默认名理论上不会相同（引擎按
+	// host:port:unitId 去重），但"名称折叠成编码"这一步仍可能撞（如
+	// 10.0.0.2-1 与 10.0.0.2_1），撞了就给后一条追加 -2。
+	// 只做批内避让，不与库内比对 —— 那会把每次轮询变成一次全表读，
+	// 而建议值只是给用户改的默认文本，唯一性由创建时逐行校验兜底。
+	suggestionTaken := make(map[string]bool, len(snap.Devices))
 	for i := range snap.Devices {
 		d := &snap.Devices[i]
+		suggestedCode := uniqueEntityCode(
+			generatedEntityCode(defaultDeviceName(*d), "dev"),
+			func(c string) bool { return suggestionTaken[c] },
+		)
+		suggestionTaken[suggestedCode] = true
 		dev := vo.ScanDeviceVO{
-			Index:        i,
-			Host:         d.Host,
-			Port:         d.Port,
-			UnitID:       d.UnitID,
-			Name:         d.Name,
-			Vendor:       d.Vendor,
-			Model:        d.Model,
-			Version:      d.Version,
-			ProtocolJSON: d.ProtocolJSON,
+			Index:         i,
+			Host:          d.Host,
+			Port:          d.Port,
+			UnitID:        d.UnitID,
+			Name:          d.Name,
+			Vendor:        d.Vendor,
+			Model:         d.Model,
+			Version:       d.Version,
+			SuggestedCode: suggestedCode,
+			ProtocolJSON:  d.ProtocolJSON,
 		}
 		for _, a := range d.Extra {
 			dev.Extra = append(dev.Extra, vo.ScanAttributeVO{Name: a.Name, Value: a.Value})

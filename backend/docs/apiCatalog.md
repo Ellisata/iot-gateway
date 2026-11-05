@@ -645,6 +645,8 @@ Agent 调用前应先获得用户明确意图。
 
 **`createDevices` 的两段式确认**：`items[].index` 指向**任务快照里 `devices` 数组的下标**；
 `protocolJson` 由服务端从自己持有的快照里取，**不采信客户端**。
+`items[].code` 可选：省略时按设备名自动生成；显式给出则必须满足设备编码格式且在库内/批内唯一，
+不合法或重复只让该行失败。界面预填的是 `devices[].suggestedCode`（按地址派生的建议值，可改）。
 若某行的地址与库内既有设备重复，默认**不创建**，只作为带 `code: "addressExists"` 的明细返回；
 用户确认后才带 `confirmDuplicate: true` 重提。
 （同一地址上多台设备既合法又常见：Modbus TCP 串口服务器后可挂多个从站、

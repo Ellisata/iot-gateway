@@ -270,17 +270,20 @@ func fixtureMeta() driversdk.Meta {
 			Title:       "夹具扫描",
 			DefaultPort: 502,
 			TargetMode:  driver.TargetModeUnicast,
+			Transport:   driver.ProbeTransportTCP,
 			MaxBudgetMs: 2000,
 			FormJSON:    json.RawMessage(`{"rule":[{"type":"input","field":"unitIds","title":"站号"}]}`),
 		}
 	case "discovery2":
-		// 与 discovery 只差 Title 与预算。热升级时 registrationSig **不含**
-		// Discovery，因此 upgrade 不会重注册 —— 这一对变体正是用来钉住
-		// 「Manager 必须每次现算而不是缓存一张表」的。
+		// 与 discovery 只差 Title / 预算 / Transport。热升级时 registrationSig
+		// **不含** Discovery，因此 upgrade 不会重注册 —— 这一对变体正是用来钉住
+		// 「Manager 必须每次现算而不是缓存一张表」的。Transport 由 tcp 改成 udp，
+		// 这样"能力被缓存"会同时表现为预筛开关不跟着变。
 		meta.Protocols[0].Discovery = &driver.DiscoverySpec{
 			Title:       "夹具扫描 v2",
 			DefaultPort: 1502,
 			TargetMode:  driver.TargetModeUnicast,
+			Transport:   driver.ProbeTransportUDP,
 			MaxBudgetMs: 3000,
 		}
 	case "pointscan":

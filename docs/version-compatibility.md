@@ -2,7 +2,7 @@
 
 > 适用于三个仓库：网关主程序 [`iot-gateway-premium`](../README.md)、官方驱动
 > [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers)、驱动 SDK
-> [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk)。最后更新：2026-11-04。
+> [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk)。最后更新：2026-11-05。
 
 ## 1. 结论
 
@@ -22,9 +22,9 @@
 
 | 版本 | 真源 | 当前值 | 参与兼容判定 |
 |---|---|---|---|
-| 网关发行版本 | git tag；构建脚本以 `-X main.version` 注入，写入 `iot_gateway.firmware_version` 并随局域网发现广播 | `v0.7.0` | 否 |
-| 官方驱动发行版本 | 仓库根的 `drivers.version`；构建时经 `-X main.version` 写入每个插件的 `Meta.Version` | `v0.3.0` | 否 |
-| 驱动 SDK 版本 | 网关 `backend/go.mod`、驱动仓库 `go.mod` | `v0.3.0` | 否 |
+| 网关发行版本 | git tag；构建脚本以 `-X main.version` 注入，写入 `iot_gateway.firmware_version` 并随局域网发现广播 | `v0.8.0` | 否 |
+| 官方驱动发行版本 | 仓库根的 `drivers.version`；构建时经 `-X main.version` 写入每个插件的 `Meta.Version` | `v0.4.0` | 否 |
+| 驱动 SDK 版本 | 网关 `backend/go.mod`、驱动仓库 `go.mod` | `v0.4.0` | 否 |
 | 线协议版本 | `driversdk.APIVersion`（[SDK 源码](https://github.com/Ellisata/iot-gateway-sdk/blob/main/driversdk/meta.go)） | `4` | **是，必须相等** |
 | 帧魔数 | `pluginwire.FrameMagic`（[SDK 源码](https://github.com/Ellisata/iot-gateway-sdk/blob/main/pluginwire/wire.go)） | `IGP2` | 是，流层第二道保护 |
 
@@ -49,6 +49,7 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 | v0.5.0 | v0.3.0 | v0.3.0 | 4 | 9 / 15 | 在线控制下发、物模型绑定、分批续扫 |
 | v0.6.0 | v0.3.0 | v0.3.0 | 4 | 9 / 15 | 采集组与分组推送、稳定编码与主题模板、物模型导入、推送监控 |
 | v0.7.0 | v0.3.0 | v0.3.0 | 4 | 9 / 15 | 事件触发采集规则（DNF 条件、按设备隔离执行、实时监控）、OPC UA 通道监控（当前离线发行版） |
+| v0.8.0 | v0.4.0 | v0.4.0 | 4 | 9 / 15 | 设备扫描 TCP 可达性预筛（`DiscoverySpec.Transport`，可选字段）、扫描并发默认 8→32 / 上限 32→128 |
 
 维护规则：
 
@@ -63,12 +64,14 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 
 | 构建所用 SDK | `APIVersion` | 可加载于 | 不可加载于 |
 |---|---|---|---|
-| v0.1.x – v0.3.x | 4 | 任意 `APIVersion = 4` 的网关（当前即 v0.3.0 及以后） | `APIVersion ≠ 4` 的网关 |
+| v0.1.x – v0.4.x | 4 | 任意 `APIVersion = 4` 的网关（当前即 v0.3.0 及以后） | `APIVersion ≠ 4` 的网关 |
 
 补充：
 
-- 官方驱动 v0.1.0 / v0.2.0 / v0.3.0 分别用 SDK v0.1.0 / v0.2.0 / v0.3.0 构建，
-  `APIVersion` 均为 4，因此都落在第一行。
+- 官方驱动 v0.1.0 / v0.2.0 / v0.3.0 / v0.4.0 分别用 SDK
+  v0.1.0 / v0.2.0 / v0.3.0 / v0.4.0 构建，`APIVersion` 均为 4，因此都落在第一行。
+- SDK v0.4.0 新增的 `DiscoverySpec.Transport` 是**可选字段**，不递增 `APIVersion`：
+  旧插件不带该字段时网关跳过 TCP 预筛，行为与 v0.3.x 一致。
 - 插件作者必须在 `driversdk.Meta` 里填 `APIVersion: driversdk.APIVersion`，不要手写数字。
 - `Meta.Version` 只用于日志与诊断。手工 `go build` 且未传 `-X main.version` 时它是
   `"dev"`，不代表任何官方版本。
@@ -109,13 +112,13 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 1. **网关启动日志**（启动时打印解析后的版本与插件线协议版本）：
 
    ```
-   application starting... (version v0.7.0, plugin APIVersion 4)
+   application starting... (version v0.8.0, plugin APIVersion 4)
    ```
 
 2. **插件加载日志**（每个插件一条，版本来自 `Meta.Version`）：
 
    ```
-   pluginhost: 已加载插件 iot-driver-modbus（协议 ModBus.TCP, ModBus.RTU，scope modbus，版本 v0.3.0，sha256 ...）
+   pluginhost: 已加载插件 iot-driver-modbus（协议 ModBus.TCP, ModBus.RTU，scope modbus，版本 v0.4.0，sha256 ...）
    ```
 
 3. **网关身份 / 局域网发现**：`iot_gateway.firmware_version` 与广播报文里的
@@ -125,16 +128,16 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 
    ```json
    {
-     "gateway": "v0.7.0",
+     "gateway": "v0.8.0",
      "os": "windows",
      "arch": "amd64",
-     "buildTime": "2026-11-04T08:00:00Z",
-     "sdk": "v0.3.0",
+     "buildTime": "2026-11-05T08:00:00Z",
+     "sdk": "v0.4.0",
      "apiVersion": 4,
      "frameMagic": "IGP2",
-     "drivers": "v0.3.0",
+     "drivers": "v0.4.0",
      "plugins": [
-       {"name": "iot-driver-modbus", "version": "v0.3.0", "sha256": "..."}
+       {"name": "iot-driver-modbus", "version": "v0.4.0", "sha256": "..."}
      ]
    }
    ```

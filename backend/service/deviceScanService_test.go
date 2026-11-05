@@ -324,7 +324,7 @@ func TestCreateDevicesFromScan(t *testing.T) {
 	if rows[0].Status != 1 {
 		t.Errorf("新建设备应为启用，实际 status=%d", rows[0].Status)
 	}
-	// 扫描建库没有编码输入：自动生成且批内唯一。
+	// 未给编码（留空）时沿用自动生成，且批内唯一。
 	if rows[0].Code == "" || rows[1].Code == "" || rows[0].Code == rows[1].Code {
 		t.Errorf("扫描建库编码 = (%q, %q)，期望非空且互不相同", rows[0].Code, rows[1].Code)
 	}
@@ -337,6 +337,113 @@ func TestCreateDevicesFromScan(t *testing.T) {
 	}
 	if cfg.Host != "10.0.0.2" {
 		t.Errorf("连接配置里的地址 = %q，期望 10.0.0.2", cfg.Host)
+	}
+}
+
+// TestCreateDevicesHonorsExplicitCode 用户给了编码就原样落库，不再按名称生成。
+func TestCreateDevicesHonorsExplicitCode(t *testing.T) {
+	svc, db := newScanFixture(t, []driver.DiscoveredDevice{
+		discovered("10.0.0.2", 1),
+		discovered("10.0.0.3", 2),
+	}, nil)
+	setupProtocolRow(t, db)
+
+	job := runScan(t, svc)
+	result, err := svc.CreateDevices(context.Background(), &dto.CreateDevicesFromScanDTO{
+		JobID: job.JobID,
+		Items: []dto.ScanDeviceItemDTO{
+			{Index: 0, Name: "1号机", Code: "line_a-1"},
+			{Index: 1, Name: "2号机", Code: "line_b-2"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateDevices: %v", err)
+	}
+	if result.Success != 2 {
+		t.Fatalf("结果 = %+v，期望成功 2 条", result)
+	}
+
+	var rows []po.Device
+	if err := db.Order("name").Find(&rows).Error; err != nil {
+		t.Fatalf("查设备: %v", err)
+	}
+	want := map[string]string{"1号机": "line_a-1", "2号机": "line_b-2"}
+	for _, r := range rows {
+		if want[r.Name] != r.Code {
+			t.Errorf("设备 %q 的编码 = %q，期望 %q", r.Name, r.Code, want[r.Name])
+		}
+	}
+}
+
+// TestCreateDevicesRejectsInvalidAndDuplicateCodes 显式编码格式非法、库内重复、
+// 批内重复都只让该行失败并给出原因，其余行照常建成。
+func TestCreateDevicesRejectsInvalidAndDuplicateCodes(t *testing.T) {
+	svc, db := newScanFixture(t, []driver.DiscoveredDevice{
+		discovered("10.0.0.2", 1),
+		discovered("10.0.0.3", 2),
+		discovered("10.0.0.4", 3),
+		discovered("10.0.0.5", 4),
+	}, nil)
+	setupProtocolRow(t, db)
+	// 库里先占住一个编码。
+	if err := db.Create(&po.Device{
+		Code: "taken", Name: "已有", ProtocolID: "proto-1", ProtocolJSON: "{}", Status: 1,
+	}).Error; err != nil {
+		t.Fatalf("预置设备: %v", err)
+	}
+
+	job := runScan(t, svc)
+	result, err := svc.CreateDevices(context.Background(), &dto.CreateDevicesFromScanDTO{
+		JobID: job.JobID,
+		Items: []dto.ScanDeviceItemDTO{
+			{Index: 0, Name: "非法", Code: "9bad"},    // 数字开头
+			{Index: 1, Name: "库内重复", Code: "taken"}, // 与预置设备撞
+			{Index: 2, Name: "批内一", Code: "dup"},    // 批内第一次出现
+			{Index: 3, Name: "批内二", Code: "dup"},    // 批内重复
+		},
+	})
+	if err != nil {
+		t.Fatalf("该场景不该是请求级错误: %v", err)
+	}
+	if result.Total != 4 || result.Success != 1 || result.Failed != 3 {
+		t.Fatalf("结果 = %+v，期望 4/1/3", result)
+	}
+
+	wantReason := map[int]string{
+		1: enums.DeviceCodeInvalidEnum.GetMessage(),
+		2: enums.DeviceCodeExistsEnum.GetMessage(),
+		4: enums.DeviceCodeExistsEnum.GetMessage(),
+	}
+	for _, e := range result.Errors {
+		if wantReason[e.Row] != e.Reason {
+			t.Errorf("第 %d 行原因 = %q，期望 %q", e.Row, e.Reason, wantReason[e.Row])
+		}
+	}
+}
+
+// TestScanJobSuggestsCodes 结果里带建议编码（前端预填用）：按默认名
+// （IP / IP-站号）派生，批内互不相同。
+func TestScanJobSuggestsCodes(t *testing.T) {
+	svc, db := newScanFixture(t, []driver.DiscoveredDevice{
+		discovered("10.0.0.2", 1),
+		discovered("10.0.0.3", 3),
+	}, nil)
+	setupProtocolRow(t, db)
+
+	job := runScan(t, svc)
+	if len(job.Devices) != 2 {
+		t.Fatalf("设备数 = %d，期望 2", len(job.Devices))
+	}
+	want := map[string]bool{"dev-10-0-0-2": true, "dev-10-0-0-2-3": true}
+	seen := map[string]bool{}
+	for _, d := range job.Devices {
+		if !want[d.SuggestedCode] {
+			t.Errorf("建议编码 = %q，期望在 %v 中", d.SuggestedCode, want)
+		}
+		if seen[d.SuggestedCode] {
+			t.Errorf("建议编码 %q 在批内重复", d.SuggestedCode)
+		}
+		seen[d.SuggestedCode] = true
 	}
 }
 

@@ -49,11 +49,29 @@ var (
 // 与 pluginhost/manager.go 里 defaultPluginDir 那组常量是同一个约定）。
 // <=0 一律视为「未配置 → 用默认值」而不是「禁用」。
 const (
-	defaultMaxConcurrentProbes = 8
-	maxMaxConcurrentProbes     = 32
+	// 扫描墙钟时间 ≈ ceil(目标数/并发) × 单目标耗时。一个网段里不可达地址占
+	// 绝大多数，每个都要等满插件侧的拨号超时 —— 并发因此是这条公式里最直观的
+	// 加速旋钮。默认 32：/24 的 254 个目标按 1.5s 拨号超时算约 12s（旧默认 8
+	// 是 48s），同时不给交换机与插件进程制造过大的突发连接。
+	// 上限 128 留给 /16 这类大网段，由运维按目标网络的承压能力手动调高。
+	defaultMaxConcurrentProbes = 32
+	maxMaxConcurrentProbes     = 128
 
 	defaultMaxTargets = 1024
 	maxMaxTargets     = 65536
+
+	// TCP 预筛的默认值。它是与 maxConcurrentProbes 独立的第二级并发：
+	// 只是一次裸 connect、不占插件进程，所以可以高一个量级。
+	// 默认 256 在常见 1024 fd 上限下安全；上限 1024 留给 /16 这类大网段，
+	// 由运维按本机 fd 与网络承压能力调高。
+	defaultPrefilterConcurrency = 256
+	maxPrefilterConcurrency     = 1024
+
+	// 预筛单目标连接超时。局域网 RTT 远小于 500ms；上限压在 1s 以内，
+	// 是为了不让预筛拖住停机（stopWait 是 2s）。
+	defaultPrefilterTimeoutMs = 500
+	minPrefilterTimeoutMs     = 100
+	maxPrefilterTimeoutMs     = 1000
 
 	defaultJobTTL = 10 * time.Minute
 
@@ -107,8 +125,14 @@ type Engine struct {
 	maxTargets    int
 	ttl           time.Duration
 
+	// TCP 预筛。enabled 为 false 或插件未声明 Transport=tcp 时整段跳过。
+	// 三个数值与 maxConcurrent 一样在启动时冻结。
+	prefilterEnabled     bool
+	prefilterConcurrency int
+	prefilterTimeoutMs   int
+
 	// policy 非 nil 时，enabled 走运行期配置（可在「运行开关」页动态切换）。
-	// 其余三个数值仍来自启动期配置 —— 它们不是开关，改动需重启。
+	// 其余数值仍来自启动期配置 —— 它们不是开关，改动需重启。
 	policy runtimecfg.Reader
 
 	specs  SpecSource
@@ -118,6 +142,11 @@ type Engine struct {
 	// 形如 discovery.Announcer 的 targets/listen 那一对。
 	subnets func() []SubnetInfo
 	now     func() time.Time
+
+	// prefilterDial / logf 同样是测试缝：前者让预筛用例不必真的开 socket，
+	// 后者避免测试触发真实日志文件的初始化。
+	prefilterDial func(ctx context.Context, target driver.ScanTarget) error
+	logf          func(format string, v ...interface{})
 
 	mu  sync.Mutex
 	job *job
@@ -141,17 +170,31 @@ func NewEngineWithPolicy(cfg *configFile.Config, specs SpecSource, prober Prober
 		maxConcurrent: defaultMaxConcurrentProbes,
 		maxTargets:    defaultMaxTargets,
 		ttl:           defaultJobTTL,
-		specs:         specs,
-		prober:        prober,
-		policy:        policy,
-		subnets:       localSubnets,
-		now:           time.Now,
+
+		// prefilterEnabled 的零值是 false：测试与最小装配（cfg=nil）因此保持
+		// 旧行为。生产默认 true 来自嵌入二进制的 default.yaml —— 磁盘上的旧
+		// 配置只覆盖它实际存在的键，缺这一项不会把它关掉。
+		prefilterConcurrency: defaultPrefilterConcurrency,
+		prefilterTimeoutMs:   defaultPrefilterTimeoutMs,
+
+		specs:   specs,
+		prober:  prober,
+		policy:  policy,
+		subnets: localSubnets,
+		now:     time.Now,
 	}
+	e.prefilterDial = e.dialForPrefilter
+	e.logf = logger.Info
 	if cfg != nil {
 		dc := cfg.DeviceScan
 		e.enabled = dc.Enabled
 		e.maxConcurrent = clampInt(dc.MaxConcurrentProbes, defaultMaxConcurrentProbes, 1, maxMaxConcurrentProbes)
 		e.maxTargets = clampInt(dc.MaxTargets, defaultMaxTargets, 1, maxMaxTargets)
+		e.prefilterEnabled = dc.PrefilterEnabled
+		e.prefilterConcurrency = clampInt(dc.PrefilterConcurrency,
+			defaultPrefilterConcurrency, 1, maxPrefilterConcurrency)
+		e.prefilterTimeoutMs = clampInt(dc.PrefilterTimeoutMs,
+			defaultPrefilterTimeoutMs, minPrefilterTimeoutMs, maxPrefilterTimeoutMs)
 		if dc.JobTTLMinutes > 0 {
 			e.ttl = time.Duration(dc.JobTTLMinutes) * time.Minute
 		}
@@ -289,34 +332,74 @@ func (e *Engine) plan(req SubmitRequest, now time.Time) (*job, error) {
 		return nil, ErrNoTargets
 	}
 
+	// 预筛与否在规划期定死：只认插件声明的 Transport，不在这里再猜协议。
+	// 续扫沿用同一个决定（见 Continue），与 port/targetMode/budgetMs 同一模式。
+	prefilter := e.prefilterEnabled && spec.Transport == driver.ProbeTransportTCP
+
 	return &job{
-		id:            "scan-" + strconv.FormatUint(e.seq.Add(1), 10),
-		protocol:      req.Protocol,
-		options:       req.Options,
-		port:          port,
-		subnets:       selected,
-		targetMode:    spec.TargetMode,
-		budgetMs:      spec.MaxBudgetMs,
-		startedAt:     now,
-		requested:     requested,
-		planned:       len(targets),
-		offset:        nextOffset,
-		batchStart:    0,
-		truncated:     truncated,
-		targets:       targets,
-		estimateMaxMs: estimateMaxMsOf(len(targets), e.maxConcurrent, spec.MaxBudgetMs),
-		seen:          make(map[string]struct{}, 16),
+		id:         "scan-" + strconv.FormatUint(e.seq.Add(1), 10),
+		protocol:   req.Protocol,
+		options:    req.Options,
+		port:       port,
+		subnets:    selected,
+		targetMode: spec.TargetMode,
+		budgetMs:   spec.MaxBudgetMs,
+		prefilter:  prefilter,
+		startedAt:  now,
+		requested:  requested,
+		planned:    len(targets),
+		offset:     nextOffset,
+		batchStart: 0,
+		truncated:  truncated,
+		targets:    targets,
+		estimateMaxMs: estimateBatchMaxMs(targets, prefilter,
+			e.prefilterConcurrency, e.prefilterTimeoutMs, e.maxConcurrent, spec.MaxBudgetMs),
+		seen: make(map[string]struct{}, 16),
 	}, nil
 }
 
-// estimateMaxMsOf 估算一批目标的最坏耗时：全部目标走满插件的单目标预算、
-// 且并发度用满。是**上界**而非期望（不可达的目标才会走满拨号超时）。
+// maxEstimateMs 估算值的上限。linux/arm 等 32 位平台上 int 是 32 位，而极端配置
+// （65536 目标、并发 1、预算 60s）算出来本来就会溢出 —— 预筛的上界相加会进一步
+// 放大。统一用 int64 计算并夹到这个值。
+const maxEstimateMs int64 = 1<<31 - 1
+
+// estimateMaxMsOf 估算一批目标的最坏耗时：全部目标走满单目标预算、且并发度用满。
+// 是**上界**而非期望（不可达的目标才会走满拨号超时）。
 func estimateMaxMsOf(n, maxConcurrent, budgetMs int) int {
 	if n <= 0 || maxConcurrent <= 0 || budgetMs <= 0 {
 		return 0
 	}
-	batches := (n + maxConcurrent - 1) / maxConcurrent
-	return batches * budgetMs
+	batches := (int64(n) + int64(maxConcurrent) - 1) / int64(maxConcurrent)
+	return saturateEstimate(batches * int64(budgetMs))
+}
+
+// estimateBatchMaxMs 一批扫描的最坏耗时 = 阶段 1 预筛上界 + 阶段 2 探测上界。
+// 预筛只作用于非广播目标，因此阶段 1 的目标数要单独数。
+func estimateBatchMaxMs(targets []driver.ScanTarget, prefilter bool,
+	prefilterConcurrency, prefilterTimeoutMs, maxConcurrent, budgetMs int) int {
+
+	probe := estimateMaxMsOf(len(targets), maxConcurrent, budgetMs)
+	if !prefilter {
+		return probe
+	}
+	unicast := 0
+	for _, t := range targets {
+		if !t.Broadcast {
+			unicast++
+		}
+	}
+	stage1 := estimateMaxMsOf(unicast, prefilterConcurrency, prefilterTimeoutMs)
+	return saturateEstimate(int64(probe) + int64(stage1))
+}
+
+func saturateEstimate(v int64) int {
+	if v <= 0 {
+		return 0
+	}
+	if v > maxEstimateMs {
+		return int(maxEstimateMs)
+	}
+	return int(v)
 }
 
 // specOf 在插件声明的能力里查这个协议。
@@ -341,11 +424,18 @@ func (e *Engine) specOf(protocol string) (driver.DiscoverySpec, bool) {
 func (e *Engine) run(j *job) {
 	defer close(j.doneCh)
 
+	// 阶段 1：声明了 TCP 的协议先做一次廉价的端口可达性预筛。广播目标与
+	// UDP/未声明协议的整批目标原样进入阶段 2。
+	targets := j.targets
+	if j.prefilter {
+		targets = e.prefilterTargets(j)
+	}
+
 	sem := make(chan struct{}, e.maxConcurrent)
 	var wg sync.WaitGroup
 
 dispatch:
-	for i := range j.targets {
+	for i := range targets {
 		// 提交前先看取消：取消之后不该再往插件里灌新的探测。
 		select {
 		case <-j.ctx.Done():
@@ -358,7 +448,7 @@ dispatch:
 			defer wg.Done()
 			defer func() { <-sem }()
 			e.probeOne(j, t)
-		}(j.targets[i])
+		}(targets[i])
 	}
 
 	wg.Wait()
@@ -552,7 +642,8 @@ func (e *Engine) Continue(jobID string) (*Snapshot, error) {
 	j.targets = targets
 	j.truncated = truncated
 	j.scannedInBatch = 0
-	j.estimateMaxMs = estimateMaxMsOf(len(targets), e.maxConcurrent, j.budgetMs)
+	j.estimateMaxMs = estimateBatchMaxMs(targets, j.prefilter,
+		e.prefilterConcurrency, e.prefilterTimeoutMs, e.maxConcurrent, j.budgetMs)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	j.ctx, j.cancel = ctx, cancel

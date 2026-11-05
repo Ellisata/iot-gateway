@@ -86,6 +86,16 @@ type ScanDeviceItemDTO struct {
 	// Name 设备名。留空时服务端按"协议-IP"生成一个。
 	Name string `json:"name"`
 
+	// Code 设备编码。可选：留空时服务端按设备名自动生成（与未加这个字段
+	// 之前的行为完全一致）。前端会把 ScanDeviceVO.SuggestedCode 预填进来，
+	// 用户改过就以此为准。
+	//
+	// 显式给出时必须是合法编码（字母开头、仅字母数字下划线短横线、最长 64），
+	// 且在库内与批内唯一。不合法/重复只让**这一条**失败并给出行级原因，
+	// 与名称撞名的语义一致。**不会自动避让**：编码创建后不可修改，用户写的
+	// 就是他想要的，悄悄改成 xxx-2 比直接报错更糟。自动生成那一支才追加序号。
+	Code string `json:"code"`
+
 	// Description 设备描述。
 	Description string `json:"description"`
 }

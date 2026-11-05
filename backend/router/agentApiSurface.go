@@ -930,6 +930,7 @@ var agentApiSurface = map[string]SurfaceEntry{
 		Access: AccessWrite,
 		Params: argBody(dto.CreateDevicesFromScanDTO{}, map[string]string{
 			"items.index":      "**任务快照里 devices 数组的下标**（不是设备 id，也不是扫描结果里的某个 id）",
+			"items.code":       "可选。留空时按设备名自动生成；显式给出则须合法且在库内/批内唯一，不合法或重复只让该行失败",
 			"items.name":       "留空时服务端按「协议-IP」生成一个",
 			"confirmDuplicate": "省略 = 重复地址的行**不建**，只回 code=addressExists 的明细；用户确认后带 true 重提",
 		}),

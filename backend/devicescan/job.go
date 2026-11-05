@@ -59,8 +59,9 @@ type Snapshot struct {
 
 	// Total 本批的目标数（等于 Planned），单独给出是为了前端的进度条不必做除法。
 	Total int `json:"total"`
-	// Scanned **本批**已完成探测的目标数。进度条以它为准，不是以 Found 为准：
-	// 广播型协议一个目标可能一次产出几十台设备，用设备数算进度会跳变。
+	// Scanned **本批**已评估完成的目标数（TCP 预筛判死 + 插件探测完成）。
+	// 进度条以它为准，不是以 Found 为准：广播型协议一个目标可能一次产出几十台
+	// 设备，用设备数算进度会跳变；预筛判死的目标也确实被检查过了。
 	Scanned int `json:"scanned"`
 	// ScannedTotal 本次扫描累计已完成的目标数（各批之和）。前端用它显示
 	// "已扫描 X / 共 Requested 个"；同一地址被重扫（取消后续扫）时只算一次。
@@ -70,9 +71,9 @@ type Snapshot struct {
 
 	// ElapsedMs 已耗时（运行中）或总耗时（终态）。
 	ElapsedMs int `json:"elapsedMs"`
-	// EstimateMaxMs 最坏耗时的估算：全部目标都走满插件的单目标预算、且并发度
-	// 用满时的墙钟时间。是**上界**而非期望 —— 不可达的目标才会走满拨号超时，
-	// 而一个网段里绝大多数地址都不可达，所以实际通常远小于它。
+	// EstimateMaxMs 最坏耗时的估算：TCP 预筛上界 + 全部目标走满插件单目标预算、
+	// 且并发度用满时的墙钟时间。是**上界**而非期望 —— 预筛与探测通常都远快于
+	// 超时，所以实际通常小得多。
 	EstimateMaxMs int `json:"estimateMaxMs"`
 
 	// Devices 已发现的设备。运行中也会返回，用户能边扫边看到结果。
@@ -91,7 +92,7 @@ type Snapshot struct {
 //
 // 字段分两类，同步要求不同：
 //   - 规划期写入、之后**只读**的（id/protocol/options/port/subnets/targetMode/
-//     budgetMs/startedAt）—— 并发读安全；
+//     budgetMs/prefilter/startedAt）—— 并发读安全；
 //   - 每批开始时与运行期被改写的（targets/requested/planned/offset/batchStart/
 //     truncated/estimateMaxMs/state/reason/scannedInBatch/devices/errors/endedAt）
 //     —— 一律在 Engine.mu 下读写。
@@ -108,7 +109,10 @@ type job struct {
 	subnets    []SubnetInfo
 	targetMode driver.TargetMode
 	// budgetMs 插件为单目标探测声明的预算，用于估算每一批的最坏耗时。
-	budgetMs  int
+	budgetMs int
+	// prefilter 本批是否先做网关侧 TCP 预筛。规划时由运行配置 +
+	// 插件声明的 Transport 决定；续扫沿用，不重新查插件能力。
+	prefilter bool
 	startedAt time.Time
 
 	// requested 整个扫描的目标总数（虚拟列表长度）。
@@ -133,8 +137,9 @@ type job struct {
 	// 以下字段在 Engine.mu 下读写。
 	state  JobState
 	reason string
-	// scannedInBatch 本批已完成探测数。累计值 = batchStart + scannedInBatch
-	// （同一地址被重扫时只按它在新一批里的位置计一次）。
+	// scannedInBatch 本批已**评估完成**的目标数：预筛判死 + 插件探测完成。
+	// 累计值 = batchStart + scannedInBatch（同一地址被重扫时只按它在新一批里的
+	// 位置计一次）。
 	scannedInBatch int
 	devices        []driver.DiscoveredDevice
 	errors         []TargetError

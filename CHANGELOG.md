@@ -6,6 +6,26 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
+## [0.8.0] - 2026-11-05
+
+### 新增
+
+- **扫描建库支持自定义设备编码**：扫描结果新增建议编码 `suggestedCode`（按地址派生，批内唯一），「添加为设备」弹窗新增编码列并预填，可修改；创建接口 `items[].code` 可选，留空仍按名称自动生成，显式给出时逐行校验格式与库内/批内唯一，不合法或重复只让该行失败（**不自动避让** —— 编码创建后不可改，悄悄改成 `-2` 比报错更糟）。
+- **设备扫描两阶段：TCP 可达性预筛**：插件在 `DiscoverySpec` 里新增可选 `Transport`（`tcp` / `udp` / 留空）。对声明 `tcp` 的协议，网关先用高并发、短超时（默认 256 / 500ms）拨一遍扫描端口，连不上的地址直接判死（计入 `scanned`、不产生错误），只把端口开着的主机交给插件 `probe`。广播目标永远绕过，`udp`/未声明协议行为不变。典型 /24 的协议探测次数从 254 次降到十几台，/16 从小时级降到分钟级。新增配置 `deviceScan.prefilterEnabled` / `prefilterConcurrency` / `prefilterTimeoutMs`（均需重启）。需要 SDK v0.4.0 与 drivers v0.4.0 配套。
+
+### 变更
+
+- **设备扫描默认并发 8 → 32，上限 32 → 128**：扫描耗时 ≈ ceil(目标数 / 并发) × 单目标耗时，一个网段里不可达地址占绝大多数、每个都要等满插件侧的拨号超时，因此并发是最直观的加速旋钮。默认值下 /24（254 个目标）按 1.5s 拨号超时由约 48 秒降至约 12 秒。**升级后若保留了旧的 `default.yaml`，需手动把 `deviceScan.maxConcurrentProbes` 调到 32 或以上**；本项改动需重启网关。
+
+### Added
+
+- **Custom device codes when creating devices from scan results**: scan results now carry a suggested `suggestedCode` (derived from the address and unique within the batch), and the "Add as devices" dialog gains a prefilled, editable code column. `items[].code` is optional on the create API: when omitted the code is still generated from the name; when provided it is validated per row for format and uniqueness against both the database and the batch, and invalid or duplicate rows fail individually (**no silent `-2` renaming** — codes are immutable after creation, so quietly changing one is worse than an error).
+- **Two-stage device scan: TCP reachability prefilter**: `DiscoverySpec` gains an optional `Transport` (`tcp` / `udp` / unset). For protocols declaring `tcp`, the gateway first dials the scan port at high concurrency with a short timeout (default 256 / 500ms); unreachable addresses are marked done (counted in `scanned`, no error entry) and only hosts with an open port reach the plugin's `probe`. Broadcast targets always bypass it, and `udp`/unset protocols behave as before. A typical /24 drops from 254 protocol probes to a dozen, and a /16 from hours to minutes. New settings `deviceScan.prefilterEnabled` / `prefilterConcurrency` / `prefilterTimeoutMs` (all require a restart). Requires SDK v0.4.0 and drivers v0.4.0.
+
+### Changed
+
+- **Device-scan concurrency default raised from 8 to 32, cap from 32 to 128**: scan time ≈ ceil(targets / concurrency) × per-target time. Most addresses in a subnet are unreachable and each waits out the plugin's dial timeout, so concurrency is the most direct speed lever. At the new default a /24 (254 targets) drops from about 48s to about 12s with a 1.5s dial timeout. **If an existing deployment keeps its old `default.yaml`, raise `deviceScan.maxConcurrentProbes` to 32 or more manually**; this setting requires a restart.
+
 ## [0.7.2] - 2026-11-05
 
 ### 新增

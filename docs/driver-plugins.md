@@ -413,7 +413,18 @@ PLC 地址解析、区间规划、TCP/RTU 客户端、驱动），不导入任�
 | `FormJSON` | **扫描选项表单**（form-create schema，与 `Protocol.FormJSON` 同构）。用户在扫描页填的内容会原样透给 prober。 |
 | `DefaultPort` | 默认探测端口，前端据此回填。 |
 | `TargetMode` | `unicast`（逐主机）/ `broadcast`（探测器绑本机地址往子网广播地址发，**一个目标可产出多台设备**）/ `both`。留空按 `unicast`。 |
+| `Transport` | `tcp` / `udp` / 留空。单播 probe 的传输层，决定网关能否在探测之前做一次短超时的 TCP 可达性预筛。**留空 ≠ udp**：留空同样不预筛。 |
 | `MaxBudgetMs` | **单目标硬预算**，见下。取值必须在 `[500, 60000]`。 |
+
+**`Transport` 是承诺，不是提示。** 声明 `tcp` 表示"网关先拨一次扫描端口、连不上"
+可以安全地当作"这个目标不是我的设备"——它必须是单播 probe 成功的前置条件。
+如果实际实现走 UDP 却填了 `tcp`，网关会把所有单播目标在预筛阶段判死，表现为
+**扫描飞快结束、0 设备、0 错误**，两边日志都没有异常。广播与单播走不同传输的
+协议应留空。官方驱动的取值：Modbus TCP / S7 / FINS-TCP / OPC UA / MC 是 `tcp`；
+FINS-UDP / Omron CIP / Rockwell CIP 是 `udp`（ListIdentity 是 UDP，不是 TCP）。
+
+预筛只作用于非广播目标，并发与超时由网关配置（`deviceScan.prefilter*`），
+**不占用 `MaxBudgetMs`**：它不参与 probe RPC 超时的推导。
 
 **② 在 `driversdk.Main` 的第三个参数（`Capabilities`）的 `Probers` 字段里给出实现**
 
@@ -997,7 +1008,10 @@ func (d *yourDriver) MatchConnection(protocolJSON string) bool
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `enabled` | `true` | 总开关。**出厂即为 `true`**，与 `plugin.enabled` / `discovery.enabled` 同一取舍。需要关掉的理由主要是合规：扫描会主动向整个网段发起 TCP 连接（广播类协议还会发 UDP 广播），某些生产网络对此有明确禁止条款。关闭后 `/deviceScan/*` 全部返回"功能未启用"。 |
-| `maxConcurrentProbes` | `8` | 同时在飞的目标探测数（上限 32）。乘上单目标耗时就是扫一个网段的墙钟时间，同时也是插件进程一侧的并发压力。 |
+| `maxConcurrentProbes` | `32` | 同时在飞的目标探测数（上限 128）。扫描墙钟时间 ≈ ceil(目标数 / 本值) × 单目标耗时；网段里不可达地址占绝大多数，所以它是最直观的加速旋钮。同时也是插件进程一侧的并发压力。**改动需重启。** |
+| `prefilterEnabled` | `true` | TCP 可达性预筛：只对声明 `Discovery.Transport=tcp` 的协议生效，先用高并发短超时拨一遍扫描端口，只把端口开着的主机交给插件。广播目标永远绕过。**改动需重启。** |
+| `prefilterConcurrency` | `256` | 预筛并发（上限 1024），独立于 `maxConcurrentProbes`；受本机 fd 上限约束。 |
+| `prefilterTimeoutMs` | `500` | 预筛单目标连接超时（`[100,1000]`）。**不是 probe 预算**，不参与 RPC 超时推导。慢设备偶尔漏扫时调大或关闭预筛。 |
 | `maxTargets` | `1024` | 单次扫描的目标数上限（上限 65536）。防手滑用：一个 /16 展开是 65534 个目标。**截断不是静默的** —— 任务快照里带 `truncated` / `requestedTargets` / `plannedTargets`，前端会明确提示。 |
 | `jobTTLMinutes` | `10` | 终态任务与结果的保留时长。任务**不落库**，网关重启即丢。 |
 
