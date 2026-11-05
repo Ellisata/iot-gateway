@@ -6,7 +6,7 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
-## [未发布]
+## [0.7.1] - 2026-11-05
 
 ### 变更
 
