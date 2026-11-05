@@ -16,6 +16,7 @@ each release, followed by English entries.
 ### 变更
 
 - **设备扫描默认并发 8 → 32，上限 32 → 128**：扫描耗时 ≈ ceil(目标数 / 并发) × 单目标耗时，一个网段里不可达地址占绝大多数、每个都要等满插件侧的拨号超时，因此并发是最直观的加速旋钮。默认值下 /24（254 个目标）按 1.5s 拨号超时由约 48 秒降至约 12 秒。**升级后若保留了旧的 `default.yaml`，需手动把 `deviceScan.maxConcurrentProbes` 调到 32 或以上**；本项改动需重启网关。
+- **扫描剩余批次自动续扫**：单批上限（`deviceScan.maxTargets`，默认 1024）仍作内部安全阀，但扫描页在任务正常结束（`done` 且 `truncated=true`）时自动调用 `POST /deviceScan/continue`，直到 `remainingTargets=0`，无需逐批点按钮；取消、失败或自动续扫失败时停止续扫，工具条上的「继续扫描」供手动重试。前端轮询上限改为按本批估算耗时每批重新计时，跨批总时长不再受 30 分钟限制。
 
 ### Added
 
@@ -25,6 +26,7 @@ each release, followed by English entries.
 ### Changed
 
 - **Device-scan concurrency default raised from 8 to 32, cap from 32 to 128**: scan time ≈ ceil(targets / concurrency) × per-target time. Most addresses in a subnet are unreachable and each waits out the plugin's dial timeout, so concurrency is the most direct speed lever. At the new default a /24 (254 targets) drops from about 48s to about 12s with a 1.5s dial timeout. **If an existing deployment keeps its old `default.yaml`, raise `deviceScan.maxConcurrentProbes` to 32 or more manually**; this setting requires a restart.
+- **Automatic continuation of remaining scan batches**: the per-batch cap (`deviceScan.maxTargets`, default 1024) stays as an internal safety valve, but the scan page now calls `POST /deviceScan/continue` automatically after a batch completes normally (`done` with `truncated=true`) until `remainingTargets=0`, so users no longer click through batches. Cancelling, a failure, or a failed auto-continue stops the chain and leaves the toolbar's Continue scan button for manual retry. The frontend poll timeout is now re-armed per batch from that batch's estimate, so the total time across batches is no longer capped at 30 minutes.
 
 ## [0.7.2] - 2026-11-05
 
