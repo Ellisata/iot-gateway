@@ -25,8 +25,12 @@ func TestOpenApiRoutesRegistered(t *testing.T) {
 		"POST /openApi/deviceAddress/labels",
 		"GET /openApi/deviceAddress/page",
 		"GET /openApi/device/sync",
+		"GET /openApi/subscription/devicePoint/sync",
 		"GET /openApi/alarm/deviceReliability",
 		"GET /openApi/alarm/pointAbnormal",
+		"GET /openApi/alarm/pageAlarm",
+		"GET /openApi/alarm/listActive",
+		"GET /openApi/alarm/pageThresholdRecord",
 		"POST /openApi/control/write",
 	}
 	for _, key := range want {

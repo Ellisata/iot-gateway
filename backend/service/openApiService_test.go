@@ -32,7 +32,7 @@ func newOpenApiSyncTestDB(t *testing.T) *gorm.DB {
 		sqlDB.SetMaxOpenConns(1)
 		t.Cleanup(func() { sqlDB.Close() })
 	}
-	if err := db.AutoMigrate(&po.Device{}, &po.IotProtocol{}, &po.DeviceAddress{}); err != nil {
+	if err := db.AutoMigrate(&po.Device{}, &po.IotProtocol{}, &po.DeviceAddress{}, &po.MqttSubscriptionDevicePoint{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
@@ -81,6 +81,7 @@ func newOpenApiSyncService(db *gorm.DB) *OpenApiService {
 		NewDeviceService(db, nil, nil),
 		NewDeviceAddressService(db, nil),
 		NewAlarmService(db),
+		NewMqttSubscriptionService(db, nil),
 	)
 }
 
@@ -253,6 +254,123 @@ func TestSyncDevicePointsOmitsSensitiveFields(t *testing.T) {
 	}
 }
 
+// seedSubscriptionSyncFixture 造订阅设备/点位索引：d1 两个点位、d2 一个（设备名称为空）、
+// d3 一个。插入顺序打乱，确认结果按 device_id / device_address_id 稳定排序而非插入序。
+func seedSubscriptionSyncFixture(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
+	rows := []po.MqttSubscriptionDevicePoint{
+		{DeviceID: "d3", DeviceAddressID: "a1", DeviceName: "电表3", DeviceAddressLabel: "功率",
+			Kind: "float", Source: po.MqttSubscriptionDevicePointSourceManual,
+			CreatedAt: "2026-10-03 10:00:00", UpdatedAt: "2026-10-03 10:00:00"},
+		{DeviceID: "d1", DeviceAddressID: "a2", DeviceName: "电表1", DeviceAddressLabel: "电压",
+			Kind: "float", Source: po.MqttSubscriptionDevicePointSourceManual,
+			CreatedAt: "2026-10-01 10:00:00", UpdatedAt: "2026-10-02 10:00:00"},
+		{DeviceID: "d2", DeviceAddressID: "a1", DeviceName: "", DeviceAddressLabel: "",
+			Kind: "", Source: po.MqttSubscriptionDevicePointSourceAuto,
+			CreatedAt: "2026-10-02 10:00:00", UpdatedAt: "2026-10-02 10:00:00"},
+		{DeviceID: "d1", DeviceAddressID: "a1", DeviceName: "电表1", DeviceAddressLabel: "电流",
+			Kind: "float", Source: po.MqttSubscriptionDevicePointSourceAuto,
+			CreatedAt: "2026-10-01 09:00:00", UpdatedAt: "2026-10-01 12:00:00"},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("seed subscription device points: %v", err)
+	}
+}
+
+// TestSyncSubscriptionDevicePointsCursorPaging 覆盖订阅设备/点位游标同步的核心契约：
+// 按设备分页、点位嵌套、两页不重不漏、nextAfter 是设备粒度。
+func TestSyncSubscriptionDevicePointsCursorPaging(t *testing.T) {
+	db := newOpenApiSyncTestDB(t)
+	seedSubscriptionSyncFixture(t, db)
+	svc := newOpenApiSyncService(db)
+	ctx := context.Background()
+
+	page1, err := svc.SyncSubscriptionDevicePoints(ctx, &dto.OpenApiSyncSubscriptionDevicePointsDTO{Size: 2})
+	if err != nil {
+		t.Fatalf("page1: %v", err)
+	}
+	if len(page1.Records) != 2 || page1.Records[0].DeviceID != "d1" || page1.Records[1].DeviceID != "d2" {
+		t.Fatalf("page1 记录 = %+v，期望按 deviceId 升序 [d1, d2]", page1.Records)
+	}
+	if !page1.HasMore || page1.NextAfter != "d2" {
+		t.Errorf("page1 hasMore/nextAfter = %v/%q，期望 true/d2", page1.HasMore, page1.NextAfter)
+	}
+
+	d1 := page1.Records[0]
+	if d1.DeviceName != "电表1" {
+		t.Errorf("d1 设备名称 = %q，期望 电表1", d1.DeviceName)
+	}
+	if len(d1.Points) != 2 || d1.Points[0].DeviceAddressID != "a1" || d1.Points[1].DeviceAddressID != "a2" {
+		t.Fatalf("d1 点位 = %+v，期望按点位 ID 升序 [a1, a2]", d1.Points)
+	}
+	if d1.Points[0].Source != po.MqttSubscriptionDevicePointSourceAuto ||
+		d1.Points[1].Source != po.MqttSubscriptionDevicePointSourceManual {
+		t.Errorf("d1 维护方式 = %q/%q，期望 auto/manual", d1.Points[0].Source, d1.Points[1].Source)
+	}
+	if d1.Points[0].CreatedAt != "2026-10-01 09:00:00" || d1.Points[0].UpdatedAt != "2026-10-01 12:00:00" {
+		t.Errorf("点位时间戳 = %q/%q", d1.Points[0].CreatedAt, d1.Points[0].UpdatedAt)
+	}
+	if d1.Points[0].DeviceID != "d1" {
+		t.Errorf("点位 deviceId = %q，期望 d1", d1.Points[0].DeviceID)
+	}
+
+	// 设备名称为空（历史/未配置名称字段）时原样返回空串，Points 仍非 nil。
+	d2 := page1.Records[1]
+	if d2.DeviceName != "" || d2.Points == nil || len(d2.Points) != 1 {
+		t.Errorf("d2 = %+v，期望空名称 + 1 个点位", d2)
+	}
+
+	page2, err := svc.SyncSubscriptionDevicePoints(ctx, &dto.OpenApiSyncSubscriptionDevicePointsDTO{After: page1.NextAfter, Size: 2})
+	if err != nil {
+		t.Fatalf("page2: %v", err)
+	}
+	if len(page2.Records) != 1 || page2.Records[0].DeviceID != "d3" {
+		t.Fatalf("page2 = %+v，期望仅 d3", page2.Records)
+	}
+	if page2.HasMore || page2.NextAfter != "" {
+		t.Errorf("page2 hasMore/nextAfter = %v/%q，期望 false/空", page2.HasMore, page2.NextAfter)
+	}
+	if len(page2.Records[0].Points) != 1 || page2.Records[0].Points[0].DeviceAddressLabel != "功率" {
+		t.Errorf("d3 点位 = %+v，期望 1 个「功率」", page2.Records[0].Points)
+	}
+}
+
+// TestSyncSubscriptionDevicePointsTrimsProbe 恰好取尽时探针条不得混入结果。
+func TestSyncSubscriptionDevicePointsTrimsProbe(t *testing.T) {
+	db := newOpenApiSyncTestDB(t)
+	seedSubscriptionSyncFixture(t, db)
+	svc := newOpenApiSyncService(db)
+
+	page, err := svc.SyncSubscriptionDevicePoints(context.Background(),
+		&dto.OpenApiSyncSubscriptionDevicePointsDTO{Size: 3})
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(page.Records) != 3 || page.HasMore || page.NextAfter != "" {
+		t.Errorf("记录数/hasMore/nextAfter = %d/%v/%q，期望 3/false/空",
+			len(page.Records), page.HasMore, page.NextAfter)
+	}
+}
+
+// TestSyncSubscriptionDevicePointsEmptyStore 空库：records 是非 nil 空切片。
+func TestSyncSubscriptionDevicePointsEmptyStore(t *testing.T) {
+	db := newOpenApiSyncTestDB(t)
+	svc := newOpenApiSyncService(db)
+
+	page, err := svc.SyncSubscriptionDevicePoints(context.Background(),
+		&dto.OpenApiSyncSubscriptionDevicePointsDTO{Size: 10})
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if page.Records == nil {
+		t.Errorf("空库的 Records 为 nil，期望非 nil 空切片")
+	}
+	if len(page.Records) != 0 || page.HasMore || page.NextAfter != "" {
+		t.Errorf("空库结果 = %+v，期望空且无下一页", page)
+	}
+}
+
 // TestSyncDevicePointsDTOValidation 钉住参数约束：size 必填且 1~100。
 func TestSyncDevicePointsDTOValidation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -282,6 +400,15 @@ func TestSyncDevicePointsDTOValidation(t *testing.T) {
 			}
 			if !tt.wantErr && err != nil {
 				t.Errorf("query %q 绑定失败: %v", tt.query, err)
+			}
+
+			var subReq dto.OpenApiSyncSubscriptionDevicePointsDTO
+			subErr := c.ShouldBindQuery(&subReq)
+			if tt.wantErr && subErr == nil {
+				t.Errorf("订阅同步 query %q 绑定成功，期望参数校验失败", tt.query)
+			}
+			if !tt.wantErr && subErr != nil {
+				t.Errorf("订阅同步 query %q 绑定失败: %v", tt.query, subErr)
 			}
 		})
 	}

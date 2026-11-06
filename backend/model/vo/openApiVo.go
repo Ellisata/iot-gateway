@@ -63,3 +63,32 @@ type OpenApiSyncDeviceVO struct {
 	OpenApiDeviceVO
 	Addresses []OpenApiDeviceAddressVO `json:"addresses"`
 }
+
+// OpenApiSyncSubscriptionDeviceVO 开放接口「订阅设备 + 点位」分批同步响应。
+//
+// 与 4.5 的设备同步同形：一台订阅设备及其全部点位。区别在数据来源 ——
+// 这里不是网关的 PLC 设备表，而是订阅报文里出现过的设备/点位元信息索引
+// （mqtt_subscription_device_point），因此没有协议、在线状态等采集字段。
+//
+// Points 恒为非 nil 切片。注意：这里的设备是从点位行反推出来的，
+// 不会出现 4.5 那种「零点位设备」（没有点位就不会有这一行）。
+type OpenApiSyncSubscriptionDeviceVO struct {
+	DeviceID   string                           `json:"deviceId"`
+	DeviceName string                           `json:"deviceName"`
+	Points     []OpenApiSyncSubscriptionPointVO `json:"points"`
+}
+
+// OpenApiSyncSubscriptionPointVO 订阅设备下的一个点位。
+//
+// DeviceID 在每个点位里重复一次，与 4.5 的 addresses[].deviceId 对齐，
+// 方便调用方把嵌套结构展平成扁平行。Source 是维护方式：
+// auto=订阅报文自动收录，manual=手工新增/编辑/导入。
+type OpenApiSyncSubscriptionPointVO struct {
+	DeviceID           string `json:"deviceId"`
+	DeviceAddressID    string `json:"deviceAddressId"`
+	DeviceAddressLabel string `json:"deviceAddressLabel"`
+	Kind               string `json:"kind"`
+	Source             string `json:"source"`
+	CreatedAt          string `json:"createdAt"`
+	UpdatedAt          string `json:"updatedAt"`
+}

@@ -26,10 +26,18 @@ func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService, oac *contr
 		openApi.GET("/deviceAddress/page", oac.PageDeviceAddresses)
 		// 全量同步：游标分批返回「设备 + 其全部点位」（见 docs/openApi.md 4.5）
 		openApi.GET("/device/sync", oac.SyncDevicePoints)
+		// 全量同步：游标分批返回「订阅设备 + 其全部点位」，数据源是订阅报文
+		// 维护的元信息索引（见 docs/openApi.md 4.12）
+		openApi.GET("/subscription/devicePoint/sync", oac.SyncSubscriptionDevicePoints)
 		// 可靠性分析：报警口径的设备可用率排行 / 点位异常 top-N，供外部跨网关汇总
 		// （见 docs/openApi.md 4.6 / 4.7）
 		openApi.GET("/alarm/deviceReliability", oac.DeviceReliability)
 		openApi.GET("/alarm/pointAbnormal", oac.PointAbnormal)
+		// 报警明细：历史分页 / 当前活跃 / 越限记录。与 4.6/4.7 的聚合报表互补 ——
+		// 那两条回答"谁最差"，这三条回答"具体是哪几条报警"（见 docs/openApi.md 4.9-4.11）。
+		openApi.GET("/alarm/pageAlarm", oac.PageAlarm)
+		openApi.GET("/alarm/listActive", oac.ListActiveAlarm)
+		openApi.GET("/alarm/pageThresholdRecord", oac.PageThresholdRecord)
 
 		// 控制下发（**唯一会改变现场设备状态的对外接口**）。
 		// 仍需 control.enabled + 协议 Writable + 点位 W 权限三层同时满足。

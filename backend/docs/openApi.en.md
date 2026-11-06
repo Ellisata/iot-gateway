@@ -13,6 +13,9 @@
 | v1.3 | 2026-10-09 | Added: device reliability statistics (4.6), point abnormality top-N (4.7) — alarm-based availability and abnormality rankings, for cross-gateway aggregation | - |
 | v1.4 | 2026-10-10 | 4.6 unit change: `availability` goes from a 0~1 fraction to a **percentage (0~100)** rounded to two decimals; `downSeconds` / `mttrSeconds` are now rounded to whole seconds | ⚠️ Yes (the `availability` unit changed — callers integrated against the 0~1 form must parse a percentage instead) |
 | v1.5 | 2026-10-31 | Added 4.8 Control Write (write PLC points). **The only public endpoint that changes the physical device state**; gated by `control.enabled`, protocol `Writable`, and point `W` permission | - |
+| v1.6 | 2026-11-02 | 4.8 write permission tightened: for points bound to a thing-model property, the property's `access_mode` must also include `W` (new error code `40039`). Writing to an `RW` point bound to an `R` property is no longer allowed | ⚠️ Yes (previously writable "RW point + R property" now returns `40039`) |
+| v1.7 | 2026-11-06 | Added: alarm history paging (4.9), current active alarms (4.10), threshold record paging (4.11) — detail-level queries that complement the aggregate reports in 4.6 / 4.7 | - |
+| v1.8 | 2026-11-06 | Added: batch sync of subscribed devices and points (4.12, cursor paging, same shape as 4.5; the data source is the device/point metadata index maintained from subscription messages) | - |
 
 ## Compatibility Commitment
 
@@ -100,10 +103,10 @@ Paginated endpoints follow a unified request/response structure:
 }
 ```
 
-> **Exception: 4.5 (batch sync) uses a "cursor" instead of `page`/`size`.** Its response is
+> **Exception: 4.5 / 4.12 (batch sync) use a "cursor" instead of `page`/`size`.** Their response is
 > `{size, hasMore, nextAfter, records}` and carries no `total`. During a long full traversal,
 > `OFFSET` paging shifts the unread window whenever rows are inserted or deleted, causing missed
-> or duplicated rows; a cursor resumes from an ordered key and is unaffected. See 4.5.
+> or duplicated rows; a cursor resumes from an ordered key and is unaffected. See 4.5 / 4.12.
 
 ### 3.4 Time Format
 
@@ -729,6 +732,342 @@ At most 50 points per request. **Batched writes are not transactional**: each po
 - `results[].code`: `0` success, `1` invalid address, `2` read-only, `3` invalid value, `4` unsupported, `5` device rejected, `6` link failure / state unknown;
 - `duplicate=true` means the `requestId` was already processed and nothing was written again;
 - After a link failure the batch state may be unknown; read the points back or confirm on site before retrying.
+
+### 4.9 Alarm History (paginated)
+
+Paginated query of the alarms persisted by the gateway (offline / data quality / threshold / recovery).
+It complements the aggregate reports in 4.6 / 4.7: those answer "who is worst", this answers
+"which alarms exactly".
+
+```
+GET /openApi/alarm/pageAlarm
+```
+
+**Request parameters (Query)**
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| page | int | Yes | Page number, starting from 1 |
+| size | int | Yes | Page size, 1~100 |
+| targetName | string | No | Target name, fuzzy match |
+| targetType | string | No | `device` / `channel` / `point` / `point_threshold`; omitted = all |
+| alarmType | string | No | `offline` / `quality` / `threshold` / `recover`; omitted = all |
+| status | string | No | `active` / `cleared`; omitted = all |
+
+**Response `data`**
+
+Pagination envelope (see §3.3); each element of `records`:
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| id | string | Alarm ID |
+| targetId | string | Target ID (device / channel / point) |
+| targetName | string | Target name (snapshot taken when the alarm occurred; still readable after the target is deleted) |
+| targetType | string | `device` / `channel` / `point` / `point_threshold` |
+| alarmType | string | `offline` / `quality` / `threshold` / `recover` |
+| alarmTypeName | string | Human-readable alarm type name (in the gateway's configured language) |
+| level | string | Alarm level |
+| content | string | Alarm content |
+| status | string | `active` / `cleared` |
+| statusName | string | Human-readable status name |
+| firstOccurTime | string | First occurrence time |
+| lastOccurTime | string | Most recent occurrence time |
+| clearTime | string | Recovery time; empty string `""` when not cleared |
+| createdAt | string | Creation time |
+| updatedAt | string | Update time |
+
+**Example**
+
+```bash
+curl -H "X-Api-Key: your-app-key" \
+     "http://192.168.1.100:9082/openApi/alarm/pageAlarm?page=1&size=20&status=active&alarmType=offline"
+```
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": {
+    "page": 1,
+    "size": 20,
+    "total": 1,
+    "records": [
+      {
+        "id": "0b6f4f8e-6f2e-4a8e-9d5c-2f7b0f3c1a11",
+        "targetId": "a1b2c3d4e5f6",
+        "targetName": "PLC-1",
+        "targetType": "device",
+        "alarmType": "offline",
+        "alarmTypeName": "Offline alarm",
+        "level": "critical",
+        "content": "Device failed 3 consecutive collection rounds",
+        "status": "active",
+        "statusName": "Active",
+        "firstOccurTime": "2026-11-06 08:12:30",
+        "lastOccurTime": "2026-11-06 08:13:00",
+        "clearTime": "",
+        "createdAt": "2026-11-06 08:12:30",
+        "updatedAt": "2026-11-06 08:13:00"
+      }
+    ]
+  },
+  "serverTime": "2026-11-06 10:30:00"
+}
+```
+
+### 4.10 Active Alarms
+
+Returns the currently **uncleared** offline alarms (offline devices + offline channels),
+i.e. the list of offline targets. It is not paginated — active targets are the small set that
+needs immediate attention, and pagination would only add another loop for the caller.
+
+```
+GET /openApi/alarm/listActive
+```
+
+**Request parameters**: none.
+
+**Response `data`**
+
+An array of alarm objects with exactly the same fields as the 4.9 `records`, ordered by
+`firstOccurTime` descending. Empty array `[]` (not `null`) when there are no active alarms.
+
+**Example**
+
+```bash
+curl -H "X-Api-Key: your-app-key" \
+     "http://192.168.1.100:9082/openApi/alarm/listActive"
+```
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": [
+    {
+      "id": "0b6f4f8e-6f2e-4a8e-9d5c-2f7b0f3c1a11",
+      "targetId": "a1b2c3d4e5f6",
+      "targetName": "PLC-1",
+      "targetType": "device",
+      "alarmType": "offline",
+      "alarmTypeName": "Offline alarm",
+      "level": "critical",
+      "content": "Device failed 3 consecutive collection rounds",
+      "status": "active",
+      "statusName": "Active",
+      "firstOccurTime": "2026-11-06 08:12:30",
+      "lastOccurTime": "2026-11-06 08:13:00",
+      "clearTime": "",
+      "createdAt": "2026-11-06 08:12:30",
+      "updatedAt": "2026-11-06 08:13:00"
+    }
+  ],
+  "serverTime": "2026-11-06 10:30:00"
+}
+```
+
+### 4.11 Threshold Records (paginated)
+
+Paginated query of threshold-breach samples. This is **not** the same thing as the alarms in 4.9:
+alarms are a debounced state machine (requires N consecutive rounds), while this table keeps
+evidence for **every raw breach** (throttled within a continuous breach segment) — so a 1~2 round
+spike is only visible here.
+
+```
+GET /openApi/alarm/pageThresholdRecord
+```
+
+**Request parameters (Query)**
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| page | int | Yes | Page number, starting from 1 |
+| size | int | Yes | Page size, 1~100 |
+| deviceId | string | No | Limit to one device; omitted = all |
+| name | string | No | Point name, fuzzy match |
+
+**Response `data`**
+
+Pagination envelope (see §3.3); each element of `records`:
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| id | string | Record ID |
+| deviceId | string | Owning device ID |
+| deviceName | string | Device name (snapshot at occurrence) |
+| addressId | string | Point ID (i.e. the point `id` from 4.4 / 4.5) |
+| addressName | string | Point name |
+| value | string | Collected value that breached the threshold |
+| kind | string | Value kind (bool / int / float / str) |
+| bound | string | Which part of the condition matched: `high` / `low` for `range`, otherwise the operator name |
+| boundName | string | Human-readable name of the matched condition |
+| thresholdOp | string | Snapshot of the threshold operator when written |
+| thresholdValue | string | Snapshot of the operands when written (**JSON array string**, e.g. `["80","100"]`) |
+| occurredAt | string | Breach time |
+
+> - `thresholdOp` / `thresholdValue` are **snapshots taken when the record was written**: after the
+>   configuration changes, history still proves which rule was in effect at that time.
+> - This table keeps the most recent 90 days; older records are pruned.
+
+**Example**
+
+```bash
+curl -H "X-Api-Key: your-app-key" \
+     "http://192.168.1.100:9082/openApi/alarm/pageThresholdRecord?page=1&size=20&deviceId=a1b2c3d4e5f6"
+```
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": {
+    "page": 1,
+    "size": 20,
+    "total": 1,
+    "records": [
+      {
+        "id": "5c2b1f0e-7d8a-4f21-b3e4-9a6c8d5e2f10",
+        "deviceId": "a1b2c3d4e5f6",
+        "deviceName": "PLC-1",
+        "addressId": "f6e5d4c3b2a1",
+        "addressName": "40001",
+        "value": "105",
+        "kind": "int",
+        "bound": "high",
+        "boundName": "Above upper limit",
+        "thresholdOp": "range",
+        "thresholdValue": "[\"0\",\"100\"]",
+        "occurredAt": "2026-11-06 09:41:12"
+      }
+    ]
+  },
+  "serverTime": "2026-11-06 10:30:00"
+}
+```
+
+### 4.12 Batch Sync of Subscribed Devices and Points
+
+Fetches **all devices that have appeared in subscription messages, together with their point
+metadata**, for full synchronisation into an external system. The shape is identical to 4.5
+(cursor paging, points nested inside devices), but the **data source differs**: this endpoint
+reads the gateway's subscription device/point index (`mqtt_subscription_device_point`), which is
+maintained from MQTT subscription parsing results or manually in the admin UI — **not** the local
+PLC device table.
+
+It therefore has no protocol name, online status, collection time, or other acquisition fields.
+
+```
+GET /openApi/subscription/devicePoint/sync
+```
+
+**Request parameters (Query)**
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| after | string | no | **Cursor**: the `nextAfter` from the previous page. **Omit on the first request** |
+| size | int | yes | Devices per page, 1~100 |
+
+**Response `data`** (same shape as 4.5)
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| size | int | Echo of the requested `size` |
+| hasMore | boolean | Whether another page exists |
+| nextAfter | string | Cursor for the next page; empty string `""` when `hasMore` is `false` |
+| records | array | Devices on this page, each described below |
+
+**Elements of `records`**
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| deviceId | string | Subscribed device ID (device identity parsed from messages) |
+| deviceName | string | Device name; empty string `""` when configured by neither subscription nor manual entry |
+| points | array | All points of this device; **always non-empty** (devices are derived from point rows) |
+
+**Elements of `points`**
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| deviceId | string | Owning device ID (same as the parent, for easy flattening) |
+| deviceAddressId | string | Point ID |
+| deviceAddressLabel | string | Point label (e.g. "current", "voltage") |
+| kind | string | Data type category (e.g. `float`); empty string when not configured |
+| source | string | Maintenance source: `auto` = auto-collected from subscription messages, `manual` = created/edited/imported manually |
+| createdAt | string | First collection time |
+| updatedAt | string | Last metadata update time |
+
+**Traversal**
+
+```
+after = ""                      # omit on the first request
+loop:
+    resp = GET /openApi/subscription/devicePoint/sync?size=100[&after=<after>]
+    process(resp.data.records)
+    if not resp.data.hasMore: break
+    after = resp.data.nextAfter
+```
+
+**Example**
+
+```bash
+curl -H "X-Api-Key: your-app-key" \
+     "http://192.168.1.100:9082/openApi/subscription/devicePoint/sync?size=2"
+```
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": {
+    "size": 2,
+    "hasMore": false,
+    "nextAfter": "",
+    "records": [
+      {
+        "deviceId": "meter-1",
+        "deviceName": "Meter 1",
+        "points": [
+          {
+            "deviceId": "meter-1",
+            "deviceAddressId": "current",
+            "deviceAddressLabel": "Phase A current",
+            "kind": "float",
+            "source": "auto",
+            "createdAt": "2026-10-01 09:00:00",
+            "updatedAt": "2026-10-01 12:00:00"
+          },
+          {
+            "deviceId": "meter-1",
+            "deviceAddressId": "voltage",
+            "deviceAddressLabel": "Voltage",
+            "kind": "float",
+            "source": "manual",
+            "createdAt": "2026-10-02 09:00:00",
+            "updatedAt": "2026-10-02 09:00:00"
+          }
+        ]
+      }
+    ]
+  },
+  "serverTime": "2026-11-06 10:30:00"
+}
+```
+
+> **Notes:**
+> - **Ordered by `deviceId` ascending**; the cursor is the last `deviceId` of the previous page.
+>   Pass the previous page's `nextAfter` back verbatim as `after`; do not construct it yourself.
+> - **A page is split by device**: all points of a device stay on the same page; a device is never
+>   cut across two pages.
+> - **There are no "point-less devices"** here: devices are derived from point rows, so a device
+>   without points simply does not exist. Unlike 4.5, `points` is never an empty array.
+> - **`source=manual` rows** have metadata confirmed manually; later subscription messages will not
+>   overwrite them. The admin UI can hand such a row back to auto maintenance when needed.
+> - A traversal ends when `hasMore` is `false` (then `nextAfter` is `""`) — **not** when `records`
+>   is empty.
 
 ## 5. Error Code Reference
 

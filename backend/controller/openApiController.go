@@ -106,6 +106,22 @@ func (ctr *OpenApiController) SyncDevicePoints(c *gin.Context) {
 	c.JSON(200, response.Success(data))
 }
 
+// SyncSubscriptionDevicePoints 对外「订阅设备 + 点位」游标分批同步查询（供外部系统全量遍历）
+func (ctr *OpenApiController) SyncSubscriptionDevicePoints(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiSyncSubscriptionDevicePointsDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.openApiService.SyncSubscriptionDevicePoints(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
 // DeviceReliability 对外设备维度可靠性统计（可用率 / 故障段数 / 停机时长 / MTTR）
 func (ctr *OpenApiController) DeviceReliability(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -131,6 +147,49 @@ func (ctr *OpenApiController) PointAbnormal(c *gin.Context) {
 		return
 	}
 	data, err := ctr.openApiService.PointAbnormal(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// PageAlarm 对外报警历史分页查询。
+func (ctr *OpenApiController) PageAlarm(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.PageAlarmDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.openApiService.PageAlarms(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// ListActiveAlarm 对外当前活跃离线报警（= 离线设备 + 离线通道）。
+func (ctr *OpenApiController) ListActiveAlarm(c *gin.Context) {
+	ctx := c.Request.Context()
+	data, err := ctr.openApiService.ListActiveAlarms(ctx)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// PageThresholdRecord 对外越限记录分页查询。
+func (ctr *OpenApiController) PageThresholdRecord(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.PageThresholdRecordDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.openApiService.PageThresholdRecords(ctx, &req)
 	if err != nil {
 		c.JSON(200, appError.HandleErrorCtx(ctx, err))
 		return

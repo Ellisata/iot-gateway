@@ -26,3 +26,15 @@ type OpenApiSyncDevicePointsDTO struct {
 	After string `form:"after"` // 游标：上一页响应里的 nextAfter；首次不传
 	Size  int    `form:"size" binding:"required,min=1,max=100"`
 }
+
+// OpenApiSyncSubscriptionDevicePointsDTO 开放接口「订阅设备 + 点位」游标分批同步请求。
+//
+// 与 OpenApiSyncDevicePointsDTO 同形：订阅设备/点位表也是按 (device_id,
+// device_address_id) 稳定排序的，游标只到设备粒度 —— 一页拿一批设备及其全部点位，
+// 翻页途中新增/删除点位不会让未读区间整体位移。
+//
+// After 为空表示从头开始；Size 沿用 1~100。
+type OpenApiSyncSubscriptionDevicePointsDTO struct {
+	After string `form:"after"` // 游标：上一页响应里的 nextAfter；首次不传
+	Size  int    `form:"size" binding:"required,min=1,max=100"`
+}

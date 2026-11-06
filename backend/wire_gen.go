@@ -94,7 +94,7 @@ func InitializeApp() (*AppDependencies, func()) {
 	logFileController := controller.NewLogFileController(logFileService)
 	openApiSecretService := service.NewOpenApiSecretService(db)
 	openApiSecretController := controller.NewOpenApiSecretController(openApiSecretService)
-	openApiService := service.NewOpenApiService(deviceService, deviceAddressService, alarmService)
+	openApiService := service.NewOpenApiService(deviceService, deviceAddressService, alarmService, mqttSubscriptionService)
 	openApiController := controller.NewOpenApiController(openApiService, controlService)
 	serviceGatewayService := service.NewGatewayService(db)
 	gatewayController := controller.NewGatewayController(serviceGatewayService)

@@ -19,14 +19,18 @@ type OpenApiService struct {
 	deviceService        *DeviceService
 	deviceAddressService *DeviceAddressService
 	alarmService         *AlarmService
+	// mqttSubscriptionService 提供订阅设备/点位索引的只读查询
+	// （mqtt_subscription_device_point，由 MQTT 订阅收包侧异步维护）。
+	mqttSubscriptionService *MqttSubscriptionService
 }
 
 // NewOpenApiService 创建开放接口对外查询服务
-func NewOpenApiService(deviceService *DeviceService, deviceAddressService *DeviceAddressService, alarmService *AlarmService) *OpenApiService {
+func NewOpenApiService(deviceService *DeviceService, deviceAddressService *DeviceAddressService, alarmService *AlarmService, mqttSubscriptionService *MqttSubscriptionService) *OpenApiService {
 	return &OpenApiService{
-		deviceService:        deviceService,
-		deviceAddressService: deviceAddressService,
-		alarmService:         alarmService,
+		deviceService:           deviceService,
+		deviceAddressService:    deviceAddressService,
+		alarmService:            alarmService,
+		mqttSubscriptionService: mqttSubscriptionService,
 	}
 }
 
@@ -186,6 +190,76 @@ func (s *OpenApiService) SyncDevicePoints(ctx context.Context, req *dto.OpenApiS
 	return result, nil
 }
 
+// SyncSubscriptionDevicePoints 游标分批同步「订阅设备 + 其全部点位」。
+//
+// 形态与理由完全对齐 4.5 的设备同步（docs/openApi.md 4.12）：
+//   - 游标落在设备粒度（device_id 升序），点位嵌套在设备内；
+//   - 多取一条判 hasMore，最后一页恰好装满时不多跑一次空请求；
+//   - Points 恒为非 nil 切片。
+//
+// 数据来自订阅报文维护的元信息索引，不是本地 PLC 设备表 —— 没有协议、
+// 在线状态等采集字段；设备列表也由点位行反推，故不存在零点位设备。
+func (s *OpenApiService) SyncSubscriptionDevicePoints(ctx context.Context, req *dto.OpenApiSyncSubscriptionDevicePointsDTO) (*response.CursorVo[vo.OpenApiSyncSubscriptionDeviceVO], error) {
+	deviceIDs, err := s.mqttSubscriptionService.ListDevicePointDeviceIDsAfter(ctx, req.After, req.Size+1)
+	if err != nil {
+		return nil, err
+	}
+
+	hasMore := len(deviceIDs) > req.Size
+	if hasMore {
+		deviceIDs = deviceIDs[:req.Size]
+	}
+
+	result := &response.CursorVo[vo.OpenApiSyncSubscriptionDeviceVO]{
+		Size:    req.Size,
+		HasMore: hasMore,
+		// 空切片而非 nil：无记录时 records 也应是 []，与 4.5 一致。
+		Records: make([]vo.OpenApiSyncSubscriptionDeviceVO, 0, len(deviceIDs)),
+	}
+	if len(deviceIDs) == 0 {
+		return result, nil
+	}
+	if hasMore {
+		result.NextAfter = deviceIDs[len(deviceIDs)-1]
+	}
+
+	rows, err := s.mqttSubscriptionService.ListDevicePointsByDeviceIDs(ctx, deviceIDs)
+	if err != nil {
+		return nil, err
+	}
+	pointsByDevice := make(map[string][]vo.OpenApiSyncSubscriptionPointVO, len(deviceIDs))
+	deviceNames := make(map[string]string, len(deviceIDs))
+	for i := range rows {
+		r := &rows[i]
+		// 同一设备的各点位理论上同名；历史/手工数据可能不一致，取第一个非空值。
+		if _, ok := deviceNames[r.DeviceID]; !ok && r.DeviceName != "" {
+			deviceNames[r.DeviceID] = r.DeviceName
+		}
+		pointsByDevice[r.DeviceID] = append(pointsByDevice[r.DeviceID], vo.OpenApiSyncSubscriptionPointVO{
+			DeviceID:           r.DeviceID,
+			DeviceAddressID:    r.DeviceAddressID,
+			DeviceAddressLabel: r.DeviceAddressLabel,
+			Kind:               r.Kind,
+			Source:             r.Source,
+			CreatedAt:          r.CreatedAt,
+			UpdatedAt:          r.UpdatedAt,
+		})
+	}
+
+	for _, deviceID := range deviceIDs {
+		points := pointsByDevice[deviceID]
+		if points == nil {
+			points = []vo.OpenApiSyncSubscriptionPointVO{}
+		}
+		result.Records = append(result.Records, vo.OpenApiSyncSubscriptionDeviceVO{
+			DeviceID:   deviceID,
+			DeviceName: deviceNames[deviceID],
+			Points:     points,
+		})
+	}
+	return result, nil
+}
+
 // DeviceReliability 对外设备维度可靠性统计（窗口内可用率 / 故障段数 / 停机时长 / MTTR）。
 //
 // **纯直通，不映射成另一套开放 VO**：与 device / address 那些需要剔除 protocolJson、
@@ -202,6 +276,27 @@ func (s *OpenApiService) DeviceReliability(ctx context.Context, req *dto.DeviceR
 // 无内部字段可裁剪。两份报表形态刻意一致，调用方可用同一段代码处理。
 func (s *OpenApiService) PointAbnormal(ctx context.Context, req *dto.PointAbnormalDTO) (*vo.PointAbnormalReportVO, error) {
 	return s.alarmService.PointAbnormal(ctx, req)
+}
+
+// PageAlarms 对外报警历史分页查询（4.9）。
+//
+// 直通理由同 DeviceReliability：AlarmVO 只含报警本身的展示字段（目标、类型、
+// 状态、发生/恢复时间），没有需要对外剔除的内部配置或凭据。另建一套同构 VO
+// 只会多一处会漂移的字段映射，而这份数据的形状在管理端与外部系统之间本应一致。
+func (s *OpenApiService) PageAlarms(ctx context.Context, req *dto.PageAlarmDTO) (*response.PageVo[vo.AlarmVO], error) {
+	return s.alarmService.PageAlarms(ctx, req)
+}
+
+// ListActiveAlarms 对外当前活跃离线报警（= 离线设备 + 离线通道，4.10）。
+// 直通理由同 PageAlarms。
+func (s *OpenApiService) ListActiveAlarms(ctx context.Context) ([]vo.AlarmVO, error) {
+	return s.alarmService.ListActiveAlarms(ctx)
+}
+
+// PageThresholdRecords 对外越限记录分页查询（4.11）。越限记录是原始样本留证，
+// 与去抖后的报警是两件事，字段同样不含内部配置。直通理由同 PageAlarms。
+func (s *OpenApiService) PageThresholdRecords(ctx context.Context, req *dto.PageThresholdRecordDTO) (*response.PageVo[vo.PointThresholdRecordVO], error) {
+	return s.alarmService.PageThresholdRecords(ctx, req)
 }
 
 // openApiAddressVO 把点位裁剪为对外 VO（剔除 threshold* 等内部配置字段）。

@@ -433,6 +433,39 @@ func (s *MqttSubscriptionService) PageMqttSubscriptionDevicePoint(ctx context.Co
 	}, nil
 }
 
+// ListDevicePointDeviceIDsAfter 按 device_id 升序返回 after 之后的设备 ID（去重），
+// 最多 limit 个，供游标分批同步续读。
+//
+// 游标落在设备粒度：一页按设备取，点位再整批挂回去，因此单台设备的点位数
+// 不会把分页切在设备中间（与 4.5 设备同步同一形态）。
+func (s *MqttSubscriptionService) ListDevicePointDeviceIDsAfter(ctx context.Context, after string, limit int) ([]string, error) {
+	if limit <= 0 {
+		return []string{}, nil
+	}
+	ids := make([]string, 0, limit)
+	err := s.sqliteDB.WithContext(ctx).Model(&po.MqttSubscriptionDevicePoint{}).
+		Distinct("device_id").
+		Where("device_id > ?", after).
+		Order("device_id ASC").
+		Limit(limit).
+		Pluck("device_id", &ids).Error
+	return ids, err
+}
+
+// ListDevicePointsByDeviceIDs 取这些设备的全部点位行，按 (device_id, device_address_id) 升序。
+// 供游标同步一次查完一页设备的所有点位，避免 N+1 查询。
+func (s *MqttSubscriptionService) ListDevicePointsByDeviceIDs(ctx context.Context, deviceIDs []string) ([]po.MqttSubscriptionDevicePoint, error) {
+	if len(deviceIDs) == 0 {
+		return []po.MqttSubscriptionDevicePoint{}, nil
+	}
+	rows := make([]po.MqttSubscriptionDevicePoint, 0)
+	err := s.sqliteDB.WithContext(ctx).
+		Where("device_id IN ?", deviceIDs).
+		Order("device_id ASC, device_address_id ASC").
+		Find(&rows).Error
+	return rows, err
+}
+
 // PreviewMqttSubscription 用尚未保存的解析配置 + 样例报文试跑转换。
 //
 // 与运行期走同一条 parser.New → Parse 路径；转换失败不是 AppError：

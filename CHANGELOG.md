@@ -6,6 +6,18 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
+## [Unreleased]
+
+### 新增
+
+- **开放接口报警明细**：新增报警历史分页 `GET /openApi/alarm/pageAlarm`、当前活跃离线报警 `GET /openApi/alarm/listActive`（不分页）与越限记录分页 `GET /openApi/alarm/pageThresholdRecord`，与既有的可靠性 / 异常聚合报表互补，回答「具体是哪几条」（开放接口文档 v1.7，4.9–4.11）。
+- **开放接口订阅设备与点位同步**：新增 `GET /openApi/subscription/devicePoint/sync`，按 `deviceId` 游标分批返回订阅报文维护的设备 / 点位元信息（`mqtt_subscription_device_point`），形态与 4.5 设备同步一致，供外部系统全量遍历（开放接口文档 v1.8，4.12）。
+
+### Added
+
+- **OpenAPI alarm details**: adds alarm-history paging `GET /openApi/alarm/pageAlarm`, currently-active offline alarms `GET /openApi/alarm/listActive` (unpaginated) and threshold-record paging `GET /openApi/alarm/pageThresholdRecord`, complementing the existing reliability / abnormality aggregates with "which alarms exactly" detail queries (OpenAPI docs v1.7, 4.9–4.11).
+- **OpenAPI subscription device/point sync**: adds `GET /openApi/subscription/devicePoint/sync`, returning device/point metadata maintained from subscription messages (`mqtt_subscription_device_point`) in device-level cursor batches, mirroring 4.5 for full external traversal (OpenAPI docs v1.8, 4.12).
+
 ## [0.8.0] - 2026-11-05
 
 ### 新增

@@ -100,6 +100,7 @@ func TestOpenApiControlWriteEndToEnd(t *testing.T) {
 		service.NewDeviceService(db, nil, nil),
 		service.NewDeviceAddressService(db, nil),
 		service.NewAlarmService(db),
+		service.NewMqttSubscriptionService(db, nil),
 	), controlSvc)
 
 	engine := gin.New()

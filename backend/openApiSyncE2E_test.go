@@ -46,7 +46,8 @@ func TestOpenApiSyncDevicePointsEndToEnd(t *testing.T) {
 		sqlDB.SetMaxOpenConns(1)
 		t.Cleanup(func() { sqlDB.Close() })
 	}
-	if err := db.AutoMigrate(&po.Device{}, &po.IotProtocol{}, &po.DeviceAddress{}, &po.OpenApiSecret{}); err != nil {
+	if err := db.AutoMigrate(&po.Device{}, &po.IotProtocol{}, &po.DeviceAddress{},
+		&po.MqttSubscriptionDevicePoint{}, &po.OpenApiSecret{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
@@ -65,6 +66,18 @@ func TestOpenApiSyncDevicePointsEndToEnd(t *testing.T) {
 		CreatedAt: "2026-09-01 10:00:00", UpdatedAt: "2026-09-05 12:00:00",
 	}).Error; err != nil {
 		t.Fatalf("seed address: %v", err)
+	}
+
+	// 订阅报文维护的设备/点位索引：一台设备两个点位（auto + manual）
+	if err := db.Create(&[]po.MqttSubscriptionDevicePoint{
+		{DeviceID: "sub-dev-1", DeviceAddressID: "sub-a1", DeviceName: "电表1",
+			DeviceAddressLabel: "电流", Kind: "float", Source: po.MqttSubscriptionDevicePointSourceAuto,
+			CreatedAt: "2026-10-01 09:00:00", UpdatedAt: "2026-10-01 12:00:00"},
+		{DeviceID: "sub-dev-1", DeviceAddressID: "sub-a2", DeviceName: "电表1",
+			DeviceAddressLabel: "电压", Kind: "float", Source: po.MqttSubscriptionDevicePointSourceManual,
+			CreatedAt: "2026-10-02 09:00:00", UpdatedAt: "2026-10-02 09:00:00"},
+	}).Error; err != nil {
+		t.Fatalf("seed subscription device points: %v", err)
 	}
 
 	// 真实密钥服务：建一把密钥，再把它读出来当请求头用
@@ -86,6 +99,7 @@ func TestOpenApiSyncDevicePointsEndToEnd(t *testing.T) {
 		service.NewDeviceService(db, nil, nil),
 		service.NewDeviceAddressService(db, nil),
 		service.NewAlarmService(db),
+		service.NewMqttSubscriptionService(db, nil),
 	), controlSvc)
 	engine := gin.New()
 	router.OpenApiRoutes(engine, secretSvc, openApiCtrl)
@@ -166,6 +180,71 @@ func TestOpenApiSyncDevicePointsEndToEnd(t *testing.T) {
 	paramBody, paramStatus := doRequestWithKey(t, engine, apiKey, "/openApi/device/sync")
 	if paramStatus != http.StatusOK || !strings.Contains(string(paramBody), "PARAM_ERROR") {
 		t.Errorf("缺 size 得到 %d / %s，期望 200 / PARAM_ERROR", paramStatus, paramBody)
+	}
+
+	// ⑤ 订阅设备与点位同步：走同一套游标契约，点位嵌套在设备内
+	subBody, subStatus := doRequestWithKey(t, engine, apiKey, "/openApi/subscription/devicePoint/sync?size=10")
+	if subStatus != http.StatusOK {
+		t.Fatalf("订阅同步状态码 = %d，期望 200", subStatus)
+	}
+	var subResp struct {
+		Code      string `json:"code"`
+		IsSuccess bool   `json:"isSuccess"`
+		Data      struct {
+			Size      int    `json:"size"`
+			HasMore   bool   `json:"hasMore"`
+			NextAfter string `json:"nextAfter"`
+			Records   []struct {
+				DeviceID   string `json:"deviceId"`
+				DeviceName string `json:"deviceName"`
+				Points     []struct {
+					DeviceID           string `json:"deviceId"`
+					DeviceAddressID    string `json:"deviceAddressId"`
+					DeviceAddressLabel string `json:"deviceAddressLabel"`
+					Kind               string `json:"kind"`
+					Source             string `json:"source"`
+					CreatedAt          string `json:"createdAt"`
+					UpdatedAt          string `json:"updatedAt"`
+				} `json:"points"`
+			} `json:"records"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(subBody, &subResp); err != nil {
+		t.Fatalf("解析订阅同步响应失败: %v\n%s", err, subBody)
+	}
+	if subResp.Code != "0" || !subResp.IsSuccess {
+		t.Fatalf("订阅同步 code=%q isSuccess=%v，期望 0/true\n%s", subResp.Code, subResp.IsSuccess, subBody)
+	}
+	if len(subResp.Data.Records) != 1 {
+		t.Fatalf("订阅设备数 = %d，期望 1", len(subResp.Data.Records))
+	}
+	subDev := subResp.Data.Records[0]
+	if subDev.DeviceID != "sub-dev-1" || subDev.DeviceName != "电表1" {
+		t.Errorf("订阅设备 = %s/%s，期望 sub-dev-1/电表1", subDev.DeviceID, subDev.DeviceName)
+	}
+	if len(subDev.Points) != 2 || subDev.Points[0].DeviceAddressID != "sub-a1" ||
+		subDev.Points[1].DeviceAddressID != "sub-a2" {
+		t.Fatalf("订阅点位未正确嵌套：%+v", subDev.Points)
+	}
+	if subDev.Points[0].Source != po.MqttSubscriptionDevicePointSourceAuto ||
+		subDev.Points[1].Source != po.MqttSubscriptionDevicePointSourceManual {
+		t.Errorf("维护方式 = %q/%q，期望 auto/manual", subDev.Points[0].Source, subDev.Points[1].Source)
+	}
+	if subDev.Points[0].CreatedAt != "2026-10-01 09:00:00" ||
+		subDev.Points[0].UpdatedAt != "2026-10-01 12:00:00" {
+		t.Errorf("订阅点位时间戳 = %q/%q", subDev.Points[0].CreatedAt, subDev.Points[0].UpdatedAt)
+	}
+	if subResp.Data.HasMore || subResp.Data.NextAfter != "" {
+		t.Errorf("订阅同步只有一页时 hasMore=%v nextAfter=%q，期望 false/空",
+			subResp.Data.HasMore, subResp.Data.NextAfter)
+	}
+
+	// ⑥ 订阅同步同样要求密钥
+	subNoKey := httptest.NewRequest("GET", "/openApi/subscription/devicePoint/sync?size=10", nil)
+	subW := httptest.NewRecorder()
+	engine.ServeHTTP(subW, subNoKey)
+	if subW.Code != http.StatusUnauthorized || !strings.Contains(subW.Body.String(), "70003") {
+		t.Errorf("订阅同步缺密钥得到 %d / %s，期望 401 / 70003", subW.Code, subW.Body.String())
 	}
 }
 

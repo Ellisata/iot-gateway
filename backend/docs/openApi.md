@@ -14,6 +14,8 @@
 | v1.4 | 2026-10-10 | 4.6 的量纲调整：`availability` 由 0~1 小数改为**百分数 0~100**（保留两位小数），`downSeconds` / `mttrSeconds` 改为四舍五入的整秒 | ⚠️ 是（`availability` 量纲变了，与 0~1 时期对接过的调用方需改按百分数解析） |
 | v1.5 | 2026-10-31 | 新增 4.8 控制下发（写 PLC 点位）。**唯一会改变现场设备状态的开放接口**，受 `control.enabled`、协议 `Writable`、点位 `W` 权限三层约束 | - |
 | v1.6 | 2026-11-02 | 4.8 写入权限收紧：绑定了物模型属性的点位，属性 `access_mode` 也必须含 `W`（新增错误码 `40039`）。`RW` 点位绑定 `R` 属性时不再允许写入 | ⚠️ 是（此前能写的「RW 点位 + R 属性」现在返回 `40039`） |
+| v1.7 | 2026-11-06 | 新增：报警历史分页（4.9）、当前活跃报警（4.10）、越限记录分页（4.11）—— 与 4.6/4.7 的聚合报表互补，提供明细级查询 | - |
+| v1.8 | 2026-11-06 | 新增：分批同步订阅设备与点位（4.12，游标翻页，形态与 4.5 一致；数据源是订阅报文维护的设备/点位元信息索引） | - |
 
 ## 兼容性承诺
 
@@ -101,10 +103,10 @@ http://<网关IP>:9082
 }
 ```
 
-> **例外：4.5 分批同步用「游标」而非 `page`/`size`。** 它的响应是
+> **例外：4.5 / 4.12 分批同步用「游标」而非 `page`/`size`。** 它们的响应是
 > `{size, hasMore, nextAfter, records}`，没有 `total`。全量遍历场景下，`OFFSET` 翻页
 > 在遍历途中发生增删会让未读区间整体位移、造成漏读或重读；游标按有序主键续读不受影响。
-> 详见 4.5。
+> 详见 4.5 / 4.12。
 
 ### 3.4 时间格式
 
@@ -726,6 +728,336 @@ Content-Type: application/json
 - `results[].code`：`0` 成功、`1` 地址无效、`2` 只读、`3` 值非法、`4` 不支持、`5` 设备拒绝、`6` 链路失败/状态未知；
 - `duplicate=true` 表示该 `requestId` 已处理过，本次未重复下发；
 - 链路失败时整批状态可能未知，请回读点位或现场确认后再决定是否重试。
+
+### 4.9 报警历史分页
+
+分页查询网关落库的报警记录（断联 / 采集质量 / 超限 / 恢复）。与 4.6 / 4.7 的聚合报表互补：
+那两条回答「谁最差」，本接口回答「具体是哪几条报警」。
+
+```
+GET /openApi/alarm/pageAlarm
+```
+
+**请求参数（Query）**
+
+| 参数 | 类型 | 必填 | 说明 |
+| ---- | ---- | ---- | ---- |
+| page | int | 是 | 页码，从 1 开始 |
+| size | int | 是 | 每页条数，1~100 |
+| targetName | string | 否 | 目标名称，模糊匹配 |
+| targetType | string | 否 | `device` / `channel` / `point` / `point_threshold`，省略 = 全部 |
+| alarmType | string | 否 | `offline` / `quality` / `threshold` / `recover`，省略 = 全部 |
+| status | string | 否 | `active` / `cleared`，省略 = 全部 |
+
+**响应 `data`**
+
+分页结构（见 §3.3），`records` 内元素：
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| id | string | 报警 ID |
+| targetId | string | 报警目标 ID（设备 / 通道 / 点位） |
+| targetName | string | 目标名称（发生时快照，目标删除后仍可读） |
+| targetType | string | `device` / `channel` / `point` / `point_threshold` |
+| alarmType | string | `offline` / `quality` / `threshold` / `recover` |
+| alarmTypeName | string | 报警类型的中文名称（如「断联报警」） |
+| level | string | 报警级别 |
+| content | string | 报警内容 |
+| status | string | `active` / `cleared` |
+| statusName | string | 状态的中文名称（「未恢复」/「已恢复」） |
+| firstOccurTime | string | 首次发生时间 |
+| lastOccurTime | string | 最近一次发生时间 |
+| clearTime | string | 恢复时间；未恢复时为空串 `""` |
+| createdAt | string | 创建时间 |
+| updatedAt | string | 更新时间 |
+
+**示例**
+
+```bash
+curl -H "X-Api-Key: your-app-key" \
+     "http://192.168.1.100:9082/openApi/alarm/pageAlarm?page=1&size=20&status=active&alarmType=offline"
+```
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": {
+    "page": 1,
+    "size": 20,
+    "total": 1,
+    "records": [
+      {
+        "id": "0b6f4f8e-6f2e-4a8e-9d5c-2f7b0f3c1a11",
+        "targetId": "a1b2c3d4e5f6",
+        "targetName": "1号PLC",
+        "targetType": "device",
+        "alarmType": "offline",
+        "alarmTypeName": "断联报警",
+        "level": "critical",
+        "content": "设备连续 3 轮采集失败",
+        "status": "active",
+        "statusName": "未恢复",
+        "firstOccurTime": "2026-11-06 08:12:30",
+        "lastOccurTime": "2026-11-06 08:13:00",
+        "clearTime": "",
+        "createdAt": "2026-11-06 08:12:30",
+        "updatedAt": "2026-11-06 08:13:00"
+      }
+    ]
+  },
+  "serverTime": "2026-11-06 10:30:00"
+}
+```
+
+### 4.10 当前活跃报警
+
+返回当前**未恢复**的断联报警（离线设备 + 离线通道）。等价于「离线目标列表」，
+不分页 —— 活跃目标是需要立即处理的那一小撮，分页只会让调用方多写一层循环。
+
+```
+GET /openApi/alarm/listActive
+```
+
+**请求参数**：无。
+
+**响应 `data`**
+
+报警对象数组，元素字段与 4.9 的 `records` 完全一致；按 `firstOccurTime` 倒序。
+无活跃报警时为空数组 `[]`（不是 `null`）。
+
+**示例**
+
+```bash
+curl -H "X-Api-Key: your-app-key" \
+     "http://192.168.1.100:9082/openApi/alarm/listActive"
+```
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": [
+    {
+      "id": "0b6f4f8e-6f2e-4a8e-9d5c-2f7b0f3c1a11",
+      "targetId": "a1b2c3d4e5f6",
+      "targetName": "1号PLC",
+      "targetType": "device",
+      "alarmType": "offline",
+      "alarmTypeName": "断联报警",
+      "level": "critical",
+      "content": "设备连续 3 轮采集失败",
+      "status": "active",
+      "statusName": "未恢复",
+      "firstOccurTime": "2026-11-06 08:12:30",
+      "lastOccurTime": "2026-11-06 08:13:00",
+      "clearTime": "",
+      "createdAt": "2026-11-06 08:12:30",
+      "updatedAt": "2026-11-06 08:13:00"
+    }
+  ],
+  "serverTime": "2026-11-06 10:30:00"
+}
+```
+
+### 4.11 越限记录分页
+
+分页查询越限样本明细。与 4.9 的**报警**是两件事：报警是去抖后的状态机（连续 N 轮
+才报），本表按**原始越限**逐条留证（同一连续越限段内节流）—— 因此 1~2 轮的尖峰
+只在这里看得到。
+
+```
+GET /openApi/alarm/pageThresholdRecord
+```
+
+**请求参数（Query）**
+
+| 参数 | 类型 | 必填 | 说明 |
+| ---- | ---- | ---- | ---- |
+| page | int | 是 | 页码，从 1 开始 |
+| size | int | 是 | 每页条数，1~100 |
+| deviceId | string | 否 | 只看某台设备；省略 = 全部 |
+| name | string | 否 | 点位名称，模糊匹配 |
+
+**响应 `data`**
+
+分页结构（见 §3.3），`records` 内元素：
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| id | string | 记录 ID |
+| deviceId | string | 所属设备 ID |
+| deviceName | string | 设备名称（发生时快照） |
+| addressId | string | 点位 ID（即 4.4 / 4.5 返回的点位 `id`） |
+| addressName | string | 点位名称 |
+| value | string | 触发越限的采集值 |
+| kind | string | 值类型（bool / int / float / str） |
+| bound | string | 命中的条件：`range` 时为 `high` / `low`，其余为算子名本身 |
+| boundName | string | 命中条件的可读名（「超上限」/「低于下限」/「大于」等） |
+| thresholdOp | string | 写入时的阈值算子快照 |
+| thresholdValue | string | 写入时的操作数快照（**JSON 数组字符串**，如 `["80","100"]`） |
+| occurredAt | string | 越限发生时间 |
+
+> - `thresholdOp` / `thresholdValue` 是**写入时的快照**：改配置后历史记录仍可自证当时
+>   用的是哪条规则。
+> - 本表只保留最近 90 天，更早的记录会被清理。
+
+**示例**
+
+```bash
+curl -H "X-Api-Key: your-app-key" \
+     "http://192.168.1.100:9082/openApi/alarm/pageThresholdRecord?page=1&size=20&deviceId=a1b2c3d4e5f6"
+```
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": {
+    "page": 1,
+    "size": 20,
+    "total": 1,
+    "records": [
+      {
+        "id": "5c2b1f0e-7d8a-4f21-b3e4-9a6c8d5e2f10",
+        "deviceId": "a1b2c3d4e5f6",
+        "deviceName": "1号PLC",
+        "addressId": "f6e5d4c3b2a1",
+        "addressName": "40001",
+        "value": "105",
+        "kind": "int",
+        "bound": "high",
+        "boundName": "超上限",
+        "thresholdOp": "range",
+        "thresholdValue": "[\"0\",\"100\"]",
+        "occurredAt": "2026-11-06 09:41:12"
+      }
+    ]
+  },
+  "serverTime": "2026-11-06 10:30:00"
+}
+```
+
+### 4.12 分批同步订阅设备与点位
+
+一次性拉取**订阅报文里出现过的全部设备及其点位元信息**，用于外部系统的全量同步。
+形态与 4.5 一致（游标分批、点位嵌套在设备内），但**数据源不同**：这里读的是网关的
+订阅设备/点位索引（`mqtt_subscription_device_point`），由 MQTT 订阅报文解析结果或
+管理端手工维护，**不是**本地 PLC 设备表。
+
+因此本接口没有协议名、在线状态、采集时间等采集字段。
+
+```
+GET /openApi/subscription/devicePoint/sync
+```
+
+**请求参数（Query）**
+
+| 参数 | 类型 | 必填 | 说明 |
+| ---- | ---- | ---- | ---- |
+| after | string | 否 | **游标**：上一页响应里的 `nextAfter`；**首次请求不传** |
+| size | int | 是 | 每页设备条数，1~100 |
+
+**响应 `data`**（与 4.5 同形）
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| size | int | 本次请求的 `size`（回显） |
+| hasMore | boolean | 是否还有下一页 |
+| nextAfter | string | 下一页游标；`hasMore` 为 `false` 时为空串 `""` |
+| records | array | 本页设备列表，每个元素见下 |
+
+**`records` 内元素**
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| deviceId | string | 订阅设备 ID（报文解析出的设备身份） |
+| deviceName | string | 设备名称；订阅/手工均未配置时为空串 `""` |
+| points | array | 该设备的全部点位；**恒为非空数组**（设备由点位行反推而来） |
+
+**`points` 内元素**
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| deviceId | string | 所属设备 ID（与父级相同，便于调用方展平） |
+| deviceAddressId | string | 点位 ID |
+| deviceAddressLabel | string | 点位标签（如"电流"、"电压"） |
+| kind | string | 数据类型类别（如 `float`）；未配置时为空串 |
+| source | string | 维护方式：`auto`=订阅报文自动收录，`manual`=手工新增/编辑/导入 |
+| createdAt | string | 首次收录时间 |
+| updatedAt | string | 元信息最近更新时间 |
+
+**遍历方式**
+
+```
+after = ""                      # 首次不传
+loop:
+    resp = GET /openApi/subscription/devicePoint/sync?size=100[&after=<after>]
+    process(resp.data.records)
+    if not resp.data.hasMore: break
+    after = resp.data.nextAfter
+```
+
+**示例**
+
+```bash
+curl -H "X-Api-Key: your-app-key" \
+     "http://192.168.1.100:9082/openApi/subscription/devicePoint/sync?size=2"
+```
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": {
+    "size": 2,
+    "hasMore": false,
+    "nextAfter": "",
+    "records": [
+      {
+        "deviceId": "meter-1",
+        "deviceName": "电表1",
+        "points": [
+          {
+            "deviceId": "meter-1",
+            "deviceAddressId": "current",
+            "deviceAddressLabel": "A相电流",
+            "kind": "float",
+            "source": "auto",
+            "createdAt": "2026-10-01 09:00:00",
+            "updatedAt": "2026-10-01 12:00:00"
+          },
+          {
+            "deviceId": "meter-1",
+            "deviceAddressId": "voltage",
+            "deviceAddressLabel": "电压",
+            "kind": "float",
+            "source": "manual",
+            "createdAt": "2026-10-02 09:00:00",
+            "updatedAt": "2026-10-02 09:00:00"
+          }
+        ]
+      }
+    ]
+  },
+  "serverTime": "2026-11-06 10:30:00"
+}
+```
+
+> **说明：**
+> - **按 `deviceId` 升序返回**，游标即上一页最后一条 `deviceId`。`after` 请原样回传
+>   上一页的 `nextAfter`，不要自行拼造。
+> - **一页按设备切分**：一台设备的所有点位都在同一页里，不会把设备切到两页。
+> - **不存在「零点位设备」**：设备是从点位行反推出来的，没有点位就不会有这一行；
+>   与 4.5 不同，`points` 不会是空数组。
+> - **`source=manual` 的行**是运维手工确认过的元信息，后续订阅报文不会再覆盖它；
+>   需要以自动收录为准时，管理端可把该行交还自动维护。
+> - 遍历结束的标志是 `hasMore` 为 `false`（此时 `nextAfter` 为 `""`），**不是**某页
+>   `records` 变空。
 
 ## 5. 错误码总表
 
