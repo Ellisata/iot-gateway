@@ -55,7 +55,7 @@
             {{ batchDeleteLabel }}
           </el-button>
           <span class="toolbar-sep" aria-hidden="true" />
-          <el-button :icon="Download" @click="handleDownloadTemplate">{{ t('common.downloadTemplate') }}</el-button>
+          <el-button :icon="Download" @click="openTemplateDialog">{{ t('common.downloadTemplate') }}</el-button>
           <el-button :icon="Upload" :loading="importing" @click="handleImport">{{ t('common.import') }}</el-button>
           <el-button type="primary" :icon="Plus" @click="handleAdd">{{ t('deviceObject.add') }}</el-button>
           <input ref="fileInputRef" type="file" accept=".xlsx" class="hidden" @change="handleFileChange" />
@@ -160,12 +160,14 @@
           show-overflow-tooltip
           class-name="col-muted"
         />
-        <el-table-column :label="t('common.status')" width="112" class-name="col-status">
+        <el-table-column :label="t('deviceObject.onlineStatus')" width="116" class-name="col-status">
           <template #default="{ row }">
-            <span class="status-pill" :class="row.status === 1 ? 'is-on' : 'is-off'">
-              <span class="status-dot" aria-hidden="true" />
-              {{ row.status === 1 ? t('common.enabled') : t('common.enableDisable.off') }}
-            </span>
+            <el-tooltip :content="onlineStateTip(row)" placement="top" :persistent="false">
+              <span class="status-pill" :class="`is-${onlineState(row)}`">
+                <span class="status-dot" aria-hidden="true" />
+                {{ onlineStateLabel(row) }}
+              </span>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column
@@ -435,6 +437,55 @@
       </template>
     </el-dialog>
 
+    <!-- ========== 下载导入模板：通用 / 按协议 ========== -->
+    <el-dialog
+      v-model="templateDialogVisible"
+      class="iot-dialog"
+      :title="t('deviceObject.templateDialogTitle')"
+      width="520px"
+      :close-on-click-modal="false"
+    >
+      <el-radio-group v-model="templateMode" class="template-mode">
+        <el-radio value="universal">{{ t('deviceObject.templateModeUniversal') }}</el-radio>
+        <el-radio value="protocol">{{ t('deviceObject.templateModeProtocol') }}</el-radio>
+      </el-radio-group>
+
+      <p class="iot-dialog-hint">
+        {{ templateMode === 'protocol'
+          ? t('deviceObject.templateProtocolHint')
+          : t('deviceObject.templateUniversalHint') }}
+      </p>
+
+      <el-form v-if="templateMode === 'protocol'" label-position="top">
+        <el-form-item :label="t('deviceObject.templateProtocolLabel')" required>
+          <el-select
+            v-model="templateProtocolId"
+            class="template-protocol-select"
+            filterable
+            remote
+            clearable
+            :remote-method="fetchTemplateProtocols"
+            :loading="templateProtocolLoading"
+            :placeholder="t('deviceObject.templateProtocolPlaceholder')"
+          >
+            <el-option
+              v-for="protocol in templateProtocolOptions"
+              :key="protocol.id"
+              :label="protocol.name"
+              :value="protocol.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="templateDialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="confirmDownloadTemplate">
+          {{ t('common.downloadTemplate') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- ========== Excel 导入结果对话框 ========== -->
     <ImportResultDialog v-model:visible="importResultVisible" :result="importResult" />
 
@@ -472,7 +523,7 @@ import {
   importDeviceObjects,
   downloadDeviceTemplate,
 } from '@/api/modules/deviceObject'
-import { getProtocolById } from '@/api/modules/protocol'
+import { getProtocolById, getProtocolList } from '@/api/modules/protocol'
 import { getThingModels } from '@/api/modules/thingModel'
 import ProtocolSelector from '@/components/ProtocolSelector.vue'
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
@@ -517,6 +568,30 @@ async function copyCode(code) {
   } catch {
     ElMessage.error(t('deviceObject.copyFailed'))
   }
+}
+
+// ---------- 在线状态 ----------
+// 四态与后端总览同一口径：禁用 → 未接入 → 离线/在线。
+// 只看 online 会把「启用但没有点位/驱动」的设备误标成在线。
+const ONLINE_STATE_KEYS = {
+  online: { label: 'deviceObject.onlineStateOnline', tip: 'deviceObject.onlineStateOnlineTip' },
+  offline: { label: 'deviceObject.onlineStateOffline', tip: 'deviceObject.onlineStateOfflineTip' },
+  uncollected: { label: 'deviceObject.onlineStateUncollected', tip: 'deviceObject.onlineStateUncollectedTip' },
+  disabled: { label: 'deviceObject.onlineStateDisabled', tip: 'deviceObject.onlineStateDisabledTip' },
+}
+
+function onlineState(row) {
+  if (row.status !== 1) return 'disabled'
+  if (row.collected === false) return 'uncollected'
+  return row.online ? 'online' : 'offline'
+}
+
+function onlineStateLabel(row) {
+  return t(ONLINE_STATE_KEYS[onlineState(row)].label)
+}
+
+function onlineStateTip(row) {
+  return t(ONLINE_STATE_KEYS[onlineState(row)].tip)
 }
 
 // ---------- 查询表单 ----------
@@ -602,13 +677,62 @@ const {
   importResult,
   handleImport,
   handleFileChange,
-  handleDownloadTemplate,
+  handleDownloadTemplate: downloadTemplate,
 } = useExcelImport({
   importFn: (file) => importDeviceObjects(file),
   downloadFn: downloadDeviceTemplate,
   templateName: () => t('deviceObject.importTemplateName'),
   refresh: fetchList,
 })
+
+// ---------- 模板下载：通用 / 按协议 ----------
+const templateDialogVisible = ref(false)
+const templateMode = ref('universal')
+const templateProtocolId = ref('')
+const templateProtocolOptions = ref([])
+const templateProtocolLoading = ref(false)
+
+function openTemplateDialog() {
+  templateDialogVisible.value = true
+  templateMode.value = 'universal'
+  templateProtocolId.value = ''
+  if (!templateProtocolOptions.value.length) fetchTemplateProtocols('')
+}
+
+async function fetchTemplateProtocols(keyword) {
+  templateProtocolLoading.value = true
+  try {
+    const params = { page: 1, size: 50 }
+    if (keyword) params.name = keyword
+    const res = await getProtocolList(params)
+    templateProtocolOptions.value = res?.records ?? []
+  } catch {
+    ElMessage.error(t('deviceObject.templateProtocolLoadFailed'))
+  } finally {
+    templateProtocolLoading.value = false
+  }
+}
+
+/** 文件名里不能出现 \ / : * ? " < > |，协议名可能带点号以外的字符。 */
+function safeTemplateFilePart(text) {
+  return String(text || '').replace(/[\\/:*?"<>|]/g, '_')
+}
+
+async function confirmDownloadTemplate() {
+  if (templateMode.value === 'protocol' && !templateProtocolId.value) {
+    ElMessage.warning(t('deviceObject.templateProtocolRequired'))
+    return
+  }
+  const protocol = templateProtocolOptions.value.find((item) => item.id === templateProtocolId.value)
+  const params = templateMode.value === 'protocol' ? { protocolId: templateProtocolId.value } : {}
+  const filename = templateMode.value === 'protocol'
+    ? t('deviceObject.importTemplateNameProtocol', {
+        name: safeTemplateFilePart(protocol?.name || templateProtocolId.value),
+      })
+    : t('deviceObject.importTemplateName')
+  const ok = await downloadTemplate(params, filename)
+  if (ok) templateDialogVisible.value = false
+}
 
 // ---------- 对话框 / 向导状态 ----------
 const dialogVisible = ref(false)
@@ -1469,14 +1593,25 @@ onBeforeUnmount(() => {
   background: currentColor;
 }
 
-.status-pill.is-on {
+.status-pill.is-online {
   color: #047857;
   background: #ecfdf5;
 }
 
-.status-pill.is-off {
+.status-pill.is-offline {
   color: #be123c;
   background: #fff1f2;
+}
+
+/* 未接入是「配置/能力问题」而不是设备故障，用琥珀色与离线区分 */
+.status-pill.is-uncollected {
+  color: #b45309;
+  background: #fffbeb;
+}
+
+.status-pill.is-disabled {
+  color: #64748b;
+  background: #f1f5f9;
 }
 
 /* 行内操作：默认中性灰，悬停才染蓝/红，四个图标不再每行都喊一次 */
@@ -1731,6 +1866,15 @@ onBeforeUnmount(() => {
   .page-stat {
     padding-bottom: 0;
   }
+}
+
+.template-mode {
+  display: flex;
+  gap: 20px;
+}
+
+.template-protocol-select {
+  width: 100%;
 }
 
 @media (max-width: 640px) {

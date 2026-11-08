@@ -9,8 +9,8 @@ import { useI18n } from 'vue-i18n'
  * Excel 批量导入组合式函数：封装文件选择、.xlsx 校验、上传、结果弹窗状态与模板下载。
  * @param {Object} opts
  * @param {(file: File) => Promise<{total:number, success:number, failed:number, errors:Array}>} opts.importFn - 导入请求（返回导入结果）
- * @param {() => Promise<Blob>} opts.downloadFn - 模板下载请求（返回 Blob）
- * @param {string} opts.templateName - 模板下载的文件名（如 "设备导入模板.xlsx"）
+ * @param {(params?: Object) => Promise<Blob>} opts.downloadFn - 模板下载请求（返回 Blob）
+ * @param {string|((params?: Object) => string)} opts.templateName - 模板下载的文件名（如 "设备导入模板.xlsx"）
  * @param {() => void} [opts.refresh] - 导入成功（至少 1 条）后刷新列表
  */
 export function useExcelImport({ importFn, downloadFn, templateName, refresh }) {
@@ -45,20 +45,28 @@ export function useExcelImport({ importFn, downloadFn, templateName, refresh }) 
     }
   }
 
-  async function handleDownloadTemplate() {
+  /**
+   * 下载模板。
+   * @param {Object} [params] - 透传给 downloadFn 的参数（如 { protocolId }）
+   * @param {string} [filename] - 覆盖 templateName 的文件名
+   * @returns {Promise<boolean>} 是否下载成功
+   */
+  async function handleDownloadTemplate(params, filename) {
     try {
-      const blob = await downloadFn()
+      const blob = await downloadFn(params)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = typeof templateName === 'function' ? templateName() : templateName
+      a.download = filename || (typeof templateName === 'function' ? templateName(params) : templateName)
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
       ElMessage.success(t('excelImport.templateDownloaded'))
+      return true
     } catch {
       ElMessage.error(t('excelImport.templateDownloadFailed'))
+      return false
     }
   }
 

@@ -39,6 +39,14 @@ type Options[T any] struct {
 	Label func(row []string) string
 	// Parse 单行解析回调
 	Parse RowFunc[T]
+	// Prepare 表级预校验钩子：在表头校验之后、事务与逐行写入之前调用一次。
+	// 返回错误时整表中止、不写入任何行。用于「整表必须同一协议」这类
+	// 无法在单行 Parse 里表达的约束。
+	Prepare func(rows [][]string) error
+	// Insert 可选的入库回调，默认 tx.Create(record)。
+	// 记录里带 gorm default 标签的零值字段（如 device.status=0）会被 GORM 省略，
+	// 这类调用方需要用 tx.Select("*").Create(record) 显式写入零值。
+	Insert func(tx *gorm.DB, record *T) error
 }
 
 // Import 通用 Excel(.xlsx) 批量导入：
@@ -62,12 +70,24 @@ func Import[T any](ctx context.Context, db *gorm.DB, data []byte, opt Options[T]
 			return nil, err
 		}
 	}
+	if opt.Prepare != nil {
+		if err := opt.Prepare(rows); err != nil {
+			return nil, err
+		}
+	}
 
 	existing := make(map[string]bool, len(opt.ExistingKeys))
 	for _, k := range opt.ExistingKeys {
 		existing[k] = true
 	}
 	seen := make(map[string]bool) // 文件内已出现的 key，用于识别文件内重复
+
+	insert := opt.Insert
+	if insert == nil {
+		insert = func(tx *gorm.DB, record *T) error {
+			return tx.Create(record).Error
+		}
+	}
 
 	// 整体事务提交；单行插入失败只记错误，不回滚其余行
 	_ = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -95,7 +115,7 @@ func Import[T any](ctx context.Context, db *gorm.DB, data []byte, opt Options[T]
 				result.Errors = append(result.Errors, vo.ExcelImportErrorVO{Row: excelRow, Name: name, Reason: opt.DupMsg})
 				continue
 			}
-			if err := tx.Create(record).Error; err != nil {
+			if err := insert(tx, record); err != nil {
 				result.Errors = append(result.Errors, vo.ExcelImportErrorVO{Row: excelRow, Name: name, Reason: "入库失败：" + err.Error()})
 				continue
 			}
@@ -147,10 +167,16 @@ func Cell(row []string, idx int) string {
 	return ""
 }
 
+// IsBlankRow 判断整行是否全为空（缺失列视为空）。
+func IsBlankRow(row []string) bool {
+	return isBlank(row, 0)
+}
+
 // isBlank 判断前 cols 列是否全为空（缺失列视为空）。
+// cols <= 0 表示检查整行 —— 表头列数由动态协议参数决定时使用。
 func isBlank(row []string, cols int) bool {
 	n := cols
-	if len(row) < n {
+	if n <= 0 || len(row) < n {
 		n = len(row)
 	}
 	for i := 0; i < n; i++ {
@@ -177,6 +203,41 @@ type ListValidation struct {
 // 与模板的 1000 行预留空间一致，避免用户往下填几行就失去下拉。
 const templateValidationRows = 1000
 
+// TemplateOptions 导入模板生成参数。
+type TemplateOptions struct {
+	Headers []string
+	Example []string
+	Widths  []float64
+	Lists   []ListValidation
+
+	// SheetName 首个工作表名（空表示保留 excelize 默认名）。
+	SheetName string
+	// ExampleSheetName 非空时把表头+示例行写到第二个工作表，首个工作表只放表头。
+	// 导入框架只读首个工作表，因此示例行不会在用户直接导入模板时被当成数据。
+	ExampleSheetName string
+	// TextCols 需设置为文本格式的列下标（0 起）：编码、IP、串口等，
+	// 避免 Excel 把 000123 这类值吃掉前导零或转成科学计数法。
+	TextCols []int
+	// DataRows 首表数据行（从第 2 行起）。非空时替代首表示例行 ——
+	// 用于「按模板导出已有数据」（如扫描结果导出为导入模板）。
+	DataRows [][]string
+	// RequiredCols 必填列下标。非 nil 时表头按「必填（深蓝+红下边）/选填（浅蓝）」
+	// 分色；nil 表示不区分（附加说明表沿用统一蓝底）。
+	RequiredCols []int
+	// Legend 示例工作表中的图例行（仅 ExampleSheetName 非空时写入）。
+	Legend string
+	// ExtraSheets 附加说明页/字典页。每张表只写表头 + 数据行，首行冻结。
+	ExtraSheets []TemplateSheet
+}
+
+// TemplateSheet 附加工作表（如逐列填写说明）。
+type TemplateSheet struct {
+	Name    string
+	Headers []string
+	Rows    [][]string
+	Widths  []float64
+}
+
 // BuildTemplate 生成带表头 + 示例行 + 冻结首行的导入模板（.xlsx）。
 func BuildTemplate(headers, example []string, widths []float64) (*bytes.Buffer, error) {
 	return BuildTemplateWithLists(headers, example, widths, nil)
@@ -184,66 +245,78 @@ func BuildTemplate(headers, example []string, widths []float64) (*bytes.Buffer, 
 
 // BuildTemplateWithLists 与 BuildTemplate 相同，并给指定列加下拉选择。
 func BuildTemplateWithLists(headers, example []string, widths []float64, lists []ListValidation) (*bytes.Buffer, error) {
+	return BuildTemplateWithOptions(TemplateOptions{
+		Headers: headers,
+		Example: example,
+		Widths:  widths,
+		Lists:   lists,
+	})
+}
+
+// BuildTemplateWithOptions 生成导入模板。除表头/示例/列宽/下拉外，支持把示例行
+// 放进单独工作表，以及把指定列设为文本格式。
+func BuildTemplateWithOptions(opt TemplateOptions) (*bytes.Buffer, error) {
 	f := excelize.NewFile()
 	defer f.Close()
+
 	sheet := f.GetSheetName(0)
+	if opt.SheetName != "" {
+		if err := f.SetSheetName(sheet, opt.SheetName); err != nil {
+			return nil, err
+		}
+		sheet = opt.SheetName
+	}
 
-	for i, h := range headers {
-		cell, err := excelize.CoordinatesToCellName(i+1, 1)
-		if err != nil {
-			return nil, err
-		}
-		if err := f.SetCellValue(sheet, cell, h); err != nil {
-			return nil, err
-		}
+	// 首表数据行：DataRows 优先；否则示例行放首表（未指定示例表时）。
+	var firstRows [][]string
+	switch {
+	case len(opt.DataRows) > 0:
+		firstRows = opt.DataRows
+	case opt.ExampleSheetName == "" && len(opt.Example) > 0:
+		firstRows = [][]string{opt.Example}
 	}
-	// 表头加粗 + 蓝底白字
-	styleID, err := f.NewStyle(&excelize.Style{
-		Font:      &excelize.Font{Bold: true, Color: "FFFFFF"},
-		Fill:      excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"409EFF"}},
-		Alignment: &excelize.Alignment{Horizontal: "center"},
-	})
-	if err != nil {
-		return nil, err
-	}
-	lastCell, err := excelize.CoordinatesToCellName(len(headers), 1)
-	if err != nil {
-		return nil, err
-	}
-	if err := f.SetCellStyle(sheet, "A1", lastCell, styleID); err != nil {
+	if err := writeTemplateSheet(f, sheet, opt.Headers, firstRows, opt.Widths, opt.TextCols, opt.RequiredCols); err != nil {
 		return nil, err
 	}
 
-	// 示例行（可删除或覆盖）
-	for j, v := range example {
-		cell, err := excelize.CoordinatesToCellName(j+1, 2)
-		if err != nil {
+	if opt.ExampleSheetName != "" {
+		if _, err := f.NewSheet(opt.ExampleSheetName); err != nil {
 			return nil, err
 		}
-		if err := f.SetCellValue(sheet, cell, v); err != nil {
+		var exampleRows [][]string
+		if len(opt.Example) > 0 {
+			exampleRows = [][]string{opt.Example}
+		}
+		if err := writeTemplateSheet(f, opt.ExampleSheetName, opt.Headers, exampleRows, opt.Widths, opt.TextCols, opt.RequiredCols); err != nil {
 			return nil, err
+		}
+		if opt.Legend != "" {
+			// 示例行固定写在第 2 行（数据只有一行）。
+			if err := writeLegend(f, opt.ExampleSheetName, opt.Legend, 1); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	// 列宽
-	for i, w := range widths {
-		col, err := excelize.ColumnNumberToName(i + 1)
-		if err != nil {
+	for _, extra := range opt.ExtraSheets {
+		if strings.TrimSpace(extra.Name) == "" {
+			continue
+		}
+		if _, err := f.NewSheet(extra.Name); err != nil {
 			return nil, err
 		}
-		if err := f.SetColWidth(sheet, col, col, w); err != nil {
+		if err := writeDataSheet(f, extra.Name, extra.Headers, extra.Rows, extra.Widths); err != nil {
 			return nil, err
 		}
-	}
-	// 冻结首行
-	if err := f.SetPanes(sheet, &excelize.Panes{Freeze: true, YSplit: 1, TopLeftCell: "A2"}); err != nil {
-		return nil, err
 	}
 
 	// 列下拉选择：用户从固定枚举里选，避免手填出模板不认识的取值。
-	for _, lv := range lists {
-		if lv.Col < 0 || lv.Col >= len(headers) {
+	for _, lv := range opt.Lists {
+		if lv.Col < 0 || lv.Col >= len(opt.Headers) {
 			return nil, fmt.Errorf("下拉列下标越界：%d", lv.Col)
+		}
+		if len(lv.Options) == 0 {
+			continue
 		}
 		col, err := excelize.ColumnNumberToName(lv.Col + 1)
 		if err != nil {
@@ -270,4 +343,174 @@ func BuildTemplateWithLists(headers, example []string, widths []float64, lists [
 		return nil, err
 	}
 	return &buf, nil
+}
+
+func writeTemplateSheet(f *excelize.File, sheet string, headers []string, rows [][]string, widths []float64, textCols, requiredCols []int) error {
+	for r, row := range rows {
+		for j, v := range row {
+			cell, err := excelize.CoordinatesToCellName(j+1, r+2)
+			if err != nil {
+				return err
+			}
+			if err := f.SetCellValue(sheet, cell, v); err != nil {
+				return err
+			}
+		}
+	}
+
+	for i, w := range widths {
+		col, err := excelize.ColumnNumberToName(i + 1)
+		if err != nil {
+			return err
+		}
+		if err := f.SetColWidth(sheet, col, col, w); err != nil {
+			return err
+		}
+	}
+
+	// 文本列：整列设文本格式，避免前导零/长数字被 Excel 自动转换。
+	if len(textCols) > 0 {
+		textStyle, err := f.NewStyle(&excelize.Style{NumFmt: 49}) // 49 = "@"
+		if err != nil {
+			return err
+		}
+		for _, idx := range textCols {
+			if idx < 0 || idx >= len(headers) {
+				return fmt.Errorf("文本列下标越界：%d", idx)
+			}
+			col, err := excelize.ColumnNumberToName(idx + 1)
+			if err != nil {
+				return err
+			}
+			if err := f.SetColStyle(sheet, col, textStyle); err != nil {
+				return err
+			}
+		}
+	}
+
+	// 表头最后写：SetColStyle 会覆盖整列已有单元格样式（包括表头），
+	// 放在文本列格式之后才能让必填/选填配色保留。
+	if err := writeHeaderRow(f, sheet, headers, requiredCols); err != nil {
+		return err
+	}
+
+	return f.SetPanes(sheet, &excelize.Panes{Freeze: true, YSplit: 1, TopLeftCell: "A2"})
+}
+
+// writeDataSheet 写一张「表头 + 多行数据」的辅助表（如逐列填写说明）。
+func writeDataSheet(f *excelize.File, sheet string, headers []string, rows [][]string, widths []float64) error {
+	if err := writeHeaderRow(f, sheet, headers, nil); err != nil {
+		return err
+	}
+	for r, row := range rows {
+		for c, value := range row {
+			cell, err := excelize.CoordinatesToCellName(c+1, r+2)
+			if err != nil {
+				return err
+			}
+			if err := f.SetCellValue(sheet, cell, value); err != nil {
+				return err
+			}
+		}
+	}
+	for i, w := range widths {
+		col, err := excelize.ColumnNumberToName(i + 1)
+		if err != nil {
+			return err
+		}
+		if err := f.SetColWidth(sheet, col, col, w); err != nil {
+			return err
+		}
+	}
+	return f.SetPanes(sheet, &excelize.Panes{Freeze: true, YSplit: 1, TopLeftCell: "A2"})
+}
+
+// writeHeaderRow 写表头。
+//
+// requiredCols 为 nil 时沿用统一蓝底（附加说明表）；非 nil 时按必填/选填分色：
+// 必填列深蓝底 + 红色下边框，选填列浅蓝底，配合列名末尾的 * 形成双重提示。
+func writeHeaderRow(f *excelize.File, sheet string, headers []string, requiredCols []int) error {
+	styled := requiredCols != nil
+	required := make(map[int]bool, len(requiredCols))
+	for _, col := range requiredCols {
+		required[col] = true
+	}
+
+	var requiredStyle, optionalStyle, plainStyle int
+	var err error
+	if styled {
+		requiredStyle, err = f.NewStyle(&excelize.Style{
+			Font:      &excelize.Font{Bold: true, Color: "FFFFFF"},
+			Fill:      excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"2F5FD0"}},
+			Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true},
+			Border:    []excelize.Border{{Type: "bottom", Color: "E4572E", Style: 2}},
+		})
+		if err != nil {
+			return err
+		}
+		optionalStyle, err = f.NewStyle(&excelize.Style{
+			Font:      &excelize.Font{Bold: true, Color: "23406B"},
+			Fill:      excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"DCE9FF"}},
+			Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true},
+			Border:    []excelize.Border{{Type: "bottom", Color: "C9D8F2", Style: 1}},
+		})
+		if err != nil {
+			return err
+		}
+	} else {
+		plainStyle, err = f.NewStyle(&excelize.Style{
+			Font:      &excelize.Font{Bold: true, Color: "FFFFFF"},
+			Fill:      excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"409EFF"}},
+			Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true},
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	for i, h := range headers {
+		cell, err := excelize.CoordinatesToCellName(i+1, 1)
+		if err != nil {
+			return err
+		}
+		if err := f.SetCellValue(sheet, cell, h); err != nil {
+			return err
+		}
+		styleID := plainStyle
+		if styled {
+			styleID = optionalStyle
+			if required[i] {
+				styleID = requiredStyle
+			}
+		}
+		if err := f.SetCellStyle(sheet, cell, cell, styleID); err != nil {
+			return err
+		}
+	}
+	if styled {
+		return f.SetRowHeight(sheet, 1, 28)
+	}
+	return nil
+}
+
+// writeLegend 在示例表数据下方写一行图例，说明 * 与表头配色的含义。
+func writeLegend(f *excelize.File, sheet, legend string, exampleRows int) error {
+	row := exampleRows + 3 // 表头 1 + 示例行 + 空行
+	if row < 3 {
+		row = 3
+	}
+	cell, err := excelize.CoordinatesToCellName(1, row)
+	if err != nil {
+		return err
+	}
+	if err := f.SetCellValue(sheet, cell, legend); err != nil {
+		return err
+	}
+	styleID, err := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Italic: true, Color: "8A94A6", Size: 10},
+	})
+	if err != nil {
+		return err
+	}
+	return f.SetCellStyle(sheet, cell, cell, styleID)
 }

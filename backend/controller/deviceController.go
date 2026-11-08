@@ -4,6 +4,8 @@
 package controller
 
 import (
+	"strings"
+
 	"github.com/gin-gonic/gin"
 
 	"iot-gateway/appError"
@@ -154,10 +156,12 @@ func (ctr *DeviceController) ImportDevice(c *gin.Context) {
 	c.JSON(200, response.Success(result))
 }
 
-// ImportTemplate 下载设备导入模板（.xlsx）
+// ImportTemplate 下载设备导入模板（.xlsx）。
+// protocolId 为空下载通用模板；非空下载包含该协议连接参数列的完整模板。
 func (ctr *DeviceController) ImportTemplate(c *gin.Context) {
 	ctx := c.Request.Context()
-	buf, err := ctr.deviceService.GenerateImportTemplate()
+	protocolID := strings.TrimSpace(c.Query("protocolId"))
+	buf, err := ctr.deviceService.GenerateImportTemplate(ctx, protocolID)
 	if err != nil {
 		c.JSON(200, appError.HandleErrorCtx(ctx, err))
 		return

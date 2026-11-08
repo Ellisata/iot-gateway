@@ -227,13 +227,22 @@ export function importDeviceObjects(file) {
 }
 
 /**
- * 下载设备导入模板（.xlsx，三列：名称/协议/描述）
+ * 下载设备导入模板（.xlsx）
+ *
+ * 不传 protocolId 时下载通用模板（名称/协议/描述/编码/物模型/状态）；
+ * 传 protocolId 时额外包含该协议 formJson 的全部连接参数列。
+ *
+ * @param {Object} [params]
+ * @param {string} [params.protocolId] - 协议 ID（可选）
  * @returns {Promise<Blob>}
  */
-export function downloadDeviceTemplate() {
+export function downloadDeviceTemplate(params = {}) {
   return request({
     url: '/device/importTemplate',
     method: 'get',
+    params: {
+      protocolId: params.protocolId || undefined,
+    },
     responseType: 'blob',
   })
 }

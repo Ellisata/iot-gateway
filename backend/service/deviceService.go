@@ -13,7 +13,6 @@ import (
 	"reflect"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"gorm.io/gorm"
 
@@ -23,6 +22,7 @@ import (
 	"iot-gateway/collector"
 	"iot-gateway/enums"
 	"iot-gateway/excelutil"
+	"iot-gateway/formjson"
 	"iot-gateway/i18n"
 	"iot-gateway/logger"
 	"iot-gateway/model/dto"
@@ -81,6 +81,10 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req *dto.CreateDeviceD
 		if req.ProtocolJSON != nil {
 			protocolJson = string(req.ProtocolJSON)
 		}
+		protocolName, err := protocolNameByID(tx, req.ProtocolID)
+		if err != nil {
+			return err
+		}
 		device := &po.Device{
 			Code:         code,
 			Name:         req.Name,
@@ -89,6 +93,7 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req *dto.CreateDeviceD
 			ModelID:      modelID,
 			Description:  req.Description,
 			Status:       1,
+			ScanIdentity: deriveScanIdentityFromJSON(protocolName, protocolJson),
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		}
@@ -186,21 +191,32 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, req *dto.UpdateDeviceD
 		if req.ProtocolJSON != nil {
 			updates["protocol_json"] = protocolJson
 		}
-		// 连接配置或协议**真的变了**，扫描身份签名就不再描述这台设备了 ——
-		// 留着它会让"扫描建设备"对着一个过时的地址报警告，把用户引向一台
-		// 早已不连在那个地址上的设备。**清掉而不是重算**：重算得从 protocol_json
-		// 里认出地址，那些键名是插件自己声明的、不统一（理由见 po.Device.ScanIdentity）。
-		// 代价只是改过配置的设备不再参与地址判重 —— 漏报一种提示，好过误报。
+		// 连接配置或协议**真的变了**，扫描身份要按新配置重算 —— 它回答的是
+		// "这台设备现在连在哪个地址"，不是"当初是怎么建出来的"。只认官方协议
+		// 表单统一的 host/port/unitId/dstNode（与导入同一套约定）；认不出 host
+		// （串口协议、没有 host 的自定义表单）就写空串，空签名不参与判重。
 		//
 		// 判据不能是"请求里带了 protocolJson / protocolId"：编辑向导每次提交都会
-		// 固定带上这两个字段（哪怕只改了名字），照那个判会让改个描述就丢掉签名 ——
-		// 列表里不再显示、也不再参与扫描建库的地址判重。这里比的是**实际值**。
+		// 固定带上这两个字段（哪怕只改了名字），照那个判会让改个描述就重算签名。
+		// 这里比的是**实际值**。
 		configChanged := req.ProtocolID != "" && req.ProtocolID != existing.ProtocolID
 		if req.ProtocolJSON != nil && !sameJSON(existing.ProtocolJSON, protocolJson) {
 			configChanged = true
 		}
 		if configChanged {
-			updates["scan_identity"] = ""
+			effectiveProtocolID := existing.ProtocolID
+			if req.ProtocolID != "" {
+				effectiveProtocolID = req.ProtocolID
+			}
+			effectiveProtocolJSON := existing.ProtocolJSON
+			if req.ProtocolJSON != nil {
+				effectiveProtocolJSON = protocolJson
+			}
+			protocolName, err := protocolNameByID(tx, effectiveProtocolID)
+			if err != nil {
+				return err
+			}
+			updates["scan_identity"] = deriveScanIdentityFromJSON(protocolName, effectiveProtocolJSON)
 		}
 		if req.Description != "" {
 			updates["description"] = req.Description
@@ -348,6 +364,15 @@ func (s *DeviceService) GetDeviceByID(ctx context.Context, id string) (*vo.Devic
 	if s.alarmService != nil {
 		online = s.alarmService.IsDeviceOnline(ctx, device.ID)
 	}
+	collected := false
+	if s.collector != nil {
+		for _, activeID := range s.collector.ActiveDeviceIDs() {
+			if activeID == device.ID {
+				collected = true
+				break
+			}
+		}
+	}
 
 	return &vo.DeviceVO{
 		ID:              device.ID,
@@ -361,6 +386,7 @@ func (s *DeviceService) GetDeviceByID(ctx context.Context, id string) (*vo.Devic
 		ScanIdentity:    device.ScanIdentity,
 		Description:     device.Description,
 		Status:          device.Status,
+		Collected:       collected,
 		Online:          online,
 		LastSuccessTime: s.deviceLastSuccess(device.ID),
 		CreatedAt:       device.CreatedAt,
@@ -615,6 +641,14 @@ func (s *DeviceService) toDeviceVOs(ctx context.Context, devices []po.Device) []
 		}
 	}
 
+	// 已接入采集集合：与设备总览同一个口径（引擎只调度启用且有活跃点位的设备）。
+	collectedSet := make(map[string]bool)
+	if s.collector != nil {
+		for _, id := range s.collector.ActiveDeviceIDs() {
+			collectedSet[id] = true
+		}
+	}
+
 	modelNames := s.thingModelNames(ctx, devices)
 
 	records := make([]vo.DeviceVO, len(devices))
@@ -631,6 +665,7 @@ func (s *DeviceService) toDeviceVOs(ctx context.Context, devices []po.Device) []
 			ScanIdentity:    d.ScanIdentity,
 			Description:     d.Description,
 			Status:          d.Status,
+			Collected:       collectedSet[d.ID],
 			Online:          !offlineSet[d.ID],
 			LastSuccessTime: s.deviceLastSuccess(d.ID),
 			CreatedAt:       d.CreatedAt,
@@ -841,11 +876,13 @@ func (s *DeviceService) deviceLastSuccess(deviceID string) string {
 
 // ImportDevices 从 Excel(.xlsx) 批量导入设备。
 //
-// 模板：名称 / 协议 / 描述 / 编码（编码可选，旧的三列表格仍可直接导入）。
-// 协议列按 iot_protocol.name 匹配，未知协议跳过该行并记录原因；名称重复
-// （库内或文件内）跳过该行；编码非法或重复也跳过该行。未填编码时按名称生成，
-// 生成结果在文件内与库内都保证唯一。其余行部分导入并返回汇总，供前端展示失败明细。
-// 导入仅建基本信息，协议参数留空 "{}"，连接参数后续在编辑界面补填。
+// 模板必须包含名称/协议/编码三列（描述/物模型/状态可选），基础字段顺序无关。
+// 编码是设备对外稳定标识，不再按名称自动生成：留空或格式非法只让该行失败。
+// 模板若带协议参数列（表头末尾 [fieldKey]），则整表必须使用同一协议，参数按
+// 协议 formJson 的类型写入 protocol_json。
+// 协议名按 iot_protocol.name 匹配；名称/编码重复、参数校验失败等只跳过该行并
+// 记录原因，其余行继续导入。表级错误（混协议、缺编码列、模板与协议表单不一致）
+// 整表拒绝。
 func (s *DeviceService) ImportDevices(ctx context.Context, data []byte) (*vo.ExcelImportResultVO, error) {
 	// 预加载现有设备名与编码：名称用于框架去重，编码用于生成/校验时避让。
 	var names []string
@@ -863,84 +900,91 @@ func (s *DeviceService) ImportDevices(ctx context.Context, data []byte) (*vo.Exc
 		}
 	}
 
-	// 预加载协议名 → ID 映射
-	protocolMap := make(map[string]string)
-	var protocols []po.IotProtocol
-	if err := s.sqliteDB.WithContext(ctx).Select("id", "name").Find(&protocols).Error; err != nil {
+	// 预加载协议（含 form_json）与物模型：逐行只做内存匹配，不查库。
+	protocols := make(map[string]po.IotProtocol)
+	var protocolRows []po.IotProtocol
+	if err := s.sqliteDB.WithContext(ctx).Select("id", "name", "form_json").Find(&protocolRows).Error; err != nil {
 		return nil, err
 	}
-	for _, p := range protocols {
-		protocolMap[p.Name] = p.ID
+	for _, protocol := range protocolRows {
+		protocols[protocol.Name] = protocol
 	}
 
+	models, err := loadThingModelIndex(ctx, s.sqliteDB)
+	if err != nil {
+		return nil, err
+	}
+
+	lang := i18n.LangFromCtx(ctx)
+	var plan *deviceImportPlan
 	now := time.Now().Format("2006-01-02 15:04:05")
+
 	return excelutil.Import(ctx, s.sqliteDB, data, excelutil.Options[po.Device]{
-		// 只校验前三列：旧模板没有「编码」列，导入时按名称生成。
-		Headers:      []string{"名称", "协议", "描述"},
 		ExistingKeys: names,
-		Cols:         4,
+		Cols:         0, // 动态列数：空行按整行判断
 		DupMsg:       enums.DeviceExistsEnum.GetMessage(),
+		Prepare: func(rows [][]string) error {
+			parsed, err := buildDeviceImportPlan(rows[0])
+			if err != nil {
+				return err
+			}
+			// 只有带协议参数列的模板才要求整表同一协议；通用/旧模板保持可混协议。
+			if parsed.hasParams() {
+				protocol, err := parsed.resolveUniformProtocol(rows, protocols)
+				if err != nil {
+					return err
+				}
+				if protocol != nil {
+					doc, err := formjson.Parse([]byte(protocol.FormJSON), lang)
+					if err != nil {
+						return importTableError(fmt.Sprintf("协议「%s」的配置表单无法解析：%v", protocol.Name, err))
+					}
+					if err := parsed.bindFields(doc, protocol.Name); err != nil {
+						return err
+					}
+					parsed.Protocol = *protocol
+				}
+			}
+			plan = parsed
+			return nil
+		},
 		Parse: func(row []string) (*po.Device, string, string) {
-			name := excelutil.Cell(row, 0)
-			protocolName := excelutil.Cell(row, 1)
-			desc := excelutil.Cell(row, 2)
-			if reason := validateImportRow(name, protocolName, protocolMap); reason != "" {
-				return nil, name, reason
+			return parseDeviceImportRow(row, plan, protocols, models, codeTaken, now)
+		},
+		// status 列带 gorm default:1，Create 会把 0 当成未设置而写回 1。
+		// 显式补一次 UpdateColumn，让导入的“禁用”设备真正以 0 落库。
+		Insert: func(tx *gorm.DB, record *po.Device) error {
+			// 先留一份：Create 可能把带 default 标签的零值字段回写成 1。
+			status := record.Status
+			if err := tx.Select("*").Create(record).Error; err != nil {
+				return err
 			}
-
-			code := excelutil.Cell(row, 3)
-			if code == "" {
-				code = uniqueEntityCode(generatedEntityCode(name, "dev"), func(c string) bool {
-					return codeTaken[c]
-				})
-			} else {
-				if !validateEntityCode(code) {
-					return nil, name, enums.DeviceCodeInvalidEnum.GetMessage()
-				}
-				if codeTaken[code] {
-					return nil, name, enums.DeviceCodeExistsEnum.GetMessage()
-				}
+			if status == 0 {
+				return tx.Model(record).UpdateColumn("status", 0).Error
 			}
-			codeTaken[code] = true
-
-			return &po.Device{
-				Code:         code,
-				Name:         name,
-				ProtocolID:   protocolMap[protocolName],
-				ProtocolJSON: "{}",
-				Description:  desc,
-				Status:       1,
-				CreatedAt:    now,
-				UpdatedAt:    now,
-			}, name, ""
+			return nil
 		},
 	})
 }
 
-// validateImportRow 校验单行设备导入数据（纯函数，便于单测；去重由 excelutil.Import 统一处理）。
-// 返回 "" 表示通过，否则返回中文失败原因。
-func validateImportRow(name, protocolName string, protocolMap map[string]string) string {
-	if name == "" {
-		return "名称为空"
+// GenerateImportTemplate 生成设备导入模板（.xlsx）。
+//
+// protocolID 为空时生成通用模板（仅基础列）；非空时把该协议 formJson 的顶层
+// 标量字段追加为连接参数列，按当前请求语言解析字段标题与选项。示例行放在第二
+// 个工作表，用户直接导入未修改的模板不会得到示例设备。
+func (s *DeviceService) GenerateImportTemplate(ctx context.Context, protocolID string) (*bytes.Buffer, error) {
+	lang := i18n.LangFromCtx(ctx)
+	if protocolID == "" {
+		spec, err := buildGenericDeviceTemplate(ctx, s.sqliteDB, lang)
+		if err != nil {
+			return nil, err
+		}
+		return excelutil.BuildTemplateWithOptions(spec)
 	}
-	if utf8.RuneCountInString(name) > 100 {
-		return "名称不能超过100个字符"
-	}
-	if protocolName == "" {
-		return "协议为空"
-	}
-	if _, ok := protocolMap[protocolName]; !ok {
-		return fmt.Sprintf("协议不存在：%s", protocolName)
-	}
-	return ""
-}
 
-// GenerateImportTemplate 生成设备导入模板（.xlsx）：
-// 表头「名称/协议/描述/编码」+ 示例行 + 冻结首行。编码列可留空，留空时按名称生成。
-func (s *DeviceService) GenerateImportTemplate() (*bytes.Buffer, error) {
-	return excelutil.BuildTemplate(
-		[]string{"名称", "协议", "描述", "编码"},
-		[]string{"示例：1号注塑机", "ModBus.TCP", "示例数据，可删除或覆盖", "injection-1"},
-		[]float64{32, 22, 40, 22},
-	)
+	spec, _, _, err := buildProtocolDeviceTemplate(ctx, s.sqliteDB, protocolID, lang)
+	if err != nil {
+		return nil, err
+	}
+	return excelutil.BuildTemplateWithOptions(spec)
 }

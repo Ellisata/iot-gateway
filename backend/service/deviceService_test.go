@@ -252,18 +252,24 @@ func TestPageDeviceSearchesNameOrScanIdentity(t *testing.T) {
 	}
 }
 
-// TestUpdateDeviceClearsScanIdentityOnlyOnRealConfigChange 扫描身份只在连接
-// 配置**真的变了**时才清空。编辑向导每次提交都会固定带上 protocolId 与
-// protocolJson（哪怕只改了名字），若按"请求带了配置"来判断，改个描述就会
-// 丢掉签名：列表里不再显示，也不再参与扫描建库的地址判重。
-// 配置比较必须是语义比较 —— form-create 回填后键顺序/空白会变，
-// 字符串不等不代表配置变了。
-func TestUpdateDeviceClearsScanIdentityOnlyOnRealConfigChange(t *testing.T) {
+// TestUpdateDeviceRecomputesScanIdentityOnRealConfigChange 扫描身份只在连接
+// 配置**真的变了**时才重算；只改名字/描述时必须保留。
+// 重算只认 host/port/unitId/dstNode；认不出 host 时写空串，空签名不参与判重。
+func TestUpdateDeviceRecomputesScanIdentityOnRealConfigChange(t *testing.T) {
 	db := newDeviceAddressImportTestDB(t)
+	for _, protocol := range []po.IotProtocol{
+		{ID: "proto-1", Name: "ModBus.TCP"},
+		{ID: "proto-2", Name: "OPC.UA"},
+		{ID: "proto-3", Name: "ModBus.RTU"},
+	} {
+		if err := db.Create(&protocol).Error; err != nil {
+			t.Fatalf("seed protocol: %v", err)
+		}
+	}
 	svc := NewDeviceService(db, nil, nil)
 	ctx := context.Background()
 
-	const identity = "Modbus.TCP|192.168.1.10|502|1"
+	const identity = "ModBus.TCP|192.168.1.10|502|0"
 	dev := po.Device{
 		ID: "dev-scan", Name: "1号风机", ProtocolID: "proto-1",
 		ProtocolJSON: `{"host":"192.168.1.10","port":502}`, Status: 1,
@@ -273,10 +279,10 @@ func TestUpdateDeviceClearsScanIdentityOnlyOnRealConfigChange(t *testing.T) {
 		t.Fatalf("seed device: %v", err)
 	}
 
-	scanIdentityOfRow := func() string {
+	scanIdentityOfRow := func(id string) string {
 		t.Helper()
 		var row po.Device
-		if err := db.Where("id = ?", dev.ID).First(&row).Error; err != nil {
+		if err := db.Where("id = ?", id).First(&row).Error; err != nil {
 			t.Fatalf("reload device: %v", err)
 		}
 		return row.ScanIdentity
@@ -291,11 +297,11 @@ func TestUpdateDeviceClearsScanIdentityOnlyOnRealConfigChange(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpdateDevice(改名): %v", err)
 	}
-	if got := scanIdentityOfRow(); got != identity {
+	if got := scanIdentityOfRow(dev.ID); got != identity {
 		t.Fatalf("改名后 scanIdentity = %q, want 保留 %q", got, identity)
 	}
 
-	// ② 连接配置真的改了 → 签名必须清空
+	// ② 连接配置真的改了 → 按新地址重算
 	if err := svc.UpdateDevice(ctx, &dto.UpdateDeviceDTO{
 		ID:           dev.ID,
 		ProtocolID:   "proto-1",
@@ -303,23 +309,99 @@ func TestUpdateDeviceClearsScanIdentityOnlyOnRealConfigChange(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpdateDevice(改地址): %v", err)
 	}
-	if got := scanIdentityOfRow(); got != "" {
-		t.Fatalf("改地址后 scanIdentity = %q, want 空串", got)
+	if got, want := scanIdentityOfRow(dev.ID), "ModBus.TCP|192.168.1.11|502|0"; got != want {
+		t.Fatalf("改地址后 scanIdentity = %q, want %q", got, want)
 	}
 
-	// ③ 协议换了（配置文本可能恰好不变）→ 签名同样必须清空
-	if err := db.Model(&po.Device{}).Where("id = ?", dev.ID).Update("scan_identity", identity).Error; err != nil {
-		t.Fatalf("reset scan_identity: %v", err)
-	}
+	// ③ 协议换了 → 签名里的协议名跟着换
 	if err := svc.UpdateDevice(ctx, &dto.UpdateDeviceDTO{
 		ID:           dev.ID,
 		ProtocolID:   "proto-2",
-		ProtocolJSON: json.RawMessage(`{"host":"192.168.1.11","port":502}`),
+		ProtocolJSON: json.RawMessage(`{"host":"192.168.1.11","port":4840}`),
 	}); err != nil {
 		t.Fatalf("UpdateDevice(换协议): %v", err)
 	}
-	if got := scanIdentityOfRow(); got != "" {
-		t.Fatalf("换协议后 scanIdentity = %q, want 空串", got)
+	if got, want := scanIdentityOfRow(dev.ID), "OPC.UA|192.168.1.11|4840|0"; got != want {
+		t.Fatalf("换协议后 scanIdentity = %q, want %q", got, want)
+	}
+
+	// ④ 新配置没有 host（串口协议）→ 写空串
+	if err := svc.UpdateDevice(ctx, &dto.UpdateDeviceDTO{
+		ID:           dev.ID,
+		ProtocolID:   "proto-3",
+		ProtocolJSON: json.RawMessage(`{"comPort":"COM1","unitId":1}`),
+	}); err != nil {
+		t.Fatalf("UpdateDevice(串口): %v", err)
+	}
+	if got := scanIdentityOfRow(dev.ID); got != "" {
+		t.Fatalf("串口配置后 scanIdentity = %q, want 空串", got)
+	}
+
+	// ⑤ 手工建设备原本没有签名，首次改连接配置后应补上
+	manual := po.Device{
+		ID: "dev-manual", Name: "手工设备", ProtocolID: "proto-1",
+		ProtocolJSON: `{}`, Status: 1,
+	}
+	if err := db.Create(&manual).Error; err != nil {
+		t.Fatalf("seed manual device: %v", err)
+	}
+	if err := svc.UpdateDevice(ctx, &dto.UpdateDeviceDTO{
+		ID:           manual.ID,
+		ProtocolID:   "proto-1",
+		ProtocolJSON: json.RawMessage(`{"host":"10.0.0.9","port":502}`),
+	}); err != nil {
+		t.Fatalf("UpdateDevice(手工设备): %v", err)
+	}
+	if got, want := scanIdentityOfRow(manual.ID), "ModBus.TCP|10.0.0.9|502|0"; got != want {
+		t.Fatalf("手工设备 scanIdentity = %q, want %q", got, want)
+	}
+}
+
+// TestCreateDeviceDerivesScanIdentity 手工创建设备时也按连接参数生成扫描身份；
+// 串口协议没有 host，保持空串。
+func TestCreateDeviceDerivesScanIdentity(t *testing.T) {
+	db := newDeviceAddressImportTestDB(t)
+	for _, protocol := range []po.IotProtocol{
+		{ID: "proto-1", Name: "ModBus.TCP"},
+		{ID: "proto-3", Name: "ModBus.RTU"},
+	} {
+		if err := db.Create(&protocol).Error; err != nil {
+			t.Fatalf("seed protocol: %v", err)
+		}
+	}
+	svc := NewDeviceService(db, nil, nil)
+	ctx := context.Background()
+
+	if err := svc.CreateDevice(ctx, &dto.CreateDeviceDTO{
+		Code:         "tcp-1",
+		Name:         "TCP 设备",
+		ProtocolID:   "proto-1",
+		ProtocolJSON: json.RawMessage(`{"host":"10.0.0.8","port":502,"unitId":2}`),
+	}); err != nil {
+		t.Fatalf("create tcp device: %v", err)
+	}
+	var tcp po.Device
+	if err := db.Where("name = ?", "TCP 设备").First(&tcp).Error; err != nil {
+		t.Fatal(err)
+	}
+	if want := "ModBus.TCP|10.0.0.8|502|2"; tcp.ScanIdentity != want {
+		t.Errorf("TCP scanIdentity = %q, want %q", tcp.ScanIdentity, want)
+	}
+
+	if err := svc.CreateDevice(ctx, &dto.CreateDeviceDTO{
+		Code:         "rtu-1",
+		Name:         "RTU 设备",
+		ProtocolID:   "proto-3",
+		ProtocolJSON: json.RawMessage(`{"comPort":"COM1","unitId":1}`),
+	}); err != nil {
+		t.Fatalf("create rtu device: %v", err)
+	}
+	var rtu po.Device
+	if err := db.Where("name = ?", "RTU 设备").First(&rtu).Error; err != nil {
+		t.Fatal(err)
+	}
+	if rtu.ScanIdentity != "" {
+		t.Errorf("RTU scanIdentity = %q, want 空串", rtu.ScanIdentity)
 	}
 }
 

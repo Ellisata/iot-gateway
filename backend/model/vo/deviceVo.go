@@ -16,13 +16,16 @@ type DeviceVO struct {
 	// ModelID / ModelName 绑定的物模型（空串 = 未绑定）。
 	ModelID   string `json:"modelId"`
 	ModelName string `json:"modelName"`
-	// ScanIdentity 扫描来源身份签名（`协议|主机|端口|站号`），空串 = 这台设备
-	// 不是扫描建出来的（或建成后改过连接配置）。语义与写入规则见
+	// ScanIdentity 扫描来源身份签名（`协议|主机|端口|站号`），空串 = 当前配置
+	// 里认不出 host（串口协议、通用模板、尚未配置连接参数）。语义与写入规则见
 	// po.Device.ScanIdentity —— 对外只读展示，不能拿来当作设备地址使用。
-	ScanIdentity    string `json:"scanIdentity"`
-	Description     string `json:"description"`
-	Status          int    `json:"status"`
-	Online          bool   `json:"online"`          // 当前是否在线（无 active 断联报警）
+	ScanIdentity string `json:"scanIdentity"`
+	Description  string `json:"description"`
+	Status       int    `json:"status"`
+	// Collected 是否已进入采集调度（采集引擎当前持有该设备任务）。
+	// 与 Online 组合才能区分「未接入」「在线」「离线」三态。
+	Collected       bool   `json:"collected"`
+	Online          bool   `json:"online"`          // 已接入采集且无 active 断联报警
 	LastSuccessTime string `json:"lastSuccessTime"` // 最近一次成功采集时间（内存态，"" 表示尚无成功记录）
 	CreatedAt       string `json:"createdAt"`
 	UpdatedAt       string `json:"updatedAt"`

@@ -443,6 +443,9 @@
       </div>
       <template #footer>
         <el-button @click="addDialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button :icon="Download" :loading="exporting" @click="handleExportTemplate">
+          {{ t('deviceScan.exportTemplate') }}
+        </el-button>
         <el-button type="primary" :loading="creating" @click="handleCreateDevices">
           {{ t('common.confirm') }}
         </el-button>
@@ -485,6 +488,7 @@ import { ElMessage } from 'element-plus'
 import {
   IconAlertTriangle as AlertTriangle,
   IconCpu as DeviceChip,
+  IconDownload as Download,
   IconFileText as Document,
   IconInfoCircle as InfoCircle,
   IconPlus as Plus,
@@ -500,6 +504,7 @@ import {
   cancelScan,
   continueScan,
   createDevicesFromScan,
+  exportScanTemplate,
   getScanCapabilities,
   getScanStatus,
   startScan,
@@ -520,6 +525,7 @@ const starting = ref(false)
 const continuing = ref(false)
 const canceling = ref(false)
 const creating = ref(false)
+const exporting = ref(false)
 const jobExpired = ref(false)
 // 自动续扫的停止标记：由「取消扫描」置位。取消是明确的用户意图，不能让下一拍
 // 的 done 快照又把它拉起来；新一轮扫描或用户手动点「继续扫描」时复位。
@@ -1022,6 +1028,49 @@ function itemsOf(rows) {
     name: r.name,
     description: r.description,
   }))
+}
+
+// ---------- 导出为设备导入模板 ----------
+// 与「添加为设备」共用当前弹窗里的编码/名称/描述；导出后可直接在 Excel 里改编码，
+// 再走设备导入落库。协议参数由后端从任务快照的 protocolJson 填进对应列。
+function safeExportFilePart(text) {
+  return String(text || '').replace(/[\\/:*?"<>|]/g, '_')
+}
+
+async function handleExportTemplate() {
+  if (!job.value) return
+  exporting.value = true
+  try {
+    const blob = await exportScanTemplate({
+      jobId: job.value.jobId,
+      items: itemsOf(addRows.value),
+    })
+    // 业务错误（如任务已过期）也是 HTTP 200；响应类型为 blob 时拦截器不会
+    // 解析 JSON，这里显式识别，避免把错误 JSON 当成 .xlsx 下载下来。
+    if (blob.type && blob.type.includes('application/json')) {
+      let message = ''
+      try {
+        message = JSON.parse(await blob.text())?.msg || ''
+      } catch {
+        // 保留兜底文案
+      }
+      ElMessage.error(message || t('deviceScan.exportTemplateFailed'))
+      return
+    }
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${t('deviceScan.exportTemplateName')}-${safeExportFilePart(job.value.protocol)}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    ElMessage.success(t('deviceScan.exportTemplateSuccess'))
+  } catch {
+    // 错误提示已由 axios 拦截器统一处理
+  } finally {
+    exporting.value = false
+  }
 }
 
 // submitCreate 提交一批待建行。confirmDuplicate 为 true 表示"地址重复也已经

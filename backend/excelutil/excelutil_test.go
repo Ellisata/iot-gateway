@@ -6,6 +6,7 @@ package excelutil
 import (
 	"bytes"
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -178,5 +179,109 @@ func TestBuildTemplate(t *testing.T) {
 	}
 	if rows[1][0] != "示例" {
 		t.Errorf("示例行 = %v", rows[1])
+	}
+}
+
+// TestImportPrepareAborts 表级预校验失败时应整表中止、零写入。
+func TestImportPrepareAborts(t *testing.T) {
+	db := newTestDB(t)
+	data := buildTestXlsx(t, [][]string{
+		{"名称", "备注"},
+		{"A", "一"},
+		{"B", "二"},
+	})
+	prepareCalls := 0
+	_, err := Import(context.Background(), db, data, Options[testItem]{
+		Headers: []string{"名称", "备注"},
+		Cols:    2,
+		Prepare: func(rows [][]string) error {
+			prepareCalls++
+			if len(rows) != 3 {
+				t.Errorf("Prepare rows = %d, want 3", len(rows))
+			}
+			return errors.New("整表校验失败")
+		},
+		Parse: func(row []string) (*testItem, string, string) {
+			return &testItem{ID: Cell(row, 0), Name: Cell(row, 0)}, Cell(row, 0), ""
+		},
+	})
+	if err == nil {
+		t.Fatal("Prepare 返回 nil 错误（占位实现），本测试需要失败路径")
+	}
+	if prepareCalls != 1 {
+		t.Errorf("Prepare 调用次数 = %d, want 1", prepareCalls)
+	}
+	var count int64
+	db.Model(&testItem{}).Count(&count)
+	if count != 0 {
+		t.Errorf("Prepare 失败后库内条数 = %d, want 0", count)
+	}
+}
+
+// TestImportBlankRowUsesWholeRow cols<=0 时，只有靠后列有值的行不能被当成空行。
+func TestImportBlankRowUsesWholeRow(t *testing.T) {
+	db := newTestDB(t)
+	data := buildTestXlsx(t, [][]string{
+		{"名称", "备注"},
+		{"", "", "只在这一列有值"},
+	})
+	result, err := Import(context.Background(), db, data, Options[testItem]{
+		Headers: []string{"名称", "备注"},
+		Cols:    0,
+		Parse: func(row []string) (*testItem, string, string) {
+			return nil, "x", "被计入"
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 || result.Failed != 1 {
+		t.Errorf("Total/Failed = %d/%d, want 1/1", result.Total, result.Failed)
+	}
+}
+
+// TestBuildTemplateWithOptions 示例行放第二个工作表，首表只有表头；文本列可设置。
+func TestBuildTemplateWithOptions(t *testing.T) {
+	buf, err := BuildTemplateWithOptions(TemplateOptions{
+		Headers:          []string{"名称", "编码", "状态"},
+		Example:          []string{"示例", "000123", "启用"},
+		Widths:           []float64{20, 20, 12},
+		Lists:            []ListValidation{{Col: 2, Options: []string{"启用", "禁用"}, AllowCustom: true}},
+		SheetName:        "设备导入",
+		ExampleSheetName: "示例",
+		TextCols:         []int{1},
+	})
+	if err != nil {
+		t.Fatalf("BuildTemplateWithOptions: %v", err)
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer f.Close()
+
+	if name := f.GetSheetName(0); name != "设备导入" {
+		t.Errorf("首个工作表 = %q, want 设备导入", name)
+	}
+	first, err := f.GetRows("设备导入")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 1 {
+		t.Errorf("首表行数 = %d, want 1（仅表头）: %v", len(first), first)
+	}
+	example, err := f.GetRows("示例")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(example) != 2 || example[1][1] != "000123" {
+		t.Errorf("示例表 = %v", example)
+	}
+	dvs, err := f.GetDataValidations("设备导入")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dvs) != 1 || dvs[0].Sqref != "C2:C1001" {
+		t.Errorf("下拉校验 = %+v", dvs)
 	}
 }

@@ -59,6 +59,35 @@ type ContinueDeviceScanDTO struct {
 	JobID string `json:"jobId" binding:"required"`
 }
 
+// ExportScanTemplateDTO 把勾选的扫描结果按协议导入模板导出（.xlsx）。
+//
+// 导出的文件与 `GET /device/importTemplate?protocolId=` 完全同构（同样的列、
+// 必填标记、下拉与配色），只是表头下面直接填好了扫描结果；用户在 Excel 里改完
+// 编码/名称后，走设备导入即可落库。
+type ExportScanTemplateDTO struct {
+	// JobID 结果所属的扫描任务。与创建设备一样，服务端只认自己持有的快照。
+	JobID string `json:"jobId" binding:"required"`
+
+	// Items 要导出的扫描结果（按给定顺序写行）。
+	Items []ScanExportItemDTO `json:"items" binding:"required,min=1"`
+}
+
+// ScanExportItemDTO 一条要导出的扫描结果。
+type ScanExportItemDTO struct {
+	// Index 在任务快照 Devices 数组里的下标。
+	Index int `json:"index" binding:"min=0"`
+
+	// Code 编码；留空时用服务端给该结果算出的建议编码。
+	// 用户通常先在「添加为设备」弹窗里改，或者导出后在 Excel 里改。
+	Code string `json:"code"`
+
+	// Name 设备名；留空时按「IP」或「IP-站号」生成（与扫描建库同一口径）。
+	Name string `json:"name"`
+
+	// Description 描述；留空时用插件上报的设备名（通常是「厂商 型号」）。
+	Description string `json:"description"`
+}
+
 // CreateDevicesFromScanDTO 把勾选的扫描结果批量建成设备。
 type CreateDevicesFromScanDTO struct {
 	// JobID 结果所属的扫描任务。服务端**只认自己持有的那份结果**：

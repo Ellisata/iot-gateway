@@ -24,6 +24,91 @@ import (
 	"iot-gateway/model/vo"
 )
 
+// TestBuildScanExportRowsRoundTripsToImport 扫描结果导出的行必须能直接被
+// 设备导入解析：列位置、协议参数类型与下拉 label→value 的往返都要成立。
+func TestBuildScanExportRowsRoundTripsToImport(t *testing.T) {
+	db := newImportTestDB(t)
+	seedImportProtocol(t, db, "proto-1", "ModBus.TCP", importTestProtocolForm)
+
+	spec, doc, protocol, err := buildProtocolDeviceTemplate(context.Background(), db, "proto-1", "zh")
+	if err != nil {
+		t.Fatalf("buildProtocolDeviceTemplate: %v", err)
+	}
+
+	snap := &devicescan.Snapshot{
+		Protocol: "ModBus.TCP",
+		Devices: []driver.DiscoveredDevice{{
+			Host:         "10.0.0.1",
+			Port:         502,
+			UnitID:       1,
+			Name:         "Vendor X",
+			ProtocolJSON: `{"host":"10.0.0.1","port":502,"byteOrder":"BIG_ENDIAN"}`,
+		}},
+	}
+	rows, err := buildScanExportRows(snap, protocol, spec, doc, []dto.ScanExportItemDTO{
+		{Index: 0},
+		{Index: 0, Code: "custom-code", Name: "自定义设备", Description: "手工描述"},
+	}, "启用")
+	if err != nil {
+		t.Fatalf("buildScanExportRows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+
+	// 第一行：默认名称、建议编码、厂商名作描述、协议参数按列填好。
+	if rows[0][importColName] != "10.0.0.1" || rows[0][importColProtocol] != "ModBus.TCP" {
+		t.Errorf("第一行基础列 = %v", rows[0])
+	}
+	if rows[0][importColDescription] != "Vendor X" {
+		t.Errorf("description = %q, want Vendor X", rows[0][importColDescription])
+	}
+	if got, want := rows[0][importColCode], scanSuggestedCodes(snap.Devices)[0]; got != want {
+		t.Errorf("code = %q, want 建议编码 %q", got, want)
+	}
+	if rows[0][importBaseCols] != "10.0.0.1" || rows[0][importBaseCols+1] != "502" {
+		t.Errorf("协议参数列 = %v", rows[0][importBaseCols:])
+	}
+	if rows[0][importBaseCols+2] != "高字在前" {
+		t.Errorf("byteOrder 应写本地化 label，实际 %q", rows[0][importBaseCols+2])
+	}
+
+	// 第二行：弹窗里的自定义值优先。
+	if rows[1][importColName] != "自定义设备" || rows[1][importColCode] != "custom-code" || rows[1][importColDescription] != "手工描述" {
+		t.Errorf("第二行 = %v", rows[1])
+	}
+
+	// 用设备导入的同一套解析器读回来：参数类型必须与扫描结果一致。
+	plan, err := buildDeviceImportPlan(spec.Headers)
+	if err != nil {
+		t.Fatalf("buildDeviceImportPlan: %v", err)
+	}
+	plan.Protocol = protocol
+	if err := plan.bindFields(doc, protocol.Name); err != nil {
+		t.Fatalf("bindFields: %v", err)
+	}
+	device, _, reason := parseDeviceImportRow(
+		rows[0], plan,
+		map[string]po.IotProtocol{protocol.Name: protocol},
+		thingModelIndex{byName: map[string]po.ThingModel{}, byCode: map[string]po.ThingModel{}},
+		map[string]bool{},
+		"2026-01-01 00:00:00",
+	)
+	if reason != "" {
+		t.Fatalf("导出的行无法导入：%s", reason)
+	}
+	var config map[string]any
+	if err := json.Unmarshal([]byte(device.ProtocolJSON), &config); err != nil {
+		t.Fatal(err)
+	}
+	if config["host"] != "10.0.0.1" || config["port"] != float64(502) || config["byteOrder"] != "BIG_ENDIAN" {
+		t.Errorf("导入后的 protocol_json = %s", device.ProtocolJSON)
+	}
+	if device.Code != "dev-10-0-0-1" || device.Name != "10.0.0.1" || device.Status != 1 {
+		t.Errorf("device = %+v", device)
+	}
+}
+
 // ==================== 替身 ====================
 
 type fakeScanSpecs struct {

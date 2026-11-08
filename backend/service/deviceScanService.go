@@ -4,6 +4,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,9 @@ import (
 	"iot-gateway/collector"
 	"iot-gateway/devicescan"
 	"iot-gateway/enums"
+	"iot-gateway/excelutil"
+	"iot-gateway/formjson"
+	"iot-gateway/i18n"
 	"iot-gateway/model/dto"
 	"iot-gateway/model/po"
 	"iot-gateway/model/vo"
@@ -353,6 +357,127 @@ func (s *DeviceScanService) CreateDevices(ctx context.Context, req *dto.CreateDe
 // 插件是可信代码，但它给的东西不能假定合法：一份坏 JSON 会写进 device 行，
 // 之后每次采集解析配置都失败，而用户看到的是"设备采不到值"，完全指不到根因。
 // 空值也拒 —— 建一台 protocolJson 为空的设备没有任何意义。
+// ExportImportTemplate 把勾选的扫描结果按该协议的设备导入模板导出（.xlsx）。
+//
+// 产物与 `GET /device/importTemplate?protocolId=` 同构：同一套表头、必填标记、
+// 下拉与配色，只是表头下面直接填好了扫描结果。用户改完编码/名称后走设备导入
+// 即可落库 —— 这条路径不写库，也不采信客户端回传的 ProtocolJSON（仍取任务快照）。
+func (s *DeviceScanService) ExportImportTemplate(ctx context.Context, req *dto.ExportScanTemplateDTO) (*bytes.Buffer, error) {
+	snap, err := s.engine.Status(req.JobID)
+	if err != nil {
+		return nil, scanError(err)
+	}
+
+	var protocol po.IotProtocol
+	if err := s.sqliteDB.WithContext(ctx).Where("name = ?", snap.Protocol).First(&protocol).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appError.NewAppErrorCtx(
+				enums.ProtocolNotExistsEnum.GetCode(),
+				enums.ProtocolNotExistsEnum.GetMessage(),
+				enums.ProtocolNotExistsEnum.GetMsgKey(),
+			)
+		}
+		return nil, err
+	}
+
+	lang := i18n.LangFromCtx(ctx)
+	spec, doc, _, err := buildProtocolDeviceTemplate(ctx, s.sqliteDB, protocol.ID, lang)
+	if err != nil {
+		return nil, err
+	}
+
+	enabled := i18n.T(lang, "device.import.status.enabled")
+	rows, err := buildScanExportRows(snap, protocol, spec, doc, req.Items, enabled)
+	if err != nil {
+		return nil, err
+	}
+
+	spec.DataRows = rows
+	return excelutil.BuildTemplateWithOptions(spec)
+}
+
+// buildScanExportRows 把勾选的扫描结果投影成模板数据行（纯函数，便于单测）。
+func buildScanExportRows(
+	snap *devicescan.Snapshot,
+	protocol po.IotProtocol,
+	spec excelutil.TemplateOptions,
+	doc *formjson.Document,
+	items []dto.ScanExportItemDTO,
+	enabledLabel string,
+) ([][]string, error) {
+	suggestedCodes := scanSuggestedCodes(snap.Devices)
+	rows := make([][]string, 0, len(items))
+	for _, item := range items {
+		if item.Index < 0 || item.Index >= len(snap.Devices) {
+			return nil, appError.NewAppErrorCtx(
+				enums.ParamValidEnum.GetCode(),
+				fmt.Sprintf("扫描结果已失效（下标越界）：%d", item.Index),
+				"",
+			)
+		}
+		dev := snap.Devices[item.Index]
+
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			name = defaultDeviceName(dev)
+		}
+		code := strings.TrimSpace(item.Code)
+		if code == "" {
+			code = suggestedCodes[item.Index]
+		}
+		description := strings.TrimSpace(item.Description)
+		if description == "" {
+			description = strings.TrimSpace(dev.Name)
+		}
+
+		row := make([]string, len(spec.Headers))
+		row[importColName] = name
+		row[importColProtocol] = protocol.Name
+		row[importColDescription] = description
+		row[importColCode] = code
+		row[importColStatus] = enabledLabel
+
+		values := parseProtocolJSONValues(dev.ProtocolJSON)
+		for i, field := range doc.Fields {
+			row[importBaseCols+i] = scanTemplateValue(field, values[field.Key])
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+func parseProtocolJSONValues(protocolJSON string) map[string]json.RawMessage {
+	values := make(map[string]json.RawMessage)
+	if strings.TrimSpace(protocolJSON) == "" {
+		return values
+	}
+	_ = json.Unmarshal([]byte(protocolJSON), &values)
+	return values
+}
+
+// scanTemplateValue 把一个扫描结果里的协议参数渲染成模板单元格。
+// select 优先写本地化 label（人读友好，导入端也认）；密码类字段一律留空。
+func scanTemplateValue(field formjson.Field, raw json.RawMessage) string {
+	if field.Secret || len(raw) == 0 {
+		return ""
+	}
+	if field.IsSelect() {
+		for _, option := range field.Options {
+			if strings.TrimSpace(string(option.Value)) == strings.TrimSpace(string(raw)) {
+				return option.Label
+			}
+		}
+	}
+	switch formjson.KindOf(raw) {
+	case formjson.KindString:
+		return formjson.StringValue(raw)
+	case formjson.KindNumber, formjson.KindBool:
+		return strings.TrimSpace(string(raw))
+	default:
+		return ""
+	}
+}
+
 func validateScanProtocolJSON(protocolJSON string) string {
 	if protocolJSON == "" {
 		return "扫描结果没有给出连接配置"
@@ -372,6 +497,23 @@ func defaultDeviceName(dev driver.DiscoveredDevice) string {
 		return dev.Host + "-" + strconv.Itoa(dev.UnitID)
 	}
 	return dev.Host
+}
+
+// scanSuggestedCodes 为整批扫描结果生成建议编码（批内去重）。
+// 与轮询快照同源，导出模板也用它，保证「页面里看到的建议值」与
+// 「导出文件里的预填编码」一致。
+func scanSuggestedCodes(devices []driver.DiscoveredDevice) []string {
+	codes := make([]string, len(devices))
+	taken := make(map[string]bool, len(devices))
+	for i := range devices {
+		code := uniqueEntityCode(
+			generatedEntityCode(defaultDeviceName(devices[i]), "dev"),
+			func(candidate string) bool { return taken[candidate] },
+		)
+		taken[code] = true
+		codes[i] = code
+	}
+	return codes
 }
 
 // scanIdentityOf 由一条扫描结果算出**扫描来源身份签名**，用来回答"设备表里
@@ -474,19 +616,9 @@ func scanJobVO(snap *devicescan.Snapshot) *vo.ScanJobVO {
 		return out
 	}
 	out.Devices = make([]vo.ScanDeviceVO, 0, len(snap.Devices))
-	// 建议编码的批内去重：同一份结果里默认名理论上不会相同（引擎按
-	// host:port:unitId 去重），但"名称折叠成编码"这一步仍可能撞（如
-	// 10.0.0.2-1 与 10.0.0.2_1），撞了就给后一条追加 -2。
-	// 只做批内避让，不与库内比对 —— 那会把每次轮询变成一次全表读，
-	// 而建议值只是给用户改的默认文本，唯一性由创建时逐行校验兜底。
-	suggestionTaken := make(map[string]bool, len(snap.Devices))
+	suggestedCodes := scanSuggestedCodes(snap.Devices)
 	for i := range snap.Devices {
 		d := &snap.Devices[i]
-		suggestedCode := uniqueEntityCode(
-			generatedEntityCode(defaultDeviceName(*d), "dev"),
-			func(c string) bool { return suggestionTaken[c] },
-		)
-		suggestionTaken[suggestedCode] = true
 		dev := vo.ScanDeviceVO{
 			Index:         i,
 			Host:          d.Host,
@@ -496,7 +628,7 @@ func scanJobVO(snap *devicescan.Snapshot) *vo.ScanJobVO {
 			Vendor:        d.Vendor,
 			Model:         d.Model,
 			Version:       d.Version,
-			SuggestedCode: suggestedCode,
+			SuggestedCode: suggestedCodes[i],
 			ProtocolJSON:  d.ProtocolJSON,
 		}
 		for _, a := range d.Extra {

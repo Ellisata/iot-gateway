@@ -61,8 +61,8 @@ func collectorGroupCodeImmutableErr() error {
 
 // generatedEntityCode 把人类可读名称转成主题安全的候选编码。
 //
-// 这个函数只服务**没有用户输入编码**的创建路径（Excel 导入、扫描建库），
-// 生成结果统一小写；手工新建仍由用户输入，大小写原样保留（与物模型 code 一致）。
+// 这个函数只服务**没有用户输入编码**的创建路径（扫描建库），生成结果统一小写；
+// 手工新建与 Excel 导入均要求用户显式填写编码，大小写原样保留（与物模型 code 一致）。
 // 名称里没有可用 ASCII 字母/数字时（如纯中文），退回随机后缀，保证编码可用。
 func generatedEntityCode(name, fallbackPrefix string) string {
 	var b strings.Builder

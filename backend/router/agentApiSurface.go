@@ -936,6 +936,15 @@ var agentApiSurface = map[string]SurfaceEntry{
 		}),
 		Note: "连接配置（protocolJson）由服务端从自己持有的任务快照里取，**不采信客户端**",
 	},
+	"POST /deviceScan/exportTemplate": {
+		Access: AccessRead,
+		Params: argBody(dto.ExportScanTemplateDTO{}, map[string]string{
+			"items.index": "**任务快照里 devices 数组的下标**",
+			"items.code":  "可选。留空时用该结果的建议编码；导出后也可在 Excel 里改",
+			"items.name":  "可选。留空时按「IP」或「IP-站号」生成",
+		}),
+		Note: "不写库。导出物与 GET /device/importTemplate?protocolId= 同构，可直接走设备导入",
+	},
 
 	// ==================== 设备点位扫描 ====================
 	"GET /deviceScan/pointCapability": {

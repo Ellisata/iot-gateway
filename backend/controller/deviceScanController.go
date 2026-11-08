@@ -139,6 +139,28 @@ func (ctr *DeviceScanController) CreateDevices(c *gin.Context) {
 	c.JSON(200, response.Success(result))
 }
 
+// ExportTemplate 把勾选的扫描结果按协议导入模板导出（.xlsx）。
+//
+// 与设备导入模板完全同构；导出后可在 Excel 里改编码/名称，再走设备导入。
+func (ctr *DeviceScanController) ExportTemplate(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req dto.ExportScanTemplateDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+
+	buf, err := ctr.deviceScanService.ExportImportTemplate(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", `attachment; filename="device-import-template.xlsx"`)
+	c.Data(200, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
+}
+
 // ==================== 点位范围扫描 ====================
 //
 // 三个 handler 与上面那组同构（同一页面、同一开关、同一套前端组件），

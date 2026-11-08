@@ -128,6 +128,25 @@ export function createDevicesFromScan(data) {
   })
 }
 
+/**
+ * 把勾选的扫描结果按该协议的设备导入模板导出（.xlsx）。
+ *
+ * 产物与 `GET /device/importTemplate?protocolId=` 同构：同样的列、必填标记、
+ * 下拉与配色，只是表头下面直接填好了扫描结果。用户可以在 Excel 里改编码/名称，
+ * 再走设备导入落库。
+ *
+ * @param {{jobId:string, items:Array<{index:number, code?:string, name?:string, description?:string}>}} data
+ * @returns {Promise<Blob>}
+ */
+export function exportScanTemplate(data) {
+  return request({
+    url: '/deviceScan/exportTemplate',
+    method: 'post',
+    data,
+    responseType: 'blob',
+  })
+}
+
 // ==================== 点位范围扫描（设备地址页的「自动发现点位」） ====================
 //
 // 与上面那组共用 deviceScan.enabled 总开关，但**同步**：一次扫描覆盖整段地址，

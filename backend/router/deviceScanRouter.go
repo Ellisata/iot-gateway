@@ -27,6 +27,7 @@ func DeviceScanRoutes(r gin.IRouter, dsc *controller.DeviceScanController) {
 		scan.GET("/status", dsc.Status)
 		scan.POST("/cancel", dsc.Cancel)
 		scan.POST("/createDevices", dsc.CreateDevices)
+		scan.POST("/exportTemplate", dsc.ExportTemplate)
 
 		// 设备点位范围扫描（设备地址页的「自动发现点位」）
 		scan.GET("/pointCapability", dsc.PointCapability)
