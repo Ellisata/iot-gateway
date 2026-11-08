@@ -181,6 +181,41 @@ func TestLargeIntegerPrecision(t *testing.T) {
 	}
 }
 
+// TestEmptyValueBecomesNull 坏质量码的点位驱动只回空串占位，映射层必须输出 null
+// 而不是让整批失败：否则 MQTT 批次编码失败、反复补发也永远发不出去。
+func TestEmptyValueBecomesNull(t *testing.T) {
+	b := push.PushBatch{
+		DeviceID:    "d1",
+		CollectedAt: "2026-10-24 10:00:00.000",
+		Records: []collector.CollectedRecord{{
+			DeviceID: "d1", DeviceAddressID: "a1",
+			Value: "", DataType: "uint16", Kind: "uint", Quality: 0,
+		}},
+	}
+
+	cases := map[string]string{
+		"auto by kind":    `{"version":1,"fields":{"value":{"source":"path","value":"value"}}}`,
+		"explicit number": `{"version":1,"fields":{"value":{"source":"path","value":"value","type":"number"}}}`,
+		"explicit bool":   `{"version":1,"fields":{"value":{"source":"path","value":"value","type":"boolean"}}}`,
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := encodeOne(t, mustEncoder(t, raw), b)
+			if got != `[{"value":null}]` {
+				t.Errorf("payload = %s, want [{\"value\":null}]", got)
+			}
+		})
+	}
+
+	// 非空但不是数字仍然报错：那是真的数据类型/映射配置问题，不能静默变成 null。
+	bad := b
+	bad.Records[0].Value = "abc"
+	enc := mustEncoder(t, `{"version":1,"fields":{"value":{"source":"path","value":"value","type":"number"}}}`)
+	if _, err := enc.Encode(bad); err == nil {
+		t.Fatal("Encode with non-numeric value should fail")
+	}
+}
+
 func TestValidationErrors(t *testing.T) {
 	cases := map[string]string{
 		"empty":            `{}`,

@@ -46,11 +46,11 @@ const (
 
 // drainPolicy 补发失败的处理策略。
 //
-// 与 influxdb 通道的差异只在 Narrow:TDengine 的补发窗口按 batchRows 聚合成一条
-// 多子表 INSERT,某组写失败时 failID 是组头,而坏数据可能不在组头 —— 按组头判毒
-// 会连坐删掉组内的好批次。打开 Narrow 可先逐批试写定位真正失败的批次再判毒。
-// 此项保持与本次重构前一致(false),需要时改此一处即可。
-var drainPolicy = push.DrainPolicy{Poison: true, Narrow: false}
+// TDengine 的补发窗口按 batchRows 聚合成一条多子表 INSERT,某组写失败时 failID
+// 是组头,而坏数据可能不在组头 —— 只按组头判毒会每轮删掉一个好批次,直到坏批
+// 浮到队头,连坐丢数据。Narrow 在首次失败后强制逐批试写,先把真正失败的批次
+// 隔离出来再判毒,与 influxdb 通道保持一致。
+var drainPolicy = push.DrainPolicy{Poison: true, Narrow: true}
 
 // tdengineChannel 单个 TDengine 3.x 推送通道运行时,实现 push.Channel。
 //

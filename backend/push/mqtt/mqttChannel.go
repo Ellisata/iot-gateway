@@ -262,7 +262,10 @@ func (ch *mqttChannel) publishLoop(client mqtt.Client) {
 		case <-ch.ob.Quit():
 			return
 		case b := <-ch.ob.Batches():
-			if !ch.publish(client, b, false) && ch.ob.SpoolEnabled() {
+			ok, permanent := ch.publish(client, b, false)
+			// 编码失败是确定性数据错误：落盘补发多少次都不会成功，不再进缓存，
+			// 否则同一批永远卡在补发队头、堵住后面所有批次。
+			if !ok && !permanent && ch.ob.SpoolEnabled() {
 				ch.ob.SpoolEnqueue(b)
 			}
 		}
@@ -298,14 +301,15 @@ func (ch *mqttChannel) waitFirstConnect(token mqtt.Token) bool {
 }
 
 // publish 向配置的所有主题发布一批数据。
-// 返回是否全部主题发布成功（断连/超时/错误均视为失败），
-// 供补发协程决定该批次是删除还是保留重试。
-func (ch *mqttChannel) publish(client mqtt.Client, b push.PushBatch, fromDrain bool) bool {
+// 返回是否全部主题发布成功，以及失败是否为永久性（确定性数据错误）。
+// 断连/超时/发布错误可重试；编码失败对同一批次永远失败，补发必须跳过该批，
+// 否则队头会被永久阻塞。两者由调用方分别处理（实时落盘 vs 补发删除）。
+func (ch *mqttChannel) publish(client mqtt.Client, b push.PushBatch, fromDrain bool) (ok, permanent bool) {
 	if client == nil || !client.IsConnected() {
 		// 不记录「未连接」：断连期间每个批次都会走到这里，会把环形缓冲刷满
 		// 无载荷条目；连接状态由 /push/status 直接给出。
 		ch.ob.Drop(1)
-		return false
+		return false, false
 	}
 
 	topics := buildTopics(ch.cfg.Topic, topicTokens{
@@ -314,9 +318,13 @@ func (ch *mqttChannel) publish(client mqtt.Client, b push.PushBatch, fromDrain b
 		GroupCode:      b.GroupCode,
 	})
 	if len(topics) == 0 {
+		// 主题配置为空：批次的编码器没有问题，补发保留它是对的 —— 改好配置后
+		// 通道会以同一 channel_id 重建，新实例继续消费同一份 spool，这批数据仍能发出去。
+		// 因此这里必须是可重试失败（permanent=false），不能当毒批次删除。
+		// 配置错误期间补发队头会停在这批上，由缓存上限裁剪最旧者兜底。
 		ch.recordRecent(b, "", nil, 0, time.Now(), "no topics resolved from config", fromDrain)
 		ch.ob.Drop(1)
-		return false
+		return false, false
 	}
 
 	messages, err := ch.encode(b)
@@ -326,14 +334,14 @@ func (ch *mqttChannel) publish(client mqtt.Client, b push.PushBatch, fromDrain b
 		ch.recordRecent(b, "", nil, 0, time.Now(), errMsg, fromDrain)
 		ch.ob.SetLastErr(errMsg)
 		ch.ob.Drop(1)
-		return false
+		return false, true
 	}
 	if len(messages) == 0 {
 		ch.ob.MarkPublished(1)
-		return true
+		return true, false
 	}
 
-	ok := true
+	ok = true
 	for _, msg := range messages {
 		for _, topic := range topics {
 			started := time.Now()
@@ -360,7 +368,7 @@ func (ch *mqttChannel) publish(client mqtt.Client, b push.PushBatch, fromDrain b
 			ch.ob.MarkPublished(1)
 		}
 	}
-	return ok
+	return ok, false
 }
 
 // recordRecent 记录一条出站报文（仅内存观测）。recent 为 nil 的零值通道直接跳过，
@@ -423,26 +431,31 @@ func (ch *mqttChannel) Preview(b push.PushBatch) push.PreviewResult {
 	return push.PreviewResult{Payloads: out}
 }
 
-// drainWindow 按入队序逐批发布窗口内批次，成功批次收集后合并删除（单条 DELETE）；
-// 任一发布失败即停止，保留该批及后续待重连重试。
-// 返回是否本窗口全部发布成功，以及首个发布失败的批次 ID（全成功为 0）。
+// drainWindow 按入队序逐批发布窗口内批次，可结束的批次收集后合并删除（单条 DELETE）；
+// 可重试的发布失败即停止，保留该批及后续待重连重试。
+// 编码失败是永久性数据错误：删除并跳过该批，继续补发后续批次，避免队头阻塞。
+// 返回是否本窗口全部处理完，以及首个可重试失败的批次 ID（全成功为 0）。
 func (ch *mqttChannel) drainWindow(client mqtt.Client, pend []push.SpoolBatch) (bool, int64) {
-	successIDs := make([]int64, 0, len(pend))
+	doneIDs := make([]int64, 0, len(pend))
 	var failID int64
 	for _, p := range pend {
 		batch := p.ToPushBatch()
-		if !ch.publish(client, batch, true) {
+		ok, permanent := ch.publish(client, batch, true)
+		if !ok && !permanent {
 			failID = p.ID
 			break
 		}
-		successIDs = append(successIDs, p.ID)
+		if permanent {
+			logger.Error("mqtt: spool batch %d failed to encode permanently, drop to unblock drain", p.ID)
+		}
+		doneIDs = append(doneIDs, p.ID)
 	}
-	if len(successIDs) > 0 {
-		if err := ch.ob.Spool().DeleteBatch(successIDs); err != nil {
-			logger.Error("mqtt: spool delete batch failed (n=%d): %v", len(successIDs), err)
+	if len(doneIDs) > 0 {
+		if err := ch.ob.Spool().DeleteBatch(doneIDs); err != nil {
+			logger.Error("mqtt: spool delete batch failed (n=%d): %v", len(doneIDs), err)
 		}
 	}
-	return len(successIDs) == len(pend), failID
+	return len(doneIDs) == len(pend), failID
 }
 
 // isConnected 返回当前连接状态（由 paho 连接/断开回调维护）

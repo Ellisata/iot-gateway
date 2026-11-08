@@ -437,12 +437,26 @@ func coerce(v any, typ string, src mappingdsl.ValueSource, doc map[string]any) (
 	case TypeString:
 		return mappingdsl.ToString(v), nil
 	case TypeNumber:
+		// 空值不是配置错误：坏质量码的点位驱动只回空串占位（见 driver.QualityXxx），
+		// 输出 null 让整批继续下发，下游据 quality < 128 识别坏点。
+		if isEmpty(v) {
+			return nil, nil
+		}
 		return toJSONNumber(v)
 	case TypeBoolean:
+		if isEmpty(v) {
+			return nil, nil
+		}
 		return toBool(v)
 	default:
 		return nil, fmt.Errorf("未知的输出类型 %q", typ)
 	}
+}
+
+// isEmpty 判断取值是否为空（nil 或仅空白）。
+// 采集侧对坏质量码只回空串占位，不能把它当成「不是合法数字/布尔值」而让整批失败。
+func isEmpty(v any) bool {
+	return strings.TrimSpace(mappingdsl.ToString(v)) == ""
 }
 
 // coerceAuto 对最常见的 value 字段按记录的 kind 输出原生 JSON 类型；
@@ -457,8 +471,14 @@ func coerceAuto(v any, src mappingdsl.ValueSource, doc map[string]any) (any, err
 		kind, _ := doc["kind"].(string)
 		switch strings.ToLower(strings.TrimSpace(kind)) {
 		case "bool":
+			if isEmpty(v) {
+				return nil, nil
+			}
 			return toBool(v)
 		case "int", "uint", "float":
+			if isEmpty(v) {
+				return nil, nil
+			}
 			return toJSONNumber(v)
 		case "string", "time":
 			return mappingdsl.ToString(v), nil
@@ -466,6 +486,9 @@ func coerceAuto(v any, src mappingdsl.ValueSource, doc map[string]any) (any, err
 			return v, nil
 		}
 	case "quality":
+		if isEmpty(v) {
+			return nil, nil
+		}
 		return toJSONNumber(v)
 	default:
 		return v, nil

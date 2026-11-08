@@ -490,10 +490,10 @@ func TestPublishRecordsRecentMessages(t *testing.T) {
 	}
 
 	client := &stubClient{connected: true}
-	if !ch.publish(client, b, false) {
+	if ok, _ := ch.publish(client, b, false); !ok {
 		t.Fatal("publish should succeed")
 	}
-	if !ch.publish(client, b, true) {
+	if ok, _ := ch.publish(client, b, true); !ok {
 		t.Fatal("drain publish should succeed")
 	}
 
@@ -522,7 +522,7 @@ func TestPublishFailureIsRecorded(t *testing.T) {
 		Records:     []collector.CollectedRecord{{DeviceID: "d1", DeviceAddressID: "a1", Value: "1"}},
 	}
 
-	if ch.publish(&stubClient{connected: true, failOn: "/t/d1/read"}, b, false) {
+	if ok, _ := ch.publish(&stubClient{connected: true, failOn: "/t/d1/read"}, b, false); ok {
 		t.Fatal("publish should fail on rejected topic")
 	}
 
@@ -532,5 +532,83 @@ func TestPublishFailureIsRecorded(t *testing.T) {
 	}
 	if msgs[0].Target != "/t/d1/read" || msgs[0].Error == "" {
 		t.Fatalf("recent = %+v, want failure with topic and error", msgs[0])
+	}
+}
+
+// perDeviceEncoder 只对指定设备编码失败，用于验证确定性编码错误不阻塞补发。
+type perDeviceEncoder struct{ failDevice string }
+
+func (e perDeviceEncoder) Encode(b push.PushBatch) ([]push.EncodedMessage, error) {
+	if b.DeviceID == e.failDevice {
+		return nil, errors.New("boom")
+	}
+	return []push.EncodedMessage{{Payload: []byte(`{}`)}}, nil
+}
+
+func TestPublishEncodeErrorIsPermanent(t *testing.T) {
+	ch, _ := newTestChannelWithSpool(t, &mqttConfig{Topic: "/t/${deviceCode}/read"})
+	ch.encoder = perDeviceEncoder{failDevice: "d1"}
+	b := push.PushBatch{
+		DeviceID:    "d1",
+		DeviceCode:  "d1",
+		CollectedAt: "t",
+		Records:     []collector.CollectedRecord{{DeviceID: "d1", DeviceAddressID: "a1", Value: "1"}},
+	}
+
+	ok, permanent := ch.publish(&stubClient{connected: true}, b, false)
+	if ok || !permanent {
+		t.Fatalf("publish = (%v, %v), want (false, true)", ok, permanent)
+	}
+}
+
+// TestPublishEmptyTopicIsRetryable 主题配置为空必须是可重试失败：
+// 改好配置后通道以同一 channel_id 重建，会继续补发同一份 spool。
+// 若这里判成永久性错误，恢复配置前缓存的数据会被提前删掉。
+func TestPublishEmptyTopicIsRetryable(t *testing.T) {
+	ch, _ := newTestChannelWithSpool(t, &mqttConfig{Topic: ""})
+	b := push.PushBatch{
+		DeviceID:    "d1",
+		DeviceCode:  "d1",
+		CollectedAt: "t",
+		Records:     []collector.CollectedRecord{{DeviceID: "d1", DeviceAddressID: "a1", Value: "1"}},
+	}
+
+	ok, permanent := ch.publish(&stubClient{connected: true}, b, false)
+	if ok || permanent {
+		t.Fatalf("publish = (%v, %v), want (false, false): 空主题应保留待配置修复后补发", ok, permanent)
+	}
+}
+
+// TestDrainWindowSkipsUnencodableBatch 编码失败的批次必须删除并跳过，
+// 否则它会永远卡在补发队头，后面的批次再也发不出去。
+func TestDrainWindowSkipsUnencodableBatch(t *testing.T) {
+	ch, spool := newTestChannelWithSpool(t, &mqttConfig{Topic: "/t/${deviceCode}/read"})
+	ch.encoder = perDeviceEncoder{failDevice: "d2"}
+
+	for _, dev := range []string{"d1", "d2", "d3"} {
+		if err := spool.Insert(push.PushBatch{DeviceID: dev, DeviceCode: dev, CollectedAt: "t"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pend, err := spool.FetchOldest(16)
+	if err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+
+	client := &stubClient{connected: true}
+	ok, failID := ch.drainWindow(client, pend)
+	if !ok || failID != 0 {
+		t.Fatalf("drainWindow = (%v, %d), want (true, 0): 编码失败应跳过而非阻塞", ok, failID)
+	}
+
+	n, err := spool.Count()
+	if err != nil {
+		t.Fatalf("count failed: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("spool count = %d, want 0 (坏批已删，后续批次继续补发)", n)
+	}
+	if len(client.published) != 2 {
+		t.Fatalf("published = %v, want d1/d3 均已发出", client.published)
 	}
 }
