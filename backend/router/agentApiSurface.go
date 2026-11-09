@@ -146,12 +146,12 @@ var agentApiSurface = map[string]SurfaceEntry{
 	"GET /device/deleteDevice/:id": {
 		Access: AccessWrite,
 		Params: argNone(),
-		Note:   "**用 GET 实现**，按方法判只读会误删。连带删掉该设备全部点位",
+		Note:   "**用 GET 实现**，按方法判只读会误删。连带删掉该设备全部点位；被事件触发规则引用时返回 40063 且不删除",
 	},
 	"POST /device/batchDeleteDevice": {
 		Access: AccessWrite,
 		Params: argBody(dto.BatchDeleteDeviceDTO{}, nil),
-		Note:   "连带删点位，响应里的 addresses 就是被连带删掉的行数",
+		Note:   "连带删点位，响应里的 addresses 就是被连带删掉的行数；任意一台被事件触发规则引用时整批返回 40063、一台都不删",
 	},
 	"POST /device/importDevice": {
 		Access: AccessWrite,
@@ -210,13 +210,14 @@ var agentApiSurface = map[string]SurfaceEntry{
 	"GET /deviceAddress/deleteDeviceAddress/:id": {
 		Access: AccessWrite,
 		Params: argNone(),
-		Note:   "**用 GET 实现**。删除静默生效（下一轮热加载就少一个点）",
+		Note:   "**用 GET 实现**。删除静默生效（下一轮热加载就少一个点）；被事件触发规则引用时返回 40064 且不删除",
 	},
 	"POST /deviceAddress/batchDeleteDeviceAddress": {
 		Access: AccessWrite,
 		Params: argBody(dto.BatchDeleteDeviceAddressDTO{}, map[string]string{
 			"deviceId": "删除范围的**前置约束**：ids 必须属于这台设备才会被删",
 		}),
+		Note: "任意一个实际会被删的点位被事件触发规则引用时整批返回 40064、一个都不删",
 	},
 	"POST /deviceAddress/importDeviceAddress": {
 		Access: AccessWrite,

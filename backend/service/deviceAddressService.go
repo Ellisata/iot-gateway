@@ -517,16 +517,23 @@ func (s *DeviceAddressService) UpdateDeviceAddress(ctx context.Context, req *dto
 // DeleteDeviceAddress 删除设备地址。
 // 删除后清除该点位的活跃质量报警（历史保留，尽力而为）——
 // 点位没了就不会再有采集信号来恢复它，不清就会永久挂在"未恢复"上。
+//
+// 被事件触发规则引用（动作点位或条件点位）时**拒绝删除**（见
+// ensureAddressesNotReferencedByTriggerRules）：删掉后规则会持续报点位不存在，
+// 条件点位也再不会产生样本。
 func (s *DeviceAddressService) DeleteDeviceAddress(ctx context.Context, id string) error {
 	err := s.sqliteDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("id = ?", id).Delete(&po.DeviceAddress{})
-		if result.Error != nil {
-			return result.Error
+		var existing po.DeviceAddress
+		if err := tx.Select("id").Where("id = ?", id).First(&existing).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return appError.NewAppErrorCtx(enums.DeviceAddressNotExistsEnum.GetCode(), enums.DeviceAddressNotExistsEnum.GetMessage(), enums.DeviceAddressNotExistsEnum.GetMsgKey())
+			}
+			return err
 		}
-		if result.RowsAffected == 0 {
-			return appError.NewAppErrorCtx(enums.DeviceAddressNotExistsEnum.GetCode(), enums.DeviceAddressNotExistsEnum.GetMessage(), enums.DeviceAddressNotExistsEnum.GetMsgKey())
+		if err := ensureAddressesNotReferencedByTriggerRules(tx, []string{id}); err != nil {
+			return err
 		}
-		return nil
+		return tx.Where("id = ?", id).Delete(&po.DeviceAddress{}).Error
 	})
 	if err != nil {
 		return err
@@ -544,12 +551,27 @@ func (s *DeviceAddressService) DeleteDeviceAddress(ctx context.Context, id strin
 //
 // device_id 参与 WHERE：只删这台设备名下的地址，见 BatchDeleteDeviceAddressDTO 的说明。
 // 删除后同样清除这些点位的活跃质量报警（与单条删除一致）。
+//
+// 被事件触发规则引用时整批拒绝（与设备批量删除同口径）：只检查**这次真会删掉**的
+// 点位 —— 传进来但不属于该设备的 id 不参与引用检查，否则会凭空拦下一次合法删除。
 func (s *DeviceAddressService) BatchDeleteDeviceAddress(ctx context.Context, deviceID string, ids []string) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
 	var deleted int64
 	err := s.sqliteDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var targets []po.DeviceAddress
+		if err := tx.Select("id").Where("device_id = ? AND id IN ?", deviceID, ids).
+			Find(&targets).Error; err != nil {
+			return err
+		}
+		targetIDs := make([]string, 0, len(targets))
+		for _, a := range targets {
+			targetIDs = append(targetIDs, a.ID)
+		}
+		if err := ensureAddressesNotReferencedByTriggerRules(tx, targetIDs); err != nil {
+			return err
+		}
 		result := tx.Where("device_id = ? AND id IN ?", deviceID, ids).Delete(&po.DeviceAddress{})
 		if result.Error != nil {
 			return result.Error

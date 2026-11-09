@@ -66,7 +66,7 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 - **MQTT subscription into time-series databases**: subscribes to JSON messages on an external MQTT broker, maps them to collection records and writes them to enabled TDengine / InfluxDB channels — with wildcard and comma-separated multi-topics, QoS, authentication, sample-message preview, connectivity testing, a choice of built-in mapping DSL or a goja JS parser, and hot reload of subscription config.
 - **Disconnection alarms**: automatic detection of device poll failures and channel disconnections (debounce + state machine), recorded on offline/recovery edges, queryable in a unified alarm center.
 - **Web admin console**: dashboard, device objects, address tags, protocol management, channel management, alarms, log viewer and API key management — bilingual (EN/中文) UI.
-- **Open API**: read-only `/openApi/*` endpoints authenticated by an `X-Api-Key` header, for MES / ERP and other external systems.
+- **Open API**: `/openApi/*` endpoints for device/point queries, control writes, thing-model batch upserts/deletes and alarm queries, authenticated by an `X-Api-Key` header, for MES / ERP and other external systems.
 - **Single-binary deployment**: frontend embedded via `go:embed`, SQLite implemented in pure Go (CGO-free). The binary plus a `plugins/` directory is the whole system; the binary **links no protocol library at all** (protocol libraries ship with the plugins), so its dependency surface is much smaller. Can be registered as a Windows service or Linux systemd service with auto-start and crash restart.
 
 ## Architecture
@@ -134,12 +134,13 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 |---|---|
 | `mqtt` | Eclipse Paho MQTT client — QoS, TLS, last-will, etc. |
 | `http` | HTTP/Webhook — POST/PUT/PATCH, Bearer / Basic / HMAC-SHA256 auth, custom headers, offline spool and replay |
+| `kafka` | Apache Kafka via franz-go (pure Go) — SASL/PLAIN, TLS, configurable acks, per-device keyed partitions, offline spool and replay |
 | `tdengine-v3` | TDEngine 3.x via the official driver-go WebSocket driver (CGO-free, connects through taosAdapter) |
 | `influxdb-v3` | InfluxDB 3.x via a self-built Line-Protocol-over-HTTP client (no heavy official SDK) |
 
 > Channels are now **type + instance name**: multiple instances of the same type can coexist (e.g. two HTTP channels for MES and ERP).
 >
-> Message-based channels (`mqtt` / `http`) support two payload formats: `native-json` (default, contract unchanged) and `mapping-json` (customer-defined outbound mapping reusing the subscription vocabulary `path` / `const` / `template` / `map` / `transform`). The console provides payload preview and test send; see [Push channels & outbound mapping](backend/docs/push-channels.md) (中文).
+> Message-based channels (`mqtt` / `http` / `kafka`) support four payload formats: `native-json` (default, contract unchanged), `group-json`, and customer-defined `mapping-json` / `script` (reusing the subscription vocabulary `path` / `const` / `template` / `map` / `transform`). The console provides payload preview and test send; see [Push channels & outbound mapping](backend/docs/push-channels.md) (中文).
 
 
 ## MQTT Subscription into Time-Series Databases
@@ -342,7 +343,7 @@ push:
 │   ├── testutil/       # Test infrastructure (parity goldens / drivertest synthetic protocol)
 │   ├── plugins/        # Plugin runtime directory (build output; shipped in the release archive)
 │   ├── mappingdsl/     # Mapping primitives shared by inbound parsing and outbound mapping (paths / templates / transforms)
-│   ├── push/           # Push engine (mqtt/http/tdengine-v3/influxdb-v3 + outbox + codec/messagechannel)
+│   ├── push/           # Push engine (mqtt/http/kafka/tdengine-v3/influxdb-v3 + outbox + codec/messagechannel)
 │   ├── parser/         # Subscription payload parsers (built-in mapping DSL / goja scripts, emit collection records)
 │   ├── subscribe/      # MQTT subscription engine (connection / queue / hot reload, parse & delivery orchestration)
 │   ├── controller/ service/ model/  # HTTP layers (Controller → Service → Database)

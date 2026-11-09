@@ -11,7 +11,7 @@
 - **HTTP 框架**: Gin v1.12
 - **ORM / 存储**: GORM + SQLite(纯 Go 实现 `glebarez/sqlite`,免 CGO;配置存储,路径见 `default.yaml`)
 - **协议驱动**: 全部为进程外插件(源码在独立仓库 `iot-gateway-drivers`,本文中的 `driversrc/...` 是该仓库路径的简写)。`goburrow/modbus`(Modbus RTU/TCP)、`robinson/gos7`(Siemens S7)、`gopcua/opcua`(OPC UA)等第三方库只被插件二进制链接,**主二进制里不含任何驱动实现**。唯一例外是推送侧的 OPC UA Server 通道(`push/opcuaserver/`)——它是服务端而非驱动,在进程内链接 gopcua 的 server 包
-- **推送**: `eclipse/paho.mqtt.golang`(MQTT)、`gopcua/opcua` server(OPC UA Server 通道)
+- **推送**: `eclipse/paho.mqtt.golang`(MQTT)、`twmb/franz-go`(Kafka)、`gopcua/opcua` server(OPC UA Server 通道)
 - **订阅解析**: `dop251/goja`(纯 Go、无 CGO)执行自定义解析脚本;契约见 [specs/parser-plugins.md](specs/parser-plugins.md)
 - **依赖注入**: Google Wire(编译期 DI,`wire.go` / `wire_gen.go`)
 - **其他**: Viper(配置)、golang-jwt(认证)、go-redis(缓存)、自定义 i18n(JSON)
@@ -59,6 +59,7 @@
 │   ├── codec/           # 载荷编码器实现:nativejson(默认契约)/ mappingjson(出站映射)
 │   ├── messagechannel/  # 消息类通道通用骨架:Outbox + Encoder + Transport
 │   ├── webhook/         # HTTP/Webhook 通道(注册类型 "http")
+│   ├── kafka/           # Kafka 通道(注册类型 "kafka"):franz-go + 设备编码分区
 │   ├── opcuaserver/     # OPC UA Server 通道(注册类型 "opcua"):状态型,地址空间 + 最新值 + 订阅通知
 │   └── mqtt/ tdengine/v3/ influxdb/v3/   # 各通道只实现「负载构造 + 下发 + 连接维护」
 ├── discovery/           # 局域网自动发现: 以 UDP 广播发布网关身份,供管理平台自动发现
@@ -123,7 +124,9 @@
 - `push.NewTemporaryChannel` 用与运行期相同的工厂构建未启动实例,供 `testConnectivity`、
   `preview`、`testSend` 复用;这三个能力走可选接口,不扩充 `push.Channel`。
 - `messagechannel.Channel` 是消息类通道通用骨架(Outbox + 编码 + Transport + 断网补发);
-  HTTP/Webhook(注册名 `http`)基于它实现。MQTT 保留自己的 paho 循环。
+  HTTP/Webhook(注册名 `http`)与 Kafka(注册名 `kafka`)基于它实现。MQTT 保留自己的 paho 循环。
+  Kafka 用可选的 `messagechannel.KeyedTransport` 传设备编码作为 record key,同设备固定分区;
+  可选的 `io.Closer` 让 `Stop`/临时通道释放 kgo 客户端(`push.ReleaseChannel`)。
 
 ### 推送通道的共享骨架([push/outbox.go](push/outbox.go), [push/drain.go](push/drain.go), [push/writer.go](push/writer.go))
 每个通道 = **`push.Outbox`(队列/断网缓存/状态)+ 通用循环(攒批下发 / 补发 / 重连)+

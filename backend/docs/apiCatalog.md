@@ -4,7 +4,7 @@
 > **只读**与**编辑**两类整理清楚，供 Agent 选取工具、拼装参数、判断副作用。
 >
 > 与同目录 [openApi.md](openApi.md) 的分工：那份是给**第三方系统开发者**看的对外契约
-> （只覆盖 `/openApi/*` 六个只读接口，带兼容性承诺）；本文是**全量台账**，
+> （覆盖 `/openApi/*` 开放接口：查询、控制下发与物模型批量 upsert，带兼容性承诺）；本文是**全量台账**，
 > 覆盖网关所有接口，含内部管理接口。两者受众不同，不要互相替代。
 >
 > 本文件**不参与 `go:embed`**（[docs.go](docs.go) 只嵌入 openApi.md / openApi.en.md），
@@ -20,6 +20,7 @@
 | v1.3 | 2026-10-06 | `__surface` 每条新增 `params` 参数表（由反射从控制器绑定的 DTO 导出，184 条参数），dsh 不再需要按字段名猜参数；本文 §0.1 与 §4.1 的参数列以 `__surface` 为准 |
 | v1.4 | 2026-10-09 | 开放接口新增两条可靠性查询（`/openApi/alarm/deviceReliability`、`/openApi/alarm/pointAbnormal`），§3.0 开放接口由 4 条增至 6 条 |
 | v1.5 | 2026-10-24 | 新增只读接口 `POST /pushChannel/previewMapping`（只试编码出站映射，不依赖通道类型/连接配置）；按实际路由把 `/agentApi` 领域接口数校正为 111 |
+| v1.6 | 2026-11-09 | 设备 / 点位删除新增触发规则引用保护：被事件触发规则引用时返回 `40063` / `40064`，批量整批不删 |
 
 ---
 
@@ -30,7 +31,7 @@
 | 通道 | 覆盖范围 | 认证方式 | Agent 友好度 |
 | ---- | -------- | -------- | ------------ |
 | **dsh 专用** `/agentApi/*` | **全部 111 个领域接口**（含全部写操作） | **无任何鉴权**（出厂**关闭**，需在「运行开关」页开启 `agentApi.enabled`） | ★★★ 开启后直接可用 |
-| **开放接口** `/openApi/*` | 仅 6 个只读接口 | 请求头 `X-Api-Key` | ★★★ 直接可用 |
+| **开放接口** `/openApi/*` | 只读查询 + 控制下发 + 物模型批量 upsert | 请求头 `X-Api-Key` | ★★★ 直接可用 |
 | **管理接口**（根路径） | 只读 + 全部编辑能力 | `Authorization: Bearer <JWT>` | ★ 需先完成 RSA-OAEP 登录 |
 
 **决策规则：**
@@ -352,6 +353,9 @@ Agent 不应在无用户意图时自行调用。
 | GET | `/openApi/device/sync` | **分批同步**设备+其全部点位（**游标翻页**，非 `page`/`size`） | `after`(游标，首次不传), `size`*(1~100) | `CursorVo<OpenApiSyncDeviceVO>` |
 | GET | `/openApi/alarm/deviceReliability` | 设备可靠性统计（可用率/故障段数/停机时长/MTTR） | `from`*, `to`*(YYYY-MM-DD，窗口≤90天), `limit`(省略=不截断) | `DeviceReliabilityReportVO` |
 | GET | `/openApi/alarm/pointAbnormal` | 点位异常 top-N（质量异常与超限分开计数） | `deviceId`(可选), `from`*, `to`*, `limit`(省略=服务端默认20) | `PointAbnormalReportVO` |
+| POST | `/openApi/thingModel/batchUpsert` | **物模型与属性批量 upsert**（按 `code` / `identifier`，无则创建、有则更新） | Body: `models`*[] | `OpenApiThingModelBatchUpsertVO` |
+| POST | `/openApi/thingModel/batchDelete` | **物模型批量删除**（按 `code`，连带其属性） | Body: `codes`*[]（≤200） | `OpenApiThingModelBatchDeleteVO` |
+| POST | `/openApi/thingModelProperty/batchDelete` | **物模型属性批量删除**（按 `modelCode` + `identifier`） | Body: `items`*[]（≤200） | `OpenApiThingModelPropertyBatchDeleteVO` |
 
 > 注意 `POST /openApi/device/names` 与 `POST /openApi/deviceAddress/labels` 虽是 POST，
 > 但**是纯查询、无副作用** —— 用 POST 是因为 ID 数组放在 Body 里（列表可能很长）。
@@ -538,6 +542,9 @@ Agent 调用前应先获得用户明确意图。
 > `{requested, deleted, addresses}`。`addresses` 是**随设备一并删掉的点位行数**
 > （表间无外键，不显式删会留下查不到的孤立行）。`deleted` 可能小于 `requested`
 > （勾选后又被人删掉的地址不在删除集里），这属**正常**，不是错误。
+>
+> 被事件触发规则引用（动作设备、动作点位或条件点位命中）的设备**拒绝删除**：
+> 单条与批量都返回错误码 `40063`，批量时整批一台都不删。先修改或删除相关规则再删设备。
 
 #### 设备点位（device_address）
 
@@ -560,6 +567,10 @@ Agent 调用前应先获得用户明确意图。
 
 > `POST /deviceAddress/batchDeleteDeviceAddress` 的 `deviceId` 是**删除范围的前置约束**
 > ——这些 id 必须属于这台设备才会被删。这是为了防止用当前页看到的 id 去删另一台设备的点位。
+>
+> 被事件触发规则引用（动作点位或条件点位命中）的点位**拒绝删除**：
+> 单条与批量都返回错误码 `40064`，批量时整批一个都不删；不属于该设备的 id 不参与
+> 引用检查（它们本来就不会被删）。先修改或删除相关规则再删点位。
 
 #### 采集控制
 

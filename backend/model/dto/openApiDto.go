@@ -38,3 +38,63 @@ type OpenApiSyncSubscriptionDevicePointsDTO struct {
 	After string `form:"after"` // 游标：上一页响应里的 nextAfter；首次不传
 	Size  int    `form:"size" binding:"required,min=1,max=100"`
 }
+
+// OpenApiThingModelBatchUpsertDTO 开放接口物模型与属性批量 upsert 请求。
+//
+// 只约束顶层批次大小（1~100）。**不要给嵌套字段加 dive 校验**：那会让一条坏数据
+// 把整批打成顶层 PARAM_ERROR，破坏「跨模型部分成功」的契约 —— 逐条校验在服务层做。
+type OpenApiThingModelBatchUpsertDTO struct {
+	Models []OpenApiThingModelUpsertDTO `json:"models" binding:"required,min=1,max=100"`
+}
+
+// OpenApiThingModelUpsertDTO 单个物模型的 upsert 条目。
+//
+// Code 是自然键：不存在则创建，存在则更新；创建后不可修改。
+// 可选字段用指针区分「省略」与「显式传空」：省略表示更新时保持原值、创建时取默认值；
+// 显式传空串则清空（Category 空串即「未分类」）。
+type OpenApiThingModelUpsertDTO struct {
+	Code        string                               `json:"code"`
+	Name        string                               `json:"name"`
+	Category    *string                              `json:"category"`
+	Version     *string                              `json:"version"`
+	Description *string                              `json:"description"`
+	Status      *int                                 `json:"status"`
+	Properties  []OpenApiThingModelPropertyUpsertDTO `json:"properties"`
+}
+
+// OpenApiThingModelPropertyUpsertDTO 单个物模型属性的 upsert 条目。
+//
+// Identifier 在模型内是自然键：不存在则创建，存在则更新；创建后不可修改。
+// Kind / AccessMode 在新建时必填；更新时省略表示保持原值（被点位绑定后改变会拒绝）。
+type OpenApiThingModelPropertyUpsertDTO struct {
+	Identifier  string  `json:"identifier"`
+	Name        string  `json:"name"`
+	Kind        *string `json:"kind"`
+	AccessMode  *string `json:"accessMode"`
+	Unit        *string `json:"unit"`
+	Description *string `json:"description"`
+	SortOrder   *int    `json:"sortOrder"`
+	Status      *int    `json:"status"`
+}
+
+// OpenApiThingModelBatchDeleteDTO 开放接口物模型批量删除请求。
+//
+// 按模型标识（code）删除；模型下的属性随模型一起删除。已被设备绑定、或其属性
+// 已被点位绑定的模型会被拒绝（41005），逐条结果互不影响。
+type OpenApiThingModelBatchDeleteDTO struct {
+	Codes []string `json:"codes" binding:"required,min=1,max=200"`
+}
+
+// OpenApiThingModelPropertyBatchDeleteDTO 开放接口物模型属性批量删除请求。
+//
+// 属性按（模型标识 + 属性标识符）定位：这两个字段共同构成属性对外可见的自然键。
+// 已被点位绑定的属性会被拒绝（41006），逐条结果互不影响。
+type OpenApiThingModelPropertyBatchDeleteDTO struct {
+	Items []OpenApiThingModelPropertyDeleteItemDTO `json:"items" binding:"required,min=1,max=200"`
+}
+
+// OpenApiThingModelPropertyDeleteItemDTO 单条属性删除定位。
+type OpenApiThingModelPropertyDeleteItemDTO struct {
+	ModelCode  string `json:"modelCode"`
+	Identifier string `json:"identifier"`
+}

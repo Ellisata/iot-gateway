@@ -1,7 +1,9 @@
 # IoT Gateway Public API Documentation
 
-> This document is intended for **third-party system developers**, describing how to query device data via the gateway public API (`/openApi/*`).
-> Except for **4.8 Control Write**, all endpoints are read-only queries. 4.8 changes the physical device state; make sure you have operational authorization before calling it.
+> This document is intended for **third-party system developers**, describing how to query device data and synchronize thing-model configuration via the gateway public API (`/openApi/*`).
+> Except for **4.8 Control Write** and **4.13~4.15 thing-model configuration writes/deletes**, all endpoints are read-only queries.
+> 4.8 changes the physical device state; make sure you have operational authorization before calling it.
+> 4.13~4.15 only modify thing-model configuration inside the gateway and never touch field devices.
 
 ## Version History
 
@@ -16,6 +18,8 @@
 | v1.6 | 2026-11-02 | 4.8 write permission tightened: for points bound to a thing-model property, the property's `access_mode` must also include `W` (new error code `40039`). Writing to an `RW` point bound to an `R` property is no longer allowed | ⚠️ Yes (previously writable "RW point + R property" now returns `40039`) |
 | v1.7 | 2026-11-06 | Added: alarm history paging (4.9), current active alarms (4.10), threshold record paging (4.11) — detail-level queries that complement the aggregate reports in 4.6 / 4.7 | - |
 | v1.8 | 2026-11-06 | Added: batch sync of subscribed devices and points (4.12, cursor paging, same shape as 4.5; the data source is the device/point metadata index maintained from subscription messages) | - |
+| v1.9 | 2026-11-09 | Added: thing model and property batch upsert (4.13, create-or-update by the `code` / `identifier` natural keys, partial success across models) | - |
+| v1.10 | 2026-11-09 | Added: thing-model batch delete (4.14) and thing-model property batch delete (4.15), deleting per natural key and returning per-item results | - |
 
 ## Compatibility Commitment
 
@@ -115,8 +119,12 @@ Note that an empty string `""` for the device's `lastSuccessTime` means **no suc
 
 ### 3.5 Idempotency and Call Frequency
 
-- Except for 4.8, all public API endpoints are idempotent read-only queries;
+- Except for 4.8 and 4.13~4.15, all public API endpoints are idempotent read-only queries;
 - 4.8 uses `requestId` for idempotency: repeating the same value returns the first result without writing the PLC again;
+- 4.13 upserts by natural keys — `code` for models and `identifier` for properties. Repeating the same payload
+  never creates duplicate rows; the second call just updates the existing rows to the submitted values;
+- 4.14 / 4.15 return `41002` / `41004` when deleting a model or property that no longer exists — this is **not**
+  treated as success. Integrations that retry "ensure absent" may treat those codes as already deleted;
 - Control writes are rate-limited per device and per point; exceeding the limit returns `40038`, so back off and retry;
 - Choose `size` as needed and paginate sequentially for full traversal; avoid high-frequency polling — for most scenarios polling every 5~30 seconds is sufficient.
 
@@ -1069,6 +1077,270 @@ curl -H "X-Api-Key: your-app-key" \
 > - A traversal ends when `hasMore` is `false` (then `nextAfter` is `""`) — **not** when `records`
 >   is empty.
 
+### 4.13 Thing Model and Property Batch Upsert
+
+Create or update thing models and their properties in batches by natural keys: models are matched by `code`,
+and properties by `identifier` within their model. **Create if absent, update if present.** This endpoint only
+modifies thing-model configuration inside the gateway; it never touches field devices and never deletes models
+or properties that are absent from the request.
+
+**Request**
+
+```
+POST /openApi/thingModel/batchUpsert
+X-Api-Key: <AppKey>
+Content-Type: application/json
+```
+
+```json
+{
+  "models": [
+    {
+      "code": "th_sensor",
+      "name": "Temperature & Humidity Sensor",
+      "category": "sensor",
+      "version": "1.0.0",
+      "description": "Workshop environment sensor",
+      "status": 1,
+      "properties": [
+        {
+          "identifier": "temperature",
+          "name": "Temperature",
+          "kind": "float",
+          "accessMode": "R",
+          "unit": "C",
+          "description": "",
+          "sortOrder": 10,
+          "status": 1
+        },
+        {
+          "identifier": "humidity",
+          "name": "Humidity",
+          "kind": "float",
+          "accessMode": "R",
+          "unit": "%"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Request fields**
+
+| Field | Required | Description |
+| ----- | -------- | ----------- |
+| `models` | Yes | 1~100 models |
+| `models[].code` | Yes | Model identifier (starts with a letter; letters, digits, `_`, `-`; ≤64). **Natural key, immutable after creation** |
+| `models[].name` | Yes | Display name (≤100 characters, globally unique) |
+| `models[].category` | No | `sensor` / `meter` / `actuator` / `robot` / `plc` / `other`; omitted = keep current value (new models = uncategorized); explicit `""` = uncategorized |
+| `models[].version` | No | ≤32 characters; omitted = keep current value (new models = `1.0.0`) |
+| `models[].description` | No | ≤500 characters; omitted = keep current value |
+| `models[].status` | No | `1` enabled / `0` disabled; omitted = keep current value (new models = `1`) |
+| `models[].properties` | No | Properties to sync under this model, up to 200; omitted or an empty array means **leave properties unchanged** |
+| `models[].properties[].identifier` | Yes | Property identifier (starts with a letter; letters, digits, `_`; ≤64). **Natural key within the model, immutable after creation** |
+| `models[].properties[].name` | Yes | Property display name (≤100 characters) |
+| `models[].properties[].kind` | Required on create | `bool` / `int` / `uint` / `float` / `string` / `time`; omitted on update = keep current value |
+| `models[].properties[].accessMode` | Required on create | `R` / `W` / `RW`; omitted on update = keep current value |
+| `models[].properties[].unit` | No | ≤32 characters; omitted = keep current value |
+| `models[].properties[].description` | No | ≤500 characters; omitted = keep current value |
+| `models[].properties[].sortOrder` | No | 0~99999; when omitted on create it becomes the model's current maximum +10; omitted on update = keep current value |
+| `models[].properties[].status` | No | `1` enabled / `0` disabled; omitted = keep current value (new properties = `1`) |
+
+**Semantics**
+
+- **Optional fields**: omitted means "do not change"; an explicit empty string clears the value
+  (`category=""` means uncategorized). An empty `kind` / `accessMode` on update is invalid.
+- **Transaction boundary is the model**: a model's metadata and all of its properties commit in one transaction.
+  If any property fails, the whole model (including metadata) rolls back; other models are unaffected — so a batch
+  may partially succeed.
+- **No deletion**: properties absent from the request stay untouched. This endpoint cannot delete models or properties.
+- **Bound properties**: once a property is bound to a point (`device_address.property_id`), an actual change to
+  `kind` / `accessMode` is rejected (`41018`). Unbind it in the admin console first.
+- **Duplicates within a batch**: for a repeated `code`, the first occurrence wins and later entries fail;
+  a repeated `identifier` within one model fails the entire model.
+- **Name uniqueness**: model names are globally unique; a collision with another model fails that model (`41001`).
+- `action=updated` means **matched and synchronized successfully**, even if the submitted values equal the stored ones.
+
+**Response**
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": {
+    "total": 1,
+    "success": 1,
+    "failed": 0,
+    "created": 1,
+    "updated": 0,
+    "propertiesCreated": 2,
+    "propertiesUpdated": 0,
+    "models": [
+      {
+        "code": "th_sensor",
+        "name": "Temperature & Humidity Sensor",
+        "action": "created",
+        "id": "0b1c2d3e4f5a",
+        "properties": [
+          { "identifier": "temperature", "action": "created", "id": "a1b2c3" },
+          { "identifier": "humidity", "action": "created", "id": "d4e5f6" }
+        ]
+      }
+    ]
+  },
+  "serverTime": "2026-11-09 10:30:00"
+}
+```
+
+| Field | Description |
+| ----- | ----------- |
+| `total` | Models in the request |
+| `success` / `failed` | Models succeeded / failed |
+| `created` / `updated` | Among successful models, how many were created / updated |
+| `propertiesCreated` / `propertiesUpdated` | Properties actually created / updated under successful models |
+| `models[]` | Per-model results, in request order |
+| `models[].code` / `name` | Identifier and name from the request |
+| `models[].action` | `created` / `updated` / `failed` |
+| `models[].id` | Gateway-internal model ID (omitted on failure) |
+| `models[].errorCode` / `errorMessage` | Failure reason (present only on failure) |
+| `models[].properties[]` | Per-property results; a failed model contains at most one failed property entry |
+
+> **Note**: a failed model or property **does not** turn the top-level response into an error envelope —
+> it still returns `code=0`, `isSuccess=true`. Callers must inspect `data.failed` and
+> `models[].action/errorCode`.
+
+**Error codes**: per-item errors are listed in §5 as `41001` / `41003` / `41007` / `41008` / `41010` /
+`41018` / `10001`. Malformed JSON, an empty `models`, or more than 100 models fails at the top level
+with `PARAM_ERROR`.
+
+### 4.14 Thing Model Batch Delete
+
+Deletes thing models in batches by model identifier (`code`). **Deleting a model also deletes all of its
+properties.** This endpoint only modifies configuration inside the gateway and never touches field devices.
+
+**Request**
+
+```
+POST /openApi/thingModel/batchDelete
+X-Api-Key: <AppKey>
+Content-Type: application/json
+```
+
+```json
+{ "codes": ["th_sensor", "th_old"] }
+```
+
+| Field | Required | Description |
+| ----- | -------- | ----------- |
+| `codes` | Yes | Model identifiers, 1~200 entries; trimmed and matched exactly against `code` |
+
+**Semantics**
+
+- **Delete protection**: if the model is bound to a device (`device.model_id`), or one of its properties is
+  still bound to a point (`device_address.property_id`), that model returns `41005` and stays untouched.
+- **Independent entries**: one failed model does not affect the others; the top-level response is always a
+  success envelope.
+- **Not found**: a missing model returns `41002` (not treated as success). Integrations that retry
+  "ensure absent" may treat `41002` as already deleted.
+- **Duplicate codes**: if the same `code` appears twice in one batch, the first entry deletes it and the
+  later entry fails with `41002`.
+- Malformed JSON, an empty `codes`, or more than 200 entries fails at the top level with `PARAM_ERROR`.
+
+**Response**
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": {
+    "requested": 2,
+    "deleted": 1,
+    "failed": 1,
+    "results": [
+      { "code": "th_sensor", "action": "deleted" },
+      { "code": "th_old", "action": "failed", "errorCode": "41002", "errorMessage": "thing model not found" }
+    ]
+  },
+  "serverTime": "2026-11-09 11:00:00"
+}
+```
+
+| Field | Description |
+| ----- | ----------- |
+| `requested` / `deleted` / `failed` | Requested entries / actually deleted / failed |
+| `results[].code` | Model identifier from the request |
+| `results[].action` | `deleted` / `failed` |
+| `results[].errorCode` / `errorMessage` | Failure reason (present only on failure) |
+
+### 4.15 Thing Model Property Batch Delete
+
+Deletes thing-model properties in batches by (model identifier `modelCode` + property identifier `identifier`).
+**Only the specified properties are deleted**; other properties of the same model are unaffected. This endpoint
+only modifies configuration inside the gateway and never touches field devices.
+
+**Request**
+
+```
+POST /openApi/thingModelProperty/batchDelete
+X-Api-Key: <AppKey>
+Content-Type: application/json
+```
+
+```json
+{
+  "items": [
+    { "modelCode": "th_sensor", "identifier": "temperature" },
+    { "modelCode": "th_sensor", "identifier": "humidity" }
+  ]
+}
+```
+
+| Field | Required | Description |
+| ----- | -------- | ----------- |
+| `items` | Yes | 1~200 entries |
+| `items[].modelCode` | Yes | Identifier `code` of the owning model |
+| `items[].identifier` | Yes | Property identifier |
+
+**Semantics**
+
+- **Delete protection**: a property bound to a point (`device_address.property_id`) returns `41006` and stays
+  untouched.
+- **Not found**: a missing model returns `41002`; a missing property returns `41004` (neither is success).
+- **Independent entries**: one failure does not affect the others; the top-level response is always a success
+  envelope.
+- **Duplicate entries**: deleting the same property twice in one batch makes later entries fail with `41004`.
+- Malformed JSON, an empty `items`, or more than 200 entries fails at the top level with `PARAM_ERROR`.
+
+**Response**
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": {
+    "requested": 2,
+    "deleted": 2,
+    "failed": 0,
+    "results": [
+      { "modelCode": "th_sensor", "identifier": "temperature", "action": "deleted" },
+      { "modelCode": "th_sensor", "identifier": "humidity", "action": "deleted" }
+    ]
+  },
+  "serverTime": "2026-11-09 11:00:00"
+}
+```
+
+| Field | Description |
+| ----- | ----------- |
+| `requested` / `deleted` / `failed` | Requested entries / actually deleted / failed |
+| `results[].modelCode` / `identifier` | Natural key from the request |
+| `results[].action` | `deleted` / `failed` |
+| `results[].errorCode` / `errorMessage` | Failure reason (present only on failure) |
+
 ## 5. Error Code Reference
 
 The error codes the public API may return are listed below (the complete list is in this section; other internal error codes never appear in public APIs):
@@ -1087,6 +1359,18 @@ The error codes the public API may return are listed below (the complete list is
 | `40036` | 200 | Invalid control write parameters | Fix per msg (duplicate point, >50 items, bad time format, …) |
 | `40037` | 200 | Control write failed (link error, state unknown) | Read back / verify on site before retrying with a new `requestId` |
 | `40038` | 200 | Control writes are too frequent | Back off per the device/point rate limit and retry |
+| `40039` | 200 | The thing-model property bound to this point is read-only | The bound property's `access_mode` must be `W` or `RW`; change it or unbind, then retry |
+| `10001` | 200 | Thing-model/property entry validation failed (per item) | Fix the name, enum value, length or count limit per `models[].errorMessage` |
+| `41001` | 200 | Thing-model name already exists, or duplicate `code` in a batch (per item) | Model names are globally unique — rename, or fix the duplicate `code` |
+| `41003` | 200 | Duplicate property identifier in a batch (per item) | The same `identifier` may appear only once per model per batch |
+| `41002` | 200 | Thing model not found (per item) | It may already be deleted; treat it as deleted or check `code` |
+| `41004` | 200 | Thing-model property not found (per item) | It may already be deleted; check `modelCode` and `identifier` |
+| `41005` | 200 | Thing model is bound to a device, or its properties are bound to points (per item) | Unbind the device/points first, or keep the model |
+| `41006` | 200 | Property is bound to a point and cannot be deleted (per item) | Unbind the point first, then delete |
+| `41007` | 200 | Invalid thing-model code (per item) | Starts with a letter; letters, digits, `_`, `-`; ≤64 |
+| `41008` | 200 | Invalid property identifier (per item) | Starts with a letter; letters, digits, `_`; ≤64 |
+| `41010` | 200 | Invalid thing-model category (per item) | Use `sensor/meter/actuator/robot/plc/other`, or leave it empty |
+| `41018` | 200 | Property is bound to a point and cannot change data type or access mode (per item) | Unbind the point in the admin console first, then change `kind`/`accessMode` |
 | `-1` | 200 | System error | Retry later; if persistent, contact the administrator and check gateway logs |
 
 ## 6. FAQ

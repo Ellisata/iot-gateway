@@ -15,7 +15,8 @@ import (
 // 供外部系统调用。该分组即对外白名单——默认关闭，只有显式挂载到
 // 此分组下的接口才对外开放；新接口在此追加。
 //
-// 除 /control/write（控制下发，高风险管理动作）外，其余接口均为只读查询。
+// 除 /control/write（控制下发，高风险管理动作）与 /thingModel/*（物模型配置
+// 写入 / 删除）外，其余接口均为只读查询。
 func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService, oac *controller.OpenApiController) {
 	openApi := r.Group("/openApi", middleware.OpenApiAuthMiddleware(oass))
 	{
@@ -42,5 +43,15 @@ func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService, oac *contr
 		// 控制下发（**唯一会改变现场设备状态的对外接口**）。
 		// 仍需 control.enabled + 协议 Writable + 点位 W 权限三层同时满足。
 		openApi.POST("/control/write", oac.WriteControl)
+
+		// 物模型配置写入：按 code / identifier upsert 物模型与属性。
+		// 只改网关配置、不触达现场设备；每个模型一个事务，跨模型部分成功；
+		// 请求中未出现的属性不删除（见 docs/openApi.md 4.13）。
+		openApi.POST("/thingModel/batchUpsert", oac.BatchUpsertThingModels)
+
+		// 物模型配置删除（见 docs/openApi.md 4.14 / 4.15）：按自然键批量删除
+		// 模型（连带其属性）或单个属性；逐条独立，绑定保护与单条删除一致。
+		openApi.POST("/thingModel/batchDelete", oac.BatchDeleteThingModels)
+		openApi.POST("/thingModelProperty/batchDelete", oac.BatchDeleteThingModelProperties)
 	}
 }

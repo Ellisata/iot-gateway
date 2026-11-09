@@ -143,6 +143,9 @@ var (
 	CollectorGroupCodeInvalidEnum   = NewBusinessEnum("40047", "采集组编码不合法（字母开头，仅字母数字下划线短横线，且不能为 legacy）", "err.collector_group_code_invalid")
 	CollectorGroupCodeExistsEnum    = NewBusinessEnum("40048", "采集组编码已存在", "err.collector_group_code_exists")
 	CollectorGroupCodeImmutableEnum = NewBusinessEnum("40049", "采集组编码不可修改", "err.collector_group_code_immutable")
+	// 组被推送通道的 config_json.groupIds 订阅时同样拒绝删除：表间没有外键，
+	// 删掉后通道配置里会留下一个永远匹配不到任何批次的组 ID。
+	CollectorGroupInUseByChannelEnum = NewBusinessEnum("40050", "采集组已被推送通道订阅，不能删除", "err.collector_group_subscribed")
 
 	// 事件触发采集规则错误码（同属采集/设备域，接在 40049 之后）
 	TriggerRuleExistsEnum                   = NewBusinessEnum("40051", "触发规则名称已存在", "err.trigger_rule_exists")
@@ -157,6 +160,12 @@ var (
 	TriggerRuleCodeInvalidEnum              = NewBusinessEnum("40060", "触发规则编码不合法（字母开头，仅字母/数字/下划线/短横线，最长 64）", "err.trigger_rule_code_invalid")
 	TriggerRuleCodeExistsEnum               = NewBusinessEnum("40061", "触发规则编码已存在", "err.trigger_rule_code_exists")
 	TriggerRuleCodeImmutableEnum            = NewBusinessEnum("40062", "触发规则编码创建后不可修改", "err.trigger_rule_code_immutable")
+	// 设备/点位被规则引用时拒绝删除：删掉之后规则会持续报
+	// "condition address ... not found" 且再也不触发，先让用户解除引用。
+	DeviceReferencedByTriggerRuleEnum        = NewBusinessEnum("40063", "设备已被事件触发规则引用，请先修改或删除相关规则", "err.device_referenced_by_trigger_rule")
+	DeviceAddressReferencedByTriggerRuleEnum = NewBusinessEnum("40064", "点位已被事件触发规则引用，请先修改或删除相关规则", "err.device_address_referenced_by_trigger_rule")
+	// 删设备会级联删掉名下采集组：若有组被推送通道订阅，同样先让用户解除引用。
+	DeviceReferencedByPushChannelEnum = NewBusinessEnum("40065", "设备下的采集组已被推送通道订阅，请先修改或删除相关推送通道", "err.device_referenced_by_push_channel")
 
 	// 物模型相关错误码（归属设备域，沿用 4000x 分段）
 	ThingModelExistsEnum                 = NewBusinessEnum("41001", "物模型标识或名称已存在", "err.thing_model_exists")

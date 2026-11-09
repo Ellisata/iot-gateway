@@ -3,13 +3,15 @@
 
 // Package messagechannel 是消息类推送通道的通用骨架。
 //
-// 它把「编码一次、发送一条或多条消息」的通道（HTTP/Webhook、未来的 Kafka）
+// 它把「编码一次、发送一条或多条消息」的通道（HTTP/Webhook、Kafka）
 // 从 Outbox/断网缓存/补发/状态统计中解耦出来；通道只需实现 Transport。
 // MQTT 仍保留自己的 paho 循环（AutoReconnect 语义不同），不走这里。
 package messagechannel
 
 import (
 	"context"
+	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,6 +45,21 @@ type Outcome struct {
 type Transport interface {
 	Probe(ctx context.Context) error
 	Send(ctx context.Context, payload []byte) Outcome
+}
+
+// KeyedTransport 可选：需要消息键的传输（如 Kafka 分区/顺序）实现此接口。
+// 同一设备的多条批次使用同一个键，落在同一分区，下游才能按设备保序消费。
+type KeyedTransport interface {
+	Transport
+	SendKeyed(ctx context.Context, key string, payload []byte) Outcome
+}
+
+// MessageKey 返回批次的稳定消息键：优先设备编码，缺失时回落设备 ID。
+func MessageKey(b push.PushBatch) string {
+	if code := strings.TrimSpace(b.DeviceCode); code != "" {
+		return code
+	}
+	return strings.TrimSpace(b.DeviceID)
 }
 
 // Config 构造参数。
@@ -144,6 +161,7 @@ func (c *Channel) Stop() {
 	c.mu.Lock()
 	if !c.running {
 		c.mu.Unlock()
+		c.Release()
 		return
 	}
 	c.running = false
@@ -156,6 +174,15 @@ func (c *Channel) Stop() {
 	c.ob.Close()
 	<-done
 	c.ob.Wait()
+	c.Release()
+}
+
+// Release 释放传输层持有的后台资源（如 Kafka 客户端）。幂等。
+// 预览/测试发送/连通性测试构造的临时通道未启动、不会走 Stop，用完必须显式释放。
+func (c *Channel) Release() {
+	if closer, ok := c.cfg.Transport.(io.Closer); ok {
+		_ = closer.Close()
+	}
 }
 
 func (c *Channel) run() {
@@ -236,7 +263,7 @@ func (c *Channel) sendBatch(b push.PushBatch, fromDrain bool) FailureKind {
 	for _, msg := range msgs {
 		started := time.Now()
 		ctx, cancel := context.WithTimeout(c.ctx, c.cfg.Timeout)
-		out := c.cfg.Transport.Send(ctx, msg.Payload)
+		out := c.dispatch(ctx, b, msg.Payload)
 		cancel()
 		c.recordRecent(b, msg.Payload, out, started, fromDrain)
 
@@ -259,6 +286,14 @@ func (c *Channel) sendBatch(b push.PushBatch, fromDrain bool) FailureKind {
 		c.ob.MarkPublished(1)
 	}
 	return FailureNone
+}
+
+// dispatch 发送一条编码后的载荷：需要消息键的传输走 SendKeyed。
+func (c *Channel) dispatch(ctx context.Context, b push.PushBatch, payload []byte) Outcome {
+	if kt, ok := c.cfg.Transport.(KeyedTransport); ok {
+		return kt.SendKeyed(ctx, MessageKey(b), payload)
+	}
+	return c.cfg.Transport.Send(ctx, payload)
 }
 
 // recordRecent 记录一条出站报文（仅内存观测）。
@@ -375,7 +410,7 @@ func (c *Channel) TestSend(b push.PushBatch) push.TestSendResult {
 	res := push.TestSendResult{Success: true, Messages: len(msgs)}
 	for _, msg := range msgs {
 		ctx, cancel := context.WithTimeout(context.Background(), c.cfg.Timeout)
-		out := c.cfg.Transport.Send(ctx, msg.Payload)
+		out := c.dispatch(ctx, b, msg.Payload)
 		cancel()
 		res.StatusCode = out.StatusCode
 		if out.Kind != FailureNone {

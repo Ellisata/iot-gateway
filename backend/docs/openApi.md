@@ -1,7 +1,8 @@
 # IoT 网关对外开放接口文档
 
-> 本文档面向**第三方系统开发人员**，描述通过网关开放接口（`/openApi/*`）查询设备数据的方式。
-> 除 **4.8 控制下发**外，接口均为只读查询；4.8 会改变现场设备状态，调用前请确认已获得操作授权。
+> 本文档面向**第三方系统开发人员**，描述通过网关开放接口（`/openApi/*`）查询设备数据、同步物模型配置的方式。
+> 除 **4.8 控制下发**与 **4.13~4.15 物模型配置写入/删除**外，接口均为只读查询；
+> 4.8 会改变现场设备状态，调用前请确认已获得操作授权；4.13~4.15 只修改网关内物模型配置，不触达现场设备。
 
 ## 版本记录
 
@@ -16,6 +17,8 @@
 | v1.6 | 2026-11-02 | 4.8 写入权限收紧：绑定了物模型属性的点位，属性 `access_mode` 也必须含 `W`（新增错误码 `40039`）。`RW` 点位绑定 `R` 属性时不再允许写入 | ⚠️ 是（此前能写的「RW 点位 + R 属性」现在返回 `40039`） |
 | v1.7 | 2026-11-06 | 新增：报警历史分页（4.9）、当前活跃报警（4.10）、越限记录分页（4.11）—— 与 4.6/4.7 的聚合报表互补，提供明细级查询 | - |
 | v1.8 | 2026-11-06 | 新增：分批同步订阅设备与点位（4.12，游标翻页，形态与 4.5 一致；数据源是订阅报文维护的设备/点位元信息索引） | - |
+| v1.9 | 2026-11-09 | 新增：物模型与属性批量 upsert（4.13，按 `code` / `identifier` 自然键创建或更新，跨模型部分成功） | - |
+| v1.10 | 2026-11-09 | 新增：物模型批量删除（4.14）、物模型属性批量删除（4.15），按自然键逐条删除并返回逐条结果 | - |
 
 ## 兼容性承诺
 
@@ -115,8 +118,12 @@ http://<网关IP>:9082
 
 ### 3.5 幂等与调用频率
 
-- 除 4.8 外，所有开放接口均为幂等的只读查询；
+- 除 4.8 与 4.13~4.15 外，所有开放接口均为幂等的只读查询；
 - 4.8 控制下发使用 `requestId` 做幂等：相同值重复调用返回首次结果，不重复写 PLC；
+- 4.13 物模型 upsert 以 `code`（模型）与 `identifier`（属性）为自然键：重复提交同一份数据不会产生重复行，
+  第二次只会把已有行更新为请求中的值；
+- 4.14 / 4.15 删除已不存在的模型或属性时分别返回 `41002` / `41004`，**不会**视为成功；
+  外部系统若按「确保不存在」重试，可把这两个码当作已删除处理；
 - 控制下发受设备级/点位级每分钟写入次数限制，超限返回 `40038`，请退避后重试；
 - 建议 `size` 按需取值、全量遍历时依次翻页；请勿高频轮询，一般场景下 5~30 秒轮询一次足够。
 
@@ -1059,6 +1066,261 @@ curl -H "X-Api-Key: your-app-key" \
 > - 遍历结束的标志是 `hasMore` 为 `false`（此时 `nextAfter` 为 `""`），**不是**某页
 >   `records` 变空。
 
+### 4.13 物模型与属性批量 upsert
+
+按自然键批量创建或更新物模型及其属性：模型按 `code` 匹配，属性在模型内按 `identifier` 匹配；
+**不存在则创建，存在则更新**。本接口只修改网关内的物模型配置，不触达现场设备，
+也不会删除请求中未出现的模型或属性。
+
+**请求**
+
+```
+POST /openApi/thingModel/batchUpsert
+X-Api-Key: <AppKey>
+Content-Type: application/json
+```
+
+```json
+{
+  "models": [
+    {
+      "code": "th_sensor",
+      "name": "温湿度传感器",
+      "category": "sensor",
+      "version": "1.0.0",
+      "description": "车间环境传感器",
+      "status": 1,
+      "properties": [
+        {
+          "identifier": "temperature",
+          "name": "温度",
+          "kind": "float",
+          "accessMode": "R",
+          "unit": "℃",
+          "description": "",
+          "sortOrder": 10,
+          "status": 1
+        },
+        {
+          "identifier": "humidity",
+          "name": "湿度",
+          "kind": "float",
+          "accessMode": "R",
+          "unit": "%"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**请求字段**
+
+| 字段 | 必填 | 说明 |
+| ---- | ---- | ---- |
+| `models` | 是 | 1~100 条模型 |
+| `models[].code` | 是 | 模型标识（字母开头，仅字母数字下划线短横线，≤64）。**自然键，创建后不可改** |
+| `models[].name` | 是 | 模型显示名（≤100 字符，全局唯一） |
+| `models[].category` | 否 | `sensor` / `meter` / `actuator` / `robot` / `plc` / `other`；省略 = 保持原值（新建时为未分类），显式 `""` = 未分类 |
+| `models[].version` | 否 | ≤32 字符；省略 = 保持原值（新建时 `1.0.0`） |
+| `models[].description` | 否 | ≤500 字符；省略 = 保持原值 |
+| `models[].status` | 否 | `1` 启用 / `0` 停用；省略 = 保持原值（新建时 `1`） |
+| `models[].properties` | 否 | 该模型下要同步的属性，最多 200 条；省略或空数组表示**不改动**该模型的属性 |
+| `models[].properties[].identifier` | 是 | 属性标识符（字母开头，仅字母数字下划线，≤64）。**模型内自然键，创建后不可改** |
+| `models[].properties[].name` | 是 | 属性显示名（≤100 字符） |
+| `models[].properties[].kind` | 新建必填 | `bool` / `int` / `uint` / `float` / `string` / `time`；更新时省略 = 保持原值 |
+| `models[].properties[].accessMode` | 新建必填 | `R` / `W` / `RW`；更新时省略 = 保持原值 |
+| `models[].properties[].unit` | 否 | ≤32 字符；省略 = 保持原值 |
+| `models[].properties[].description` | 否 | ≤500 字符；省略 = 保持原值 |
+| `models[].properties[].sortOrder` | 否 | 0~99999；新建省略时取该模型当前最大值 +10，更新省略 = 保持原值 |
+| `models[].properties[].status` | 否 | `1` 启用 / `0` 停用；省略 = 保持原值（新建时 `1`） |
+
+**语义说明**
+
+- **可选字段**：省略表示“不改动”；显式传空串表示清空（`category` 空串即未分类）。
+  `kind` / `accessMode` 更新时显式传空串属于非法值。
+- **事务边界是模型**：同一模型的元数据与全部属性在一个事务里提交；任一属性失败会回滚该模型
+  （包括元数据），其它模型不受影响 —— 因此一批请求可能部分成功。
+- **不删除**：请求中未出现的属性保持原样；本接口没有删除模型或属性的能力。
+- **已绑定属性**：属性一旦被点位（`device_address.property_id`）绑定，`kind` / `accessMode`
+  的实际变更会被拒绝（`41018`），需先在管理端解除绑定。
+- **批次内重复**：同一批次重复出现同一 `code` 时，首次出现者生效，后续条目失败；
+  同一模型内重复出现同一 `identifier` 时，整个模型失败。
+- **名称唯一**：模型名称全局唯一，与其它模型撞名时该模型失败（`41001`）。
+- `action=updated` 表示**匹配并同步成功**，即使本次提交的值与库中完全相同。
+
+**响应**
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": {
+    "total": 1,
+    "success": 1,
+    "failed": 0,
+    "created": 1,
+    "updated": 0,
+    "propertiesCreated": 2,
+    "propertiesUpdated": 0,
+    "models": [
+      {
+        "code": "th_sensor",
+        "name": "温湿度传感器",
+        "action": "created",
+        "id": "0b1c2d3e4f5a",
+        "properties": [
+          { "identifier": "temperature", "action": "created", "id": "a1b2c3" },
+          { "identifier": "humidity", "action": "created", "id": "d4e5f6" }
+        ]
+      }
+    ]
+  },
+  "serverTime": "2026-11-09 10:30:00"
+}
+```
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `total` | 请求中的模型数 |
+| `success` / `failed` | 成功 / 失败的模型数 |
+| `created` / `updated` | 成功的模型中，新建 / 更新的数量 |
+| `propertiesCreated` / `propertiesUpdated` | 成功模型中实际新建 / 更新的属性数 |
+| `models[]` | 逐条结果，顺序与请求一致 |
+| `models[].code` / `name` | 请求中的标识与名称 |
+| `models[].action` | `created` / `updated` / `failed` |
+| `models[].id` | 模型的网关内部 ID（失败时省略） |
+| `models[].errorCode` / `errorMessage` | 失败原因（仅失败时出现） |
+| `models[].properties[]` | 属性逐条结果；失败模型至多给出一条失败属性明细 |
+
+> **注意**：批量中单个模型/属性失败**不会**把顶层响应变成错误信封 —— 顶层仍是 `code=0`、
+> `isSuccess=true`，调用方必须检查 `data.failed` 与 `models[].action/errorCode`。
+
+**错误码**：逐条错误见 §5 中 `41001` / `41003` / `41007` / `41008` / `41010` / `41018` / `10001`；
+请求体格式错误、`models` 为空或超过 100 条时，顶层返回 `PARAM_ERROR`。
+
+### 4.14 物模型批量删除
+
+按模型标识（`code`）批量删除物模型。**删除模型会连带删除其全部属性**；本接口只修改网关内配置，
+不触达现场设备。
+
+**请求**
+
+```
+POST /openApi/thingModel/batchDelete
+X-Api-Key: <AppKey>
+Content-Type: application/json
+```
+
+```json
+{ "codes": ["th_sensor", "th_old"] }
+```
+
+| 字段 | 必填 | 说明 |
+| ---- | ---- | ---- |
+| `codes` | 是 | 模型标识数组，1~200 条；逐条 trim 后按 `code` 精确匹配 |
+
+**语义说明**
+
+- **删除保护**：模型已被设备绑定（`device.model_id`），或模型下仍有属性被点位绑定
+  （`device_address.property_id`）时，该模型返回 `41005` 并保持原样。
+- **逐条独立**：一个模型失败不影响其它模型；顶层响应始终是成功信封。
+- **不存在**：模型不存在返回 `41002`（不视为成功）；外部系统若按「确保不存在」重试，
+  可把 `41002` 当作已删除处理。
+- **重复 code**：同一批次重复出现同一 `code` 时，第一条删除成功后，后续条目因不存在返回 `41002`。
+- 请求体格式错误、`codes` 为空或超过 200 条时，顶层返回 `PARAM_ERROR`。
+
+**响应**
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": {
+    "requested": 2,
+    "deleted": 1,
+    "failed": 1,
+    "results": [
+      { "code": "th_sensor", "action": "deleted" },
+      { "code": "th_old", "action": "failed", "errorCode": "41002", "errorMessage": "物模型不存在" }
+    ]
+  },
+  "serverTime": "2026-11-09 11:00:00"
+}
+```
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `requested` / `deleted` / `failed` | 请求条数 / 实际删除数 / 失败数 |
+| `results[].code` | 请求中的模型标识 |
+| `results[].action` | `deleted` / `failed` |
+| `results[].errorCode` / `errorMessage` | 失败原因（仅失败时出现） |
+
+### 4.15 物模型属性批量删除
+
+按（模型标识 `modelCode` + 属性标识符 `identifier`）批量删除物模型属性。**只删除指定的属性**，
+不影响同模型的其它属性；本接口只修改网关内配置，不触达现场设备。
+
+**请求**
+
+```
+POST /openApi/thingModelProperty/batchDelete
+X-Api-Key: <AppKey>
+Content-Type: application/json
+```
+
+```json
+{
+  "items": [
+    { "modelCode": "th_sensor", "identifier": "temperature" },
+    { "modelCode": "th_sensor", "identifier": "humidity" }
+  ]
+}
+```
+
+| 字段 | 必填 | 说明 |
+| ---- | ---- | ---- |
+| `items` | 是 | 1~200 条 |
+| `items[].modelCode` | 是 | 所属模型的标识 `code` |
+| `items[].identifier` | 是 | 属性标识符 |
+
+**语义说明**
+
+- **删除保护**：属性已被点位绑定（`device_address.property_id`）时返回 `41006` 并保持原样。
+- **不存在**：模型不存在返回 `41002`，属性不存在返回 `41004`（均不视为成功）。
+- **逐条独立**：一条失败不影响其它条目；顶层响应始终是成功信封。
+- **重复条目**：同一批次重复删除同一属性时，第一条成功后，后续条目因不存在返回 `41004`。
+- 请求体格式错误、`items` 为空或超过 200 条时，顶层返回 `PARAM_ERROR`。
+
+**响应**
+
+```json
+{
+  "code": "0",
+  "msg": "success",
+  "isSuccess": true,
+  "data": {
+    "requested": 2,
+    "deleted": 2,
+    "failed": 0,
+    "results": [
+      { "modelCode": "th_sensor", "identifier": "temperature", "action": "deleted" },
+      { "modelCode": "th_sensor", "identifier": "humidity", "action": "deleted" }
+    ]
+  },
+  "serverTime": "2026-11-09 11:00:00"
+}
+```
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `requested` / `deleted` / `failed` | 请求条数 / 实际删除数 / 失败数 |
+| `results[].modelCode` / `identifier` | 请求中的自然键 |
+| `results[].action` | `deleted` / `failed` |
+| `results[].errorCode` / `errorMessage` | 失败原因（仅失败时出现） |
+
 ## 5. 错误码总表
 
 开放接口可能返回的错误码如下（完整列表见本节，其他内部错误码不会出现在开放接口中）：
@@ -1078,6 +1340,17 @@ curl -H "X-Api-Key: your-app-key" \
 | `40037` | 200 | 控制下发失败（链路错误，状态未知） | 先回读/现场确认，再决定是否换 `requestId` 重试 |
 | `40038` | 200 | 控制下发过于频繁 | 按设备级/点位级限流退避后重试 |
 | `40039` | 200 | 该点位绑定的物模型属性为只读 | 点位绑定的属性 `access_mode` 需为 `W` 或 `RW`；改属性模式或解绑后重试 |
+| `10001` | 200 | 物模型/属性条目参数校验失败（逐条） | 按 `models[].errorMessage` 修正名称、枚举值、长度或数量上限 |
+| `41001` | 200 | 物模型名称已存在，或批次内 `code` 重复（逐条） | 模型名称全局唯一；换一个名称，或修正批次内重复的 `code` |
+| `41003` | 200 | 批次内属性标识符重复（逐条） | 同一批次内同一模型的 `identifier` 只能出现一次 |
+| `41002` | 200 | 物模型不存在（逐条） | 模型可能已被删除；按「已删除」处理或核对 `code` |
+| `41004` | 200 | 物模型属性不存在（逐条） | 属性可能已被删除；核对 `modelCode` 与 `identifier` |
+| `41005` | 200 | 物模型已被设备绑定或其属性已被点位绑定，不能删除（逐条） | 先解绑设备/点位，或保留该模型 |
+| `41006` | 200 | 属性已被点位绑定，不能删除（逐条） | 先解除点位绑定再删除 |
+| `41007` | 200 | 物模型标识不合法（逐条） | 字母开头，仅字母数字下划线短横线，≤64 |
+| `41008` | 200 | 属性标识符不合法（逐条） | 字母开头，仅字母数字下划线，≤64 |
+| `41010` | 200 | 物模型分类不合法（逐条） | 取 `sensor/meter/actuator/robot/plc/other` 或留空 |
+| `41018` | 200 | 属性已被点位绑定，不能修改数据类型或读写模式（逐条） | 先在管理端解除点位绑定，再修改 `kind`/`accessMode` |
 | `-1` | 200 | 系统错误 | 稍后重试，持续出现请联系管理员并查看网关日志 |
 
 ## 6. FAQ

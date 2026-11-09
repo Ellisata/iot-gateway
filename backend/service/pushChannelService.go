@@ -240,6 +240,7 @@ func (s *PushChannelService) PreviewPushChannel(ctx context.Context, req *dto.Pr
 	if err != nil {
 		return &vo.PushChannelPreviewVO{Error: err.Error()}
 	}
+	defer push.ReleaseChannel(ch)
 	previewer, ok := ch.(push.Previewer)
 	if !ok {
 		return &vo.PushChannelPreviewVO{Error: "该通道类型不支持载荷预览"}
@@ -283,6 +284,7 @@ func (s *PushChannelService) TestSendPushChannel(ctx context.Context, req *dto.T
 	if err != nil {
 		return &vo.PushChannelTestSendVO{Error: err.Error()}
 	}
+	defer push.ReleaseChannel(ch)
 	sender, ok := ch.(push.TestSender)
 	if !ok {
 		return &vo.PushChannelTestSendVO{Error: "该通道类型不支持测试发送"}

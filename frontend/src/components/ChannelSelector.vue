@@ -53,6 +53,7 @@ const { types, loading, load } = usePushChannelTypes()
 const fallback = [
   { type: 'mqtt', label: 'MQTT' },
   { type: 'http', label: 'HTTP / Webhook' },
+  { type: 'kafka', label: 'Kafka' },
   { type: 'tdengine-v3', label: 'TDengine v3' },
   { type: 'influxdb-v3', label: 'InfluxDB v3' },
 ]

@@ -128,6 +128,80 @@ func TestCollectorGroupCRUDAndDeleteGuard(t *testing.T) {
 	}
 }
 
+// TestCollectorGroupDeleteRejectsPushChannelSubscription 组被推送通道订阅时拒绝删除。
+//
+// 覆盖三点：停用通道同样算引用；只拦被订阅的那个组；从通道配置移除后即可删除。
+func TestCollectorGroupDeleteRejectsPushChannelSubscription(t *testing.T) {
+	db := newDeviceAddressImportTestDB(t)
+	ctx := context.Background()
+
+	if err := db.Create(&po.Device{ID: "dev-1", Name: "dev1", ProtocolID: "proto-1", ProtocolJSON: "{}", Status: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := NewCollectorGroupService(db)
+
+	createGroup := func(code string) string {
+		t.Helper()
+		if err := svc.CreateCollectorGroup(ctx, &dto.CreateCollectorGroupDTO{
+			DeviceID: "dev-1", Code: code, Name: code, IntervalMs: 500,
+		}); err != nil {
+			t.Fatalf("create %s: %v", code, err)
+		}
+		var group po.CollectorGroup
+		if err := db.Where("device_id = ? AND code = ?", "dev-1", code).First(&group).Error; err != nil {
+			t.Fatalf("load %s: %v", code, err)
+		}
+		return group.ID
+	}
+
+	subscribed := createGroup("fast")
+	notSubscribed := createGroup("slow")
+
+	// 停用的通道也拦住删除：重新启用时同样要求引用完整。
+	if err := db.Create(&po.PushChannel{
+		ID:         "ch-1",
+		Type:       "mqtt",
+		Name:       "ch-1",
+		Status:     0,
+		ConfigJSON: `{"broker":"127.0.0.1","topic":"iot/${groupCode}","groupIds":["` + subscribed + `"]}`,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	err := svc.DeleteCollectorGroup(ctx, subscribed)
+	if got := errCode(t, err); got != enums.CollectorGroupInUseByChannelEnum.GetCode() {
+		t.Errorf("delete subscribed code = %s, want %s", got, enums.CollectorGroupInUseByChannelEnum.GetCode())
+	}
+	var remain int64
+	if err := db.Model(&po.CollectorGroup{}).Where("id = ?", subscribed).Count(&remain).Error; err != nil {
+		t.Fatal(err)
+	}
+	if remain != 1 {
+		t.Fatalf("subscribed group rows after rejected delete = %d, want 1", remain)
+	}
+
+	// 未被订阅的组不受影响。
+	if err := svc.DeleteCollectorGroup(ctx, notSubscribed); err != nil {
+		t.Fatalf("delete unsubscribed group: %v", err)
+	}
+
+	// 坏掉的通道配置不挡删除（引擎本来就会跳过它）。
+	if err := db.Create(&po.PushChannel{
+		ID: "ch-bad", Type: "mqtt", Name: "ch-bad", ConfigJSON: `not-json`,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 从通道配置移除订阅后即可删除。
+	if err := db.Model(&po.PushChannel{}).Where("id = ?", "ch-1").
+		Update("config_json", `{"broker":"127.0.0.1","topic":"iot/${groupCode}"}`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteCollectorGroup(ctx, subscribed); err != nil {
+		t.Fatalf("delete after unsubscribing: %v", err)
+	}
+}
+
 // TestBatchAssignCollectorGroupRejectsCrossDevice 组必须属于点位所在设备。
 func TestBatchAssignCollectorGroupRejectsCrossDevice(t *testing.T) {
 	db := newDeviceAddressImportTestDB(t)

@@ -32,6 +32,15 @@ type Channel interface {
 	TestConnectivity() error
 }
 
+// Releaser 可选：释放通道持有的后台资源（如 Kafka 客户端）。
+//
+// 预览 / 测试发送 / 连通性测试构造的临时通道不会 Start/Stop，用完必须显式释放；
+// 运行中的通道由 Stop 负责释放。用可选接口而不是给 Channel 增加方法，
+// 是为了不强迫不需要资源的通道（webhook / mqtt）也实现一个空方法。
+type Releaser interface {
+	Release()
+}
+
 // TimeSeriesChannel 标记接口：该通道的数据最终落在时序数据库（TDengine / InfluxDB）。
 //
 // MQTT 订阅的数据经此接口定向投递，避免再经推送引擎里的 MQTT 通道回环发布
@@ -117,6 +126,14 @@ func NewTemporaryChannel(db *gorm.DB, channelType, name, configJSON string) (Cha
 	return factory(db, &po.PushChannel{Name: name, Type: typ, ConfigJSON: configJSON})
 }
 
+// ReleaseChannel 释放通道持有的后台资源（通道实现了 Releaser 时）。
+// 临时通道不会 Start/Stop，用完必须调用；对不持有资源的通道是空操作。
+func ReleaseChannel(ch Channel) {
+	if r, ok := ch.(Releaser); ok {
+		r.Release()
+	}
+}
+
 // TestChannelConnectivity 根据通道类型名与 config_json 测试通道连通性。
 // 复用类型工厂构建临时通道实例（同时校验配置合法性），再调用其 TestConnectivity
 // 建立连接探测后释放，不落库、不启动后台 goroutine。测试通道若启用断网缓存
@@ -126,5 +143,6 @@ func TestChannelConnectivity(db *gorm.DB, channelType, configJSON string) error 
 	if err != nil {
 		return err
 	}
+	defer ReleaseChannel(ch)
 	return ch.TestConnectivity()
 }

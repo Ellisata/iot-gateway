@@ -14,16 +14,26 @@ import (
 
 // OpenApiController 开放接口控制器（供外部系统凭密钥调用）。
 //
-// 除控制下发外均为只读查询。控制下发仍受 control.enabled、协议 Writable、
-// 点位 rw_permission 与物模型属性 access_mode 四层约束，见 service.ControlService。
+// 除控制下发与物模型批量 upsert 外均为只读查询。控制下发仍受 control.enabled、
+// 协议 Writable、点位 rw_permission 与物模型属性 access_mode 四层约束，见
+// service.ControlService；物模型 upsert 只维护配置，不触达现场设备。
 type OpenApiController struct {
-	openApiService *service.OpenApiService
-	controlService *service.ControlService
+	openApiService    *service.OpenApiService
+	controlService    *service.ControlService
+	thingModelService *service.ThingModelService
 }
 
 // NewOpenApiController 创建开放接口控制器
-func NewOpenApiController(openApiService *service.OpenApiService, controlService *service.ControlService) *OpenApiController {
-	return &OpenApiController{openApiService: openApiService, controlService: controlService}
+func NewOpenApiController(
+	openApiService *service.OpenApiService,
+	controlService *service.ControlService,
+	thingModelService *service.ThingModelService,
+) *OpenApiController {
+	return &OpenApiController{
+		openApiService:    openApiService,
+		controlService:    controlService,
+		thingModelService: thingModelService,
+	}
 }
 
 // PageDevices 对外设备分页查询
@@ -190,6 +200,60 @@ func (ctr *OpenApiController) PageThresholdRecord(c *gin.Context) {
 		return
 	}
 	data, err := ctr.openApiService.PageThresholdRecords(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// BatchUpsertThingModels 对外物模型与属性批量 upsert。
+//
+// 按 code / identifier 作自然键：没有则创建，有则更新；每个模型一个事务，
+// 跨模型部分成功。只维护配置，不删除请求中未出现的属性，也不触达现场设备。
+func (ctr *OpenApiController) BatchUpsertThingModels(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiThingModelBatchUpsertDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.thingModelService.BatchUpsertOpenApiThingModels(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// BatchDeleteThingModels 对外物模型批量删除（按 code）。
+//
+// 删除模型会连带删除其属性；已被设备绑定或其属性已被点位绑定的模型会被拒绝。
+// 逐条结果互不影响，顶层响应仍为成功信封。
+func (ctr *OpenApiController) BatchDeleteThingModels(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiThingModelBatchDeleteDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.thingModelService.BatchDeleteOpenApiThingModels(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// BatchDeleteThingModelProperties 对外物模型属性批量删除（按 modelCode + identifier）。
+func (ctr *OpenApiController) BatchDeleteThingModelProperties(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiThingModelPropertyBatchDeleteDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.thingModelService.BatchDeleteOpenApiThingModelProperties(ctx, &req)
 	if err != nil {
 		c.JSON(200, appError.HandleErrorCtx(ctx, err))
 		return

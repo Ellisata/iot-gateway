@@ -1,6 +1,6 @@
 # 推送通道与出站映射
 
-本文档描述消息类推送通道（`mqtt` / `http`）的**载荷格式**与 **HTTP/Webhook** 配置，
+本文档描述消息类推送通道（`mqtt` / `http` / `kafka`）的**载荷格式**与连接配置，
 以及状态型通道 **OPC UA Server** 的地址空间约定。
 `tdengine-v3` / `influxdb-v3` 的写入语义不变，见各自的表结构说明。
 
@@ -8,7 +8,7 @@
 
 `push_channel` 现在有两列：
 
-- `type`：通道类型（`mqtt` / `http` / `tdengine-v3` / `influxdb-v3`），决定用哪个实现；
+- `type`：通道类型（`mqtt` / `http` / `kafka` / `tdengine-v3` / `influxdb-v3`），决定用哪个实现；
 - `name`：实例名，同一类型下唯一。
 
 因此同一类型可以建多条。例如两条 HTTP 通道分别接 MES 与 ERP，或两条 MQTT
@@ -94,6 +94,10 @@
 
 - 省略/空数组：接收全部记录（含未分组）；
 - 非空：只接收这些组，未分组记录被排除。
+
+被任一通道订阅的组**不能删除**（错误码 `40050`）：先在该通道的 `groupIds` 里移除这个组。
+停用的通道同样算引用 —— 重新启用时配置不会丢。删除设备会级联删组，所以名下任一组
+被订阅时设备删除（单条与批量）同样被拒绝（`40065`），批量删除不做部分成功。
 
 MQTT 主题模板只支持以下编码占位符：
 
@@ -477,3 +481,76 @@ Objects (ns=0;i=85)
 - `ModifySubscription`、`Republish`、`TransferSubscriptions` 等订阅服务未实现。
 - 服务启动时 gopcua 会向标准库 log 打一行 `Started listening on ...`。
 - `deviceIds` 使用数据库设备 ID（不是设备名）。
+
+## 7. Kafka 通道（type=kafka）
+
+消息类通道：复用 §2 的全部载荷格式与出站映射，以及断网缓存 / 补发 / 监控。
+底层是纯 Go 的 `franz-go`（`kgo`），每个通道写一个**静态 topic**（v1 不做按设备
+动态 topic 模板）。建议 Kafka 0.11+（RecordBatch v2）；SASL/PLAIN 需要 broker
+启用对应的 SASL 机制。
+
+### 7.1 配置
+
+```json
+{
+  "brokers": "10.0.0.1:9092,10.0.0.2:9092",
+  "topic": "iot-data",
+  "clientId": "iot-gateway",
+  "acks": "all",
+  "allowAutoTopicCreation": false,
+  "authType": "plain",
+  "saslUsername": "gateway",
+  "saslPassword": "secret",
+  "tlsEnabled": true,
+  "insecureSkipVerify": false,
+  "timeoutSeconds": 10,
+  "workers": 1,
+  "spoolDisabled": false,
+  "spoolMaxBatches": 100000,
+  "format": "native-json"
+}
+```
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `brokers` | 必填 | 逗号分隔的 seed broker；省略端口时补 `9092`，IPv6 用 `[::1]:9092` 或直接写 `::1` |
+| `topic` | 必填 | 静态 topic，仅允许字母、数字、点、下划线与短横线，最长 249 |
+| `clientId` | `iot-gateway` | Kafka client.id |
+| `acks` | `all` | `all` / `leader` / `none`。**`leader`/`none` 会关闭幂等写入**（franz-go 的幂等写入要求 acks=all） |
+| `allowAutoTopicCreation` | `false` | 允许 broker 自动建 topic。关闭且 topic 不存在时批次按毒批次丢弃（见 §7.3） |
+| `authType` | `none` | `none` / `plain`；`plain` 必须填 `saslUsername`，密码可空 |
+| `tlsEnabled` | `false` | 启用 TLS（最低 TLS 1.2） |
+| `insecureSkipVerify` | `false` | 仅自签名证书的内网环境使用，要求 `tlsEnabled=true` |
+| `timeoutSeconds` | `10` | 1–120；同时用于单次发送超时与 Produce 请求超时 |
+| `workers` | `1` | 1–64。默认 1 保证同一设备的批次按入队顺序发送，调大可能乱序 |
+| `spoolDisabled` / `spoolMaxBatches` | `false` / `100000` | 断网缓存开关与批次上限，与 HTTP/MQTT 同语义 |
+| `format` / `mapping` | `native-json` | 见 §2，`kafka` 支持全部四种格式 |
+
+### 7.2 分区与顺序
+
+- 一条编码后的消息 = 一条 Kafka record。`native-json` / `group-json` 每批一条，
+  `mapping-json` 的 `emit=record` 每批多条。
+- record key 固定为**设备编码**（`device.code`），缺失时回落设备 ID。franz-go 的
+  默认按键分区器把同一个 key 放到同一分区，因此同一设备的数据在 Kafka 侧可保序。
+- `workers` 默认 1：同设备的多个批次也按入队顺序写入。调大后跨批次的顺序不再保证
+  （分区内仍然有序）。
+- 下游按设备消费时应使用 record key（或载荷里的 `deviceCode`）作为业务主键。
+
+### 7.3 错误分类与补发
+
+| 情况 | 处理 |
+|---|---|
+| 网络 / 超时 / leader 选举 / 分区迁移 | 可重试：标记断连，批次写入本地 outbox，恢复后补发 |
+| `UNKNOWN_TOPIC_OR_PARTITION` 且自动创建关闭 | 毒批次：删除并计入 dropped，避免队头永久阻塞、缓存无限堆积 |
+| 鉴权失败 / 非法 topic / 消息过大等不可重试错误 | 毒批次：删除并计入 dropped |
+| `acks=none` | 写完即成功，**broker 的拒绝不可见**；生产环境推荐 `all` 或 `leader` |
+
+与 HTTP/MQTT 一样是**至少一次**投递：补发可能产生重复，下游应按业务主键幂等。
+
+### 7.4 连通性测试 vs 测试发送
+
+- **测试连接**只对 seed broker 发一次 broker-only Metadata 请求（franz-go `Ping`），
+  验证集群可达与 SASL/TLS 握手，**不校验 topic 是否存在、不触发自动创建**。
+- **测试发送**用样例记录真的 produce 一条，topic 是否存在、鉴权与载荷是否被接受，
+  以这个结果为准。
+- **预览载荷**只编码、不发送，不需要 broker。

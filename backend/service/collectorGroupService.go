@@ -208,6 +208,10 @@ func (s *CollectorGroupService) UpdateCollectorGroup(ctx context.Context, req *d
 //
 // 组被点位绑定时拒绝删除（与物模型删除守卫一致）：点位不会因为删组而悄悄
 // 回到另一种采集周期，用户必须先显式解绑。
+//
+// 组被推送通道的 config_json.groupIds 订阅时同样拒绝删除（见
+// ensureCollectorGroupNotReferencedByPushChannels）：否则通道配置里会留下一个
+// 永远匹配不到任何批次的组 ID，且没有任何报错。
 func (s *CollectorGroupService) DeleteCollectorGroup(ctx context.Context, id string) error {
 	return s.sqliteDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var group po.CollectorGroup
@@ -225,6 +229,9 @@ func (s *CollectorGroupService) DeleteCollectorGroup(ctx context.Context, id str
 		if bound > 0 {
 			return appError.NewAppErrorCtx(enums.CollectorGroupInUseEnum.GetCode(),
 				enums.CollectorGroupInUseEnum.GetMessage(), enums.CollectorGroupInUseEnum.GetMsgKey())
+		}
+		if err := ensureCollectorGroupNotReferencedByPushChannels(tx, id); err != nil {
+			return err
 		}
 		return tx.Where("id = ?", id).Delete(&po.CollectorGroup{}).Error
 	})

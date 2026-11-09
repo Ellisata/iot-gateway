@@ -32,6 +32,7 @@ import (
 import (
 	_ "embed"
 	_ "iot-gateway/push/influxdb/v3"
+	_ "iot-gateway/push/kafka"
 	_ "iot-gateway/push/mqtt"
 	_ "iot-gateway/push/opcuaserver"
 	_ "iot-gateway/push/tdengine/v3"
@@ -95,7 +96,7 @@ func InitializeApp() (*AppDependencies, func()) {
 	openApiSecretService := service.NewOpenApiSecretService(db)
 	openApiSecretController := controller.NewOpenApiSecretController(openApiSecretService)
 	openApiService := service.NewOpenApiService(deviceService, deviceAddressService, alarmService, mqttSubscriptionService)
-	openApiController := controller.NewOpenApiController(openApiService, controlService)
+	openApiController := controller.NewOpenApiController(openApiService, controlService, thingModelService)
 	serviceGatewayService := service.NewGatewayService(db)
 	gatewayController := controller.NewGatewayController(serviceGatewayService)
 	pluginService := service.NewPluginService(pluginhostManager)

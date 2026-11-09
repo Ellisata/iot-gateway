@@ -32,6 +32,9 @@ func TestOpenApiRoutesRegistered(t *testing.T) {
 		"GET /openApi/alarm/listActive",
 		"GET /openApi/alarm/pageThresholdRecord",
 		"POST /openApi/control/write",
+		"POST /openApi/thingModel/batchUpsert",
+		"POST /openApi/thingModel/batchDelete",
+		"POST /openApi/thingModelProperty/batchDelete",
 	}
 	for _, key := range want {
 		if !routes[key] {

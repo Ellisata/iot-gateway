@@ -64,7 +64,7 @@
 - **MQTT 订阅入时序库**：订阅外部 MQTT broker 上的 JSON 报文，按映射规则转换为采集记录后写入已启用的 TDengine / InfluxDB 通道；支持通配符 Topic、英文逗号分隔的多 Topic、QoS、鉴权、样例报文预览与连通性测试，解析器可选内置映射 DSL 或 goja JS 脚本，配置增删改自动热加载。
 - **断联报警**：设备采集失败与推送通道断连自动检测（去抖 + 状态机），离线/恢复边沿落库，统一报警中心查询。
 - **Web 管理控制台**：首页大盘、设备对象、地址标签、协议管理、通道管理、报警管理、日志查看、密钥管理，中英双语界面。
-- **开放接口**：`/openApi/*` 只读查询接口，`X-Api-Key` 密钥鉴权，供 MES / ERP 等外部系统对接。
+- **开放接口**：`/openApi/*` 设备/点位查询、控制下发、物模型批量 upsert/删除与报警查询，`X-Api-Key` 密钥鉴权，供 MES / ERP 等外部系统对接。
 - **单二进制部署**：前端经 `go:embed` 内嵌，SQLite 纯 Go 实现（免 CGO），主程序 + `plugins/` 目录即完整系统；主二进制**不再链接任何协议库**（协议库随插件分发），依赖面更窄；支持注册为 Windows 服务 / Linux systemd 服务，开机自启、崩溃自动拉起。
 
 ## 系统架构
@@ -137,14 +137,15 @@
 |---|---|
 | `mqtt` | Eclipse Paho MQTT 客户端，支持 QoS、TLS、遗嘱等 |
 | `http` | HTTP/Webhook：POST/PUT/PATCH，Bearer / Basic / HMAC-SHA256 鉴权、自定义请求头、断网缓存与补发 |
+| `kafka` | Apache Kafka（franz-go，纯 Go）：SASL/PLAIN、TLS、acks 可配，按设备编码分区，断网缓存与补发 |
 | `tdengine-v3` | TDEngine 3.x，官方 driver-go WebSocket 驱动（免 CGO，经 taosAdapter 连接） |
 | `influxdb-v3` | InfluxDB 3.x，自研 Line Protocol over HTTP 直连（不引入官方重依赖客户端） |
 
 > 通道现在是「**类型 + 实例名**」：同一类型可建多条（例如两条 HTTP 通道分别接 MES 与 ERP）。
 >
-> 消息类通道（`mqtt` / `http`）支持两种载荷格式：`native-json`（默认，契约不变）与
-> `mapping-json`（自定义出站映射，复用订阅侧的 `path` / `const` / `template` / `map` /
-> `transform` 词汇）。控制台提供载荷预览与测试发送；映射规则见
+> 消息类通道（`mqtt` / `http` / `kafka`）支持四种载荷格式：`native-json`（默认，契约不变）、
+> `group-json`，以及自定义的 `mapping-json` / `script`（复用订阅侧的 `path` / `const` /
+> `template` / `map` / `transform` 词汇）。控制台提供载荷预览与测试发送；映射规则见
 > [推送通道与出站映射](backend/docs/push-channels.md)。
 >
 > 推送通道与协议驱动均为**注册表 + 接口**的插件式设计，新增协议/通道无需改动引擎代码。
@@ -339,7 +340,7 @@ push:
 │   ├── testutil/       # 测试基建（parity 黄金基线 / drivertest 合成协议）
 │   ├── plugins/        # 插件运行时目录（构建产物，发行包自带）
 │   ├── mappingdsl/     # 入站解析 / 出站映射共用的映射原语（JSON 路径 / 模板 / 变换）
-│   ├── push/           # 推送引擎（mqtt/http/tdengine-v3/influxdb-v3 + outbox + codec/messagechannel）
+│   ├── push/           # 推送引擎（mqtt/http/kafka/tdengine-v3/influxdb-v3 + outbox + codec/messagechannel）
 │   ├── parser/         # 订阅报文解析器（内置映射 DSL / goja 脚本，输出采集记录）
 │   ├── subscribe/      # MQTT 订阅引擎（连接 / 队列 / 热加载，解析与投递编排）
 │   ├── controller/ service/ model/  # HTTP 分层（Controller → Service → Database）

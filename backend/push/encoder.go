@@ -5,7 +5,7 @@ package push
 
 // EncodedMessage 编码器输出的一条待发送消息。
 //
-// 消息类通道（MQTT / HTTP / 未来的 Kafka）只需要字节；主题、方法、鉴权等
+// 消息类通道（MQTT / HTTP / Kafka）只需要字节；主题、方法、鉴权等
 // 由通道配置决定。Sparkplug B 这类带会话状态的协议不套用本接口，单独实现通道。
 type EncodedMessage struct {
 	Payload []byte

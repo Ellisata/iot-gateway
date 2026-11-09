@@ -18,7 +18,12 @@ import (
 	"iot-gateway/testutil/drivertest"
 )
 
-// newDeviceAddressImportTestDB 构建设备地址导入测试库（临时文件 SQLite，含三张表）。
+// newDeviceAddressImportTestDB 构建设备地址导入测试库（临时文件 SQLite）。
+//
+// trigger_rule 也建出来：删除设备前会检查触发规则引用（见
+// ensureDevicesNotReferencedByTriggerRules），所有删除测试都会读到这张表。
+// push_channel 同理：删除采集组前会检查通道订阅（见
+// ensureCollectorGroupNotReferencedByPushChannels）。
 func newDeviceAddressImportTestDB(t *testing.T) *gorm.DB {
 	dbPath := filepath.Join(t.TempDir(), "addr_import_test.db")
 	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
@@ -30,7 +35,8 @@ func newDeviceAddressImportTestDB(t *testing.T) *gorm.DB {
 		sqlDB.SetMaxOpenConns(1)
 		t.Cleanup(func() { sqlDB.Close() })
 	}
-	if err := db.AutoMigrate(&po.Device{}, &po.IotProtocol{}, &po.DeviceAddress{}, &po.CollectorGroup{}); err != nil {
+	if err := db.AutoMigrate(&po.Device{}, &po.IotProtocol{}, &po.DeviceAddress{},
+		&po.CollectorGroup{}, &po.TriggerRule{}, &po.PushChannel{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db

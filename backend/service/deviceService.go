@@ -270,14 +270,30 @@ func sameJSON(a, b string) bool {
 // （见 migrations/002_device.sql），不显式删就会留下一堆查不到的孤立行：
 // 采集侧只按 device 加载地址、前端只按 deviceId 列地址，这些行在界面上
 // 永远不出现，只能靠翻库发现。同理，将来若有别的表挂 device.id 也要在这里补上。
+//
+// 被事件触发规则引用的设备**拒绝删除**（见 ensureDevicesNotReferencedByTriggerRules）：
+// 删掉后规则会持续报点位不存在且再也不会触发。
+//
+// 名下采集组被推送通道订阅的设备同样拒绝删除（见
+// ensureDevicesNotReferencedByPushChannels）：采集组随设备级联删除，否则通道配置里
+// 会留下悬空的组 ID。
 func (s *DeviceService) DeleteDevice(ctx context.Context, id string) error {
 	err := s.sqliteDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("id = ?", id).Delete(&po.Device{})
-		if result.Error != nil {
-			return result.Error
+		var existing po.Device
+		if err := tx.Select("id").Where("id = ?", id).First(&existing).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return appError.NewAppErrorCtx(enums.DeviceNotExistsEnum.GetCode(), enums.DeviceNotExistsEnum.GetMessage(), enums.DeviceNotExistsEnum.GetMsgKey())
+			}
+			return err
 		}
-		if result.RowsAffected == 0 {
-			return appError.NewAppErrorCtx(enums.DeviceNotExistsEnum.GetCode(), enums.DeviceNotExistsEnum.GetMessage(), enums.DeviceNotExistsEnum.GetMsgKey())
+		if err := ensureDevicesNotReferencedByTriggerRules(tx, []string{id}); err != nil {
+			return err
+		}
+		if err := ensureDevicesNotReferencedByPushChannels(tx, []string{id}); err != nil {
+			return err
+		}
+		if err := tx.Where("id = ?", id).Delete(&po.Device{}).Error; err != nil {
+			return err
 		}
 		if err := tx.Where("device_id = ?", id).Delete(&po.DeviceAddress{}).Error; err != nil {
 			return err
@@ -307,12 +323,24 @@ func (s *DeviceService) DeleteDevice(ctx context.Context, id string) error {
 //
 // 点位先按同一批 device_id 删掉，再删设备（同一事务，顺序不影响结果）：
 // 这样即使某个 id 对应的设备行早就没了，它遗留的孤立点位也能被顺手清干净。
+//
+// 被事件触发规则引用的设备同样拒绝删除（单条与批量口径一致，见
+// ensureDevicesNotReferencedByTriggerRules）；名下采集组被推送通道订阅的设备
+// 同样整批拒绝（见 ensureDevicesNotReferencedByPushChannels）。
 func (s *DeviceService) BatchDeleteDevice(ctx context.Context, ids []string) (int64, int64, error) {
 	if len(ids) == 0 {
 		return 0, 0, nil
 	}
 	var devices, addresses int64
 	err := s.sqliteDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 整批先查引用：只要有任意一台被规则引用就整批拒绝，不做"删一半"的
+		// 部分成功 —— 用户看到的是一次失败，库里的状态也必须是一次都没动。
+		if err := ensureDevicesNotReferencedByTriggerRules(tx, ids); err != nil {
+			return err
+		}
+		if err := ensureDevicesNotReferencedByPushChannels(tx, ids); err != nil {
+			return err
+		}
 		result := tx.Where("device_id IN ?", ids).Delete(&po.DeviceAddress{})
 		if result.Error != nil {
 			return result.Error

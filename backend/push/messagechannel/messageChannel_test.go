@@ -275,3 +275,83 @@ func spoolCount(c *Channel) int64 {
 	n, _ := c.ob.Spool().Count()
 	return n
 }
+
+// fakeKeyedTransport 记录消息键，验证 KeyedTransport 分支。
+type fakeKeyedTransport struct {
+	fakeTransport
+	mu   sync.Mutex
+	keys []string
+}
+
+func (f *fakeKeyedTransport) SendKeyed(_ context.Context, key string, _ []byte) Outcome {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.keys = append(f.keys, key)
+	return Outcome{Kind: FailureNone, StatusCode: 200}
+}
+
+func (f *fakeKeyedTransport) recordedKeys() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.keys...)
+}
+
+func TestMessageChannelUsesKeyedTransport(t *testing.T) {
+	tr := &fakeKeyedTransport{}
+	c := newTestChannel(t, fakeEncoder{}, tr)
+
+	b := sampleBatch()
+	b.DeviceCode = "dev-001"
+	c.Enqueue(b)
+	waitFor(t, "first publish", func() bool { return c.Snapshot().PublishCount >= 1 })
+
+	b.DeviceCode = "" // 回落到 DeviceID
+	c.Enqueue(b)
+	waitFor(t, "second publish", func() bool { return c.Snapshot().PublishCount >= 2 })
+
+	keys := tr.recordedKeys()
+	if len(keys) != 2 {
+		t.Fatalf("keys = %v, want 2 entries", keys)
+	}
+	if keys[0] != "dev-001" {
+		t.Errorf("first key = %q, want dev-001", keys[0])
+	}
+	if keys[1] != "d1" {
+		t.Errorf("second key = %q, want fallback device ID d1", keys[1])
+	}
+}
+
+// fakeClosingTransport 记录 Close 调用次数。
+type fakeClosingTransport struct {
+	fakeTransport
+	closeMu sync.Mutex
+	closes  int
+}
+
+func (f *fakeClosingTransport) Close() error {
+	f.closeMu.Lock()
+	defer f.closeMu.Unlock()
+	f.closes++
+	return nil
+}
+
+func TestMessageChannelReleaseClosesTransport(t *testing.T) {
+	tr := &fakeClosingTransport{}
+	c := New(Config{
+		Tag:       "test",
+		ID:        "c1",
+		Name:      "test",
+		Type:      "test",
+		Encoder:   fakeEncoder{},
+		Transport: tr,
+	})
+
+	c.Release()
+	c.Release()
+	c.Stop() // 未启动：Stop 也应释放资源
+	tr.closeMu.Lock()
+	defer tr.closeMu.Unlock()
+	if tr.closes != 3 {
+		t.Fatalf("close calls = %d, want 3", tr.closes)
+	}
+}

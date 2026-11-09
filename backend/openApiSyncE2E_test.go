@@ -100,7 +100,7 @@ func TestOpenApiSyncDevicePointsEndToEnd(t *testing.T) {
 		service.NewDeviceAddressService(db, nil),
 		service.NewAlarmService(db),
 		service.NewMqttSubscriptionService(db, nil),
-	), controlSvc)
+	), controlSvc, service.NewThingModelService(db))
 	engine := gin.New()
 	router.OpenApiRoutes(engine, secretSvc, openApiCtrl)
 
