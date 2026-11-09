@@ -390,7 +390,7 @@ push:
 
 ## 社区交流
 
-- **Issue / Discussion**：Bug 与功能建议请提 [Issue](https://gitee.com/wang4856304/iot-gateway/issues)（GitHub 仓库为镜像，仅接受 PR）。
+- **Issue / Discussion**：Bug 与功能建议请提 [GitHub Issue](https://github.com/Ellisata/iot-gateway/issues) 或 [Gitee Issue](https://gitee.com/wang4856304/iot-gateway/issues)（任选其一，两边都会跟进）
 - **微信交流群**：联系 `15289288565@163.com` 拉群。
 
 <!-- TODO: <img src="docs/images/wechat-group.png" width="240" alt="微信交流群" /> -->
