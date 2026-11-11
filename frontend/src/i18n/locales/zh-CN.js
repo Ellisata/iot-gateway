@@ -704,6 +704,28 @@ export default {
     rangeOrder: '区间下限必须小于上限',
     valueRequired: '请填写比较值',
     condRange: '[{low}, {high}]',
+    // 工程量变换：采集侧执行一次，实时值/报警/触发规则/所有推送共用同一工程值。
+    engineeringTransform: '工程量变换',
+    transformHint: '在采集侧对原始值执行一次（缩放/取整等），实时值、报警、触发规则和所有推送通道（含时序库）都使用变换后的工程值。若下游映射里已配过同一个缩放，请删除下游那条，避免重复换算。',
+    transformInvalid: '工程量变换配置不合法：请检查算子与参数，default 必须放在第一位',
+    transformEditor: {
+      transform: '变换',
+      addTransform: '添加变换',
+      transformEmpty: '未配置变换，原始值直接使用',
+      removeTransform: '删除变换',
+      transformOp: {
+        scale: '缩放',
+        round: '四舍五入',
+        trim: '去空白',
+        default: '默认值',
+      },
+      transformParam: {
+        factor: '系数',
+        offset: '偏移',
+        digits: '小数位',
+        value: '回落值',
+      },
+    },
     idCopied: 'ID 已复制',
     copyFailed: '复制失败',
     deleteConfirm: '确定要删除设备地址「{name}」吗？',

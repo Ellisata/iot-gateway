@@ -86,6 +86,9 @@ type CreateDeviceAddressDTO struct {
 	GroupID     string                     `json:"groupId"`
 	Description string                     `json:"description"`
 	Threshold   *DeviceAddressThresholdDTO `json:"threshold"`
+	// Transform 工程量变换流水线（仅 scale/round/trim/default，见 mappingdsl/normalization.go）。
+	// 原始 JSON 交给服务层解析校验；空/省略 = 不配置。
+	Transform json.RawMessage `json:"transform"`
 }
 
 // UpdateDeviceAddressDTO 更新设备地址请求
@@ -107,6 +110,8 @@ type UpdateDeviceAddressDTO struct {
 	Description string                     `json:"description"`
 	Status      *int                       `json:"status"`
 	Threshold   *DeviceAddressThresholdDTO `json:"threshold"`
+	// Transform 三态：省略/null = 不动；[] = 清空；数组 = 整份替换。
+	Transform *json.RawMessage `json:"transform"`
 }
 
 // BatchDeleteDeviceAddressDTO 批量删除设备地址请求

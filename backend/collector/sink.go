@@ -87,9 +87,10 @@ func (t PointThreshold) Inert() bool {
 // 实现方必须保证不阻塞采集（内部应轻量快速）：本方法在采集协程里按点位逐个调用，
 // 海量点位下即热点路径。
 type PointValueSink interface {
-	// ReportPointValue 上报单个点位本轮读到的原始值及其阈值配置。
+	// ReportPointValue 上报单个点位本轮的值（工程量变换后）及其阈值配置。
 	//
-	// value 为驱动格式化好的字符串（未重新格式化，报警文案据此与实时页一致）；
+	// value 取自采集记录：配置了工程量变换时已是变换后的工程值（阈值因此按工程值配置），
+	// 未配置时与驱动返回的原始值一致；
 	// quality 取自 driver.ReadResult.Quality，**是否可用由实现方判定** ——
 	// 用 driver.QualityUsable 判，别写 `quality != 0`：读失败的点位不再恒为 0
 	// （见 driver.QualityXxx 的子码），value 是占位串；

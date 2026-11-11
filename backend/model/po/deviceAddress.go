@@ -28,11 +28,14 @@ type DeviceAddress struct {
 	ThresholdEnabled int    `gorm:"column:threshold_enabled;not null;default:0" json:"thresholdEnabled"`
 	ThresholdOp      string `gorm:"column:threshold_op;not null;default:''" json:"thresholdOp"`
 	ThresholdValue   string `gorm:"column:threshold_value;not null;default:''" json:"thresholdValue"`
-	ScanFrequency    int    `gorm:"column:scan_frequency;default:1000" json:"scanFrequency"`
-	Description      string `gorm:"column:description" json:"description"`
-	Status           int    `gorm:"column:status;default:1" json:"status"`
-	CreatedAt        string `gorm:"column:created_at" json:"createdAt"`
-	UpdatedAt        string `gorm:"column:updated_at" json:"updatedAt"`
+	// TransformJSON 点位工程量变换流水线（mappingdsl.Transform 的 JSON 数组）。
+	// 空串 = 未配置。由采集侧在 toRecords 里执行一次，见 collector/task.go。
+	TransformJSON string `gorm:"column:transform_json;not null;default:''" json:"transformJson"`
+	ScanFrequency int    `gorm:"column:scan_frequency;default:1000" json:"scanFrequency"`
+	Description   string `gorm:"column:description" json:"description"`
+	Status        int    `gorm:"column:status;default:1" json:"status"`
+	CreatedAt     string `gorm:"column:created_at" json:"createdAt"`
+	UpdatedAt     string `gorm:"column:updated_at" json:"updatedAt"`
 }
 
 // TableName 表名

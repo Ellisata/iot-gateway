@@ -5,14 +5,14 @@
 
 <template>
   <div class="transform-editor">
-    <div class="transform-head">
-      <span class="transform-title">{{ t('channel.mapEditor.transform') }}</span>
+    <div class="transform-head" :class="{ 'is-titleless': !showTitle }">
+      <span v-if="showTitle" class="transform-title">{{ L('transform') }}</span>
       <el-button text size="small" :disabled="disabled" @click="addTransform">
-        {{ t('channel.mapEditor.addTransform') }}
+        {{ L('addTransform') }}
       </el-button>
     </div>
     <p v-if="!transforms.length" class="transform-empty">
-      {{ t('channel.mapEditor.transformEmpty') }}
+      {{ L('transformEmpty') }}
     </p>
     <div v-for="(tr, index) in transforms" :key="tr.id || index" class="transform-row">
       <el-select
@@ -23,10 +23,10 @@
         @change="changeOp(tr, $event)"
       >
         <el-option
-          v-for="op in TRANSFORM_OPS"
+          v-for="op in ops"
           :key="op"
           :value="op"
-          :label="t(`channel.mapEditor.transformOp.${op}`)"
+          :label="L(`transformOp.${op}`)"
         />
       </el-select>
 
@@ -36,14 +36,14 @@
             v-model="tr.factor"
             size="small"
             :disabled="disabled"
-            :placeholder="t('channel.mapEditor.transformParam.factor')"
+            :placeholder="L('transformParam.factor')"
             @input="emitChange"
           />
           <el-input
             v-model="tr.offset"
             size="small"
             :disabled="disabled"
-            :placeholder="t('channel.mapEditor.transformParam.offset')"
+            :placeholder="L('transformParam.offset')"
             @input="emitChange"
           />
         </template>
@@ -52,7 +52,7 @@
             v-model="tr.digits"
             size="small"
             :disabled="disabled"
-            :placeholder="t('channel.mapEditor.transformParam.digits')"
+            :placeholder="L('transformParam.digits')"
             @input="emitChange"
           />
         </template>
@@ -61,7 +61,7 @@
             v-model="tr.value"
             size="small"
             :disabled="disabled"
-            :placeholder="t('channel.mapEditor.transformParam.value')"
+            :placeholder="L('transformParam.value')"
             @input="emitChange"
           />
         </template>
@@ -70,14 +70,14 @@
             v-model="tr.offset"
             size="small"
             :disabled="disabled"
-            :placeholder="t('channel.mapEditor.transformParam.offset')"
+            :placeholder="L('transformParam.offset')"
             @input="emitChange"
           />
           <el-input
             v-model="tr.length"
             size="small"
             :disabled="disabled"
-            :placeholder="t('channel.mapEditor.transformParam.length')"
+            :placeholder="L('transformParam.length')"
             @input="emitChange"
           />
         </template>
@@ -86,21 +86,21 @@
             v-model="tr.pattern"
             size="small"
             :disabled="disabled"
-            :placeholder="t('channel.mapEditor.transformParam.pattern')"
+            :placeholder="L('transformParam.pattern')"
             @input="emitChange"
           />
           <el-input
             v-model="tr.group"
             size="small"
             :disabled="disabled"
-            :placeholder="t('channel.mapEditor.transformParam.group')"
+            :placeholder="L('transformParam.group')"
             @input="emitChange"
           />
         </template>
         <span v-else class="transform-none">—</span>
       </div>
 
-      <el-tooltip :content="t('channel.mapEditor.removeTransform')" placement="top">
+      <el-tooltip :content="L('removeTransform')" placement="top">
         <el-button text size="small" :disabled="disabled" @click="removeTransform(index)">
           <el-icon><IconTrash /></el-icon>
         </el-button>
@@ -127,17 +127,36 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  // 可选算子；点位工程量变换只传归一小集合，push mapping 用默认全量。
+  ops: {
+    type: Array,
+    default: () => TRANSFORM_OPS,
+  },
+  // i18n 命名空间；默认沿用 push mapping，点位页可指向自己的文案。
+  labelPrefix: {
+    type: String,
+    default: 'channel.mapEditor',
+  },
+  // 点位页外层已有 form-item 标签，这里隐藏内部的「变换」标题。
+  showTitle: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 const emit = defineEmits(['change'])
 const { t } = useI18n()
+
+function L(key) {
+  return t(`${props.labelPrefix}.${key}`)
+}
 
 function emitChange() {
   emit('change')
 }
 
 function addTransform() {
-  props.transforms.push(createTransformRow('scale'))
+  props.transforms.push(createTransformRow(props.ops[0] || 'scale'))
   emitChange()
 }
 
@@ -163,6 +182,10 @@ function changeOp(tr, op) {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 6px;
+}
+
+.transform-head.is-titleless {
+  justify-content: flex-end;
 }
 
 .transform-title {

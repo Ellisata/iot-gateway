@@ -128,7 +128,9 @@ func (t *topology) signature() string {
 	for _, d := range t.devices {
 		write("d", d.ID, d.Name, d.Description)
 		for _, a := range t.addrs[d.ID] {
-			write("a", a.ID, a.Name, a.Label, a.CommonDataType, a.DataType, a.Description)
+			// transform_json 参与签名：它会改变节点的有效编码器（整数 → Double），
+			// 不重建地址空间的话旧节点仍按整数解析，工程值会一直写不进去。
+			write("a", a.ID, a.Name, a.Label, a.CommonDataType, a.DataType, a.Description, a.TransformJSON)
 		}
 	}
 	return strconv.FormatUint(h.Sum64(), 16)
@@ -175,7 +177,7 @@ func newObjectNode(nodeID *ua.NodeID, name, description string) *server.Node {
 
 // newPointNode 把 device_address 建成一个 Variable 节点。
 func newPointNode(cfg *config, nsID uint16, dev po.Device, addr po.DeviceAddress) *pointNode {
-	codec := codecFor(addr.CommonDataType, "")
+	codec := effectivePointCodec(addr)
 	label := addr.Label
 	if label == "" {
 		label = addr.Name

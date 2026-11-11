@@ -13,8 +13,10 @@ type CollectedRecord struct {
 	DeviceAddressID    string `json:"deviceAddressID"`
 	DeviceAddressName  string `json:"deviceAddressName"`
 	DeviceAddressLabel string `json:"deviceAddressLabel"` // 地址 name 的中文说明（如温度、电流）
-	Value              string `json:"value"`
-	DataType           string `json:"dataType"`
+	// Value 采集值。点位配置了工程量变换（device_address.transform_json）时，
+	// 这里已经是变换后的工程值，Kind 也可能被提升为 float；未配置时与驱动返回值一致。
+	Value    string `json:"value"`
+	DataType string `json:"dataType"`
 	// Kind 数据类型类别（driver.KindXxx），由驱动从已解析类型填充。
 	// 携带 json tag 以保证断网缓存（push/spool）序列化回放后不丢失。
 	// MQTT 通道自行构建 pushPoint，不受本字段影响。

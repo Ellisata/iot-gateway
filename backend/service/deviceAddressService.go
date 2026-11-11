@@ -23,6 +23,7 @@ import (
 	"iot-gateway/enums"
 	"iot-gateway/excelutil"
 	"iot-gateway/logger"
+	"iot-gateway/mappingdsl"
 	"iot-gateway/model/dto"
 	"iot-gateway/model/po"
 	"iot-gateway/model/vo"
@@ -91,10 +92,20 @@ func (s *DeviceAddressService) CreateDeviceAddress(ctx context.Context, req *dto
 		return err
 	}
 
+	kind := kindOfAddressType(protocolName, internal)
+
 	// 报警条件校验：可用比较符由数据类型的 Kind 决定（矩阵见 driver.OperatorsForKind）
 	enabled, op, values := thresholdFields(req.Threshold)
-	if err := validateAddressThreshold(enabled, op, values,
-		kindOfAddressType(protocolName, internal)); err != nil {
+	if err := validateAddressThreshold(enabled, op, values, kind); err != nil {
+		return err
+	}
+
+	// 工程量变换：只允许归一小集合，且缩放/取整只能配在数值点位上。
+	transforms, err := parseAddressTransforms(req.Transform)
+	if err != nil {
+		return err
+	}
+	if err := validateAddressTransforms(transforms, kind); err != nil {
 		return err
 	}
 
@@ -114,6 +125,7 @@ func (s *DeviceAddressService) CreateDeviceAddress(ctx context.Context, req *dto
 		ThresholdEnabled: boolToInt(enabled),
 		ThresholdOp:      op,
 		ThresholdValue:   marshalThresholdValues(values),
+		TransformJSON:    marshalAddressTransforms(transforms),
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -362,6 +374,52 @@ func marshalThresholdValues(values []string) string {
 	return string(raw)
 }
 
+// parseAddressTransforms 解析请求里的工程量变换原始 JSON。
+// 空/省略/null 都表示未配置；数组交给 mappingdsl 做白名单与参数校验。
+func parseAddressTransforms(raw json.RawMessage) ([]mappingdsl.Transform, error) {
+	ts, err := mappingdsl.ParseNormalization(string(raw))
+	if err != nil {
+		return nil, appError.NewAppErrorCtx(enums.ParamValidEnum.GetCode(), err.Error(), enums.ParamValidEnum.GetMsgKey())
+	}
+	return ts, nil
+}
+
+// validateAddressTransforms 校验流水线与点位类型是否兼容。
+//
+// scale / round 只能配在数值点位上：配在 bool/string/time 上时采集侧每轮都会
+// 报"不是数字"并保留原值，等于一个永不生效的配置。default 的回落值在数值点位
+// 上也必须可解析为数值，否则同样每轮失败。
+func validateAddressTransforms(ts []mappingdsl.Transform, kind string) error {
+	if len(ts) == 0 {
+		return nil
+	}
+	if mappingdsl.NormalizationForcesFloat(ts) && !driver.IsNumericKind(kind) {
+		return appError.NewAppErrorCtx(enums.ParamValidEnum.GetCode(), "缩放/四舍五入变换仅适用于数值类型点位", enums.ParamValidEnum.GetMsgKey())
+	}
+	if driver.IsNumericKind(kind) {
+		for _, t := range ts {
+			if t.Op == mappingdsl.OpDefault {
+				if _, ok := mappingdsl.ToFloat64(t.Value); !ok {
+					return appError.NewAppErrorCtx(enums.ParamValidEnum.GetCode(), "数值点位的默认值必须可解析为数值", enums.ParamValidEnum.GetMsgKey())
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// marshalAddressTransforms 把流水线序列化为库里的 JSON；空流水线存空串（未配置）。
+func marshalAddressTransforms(ts []mappingdsl.Transform) string {
+	if len(ts) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(ts)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
 // UpdateDeviceAddress 更新设备地址
 func (s *DeviceAddressService) UpdateDeviceAddress(ctx context.Context, req *dto.UpdateDeviceAddressDTO) error {
 	db := s.sqliteDB.WithContext(ctx)
@@ -493,6 +551,37 @@ func (s *DeviceAddressService) UpdateDeviceAddress(ctx context.Context, req *dto
 		updates["threshold_op"] = op
 		updates["threshold_value"] = stored
 		thresholdInert = !enabled || op == "" || stored == ""
+	}
+
+	// 工程量变换三态：省略 = 不动，[] = 清空，数组 = 整份替换。
+	// 显式 null 与省略同义（部分 JSON 编码器会把"没有值"写成 null）。
+	if req.Transform != nil && !bytes.Equal(bytes.TrimSpace(*req.Transform), []byte("null")) {
+		transforms, err := parseAddressTransforms(*req.Transform)
+		if err != nil {
+			return err
+		}
+		if err := loadDevice(); err != nil {
+			return err
+		}
+		kind := kindOfAddressType(s.getProtocolName(ctx, device.ProtocolID), effectiveInternal)
+		if err := validateAddressTransforms(transforms, kind); err != nil {
+			return err
+		}
+		updates["transform_json"] = marshalAddressTransforms(transforms)
+	} else if existing.TransformJSON != "" && typeOrRWChanged && (req.CommonDataType != "" || req.DataType != "") {
+		// 改了数据类型但没传新流水线：按新 Kind 复核库里那份，别把一个 scale
+		// 留在已经变成 string/bool 的点位上 —— 那会让该点位每轮采集都走失败回退。
+		transforms, err := parseAddressTransforms(json.RawMessage(existing.TransformJSON))
+		if err != nil {
+			return err
+		}
+		if err := loadDevice(); err != nil {
+			return err
+		}
+		kind := kindOfAddressType(s.getProtocolName(ctx, device.ProtocolID), effectiveInternal)
+		if err := validateAddressTransforms(transforms, kind); err != nil {
+			return err
+		}
 	}
 
 	if len(updates) == 0 {
@@ -770,6 +859,7 @@ func addressVO(a po.DeviceAddress) vo.DeviceAddressVO {
 		ThresholdEnabled: a.ThresholdEnabled,
 		ThresholdOp:      a.ThresholdOp,
 		ThresholdValue:   a.ThresholdValue,
+		TransformJSON:    a.TransformJSON,
 		CreatedAt:        a.CreatedAt,
 		UpdatedAt:        a.UpdatedAt,
 	}

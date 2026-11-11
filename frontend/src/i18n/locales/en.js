@@ -706,6 +706,29 @@ export default {
     rangeOrder: 'The range low must be less than the range high',
     valueRequired: 'Enter a value to compare',
     condRange: '[{low}, {high}]',
+    // Engineering transform: applied once at collection; live values, alarms, trigger
+    // rules and every push channel (including TSDB) share the same engineering value.
+    engineeringTransform: 'Engineering Transform',
+    transformHint: 'Applied once at collection (scale/round/etc.). Live values, alarms, trigger rules and all push channels (including TSDB) use the transformed engineering value. If a downstream mapping already scales the same point, remove that scale to avoid double conversion.',
+    transformInvalid: 'Invalid engineering transform: check the operators and parameters; default must come first',
+    transformEditor: {
+      transform: 'Transforms',
+      addTransform: 'Add Transform',
+      transformEmpty: 'No transform; raw value is used as-is',
+      removeTransform: 'Remove Transform',
+      transformOp: {
+        scale: 'Scale',
+        round: 'Round',
+        trim: 'Trim',
+        default: 'Default',
+      },
+      transformParam: {
+        factor: 'Factor',
+        offset: 'Offset',
+        digits: 'Digits',
+        value: 'Fallback',
+      },
+    },
     idCopied: 'ID copied',
     copyFailed: 'Copy failed',
     deleteConfirm: 'Are you sure to delete device address "{name}"?',

@@ -53,6 +53,10 @@ export const TRANSFORM_OPS = [
   'regex',
 ]
 
+// 点位工程量变换只开放归一小集合（与 backend/mappingdsl/normalization.go 对齐）。
+// hexDecode/base64Decode/bitfield/regex 会改变值的类别，点位级不允许。
+export const ADDRESS_TRANSFORM_OPS = ['scale', 'round', 'trim', 'default']
+
 // 含花括号的示例只能放在这里：vue-i18n 会把 {...} 当成插值。
 export const TEMPLATE_PLACEHOLDER = 'gateway/{deviceId}'
 export const KEY_PLACEHOLDER = 'deviceId 或 device.id'
@@ -270,6 +274,28 @@ function transformToJSON(t) {
       break
   }
   return out
+}
+
+// transformRowsToJSON / transformJSONToRows 供点位工程量变换编辑器使用。
+// 与 mapping 状态共用同一套行列模型与参数转换，避免两处各写一份。
+export function transformRowsToJSON(rows, allowedOps = TRANSFORM_OPS) {
+  const out = []
+  for (const row of rows || []) {
+    if (!row || !allowedOps.includes(row.op)) continue
+    const json = transformToJSON(row)
+    if (json) out.push(json)
+  }
+  return out
+}
+
+export function transformJSONToRows(list, allowedOps = TRANSFORM_OPS) {
+  const rows = []
+  for (const item of list || []) {
+    if (!isPlainObject(item) || !allowedOps.includes(String(item.op || ''))) continue
+    const parsed = transformToRow(item)
+    if (parsed.ok) rows.push(parsed.row)
+  }
+  return rows
 }
 
 export function stateToMapping(state) {
@@ -641,6 +667,41 @@ function validateTransforms(row, section, problems) {
       }
     }
   }
+}
+
+// validateTransformRows 校验一条独立的点位变换流水线（不依赖整个 mapping 文档）。
+// 与后端 ValidateNormalization 对齐：白名单、default 必须在首位且有值、scale 参数为数字、
+// round 小数位 0-12。返回 problems 数组，空数组表示通过。
+export function validateTransformRows(rows, allowedOps = TRANSFORM_OPS) {
+  const problems = []
+  const list = rows || []
+  list.forEach((t, index) => {
+    const base = { rowId: t?.id, index }
+    if (!t || !allowedOps.includes(t.op)) {
+      problems.push(error('badTransform', base))
+      return
+    }
+    if (t.op === 'default') {
+      if (index !== 0) problems.push(error('transformDefaultFirst', base))
+      if (String(t.value ?? '').trim() === '') {
+        problems.push(error('transformDefaultValue', base))
+      }
+    }
+    if (t.op === 'scale') {
+      for (const param of ['factor', 'offset']) {
+        if (t[param] !== '' && t[param] != null && !Number.isFinite(Number(t[param]))) {
+          problems.push(error('transformNumberInvalid', { ...base, param }))
+        }
+      }
+    }
+    if (t.op === 'round') {
+      const digits = t.digits === '' ? 0 : Number(t.digits)
+      if (!Number.isInteger(digits) || digits < 0 || digits > 12) {
+        problems.push(error('transformDigitsRange', base))
+      }
+    }
+  })
+  return problems
 }
 
 export function firstError(problems) {

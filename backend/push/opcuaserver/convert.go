@@ -13,6 +13,9 @@ import (
 	"github.com/gopcua/opcua/ua"
 
 	"github.com/Ellisata/iot-gateway-sdk/driver"
+
+	"iot-gateway/mappingdsl"
+	"iot-gateway/model/po"
 )
 
 // valueCodec 描述一个点位的「OPC UA 数据类型 + 字符串值解析」。
@@ -74,6 +77,38 @@ func codecFor(commonDataType, kind string) valueCodec {
 		return stringCodec()
 	}
 	return stringCodec()
+}
+
+// effectivePointCodec 返回点位实际应暴露的 OPC UA 编码器。
+//
+// 节点的 DataType 在建树时定死，而点位工程量变换会把整数点位的值变成小数
+// （如 int16 253 ×0.1 → "25.3"）。若仍按 common_data_type 用 Int16 编码器，
+// 每次写入都会解析失败。这里在流水线确定会产生小数时，把**整数类型**的节点
+// 提升为 Double；已经是浮点/字符串/布尔/时间的节点保持原类型。
+func effectivePointCodec(addr po.DeviceAddress) valueCodec {
+	base := codecFor(addr.CommonDataType, "")
+	if addr.TransformJSON == "" {
+		return base
+	}
+	ts, err := mappingdsl.ParseNormalization(addr.TransformJSON)
+	if err != nil || !mappingdsl.NormalizationForcesFloat(ts) {
+		return base
+	}
+	if !isIntegerTypeID(base.typeID) {
+		return base
+	}
+	return codecFor("", driver.KindFloat)
+}
+
+// isIntegerTypeID 判断 OPC UA 内置类型是否整数族。只有整数族需要为小数提升类型；
+// 布尔、浮点、字符串、时间保持声明类型。
+func isIntegerTypeID(typeID uint32) bool {
+	switch typeID {
+	case id.SByte, id.Byte, id.Int16, id.UInt16, id.Int32, id.UInt32, id.Int64, id.UInt64:
+		return true
+	default:
+		return false
+	}
 }
 
 func boolCodec() valueCodec {

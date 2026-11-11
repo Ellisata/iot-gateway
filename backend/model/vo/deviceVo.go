@@ -77,8 +77,11 @@ type DeviceAddressVO struct {
 	// ThresholdValue 操作数的 JSON 数组字符串（如 ["10","40"]），由前端自行解析展示 ——
 	// 与库里存的原样一致，不做二次包装（包装成对象会让 PO→VO 的映射多一层无谓转换）。
 	ThresholdValue string `json:"thresholdValue"`
-	CreatedAt      string `json:"createdAt"`
-	UpdatedAt      string `json:"updatedAt"`
+	// TransformJSON 工程量变换流水线的原始 JSON 数组字符串（空串 = 未配置），
+	// 与 ThresholdValue 一样由前端自行解析，服务端不做二次包装。
+	TransformJSON string `json:"transformJson"`
+	CreatedAt     string `json:"createdAt"`
+	UpdatedAt     string `json:"updatedAt"`
 }
 
 // BatchDeleteAddressResultVO 批量删除设备地址的结果

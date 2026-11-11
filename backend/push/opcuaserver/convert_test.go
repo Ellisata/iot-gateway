@@ -11,7 +11,40 @@ import (
 	"github.com/gopcua/opcua/ua"
 
 	"github.com/Ellisata/iot-gateway-sdk/driver"
+
+	"iot-gateway/model/po"
 )
+
+// 整数点位配了会产生小数的变换时，节点必须暴露为 Double —— 否则每次写入
+// "25.3" 都会被 Int16 编码器拒绝，订阅端只能看到 Bad。
+func TestEffectivePointCodecPromotesIntegerForFloatTransform(t *testing.T) {
+	scale := `[{"op":"scale","factor":0.1}]`
+	cases := []struct {
+		name   string
+		addr   po.DeviceAddress
+		want   uint32
+		parses string
+	}{
+		{"Short+scale → Double", po.DeviceAddress{CommonDataType: "Short", TransformJSON: scale}, id.Double, "25.3"},
+		{"Float+scale 保持 Float", po.DeviceAddress{CommonDataType: "Float", TransformJSON: scale}, id.Float, "25.3"},
+		{"Double+round 保持 Double", po.DeviceAddress{CommonDataType: "Double", TransformJSON: `[{"op":"round","digits":2}]`}, id.Double, "25.3"},
+		{"Short+trim 保持 Int16", po.DeviceAddress{CommonDataType: "Short", TransformJSON: `[{"op":"trim"}]`}, id.Int16, "253"},
+		{"String+scale 保持 String", po.DeviceAddress{CommonDataType: "String", TransformJSON: scale}, id.String, "25.3"},
+		{"非法 JSON 保持原类型", po.DeviceAddress{CommonDataType: "Short", TransformJSON: `nope`}, id.Int16, "253"},
+		{"未配置保持原类型", po.DeviceAddress{CommonDataType: "Short"}, id.Int16, "253"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			codec := effectivePointCodec(c.addr)
+			if codec.typeID != c.want {
+				t.Fatalf("typeID = %d, want %d", codec.typeID, c.want)
+			}
+			if _, err := codec.parse(c.parses); err != nil {
+				t.Fatalf("解析 %q 失败: %v", c.parses, err)
+			}
+		})
+	}
+}
 
 func TestCodecForCommonDataType(t *testing.T) {
 	cases := []struct {

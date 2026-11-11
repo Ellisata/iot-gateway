@@ -98,6 +98,11 @@ type gatewayTask struct {
 	groupByID map[string]groupInfo
 	// addrGroupIDs: addressID -> groupID，仅用于驱动返回顺序与 addrs 不一致时的回退查询。
 	addrGroupIDs map[string]string
+	// addrTransforms: addressID -> 编译好的工程量变换流水线。只含配置有效且非空的点位；
+	// 在任务构建期解析一次，toRecords 只做 map 查询（点位 ID 是 UUID，全局唯一）。
+	addrTransforms map[string]compiledTransform
+	// transformErrLog: addressID -> 变换失败日志限流状态（见 shouldLogAddressTransformError）。
+	transformErrLog map[string]transformErrState
 
 	db        *gorm.DB
 	sink      RecordSink      // 采集数据接收者（推送引擎等），可为 nil
@@ -381,6 +386,7 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 	addrLabelMap := make(map[string]map[string]string)            // deviceID -> addressID -> 中文说明
 	addrPropCodes := make(map[string]string)                      // addressID -> 属性标识符
 	addrGroupIDs := make(map[string]string)                       // addressID -> 采集组 ID
+	addrTransforms := make(map[string]compiledTransform)          // addressID -> 工程量变换
 
 	for _, dev := range devices {
 		if _, ok := drvMap[dev.ID]; !ok {
@@ -397,6 +403,18 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 		protocolName := devProtocols[dev.ID]
 		for i := range addrs {
 			addr := &addrs[i]
+
+			// 工程量变换必须在下面的过滤之前编译：Engine.ReadRecords 供触发规则读取
+			// 动作点位，同样走 toRecords，那些点位可能不在轮询调度里。非法配置只记一次
+			// 日志并让该点位保持原值，不能因为它把整台设备的采集拖垮。
+			if raw := strings.TrimSpace(addr.TransformJSON); raw != "" {
+				ct, err := compileAddressTransform(raw)
+				if err != nil {
+					logger.Warn("collector: address %s transform_json invalid, ignored: %v", addr.ID, err)
+				} else {
+					addrTransforms[addr.ID] = ct
+				}
+			}
 
 			// 只写点位（rw_permission=W）只参与控制下发，不进入采集调度：
 			// 驱动契约里没有权限字段，读它只会在设备侧报错、把整台设备拖入退避/离线，
@@ -470,6 +488,7 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 		protocols:      devProtocols,
 		groupByID:      groups,
 		addrGroupIDs:   addrGroupIDs,
+		addrTransforms: addrTransforms,
 		db:             db,
 		sink:           sink,
 		stateSink:      stateSink,
@@ -999,7 +1018,8 @@ func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, result
 	for i, r := range results {
 		name, label := "", ""
 		groupID := ""
-		if i < len(addrs) && addrs[i].ID == r.DeviceAddressID {
+		aligned := i < len(addrs) && addrs[i].ID == r.DeviceAddressID
+		if aligned {
 			name = addrs[i].Name
 			label = addrs[i].Label
 			groupID = addrs[i].GroupID
@@ -1013,6 +1033,28 @@ func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, result
 			}
 			groupID = t.addrGroupIDs[r.DeviceAddressID]
 		}
+
+		// 工程量变换：对齐时先用点位自己的 transform_json 做廉价守卫，未配置变换的
+		// 绝大多数点位不为此多付一次 map 查询；未对齐时直接查 map（正常驱动不会走到）。
+		// 失败只记限频日志并保留原值，不改质量码 —— 见 compiledTransform.apply。
+		value, kind := r.Value, r.Kind
+		var ct compiledTransform
+		var hasCT bool
+		if aligned {
+			if addrs[i].TransformJSON != "" {
+				ct, hasCT = t.addrTransforms[r.DeviceAddressID]
+			}
+		} else {
+			ct, hasCT = t.addrTransforms[r.DeviceAddressID]
+		}
+		if hasCT {
+			var err error
+			value, kind, err = ct.apply(value, kind, r.Quality)
+			if err != nil {
+				t.logAddressTransformError(dev, r.DeviceAddressID, label, err)
+			}
+		}
+
 		groupName, groupCode, groupInterval := "", "", 0
 		if groupID != "" {
 			if g, ok := t.groupByID[groupID]; ok {
@@ -1028,9 +1070,9 @@ func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, result
 			DeviceAddressID:    r.DeviceAddressID,
 			DeviceAddressName:  name,
 			DeviceAddressLabel: label,
-			Value:              r.Value,
+			Value:              value,
 			DataType:           r.DataType,
-			Kind:               r.Kind,
+			Kind:               kind,
 			Protocol:           protocol,
 			Quality:            r.Quality,
 			ThingModelCode:     modelCode,

@@ -6,6 +6,16 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
+## [Unreleased]
+
+### 新增
+
+- **点位级工程量变换**：设备点位新增「工程量变换」（`device_address.transform_json`，迁移 `036_device_address_transform.sql`），在采集侧对原始值执行一次 `scale / round / trim / default` 流水线。实时值、点位阈值报警、触发规则、断网缓存与全部推送通道（MQTT / Kafka / HTTP / OPC UA / TDengine / InfluxDB）使用同一个工程值，时序库不再需要单独配置换算。`scale`（或保留小数位的 `round`）会把数值点位的 `kind` 提升为 `float`，OPC UA 整数节点相应提升为 Double；变换失败保留原值并限频记录日志。出站 `mapping-json` 的 transform 仍作为展示层保留，迁移到点位级后应删除通道侧重复的 `scale`。
+
+### Added
+
+- **Per-point engineering transform**: device points gain an "engineering transform" (`device_address.transform_json`, migration `036_device_address_transform.sql`) that runs a `scale / round / trim / default` pipeline once at collection. Live values, point threshold alarms, trigger rules, the offline spool and every push channel (MQTT / Kafka / HTTP / OPC UA / TDengine / InfluxDB) see the same engineering value, so TSDB channels no longer need their own conversion. `scale` (or `round` with decimal digits) promotes numeric points' `kind` to `float`, and integer OPC UA nodes become Double accordingly; on failure the raw value is kept and the error is logged with rate limiting. The outbound `mapping-json` transform remains a presentation layer — remove any duplicate `scale` from channel mappings after moving it to the point.
+
 ## [0.8.1] - 2026-11-11
 
 ### 新增

@@ -18,7 +18,7 @@
     v-model="visible"
     class="iot-dialog"
     :title="isEdit ? t('deviceAddress.editTitle') : t('deviceAddress.addTitle')"
-    width="620px"
+    width="760px"
     :close-on-click-modal="false"
     @close="handleDialogClose"
   >
@@ -210,6 +210,19 @@
         </el-select>
       </el-form-item>
 
+      <!-- 工程量变换：采集侧执行一次，实时值、报警、触发规则与所有推送（含时序库）共用 -->
+      <el-form-item :label="t('deviceAddress.engineeringTransform')">
+        <MappingTransformEditor
+          :transforms="formData.transformRows"
+          :ops="ADDRESS_TRANSFORM_OPS"
+          :show-title="false"
+          label-prefix="deviceAddress.transformEditor"
+        />
+        <div class="iot-form-hint is-block">
+          {{ t('deviceAddress.transformHint') }}
+        </div>
+      </el-form-item>
+
       <!-- 报警条件：开关 + 比较符 + 操作数。比较符与操作数控件都按数据类型的类别切换 -->
       <el-form-item :label="t('deviceAddress.thresholdAlarm')" prop="thresholdEnabled">
         <el-switch
@@ -335,6 +348,13 @@ import { listCollectorGroups } from '@/api/modules/collectorGroup'
 import { useScanFrequencyOptions } from '@/composables/useScanFrequencyOptions'
 import { getAddressExample, getAddressSpec } from '@/utils/addressSyntax'
 import { buildConditionValues, parseConditionValues } from '@/utils/addressThreshold'
+import MappingTransformEditor from '@/components/pushMapping/MappingTransformEditor.vue'
+import {
+  ADDRESS_TRANSFORM_OPS,
+  transformJSONToRows,
+  transformRowsToJSON,
+  validateTransformRows,
+} from '@/utils/pushMapping'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps({
@@ -519,6 +539,9 @@ const formData = reactive({
   thresholdEnabled: 0,
   thresholdOp: '',
   thresholdValues: [],
+  // 工程量变换：有序算子流水线（scale/round/trim/default），采集侧执行一次。
+  // 提交时始终整份发送，空数组表示清空。
+  transformRows: [],
 })
 
 // ---------- 表单校验规则 ----------
@@ -584,6 +607,7 @@ async function loadAddress(id) {
     formData.thresholdEnabled = row.thresholdEnabled ?? 0
     formData.thresholdOp = row.thresholdOp ?? ''
     formData.thresholdValues = parseConditionValues(row.thresholdValue)
+    formData.transformRows = parseTransformRows(row.transformJson)
   } catch {
     // 错误提示由响应拦截器给出；关闭对话框，别让用户对着空表单点保存
     if (token === loadToken) visible.value = false
@@ -615,6 +639,19 @@ function resetFormData() {
   formData.thresholdEnabled = 0
   formData.thresholdOp = ''
   formData.thresholdValues = []
+  formData.transformRows = []
+}
+
+// 后端把流水线存成 JSON 数组字符串（与 thresholdValue 同一口径）。
+// 解析失败按"未配置"处理：编辑框应能打开，不能因为一条坏配置把人挡在门外。
+function parseTransformRows(raw) {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? transformJSONToRows(parsed, ADDRESS_TRANSFORM_OPS) : []
+  } catch {
+    return []
+  }
 }
 
 // ---------- 属性下拉：按当前数据类型与读写模式过滤 ----------
@@ -760,6 +797,15 @@ function validateThreshold() {
   return true
 }
 
+// 点位变换的校验规则与后端 ValidateNormalization 对齐（白名单、default 首位、
+// scale 参数为数字、round 小数位 0-12）。这里只给一条通用提示，细节由后端兜底。
+function validateAddressTransform() {
+  const problems = validateTransformRows(formData.transformRows, ADDRESS_TRANSFORM_OPS)
+  if (problems.length === 0) return true
+  ElMessage.warning(t('deviceAddress.transformInvalid'))
+  return false
+}
+
 // ---------- 提交 ----------
 async function handleSubmit() {
   if (!formRef.value) return
@@ -769,6 +815,7 @@ async function handleSubmit() {
     return
   }
   if (!validateThreshold()) return
+  if (!validateAddressTransform()) return
 
   submitting.value = true
   try {
@@ -790,6 +837,8 @@ async function handleSubmit() {
         op: formData.thresholdOp,
         values: buildConditionValues(formData.thresholdOp, formData.thresholdValues),
       },
+      // 始终整份提交：编辑时 [] 表示清空流水线（后端按「省不省略」区分三态）。
+      transform: transformRowsToJSON(formData.transformRows, ADDRESS_TRANSFORM_OPS),
     }
 
     if (isEdit.value) {

@@ -308,6 +308,9 @@ func (e *Engine) loadConfigChecksum() uint64 {
 		io.WriteString(h, "|")
 		// 采集组绑定：改绑/解绑要重建任务，生效周期与记录里的组身份才会更新。
 		io.WriteString(h, a.GroupID)
+		io.WriteString(h, "|")
+		// 工程量变换在任务构建期编译、采集侧执行，改它必须重建任务才会生效。
+		io.WriteString(h, a.TransformJSON)
 		io.WriteString(h, "\n")
 	}
 
