@@ -2,7 +2,7 @@
 
 > 适用于三个仓库：网关主程序 [`iot-gateway-premium`](../README.md)、官方驱动
 > [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers)、驱动 SDK
-> [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk)。最后更新：2026-11-05。
+> [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk)。最后更新：2026-11-11。
 
 ## 1. 结论
 
@@ -22,7 +22,7 @@
 
 | 版本 | 真源 | 当前值 | 参与兼容判定 |
 |---|---|---|---|
-| 网关发行版本 | git tag；构建脚本以 `-X main.version` 注入，写入 `iot_gateway.firmware_version` 并随局域网发现广播 | `v0.8.0` | 否 |
+| 网关发行版本 | git tag；构建脚本以 `-X main.version` 注入，写入 `iot_gateway.firmware_version` 并随局域网发现广播 | `v0.8.1` | 否 |
 | 官方驱动发行版本 | 仓库根的 `drivers.version`；构建时经 `-X main.version` 写入每个插件的 `Meta.Version` | `v0.4.0` | 否 |
 | 驱动 SDK 版本 | 网关 `backend/go.mod`、驱动仓库 `go.mod` | `v0.4.0` | 否 |
 | 线协议版本 | `driversdk.APIVersion`（[SDK 源码](https://github.com/Ellisata/iot-gateway-sdk/blob/main/driversdk/meta.go)） | `4` | **是，必须相等** |
@@ -50,6 +50,7 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 | v0.6.0 | v0.3.0 | v0.3.0 | 4 | 9 / 15 | 采集组与分组推送、稳定编码与主题模板、物模型导入、推送监控 |
 | v0.7.0 | v0.3.0 | v0.3.0 | 4 | 9 / 15 | 事件触发采集规则（DNF 条件、按设备隔离执行、实时监控）、OPC UA 通道监控（当前离线发行版） |
 | v0.8.0 | v0.4.0 | v0.4.0 | 4 | 9 / 15 | 设备扫描 TCP 可达性预筛（`DiscoverySpec.Transport`，可选字段）、扫描并发默认 8→32 / 上限 32→128、扫描剩余批次自动续扫 |
+| v0.8.1 | v0.4.0 | v0.4.0 | 4 | 9 / 15 | Kafka 推送通道、开放接口报警明细 / 订阅设备点位同步 / 物模型批量 upsert 与删除、按协议生成设备导入模板与扫描结果导出、采集组与设备/点位被引用时拒绝删除 |
 
 维护规则：
 
