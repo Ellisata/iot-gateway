@@ -75,13 +75,14 @@ func nowString() string {
 func (s *ThingModelService) CreateThingModel(ctx context.Context, req *dto.CreateThingModelDTO) error {
 	code := strings.TrimSpace(req.Code)
 	name := strings.TrimSpace(req.Name)
+	category := strings.TrimSpace(req.Category)
 	if !thingModelCodePattern.MatchString(code) {
 		return thingModelErr(enums.ThingModelCodeInvalidEnum)
 	}
 	if name == "" {
 		return thingModelErr(enums.ParamValidEnum)
 	}
-	if !constants.IsValidThingModelCategory(req.Category) {
+	if !constants.IsValidThingModelCategory(category) {
 		return thingModelErr(enums.ThingModelCategoryInvalidEnum)
 	}
 	version := strings.TrimSpace(req.Version)
@@ -104,7 +105,7 @@ func (s *ThingModelService) CreateThingModel(ctx context.Context, req *dto.Creat
 		return tx.Create(&po.ThingModel{
 			Code:        code,
 			Name:        name,
-			Category:    req.Category,
+			Category:    category,
 			Version:     version,
 			Description: req.Description,
 			Status:      1,
@@ -125,9 +126,7 @@ func (s *ThingModelService) UpdateThingModel(ctx context.Context, req *dto.Updat
 	if req.Code != "" && !thingModelCodePattern.MatchString(strings.TrimSpace(req.Code)) {
 		return thingModelErr(enums.ThingModelCodeInvalidEnum)
 	}
-	if !constants.IsValidThingModelCategory(req.Category) {
-		return thingModelErr(enums.ThingModelCategoryInvalidEnum)
-	}
+	category := strings.TrimSpace(req.Category)
 	version := strings.TrimSpace(req.Version)
 	if version == "" {
 		version = "1.0.0"
@@ -144,6 +143,10 @@ func (s *ThingModelService) UpdateThingModel(ctx context.Context, req *dto.Updat
 		if req.Code != "" && strings.TrimSpace(req.Code) != existing.Code {
 			return thingModelErr(enums.ThingModelCodeImmutableEnum)
 		}
+		// 开放接口下发的自定义分类允许原样保留；新增或改挂仍只接受内置分类。
+		if category != existing.Category && !constants.IsValidThingModelCategory(category) {
+			return thingModelErr(enums.ThingModelCategoryInvalidEnum)
+		}
 
 		var dup int64
 		if err := tx.Model(&po.ThingModel{}).
@@ -157,7 +160,7 @@ func (s *ThingModelService) UpdateThingModel(ctx context.Context, req *dto.Updat
 
 		updates := map[string]any{
 			"name":        name,
-			"category":    req.Category,
+			"category":    category,
 			"version":     version,
 			"description": req.Description,
 			"updated_at":  nowString(),
@@ -231,11 +234,12 @@ func (s *ThingModelService) PageThingModel(ctx context.Context, req *dto.PageThi
 		like := "%" + kw + "%"
 		db = db.Where("code LIKE ? OR name LIKE ?", like, like)
 	}
-	if req.Category != "" {
-		if !constants.IsValidThingModelCategory(req.Category) {
+	if category := strings.TrimSpace(req.Category); category != "" {
+		// 筛选要能命中平台下发的自定义分类，因此只校验格式，不套内置枚举。
+		if !constants.IsValidThingModelCategoryCode(category) {
 			return nil, thingModelErr(enums.ThingModelCategoryInvalidEnum)
 		}
-		db = db.Where("category = ?", req.Category)
+		db = db.Where("category = ?", category)
 	}
 
 	var total int64

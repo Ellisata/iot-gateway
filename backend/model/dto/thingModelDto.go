@@ -21,11 +21,15 @@ type CreateThingModelDTO struct {
 //
 // Code 创建后不可修改：它是导入导出与外部引用的稳定键。请求里可以省略，
 // 传了就必须与原值一致；不一致会被服务层拒绝。
+//
+// Category 不在这里做 oneof：开放接口可能已下发平台自定义分类，本地管理端
+// 必须能保留它（例如只改名称）。服务层会放行“与原值相同”的分类，但新增或
+// 改挂仍只接受内置分类，避免本地随意制造新 code。
 type UpdateThingModelDTO struct {
 	ID          string `json:"id" binding:"required"`
 	Code        string `json:"code" binding:"omitempty,max=64"`
 	Name        string `json:"name" binding:"required,min=1,max=100"`
-	Category    string `json:"category" binding:"omitempty,oneof=sensor meter actuator robot plc other"`
+	Category    string `json:"category" binding:"omitempty,max=32"`
 	Version     string `json:"version" binding:"omitempty,max=32"`
 	Description string `json:"description" binding:"omitempty,max=500"`
 	Status      *int   `json:"status" binding:"omitempty,oneof=0 1"`

@@ -101,7 +101,7 @@ func TestOpenApiControlWriteEndToEnd(t *testing.T) {
 		service.NewDeviceAddressService(db, nil),
 		service.NewAlarmService(db),
 		service.NewMqttSubscriptionService(db, nil),
-	), controlSvc, service.NewThingModelService(db))
+	), controlSvc, service.NewThingModelService(db), nil)
 
 	engine := gin.New()
 	router.OpenApiRoutes(engine, secretSvc, openApiCtrl)

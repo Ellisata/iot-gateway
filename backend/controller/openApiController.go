@@ -21,6 +21,7 @@ type OpenApiController struct {
 	openApiService    *service.OpenApiService
 	controlService    *service.ControlService
 	thingModelService *service.ThingModelService
+	configService     *service.OpenApiConfigService
 }
 
 // NewOpenApiController 创建开放接口控制器
@@ -28,12 +29,271 @@ func NewOpenApiController(
 	openApiService *service.OpenApiService,
 	controlService *service.ControlService,
 	thingModelService *service.ThingModelService,
+	configService *service.OpenApiConfigService,
 ) *OpenApiController {
 	return &OpenApiController{
 		openApiService:    openApiService,
 		controlService:    controlService,
 		thingModelService: thingModelService,
+		configService:     configService,
 	}
+}
+
+// Capabilities 配置同步能力协商。
+func (ctr *OpenApiController) Capabilities(c *gin.Context) {
+	ctx := c.Request.Context()
+	data, err := ctr.configService.Capabilities(ctx)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// PageThingModelsForConfig 物模型配置分页读（含属性与 contentHash）。
+func (ctr *OpenApiController) PageThingModelsForConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiConfigPageDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.configService.PageThingModels(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// PageDeviceConfigs 设备配置分页读（设备 + 采集组 + 点位 + contentHash）。
+func (ctr *OpenApiController) PageDeviceConfigs(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiDeviceConfigPageDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.configService.PageDeviceConfigs(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// PagePushChannelsForConfig 推送通道配置分页读（config 脱敏 + contentHash）。
+func (ctr *OpenApiController) PagePushChannelsForConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiPushChannelPageDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.configService.PagePushChannels(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// ListPushChannelForms 推送通道动态表单。
+func (ctr *OpenApiController) ListPushChannelForms(c *gin.Context) {
+	ctx := c.Request.Context()
+	data, err := ctr.configService.ListPushChannelForms(ctx)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// ListPushChannelTypes 推送通道类型元数据。
+func (ctr *OpenApiController) ListPushChannelTypes(c *gin.Context) {
+	c.JSON(200, response.Success(ctr.configService.ListPushChannelTypes()))
+}
+
+// PageAlarmWebhooksForConfig 告警 Webhook 配置分页读（secret 脱敏 + contentHash）。
+func (ctr *OpenApiController) PageAlarmWebhooksForConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiAlarmWebhookPageDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.configService.PageAlarmWebhooks(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// ListAlarmWebhookForms 告警 Webhook 动态表单。
+func (ctr *OpenApiController) ListAlarmWebhookForms(c *gin.Context) {
+	ctx := c.Request.Context()
+	data, err := ctr.configService.ListAlarmWebhookForms(ctx)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// ListAlarmWebhookTypes 告警 Webhook 类型元数据。
+func (ctr *OpenApiController) ListAlarmWebhookTypes(c *gin.Context) {
+	c.JSON(200, response.Success(ctr.configService.ListAlarmWebhookTypes()))
+}
+
+// ListSystemConfigForOpenApi 运行开关全量读。
+func (ctr *OpenApiController) ListSystemConfigForOpenApi(c *gin.Context) {
+	ctx := c.Request.Context()
+	data, err := ctr.configService.ListSystemConfig(ctx)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// ListProtocolsForConfig 协议与点位数据类型。
+func (ctr *OpenApiController) ListProtocolsForConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	data, err := ctr.configService.ListProtocols(ctx)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// BatchUpsertPushChannels 推送通道批量 upsert（自然键 type/name）。
+func (ctr *OpenApiController) BatchUpsertPushChannels(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiPushChannelBatchUpsertDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.configService.BatchUpsertPushChannels(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// BatchDeletePushChannels 推送通道批量删除。
+func (ctr *OpenApiController) BatchDeletePushChannels(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiPushChannelBatchDeleteDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.configService.BatchDeletePushChannels(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// BatchUpsertAlarmWebhooks 告警 Webhook 批量 upsert（自然键 name）。
+func (ctr *OpenApiController) BatchUpsertAlarmWebhooks(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiAlarmWebhookBatchUpsertDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.configService.BatchUpsertAlarmWebhooks(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// BatchDeleteAlarmWebhooks 告警 Webhook 批量删除。
+func (ctr *OpenApiController) BatchDeleteAlarmWebhooks(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiAlarmWebhookBatchDeleteDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.configService.BatchDeleteAlarmWebhooks(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// BatchUpdateSystemConfig 运行开关批量修改。
+func (ctr *OpenApiController) BatchUpdateSystemConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiSystemConfigBatchUpdateDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.configService.BatchUpdateSystemConfig(ctx, &req, "openapi")
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// BatchResetSystemConfig 运行开关批量恢复默认。
+func (ctr *OpenApiController) BatchResetSystemConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiSystemConfigBatchResetDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.configService.BatchResetSystemConfig(ctx, &req, "openapi")
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// BatchUpsertDeviceConfigs 设备配置批量 upsert（设备 + 采集组 + 点位）。
+func (ctr *OpenApiController) BatchUpsertDeviceConfigs(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiDeviceConfigBatchUpsertDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.configService.BatchUpsertDeviceConfigs(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// BatchDeleteDeviceConfigs 设备配置批量删除。
+func (ctr *OpenApiController) BatchDeleteDeviceConfigs(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiDeviceConfigBatchDeleteDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.configService.BatchDeleteDeviceConfigs(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
 }
 
 // PageDevices 对外设备分页查询

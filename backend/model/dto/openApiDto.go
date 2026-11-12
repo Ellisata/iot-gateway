@@ -60,6 +60,9 @@ type OpenApiThingModelUpsertDTO struct {
 	Description *string                              `json:"description"`
 	Status      *int                                 `json:"status"`
 	Properties  []OpenApiThingModelPropertyUpsertDTO `json:"properties"`
+	// ReplaceProperties 为 true 时，删除请求中未出现的属性（受点位绑定保护）。
+	// 默认 false，保持 4.13 既有「只增不删」契约。
+	ReplaceProperties *bool `json:"replaceProperties"`
 }
 
 // OpenApiThingModelPropertyUpsertDTO 单个物模型属性的 upsert 条目。

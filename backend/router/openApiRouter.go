@@ -44,6 +44,31 @@ func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService, oac *contr
 		// 仍需 control.enabled + 协议 Writable + 点位 W 权限三层同时满足。
 		openApi.POST("/control/write", oac.WriteControl)
 
+		// ==================== 配置同步（管理平台统一配置管理） ====================
+		// 读接口返回的 payload 就是管理平台应保存的期望态，密钥字段已脱敏；
+		// contentHash 由网关按 sha256-canonical-json-v1 计算，供漂移比较。
+		openApi.GET("/config/capabilities", oac.Capabilities)
+		openApi.GET("/config/protocols", oac.ListProtocolsForConfig)
+		openApi.GET("/thingModel/page", oac.PageThingModelsForConfig)
+		openApi.GET("/deviceConfig/page", oac.PageDeviceConfigs)
+		openApi.GET("/pushChannel/page", oac.PagePushChannelsForConfig)
+		openApi.GET("/pushChannel/types", oac.ListPushChannelTypes)
+		openApi.GET("/pushChannel/forms", oac.ListPushChannelForms)
+		openApi.GET("/alarmWebhook/page", oac.PageAlarmWebhooksForConfig)
+		openApi.GET("/alarmWebhook/types", oac.ListAlarmWebhookTypes)
+		openApi.GET("/alarmWebhook/forms", oac.ListAlarmWebhookForms)
+		openApi.GET("/systemConfig/list", oac.ListSystemConfigForOpenApi)
+
+		// 配置写入：只改网关配置，不触达现场设备；逐条部分成功。
+		openApi.POST("/pushChannel/batchUpsert", oac.BatchUpsertPushChannels)
+		openApi.POST("/pushChannel/batchDelete", oac.BatchDeletePushChannels)
+		openApi.POST("/alarmWebhook/batchUpsert", oac.BatchUpsertAlarmWebhooks)
+		openApi.POST("/alarmWebhook/batchDelete", oac.BatchDeleteAlarmWebhooks)
+		openApi.POST("/systemConfig/batchUpdate", oac.BatchUpdateSystemConfig)
+		openApi.POST("/systemConfig/batchReset", oac.BatchResetSystemConfig)
+		openApi.POST("/deviceConfig/batchUpsert", oac.BatchUpsertDeviceConfigs)
+		openApi.POST("/deviceConfig/batchDelete", oac.BatchDeleteDeviceConfigs)
+
 		// 物模型配置写入：按 code / identifier upsert 物模型与属性。
 		// 只改网关配置、不触达现场设备；每个模型一个事务，跨模型部分成功；
 		// 请求中未出现的属性不删除（见 docs/openApi.md 4.13）。

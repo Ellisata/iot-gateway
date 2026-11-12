@@ -21,6 +21,7 @@
 | v1.4 | 2026-10-09 | 开放接口新增两条可靠性查询（`/openApi/alarm/deviceReliability`、`/openApi/alarm/pointAbnormal`），§3.0 开放接口由 4 条增至 6 条 |
 | v1.5 | 2026-10-24 | 新增只读接口 `POST /pushChannel/previewMapping`（只试编码出站映射，不依赖通道类型/连接配置）；按实际路由把 `/agentApi` 领域接口数校正为 111 |
 | v1.6 | 2026-11-09 | 设备 / 点位删除新增触发规则引用保护：被事件触发规则引用时返回 `40063` / `40064`，批量整批不删 |
+| v1.7 | 2026-11-11 | `/openApi` 新增配置同步接口（能力协商、五域只读、推送通道/告警 Webhook/运行开关/设备点位批量写），见 [openApi.md](openApi.md) 4.16 |
 
 ---
 

@@ -3,15 +3,22 @@
 
 package constants
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // 物模型分类 code。
 //
-// 分类是产品内置的固定枚举，**不建字典表**：thing_model.category 只存 code，
-// 展示名由前端 i18n 提供（thingModel.category.<code>），这样英文界面不会出现
-// 中文分类名，也不会出现“传感器 / 传感器类 / sensor”这类自由文本漂移。
+// 网关内置分类是固定枚举，用于网关本地管理端与导入模板：thing_model.category
+// 只存 code，展示名由前端 i18n 提供（thingModel.category.<code>），这样英文界面
+// 不会出现中文分类名，也不会出现“传感器 / 传感器类 / sensor”这类自由文本漂移。
 //
-// 新增分类需要同时修改：本文件、两份 i18n 文案、以及属性/模型的 DTO 校验。
+// 开放接口（管理平台下发）允许使用平台自定义分类：平台是分类词表的权威源，
+// 网关只校验格式（见 IsValidOpenApiThingModelCategory），不再把分类限制在
+// 内置枚举内。这样新增分类只需平台维护，不需要网关跟着发版。
+//
+// 新增内置分类仍需同时修改：本文件、两份 i18n 文案、以及属性/模型的 DTO 校验。
 // 刻意不在 SQL 里加 CHECK 约束 —— SQLite 修改 CHECK 需要重建表，分类扩展
 // 的成本不该落在这里，校验统一放服务层。
 const (
@@ -34,13 +41,33 @@ var ThingModelCategoryCodes = []string{
 	ThingModelCategoryOther,
 }
 
-// IsValidThingModelCategory 报告 code 是否为合法分类。
+// IsValidThingModelCategory 报告 code 是否为网关内置分类。
 // 空串表示“未分类”，同样合法。
 func IsValidThingModelCategory(code string) bool {
 	if code == ThingModelCategoryUnset {
 		return true
 	}
 	return containsCode(ThingModelCategoryCodes, code)
+}
+
+// OpenApiThingModelCategoryPattern 开放接口下发的分类 code 格式。
+// 小写字母开头，可含小写字母、数字、下划线、中划线，最长 32 位。
+var OpenApiThingModelCategoryPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+
+// IsValidThingModelCategoryCode 校验任意分类 code 的格式（内置或平台自定义）。
+//
+// 空串 = 未分类；只约束格式，不校验是否在内置枚举内。用于开放接口写入和
+// 列表筛选这类“接受平台词表”的场景。
+func IsValidThingModelCategoryCode(code string) bool {
+	code = strings.TrimSpace(code)
+	return code == "" || OpenApiThingModelCategoryPattern.MatchString(code)
+}
+
+// IsValidOpenApiThingModelCategory 校验开放接口下发的分类。
+//
+// 分类词表由平台维护，网关不再做白名单校验 —— 否则平台每加一个分类都要升级网关。
+func IsValidOpenApiThingModelCategory(code string) bool {
+	return IsValidThingModelCategoryCode(code)
 }
 
 // ThingModelCategoryDisplayNames 分类 code → 中文展示名，仅供 Excel 导入模板使用。

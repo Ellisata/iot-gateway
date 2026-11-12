@@ -20,6 +20,7 @@
 | v1.8 | 2026-11-06 | Added: batch sync of subscribed devices and points (4.12, cursor paging, same shape as 4.5; the data source is the device/point metadata index maintained from subscription messages) | - |
 | v1.9 | 2026-11-09 | Added: thing model and property batch upsert (4.13, create-or-update by the `code` / `identifier` natural keys, partial success across models) | - |
 | v1.10 | 2026-11-09 | Added: thing-model batch delete (4.14) and thing-model property batch delete (4.15), deleting per natural key and returning per-item results | - |
+| v1.11 | 2026-11-11 | Added: configuration sync (4.16) — capability negotiation, read APIs for five domains, and batch writes for push channels / alarm webhooks / runtime switches / device points. Read APIs return masked desired state plus `contentHash` for template deployment and drift detection | - |
 
 ## Compatibility Commitment
 
@@ -1133,7 +1134,7 @@ Content-Type: application/json
 | `models` | Yes | 1~100 models |
 | `models[].code` | Yes | Model identifier (starts with a letter; letters, digits, `_`, `-`; ≤64). **Natural key, immutable after creation** |
 | `models[].name` | Yes | Display name (≤100 characters, globally unique) |
-| `models[].category` | No | `sensor` / `meter` / `actuator` / `robot` / `plc` / `other`; omitted = keep current value (new models = uncategorized); explicit `""` = uncategorized |
+| `models[].category` | No | Category code: built-in `sensor` / `meter` / `actuator` / `robot` / `plc` / `other`, or a custom code maintained by the management platform (starts with a lowercase letter; lowercase letters, digits, `_`, `-`; ≤32). Omitted = keep current value (new models = uncategorized); explicit `""` = uncategorized |
 | `models[].version` | No | ≤32 characters; omitted = keep current value (new models = `1.0.0`) |
 | `models[].description` | No | ≤500 characters; omitted = keep current value |
 | `models[].status` | No | `1` enabled / `0` disabled; omitted = keep current value (new models = `1`) |
@@ -1341,6 +1342,85 @@ Content-Type: application/json
 | `results[].action` | `deleted` / `failed` |
 | `results[].errorCode` / `errorMessage` | Failure reason (present only on failure) |
 
+### 4.16 Configuration Sync (Management Platform)
+
+> These endpoints let a management platform deploy configuration templates to the gateway.
+> **They only modify gateway configuration and never touch field devices.**
+> The `payload` returned by read APIs is exactly the desired state the management platform
+> should store; secret fields are masked as `***`. Write APIs return per-item results while
+> the top-level envelope stays successful (`code=0`); callers must inspect `items[]`.
+
+#### 4.16.1 Capability Negotiation
+
+```
+GET /openApi/config/capabilities
+```
+
+Returns `cfgSyncVersion`, `openApiVersion`, `gatewayVersion`, `hashVersion`,
+`hashAlgorithm`, and per-domain `read/upsert/delete/update/reset/maxBatch`.
+The management platform must call this first; if `hashVersion` differs, drift
+detection must be disabled.
+
+#### 4.16.2 Read APIs
+
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| GET | `/openApi/thingModel/page` | Thing models + properties + `contentHash` |
+| GET | `/openApi/deviceConfig/page` | Devices + collector groups + points + `contentHash`; page size max 20 |
+| GET | `/openApi/pushChannel/page` | Push channels, `config` masked |
+| GET | `/openApi/pushChannel/types` | Channel type metadata |
+| GET | `/openApi/pushChannel/forms` | Channel dynamic forms |
+| GET | `/openApi/alarmWebhook/page` | Alarm webhooks, `secret` masked |
+| GET | `/openApi/alarmWebhook/types` | Webhook type metadata |
+| GET | `/openApi/alarmWebhook/forms` | Webhook dynamic forms |
+| GET | `/openApi/systemConfig/list` | Current runtime switch values |
+| GET | `/openApi/config/protocols` | Protocols and point data types |
+
+Paginated endpoints use `page/size` and return `{page,size,total,records}`; each
+record is `{targetKey,payload,contentHash}`.
+
+#### 4.16.3 Write APIs
+
+| Method | Path | Natural key | Description |
+| ------ | ---- | ----------- | ----------- |
+| POST | `/openApi/thingModel/batchUpsert` | `code` / `identifier` | Existing API; optional `replaceProperties=true` deletes absent properties |
+| POST | `/openApi/thingModel/batchDelete` | `code` | Existing API |
+| POST | `/openApi/pushChannel/batchUpsert` | `type/name` | `config` is an object; `"***"` keeps the existing secret |
+| POST | `/openApi/pushChannel/batchDelete` | `type/name` | Per-item delete |
+| POST | `/openApi/alarmWebhook/batchUpsert` | `name` | `secret` `"***"` keeps the existing value |
+| POST | `/openApi/alarmWebhook/batchDelete` | `name` | Per-item delete |
+| POST | `/openApi/systemConfig/batchUpdate` | `key` | Batch update runtime switches |
+| POST | `/openApi/systemConfig/batchReset` | `key` | Batch reset to defaults |
+| POST | `/openApi/deviceConfig/batchUpsert` | `code` or `name` | Device + groups + points; `mode=replace` deletes absent points/groups |
+| POST | `/openApi/deviceConfig/batchDelete` | `code` or `name` | Per-item delete, preserving trigger-rule / push-channel reference guards |
+
+Batch limits: thing models / push channels / alarm webhooks 100, runtime switches 50,
+devices 20. Per device: at most 500 points and 100 collector groups.
+
+#### 4.16.4 contentHash and Secret Retention
+
+- Algorithm: `sha256-canonical-json-v1`. Object keys are sorted, numbers normalized,
+  HTML not escaped; secret fields (`password/secret/token/apiKey/...`) contribute only
+  their presence, not their value.
+- Secret placeholder `"***"`: on write it means "keep the gateway's existing value"
+  (supported in nested `config`/`protocolJson` paths and aligned array indexes).
+  Read APIs never return real secrets.
+- Therefore "import → re-deploy" will not overwrite gateway secrets with `***`.
+- Known limitation: changing only a secret value does not produce drift.
+
+#### 4.16.5 Apply Order
+
+The management platform applies in this order: `runtime switches → push channels →
+alarm webhooks → thing models → devices/points`. Devices and points depend on thing
+models and protocols; reversing the order fails on missing references.
+
+#### 4.16.6 Error Codes
+
+`42001-42009` are configuration-sync specific: unsupported type, protocol missing,
+thing model missing/disabled, model change missing points, protocol change missing
+all points, collector group missing, unsupported hash version, batch limit exceeded,
+invalid device configuration. Per-item `errorCode` reflects the gateway's actual result.
+
 ## 5. Error Code Reference
 
 The error codes the public API may return are listed below (the complete list is in this section; other internal error codes never appear in public APIs):
@@ -1369,7 +1449,7 @@ The error codes the public API may return are listed below (the complete list is
 | `41006` | 200 | Property is bound to a point and cannot be deleted (per item) | Unbind the point first, then delete |
 | `41007` | 200 | Invalid thing-model code (per item) | Starts with a letter; letters, digits, `_`, `-`; ≤64 |
 | `41008` | 200 | Invalid property identifier (per item) | Starts with a letter; letters, digits, `_`; ≤64 |
-| `41010` | 200 | Invalid thing-model category (per item) | Use `sensor/meter/actuator/robot/plc/other`, or leave it empty |
+| `41010` | 200 | Invalid thing-model category format (per item) | Empty, or a code that starts with a lowercase letter, contains only lowercase letters/digits/`_`/`-`, and is ≤32 characters (built-in `sensor/meter/actuator/robot/plc/other` also valid) |
 | `41018` | 200 | Property is bound to a point and cannot change data type or access mode (per item) | Unbind the point in the admin console first, then change `kind`/`accessMode` |
 | `-1` | 200 | System error | Retry later; if persistent, contact the administrator and check gateway logs |
 

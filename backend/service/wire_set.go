@@ -25,6 +25,7 @@ var ServiceProviderSet = wire.NewSet(
 	NewLogFileService,
 	NewOpenApiSecretService,
 	NewOpenApiService,
+	NewOpenApiConfigService,
 	NewGatewayService,
 	NewPluginService,
 	NewDeviceScanService,

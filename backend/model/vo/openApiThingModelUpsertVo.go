@@ -34,6 +34,7 @@ type OpenApiThingModelUpsertItemVO struct {
 	Name         string                                  `json:"name"`
 	Action       string                                  `json:"action"`
 	ID           string                                  `json:"id,omitempty"`
+	ContentHash  string                                  `json:"contentHash,omitempty"`
 	ErrorCode    string                                  `json:"errorCode,omitempty"`
 	ErrorMessage string                                  `json:"errorMessage,omitempty"`
 	Properties   []OpenApiThingModelPropertyUpsertItemVO `json:"properties"`

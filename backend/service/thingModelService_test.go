@@ -167,6 +167,35 @@ func TestThingModelCRUDValidation(t *testing.T) {
 	}
 }
 
+// TestUpdateThingModelKeepsOpenApiCustomCategory 开放接口下发的自定义分类，
+// 本地管理端只改其它字段时必须能原样保留；改挂到另一个自定义分类仍被拒绝。
+func TestUpdateThingModelKeepsOpenApiCustomCategory(t *testing.T) {
+	db := newThingModelTestDB(t)
+	svc := NewThingModelService(db)
+	ctx := context.Background()
+
+	if _, err := svc.BatchUpsertOpenApiThingModels(ctx, thingModelUpsertReq(dto.OpenApiThingModelUpsertDTO{
+		Code: "th_energy", Name: "能源模型", Category: strPtr("energy"),
+	})); err != nil {
+		t.Fatalf("seed custom category: %v", err)
+	}
+	model := loadThingModelByCode(t, svc, "th_energy")
+
+	if err := svc.UpdateThingModel(ctx, &dto.UpdateThingModelDTO{
+		ID: model.ID, Name: "能源模型-新", Category: "energy",
+	}); err != nil {
+		t.Fatalf("update with same custom category: %v", err)
+	}
+	got := loadThingModelByCode(t, svc, "th_energy")
+	if got.Name != "能源模型-新" || got.Category != "energy" {
+		t.Fatalf("model = %+v", got)
+	}
+
+	wantThingModelErrCode(t, svc.UpdateThingModel(ctx, &dto.UpdateThingModelDTO{
+		ID: model.ID, Name: "能源模型-新", Category: "another_custom",
+	}), enums.ThingModelCategoryInvalidEnum.GetCode())
+}
+
 // TestPageThingModelProperties 钉住属性分页：翻页切片、排序与 maxSortOrder
 // （前端新增属性靠它接着末尾排，取不到就会插到中间）。
 func TestPageThingModelProperties(t *testing.T) {

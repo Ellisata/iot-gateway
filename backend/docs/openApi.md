@@ -19,6 +19,7 @@
 | v1.8 | 2026-11-06 | 新增：分批同步订阅设备与点位（4.12，游标翻页，形态与 4.5 一致；数据源是订阅报文维护的设备/点位元信息索引） | - |
 | v1.9 | 2026-11-09 | 新增：物模型与属性批量 upsert（4.13，按 `code` / `identifier` 自然键创建或更新，跨模型部分成功） | - |
 | v1.10 | 2026-11-09 | 新增：物模型批量删除（4.14）、物模型属性批量删除（4.15），按自然键逐条删除并返回逐条结果 | - |
+| v1.11 | 2026-11-11 | 新增：配置同步（4.16）—— 能力协商、五域只读、推送通道/告警 Webhook/运行开关/设备点位批量写。读接口返回脱敏期望态与 `contentHash`，供管理平台做模板部署与漂移检测 | - |
 
 ## 兼容性承诺
 
@@ -1121,7 +1122,7 @@ Content-Type: application/json
 | `models` | 是 | 1~100 条模型 |
 | `models[].code` | 是 | 模型标识（字母开头，仅字母数字下划线短横线，≤64）。**自然键，创建后不可改** |
 | `models[].name` | 是 | 模型显示名（≤100 字符，全局唯一） |
-| `models[].category` | 否 | `sensor` / `meter` / `actuator` / `robot` / `plc` / `other`；省略 = 保持原值（新建时为未分类），显式 `""` = 未分类 |
+| `models[].category` | 否 | 分类 code：内置 `sensor` / `meter` / `actuator` / `robot` / `plc` / `other`，或管理平台维护的自定义 code（小写字母开头，可含小写字母、数字、`_`、`-`，≤32）；省略 = 保持原值（新建时为未分类），显式 `""` = 未分类 |
 | `models[].version` | 否 | ≤32 字符；省略 = 保持原值（新建时 `1.0.0`） |
 | `models[].description` | 否 | ≤500 字符；省略 = 保持原值 |
 | `models[].status` | 否 | `1` 启用 / `0` 停用；省略 = 保持原值（新建时 `1`） |
@@ -1321,6 +1322,79 @@ Content-Type: application/json
 | `results[].action` | `deleted` / `failed` |
 | `results[].errorCode` / `errorMessage` | 失败原因（仅失败时出现） |
 
+### 4.16 配置同步（管理平台统一配置管理）
+
+> 本节接口供管理平台把配置模板下发到网关。**只改网关配置，不触达现场设备**。
+> 读接口返回的 `payload` 就是管理平台应保存的期望态；密钥字段脱敏为 `***`。
+> 写入接口逐条返回结果，顶层信封恒为成功（`code=0`），调用方必须检查 `items[]`。
+
+#### 4.16.1 能力协商
+
+```
+GET /openApi/config/capabilities
+```
+
+返回 `cfgSyncVersion`、`openApiVersion`、`gatewayVersion`、`hashVersion`、
+`hashAlgorithm` 与各配置域的 `read/upsert/delete/update/reset/maxBatch`。
+管理平台必须先调用本接口：`hashVersion` 不一致时禁止做漂移判断。
+
+#### 4.16.2 只读接口
+
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| GET | `/openApi/thingModel/page` | 物模型 + 属性 + `contentHash` |
+| GET | `/openApi/deviceConfig/page` | 设备 + 采集组 + 点位 + `contentHash`，页大小上限 20 |
+| GET | `/openApi/pushChannel/page` | 推送通道，`config` 已脱敏 |
+| GET | `/openApi/pushChannel/types` | 通道类型元数据 |
+| GET | `/openApi/pushChannel/forms` | 通道动态表单 |
+| GET | `/openApi/alarmWebhook/page` | 告警 Webhook，`secret` 已脱敏 |
+| GET | `/openApi/alarmWebhook/types` | Webhook 类型元数据 |
+| GET | `/openApi/alarmWebhook/forms` | Webhook 动态表单 |
+| GET | `/openApi/systemConfig/list` | 运行开关当前值 |
+| GET | `/openApi/config/protocols` | 协议与点位数据类型 |
+
+分页接口使用 `page/size`，返回 `{page,size,total,records}`；每条记录为
+`{targetKey,payload,contentHash}`。
+
+#### 4.16.3 写入接口
+
+| 方法 | 路径 | 自然键 | 说明 |
+| ---- | ---- | ------ | ---- |
+| POST | `/openApi/thingModel/batchUpsert` | `code` / `identifier` | 已有接口；可选 `replaceProperties=true` 删除未出现属性 |
+| POST | `/openApi/thingModel/batchDelete` | `code` | 已有接口 |
+| POST | `/openApi/pushChannel/batchUpsert` | `type/name` | `config` 为对象；`"***"` 保留现有密钥 |
+| POST | `/openApi/pushChannel/batchDelete` | `type/name` | 逐条删除 |
+| POST | `/openApi/alarmWebhook/batchUpsert` | `name` | `secret` 为 `"***"` 时保留现有值 |
+| POST | `/openApi/alarmWebhook/batchDelete` | `name` | 逐条删除 |
+| POST | `/openApi/systemConfig/batchUpdate` | `key` | 批量修改运行开关 |
+| POST | `/openApi/systemConfig/batchReset` | `key` | 批量恢复默认 |
+| POST | `/openApi/deviceConfig/batchUpsert` | `code` 或 `name` | 设备 + 采集组 + 点位；`mode=replace` 删除未出现点位/组 |
+| POST | `/openApi/deviceConfig/batchDelete` | `code` 或 `name` | 逐条删除，保留触发规则/推送通道引用保护 |
+
+单批上限：物模型/推送通道/告警 Webhook 100，运行开关 50，设备 20。
+单台设备点位上限 500、采集组上限 100。
+
+#### 4.16.4 contentHash 与密钥保留
+
+- 算法：`sha256-canonical-json-v1`。对象键排序、数字规范化、HTML 不转义；
+  密钥字段（`password/secret/token/apiKey/...`）只计存在性，不计值。
+- 密钥占位符 `"***"`：写入时表示保留网关现有值（支持 `config`/`protocolJson`
+  的嵌套路径与数组下标对齐）；读接口永不返回真实密钥。
+- 因此「导入 → 再次下发」即使拿不到密钥，也不会把网关密钥覆盖成 `***`。
+- 已知限制：只修改密钥值不会产生漂移（hash 不计值）。
+
+#### 4.16.5 应用顺序
+
+管理平台按 `运行时开关 → 推送通道 → 告警 Webhook → 物模型 → 设备/点位`
+的顺序下发。设备/点位依赖物模型与协议，顺序反了会因子键不存在而失败。
+
+#### 4.16.6 错误码
+
+`42001-42009` 为配置同步专用错误码：不支持的配置类型、协议不存在、
+物模型不存在/停用、模型变更缺点位、协议变更缺全部点位、采集组不存在、
+hash 版本不支持、批量超限、设备配置不合法。逐条结果中的 `errorCode`
+以网关实际返回为准。
+
 ## 5. 错误码总表
 
 开放接口可能返回的错误码如下（完整列表见本节，其他内部错误码不会出现在开放接口中）：
@@ -1349,7 +1423,7 @@ Content-Type: application/json
 | `41006` | 200 | 属性已被点位绑定，不能删除（逐条） | 先解除点位绑定再删除 |
 | `41007` | 200 | 物模型标识不合法（逐条） | 字母开头，仅字母数字下划线短横线，≤64 |
 | `41008` | 200 | 属性标识符不合法（逐条） | 字母开头，仅字母数字下划线，≤64 |
-| `41010` | 200 | 物模型分类不合法（逐条） | 取 `sensor/meter/actuator/robot/plc/other` 或留空 |
+| `41010` | 200 | 物模型分类格式不合法（逐条） | 空串，或小写字母开头、仅含小写字母/数字/`_`/`-`、≤32 位的 code（内置 `sensor/meter/actuator/robot/plc/other` 同样合法） |
 | `41018` | 200 | 属性已被点位绑定，不能修改数据类型或读写模式（逐条） | 先在管理端解除点位绑定，再修改 `kind`/`accessMode` |
 | `-1` | 200 | 系统错误 | 稍后重试，持续出现请联系管理员并查看网关日志 |
 

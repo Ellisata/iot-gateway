@@ -36,6 +36,34 @@ func TestParseThingModelCategory(t *testing.T) {
 	}
 }
 
+// TestIsValidOpenApiThingModelCategory 开放接口的分类只校验格式，不校验内置枚举：
+// 平台可以下发自定义 code，但空串以外的取值必须是小写字母开头的稳定标识。
+func TestIsValidOpenApiThingModelCategory(t *testing.T) {
+	tests := []struct {
+		code string
+		want bool
+	}{
+		{"", true},
+		{"  ", true},
+		{"sensor", true},
+		{"energy", true},
+		{"energy_storage", true},
+		{"energy-storage", true},
+		{"a", true},
+		{"a1234567890123456789012345678901", true},   // 32 位
+		{"a12345678901234567890123456789012", false}, // 33 位
+		{"Energy", false},
+		{"energy storage", false},
+		{"1energy", false},
+		{"能源", false},
+	}
+	for _, tt := range tests {
+		if got := IsValidOpenApiThingModelCategory(tt.code); got != tt.want {
+			t.Errorf("IsValidOpenApiThingModelCategory(%q) = %v，期望 %v", tt.code, got, tt.want)
+		}
+	}
+}
+
 // TestThingModelCategoryTemplateOptions 模板下拉项必须是「中文名（code）」。
 func TestThingModelCategoryTemplateOptions(t *testing.T) {
 	options := ThingModelCategoryTemplateOptions()

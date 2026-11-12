@@ -35,6 +35,26 @@ func TestOpenApiRoutesRegistered(t *testing.T) {
 		"POST /openApi/thingModel/batchUpsert",
 		"POST /openApi/thingModel/batchDelete",
 		"POST /openApi/thingModelProperty/batchDelete",
+		// 配置同步（管理平台统一配置管理）
+		"GET /openApi/config/capabilities",
+		"GET /openApi/config/protocols",
+		"GET /openApi/thingModel/page",
+		"GET /openApi/deviceConfig/page",
+		"GET /openApi/pushChannel/page",
+		"GET /openApi/pushChannel/types",
+		"GET /openApi/pushChannel/forms",
+		"GET /openApi/alarmWebhook/page",
+		"GET /openApi/alarmWebhook/types",
+		"GET /openApi/alarmWebhook/forms",
+		"GET /openApi/systemConfig/list",
+		"POST /openApi/pushChannel/batchUpsert",
+		"POST /openApi/pushChannel/batchDelete",
+		"POST /openApi/alarmWebhook/batchUpsert",
+		"POST /openApi/alarmWebhook/batchDelete",
+		"POST /openApi/systemConfig/batchUpdate",
+		"POST /openApi/systemConfig/batchReset",
+		"POST /openApi/deviceConfig/batchUpsert",
+		"POST /openApi/deviceConfig/batchDelete",
 	}
 	for _, key := range want {
 		if !routes[key] {

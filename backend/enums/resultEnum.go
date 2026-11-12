@@ -187,6 +187,17 @@ var (
 	ThingModelAccessMismatchEnum         = NewBusinessEnum("41017", "点位读写权限不覆盖属性读写模式", "err.thing_model_access_mismatch")
 	ThingModelPropertyBoundImmutableEnum = NewBusinessEnum("41018", "属性已被点位绑定，不能修改数据类型或读写模式", "err.thing_model_property_bound_immutable")
 
+	// 配置同步相关错误码（开放接口 /openApi/config/*）
+	CfgTypeUnsupportedEnum             = NewBusinessEnum("42001", "不支持的配置类型", "err.cfg_type_unsupported")
+	CfgProtocolNotExistsEnum           = NewBusinessEnum("42002", "设备配置中的协议不存在", "err.cfg_protocol_not_exists")
+	CfgThingModelNotExistsEnum         = NewBusinessEnum("42003", "设备配置中的物模型不存在或已停用", "err.cfg_thing_model_not_exists")
+	CfgThingModelPointsMissingEnum     = NewBusinessEnum("42004", "设备已绑定属性的点位未随模型变更一并提交", "err.cfg_thing_model_points_missing")
+	CfgProtocolChangePointsMissingEnum = NewBusinessEnum("42005", "协议变更需要提交该设备的全部点位", "err.cfg_protocol_change_points_missing")
+	CfgCollectorGroupNotExistsEnum     = NewBusinessEnum("42006", "点位引用的采集组不存在", "err.cfg_collector_group_not_exists")
+	CfgHashVersionUnsupportedEnum      = NewBusinessEnum("42007", "配置内容 hash 版本不支持", "err.cfg_hash_version_unsupported")
+	CfgBatchLimitEnum                  = NewBusinessEnum("42008", "批量条目数超限", "err.cfg_batch_limit")
+	CfgDeviceConfigInvalidEnum         = NewBusinessEnum("42009", "设备配置不合法", "err.cfg_device_config_invalid")
+
 	// 数据推送通道相关错误码
 	PushChannelExistsEnum      = NewBusinessEnum("60001", "数据推送通道名称已存在", "err.push_channel_exists")
 	PushChannelNotExistsEnum   = NewBusinessEnum("60002", "数据推送通道不存在", "err.push_channel_not_found")

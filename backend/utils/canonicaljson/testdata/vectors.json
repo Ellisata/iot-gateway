@@ -1,0 +1,189 @@
+{
+  "hashVersion": 1,
+  "vectors": [
+    {
+      "name": "object-key-order",
+      "cfgType": "push_channel",
+      "input": {
+        "b": 2,
+        "a": 1
+      },
+      "canonical": "{\"a\":1,\"b\":2}",
+      "masked": "{\"a\":1,\"b\":2}",
+      "hash": "2144c93576b5f361ff656d040731821bcf79abb9939826021043e529f82106ce"
+    },
+    {
+      "name": "number-normalization",
+      "cfgType": "thing_model",
+      "input": {
+        "n": 1.0,
+        "m": 0.50,
+        "big": 1234567890123456789
+      },
+      "canonical": "{\"big\":1234567890123456789,\"m\":0.5,\"n\":1}",
+      "masked": "{\"big\":1234567890123456789,\"m\":0.5,\"n\":1}",
+      "hash": "ae3bb0157a0fee5ca3f9788fbddbddd1634680cdcdb72f1c2d7a39492f647bce"
+    },
+    {
+      "name": "nested-secrets",
+      "cfgType": "push_channel",
+      "input": {
+        "host": "h",
+        "password": "p",
+        "nested": {
+          "token": "t",
+          "db": "x"
+        },
+        "arr": [
+          {
+            "secret": "s"
+          },
+          {
+            "secret": ""
+          }
+        ]
+      },
+      "canonical": "{\"arr\":[{\"secret\":\"s\"},{\"secret\":\"\"}],\"host\":\"h\",\"nested\":{\"db\":\"x\",\"token\":\"t\"},\"password\":\"p\"}",
+      "masked": "{\"arr\":[{\"secret\":\"***\"},{\"secret\":\"\"}],\"host\":\"h\",\"nested\":{\"db\":\"x\",\"token\":\"***\"},\"password\":\"***\"}",
+      "hash": "f5a8fbc154e9dc20614d4ac545e1a4f1741e120049756bdfc7f20f0cd6658502"
+    },
+    {
+      "name": "html-not-escaped",
+      "cfgType": "alarm_webhook",
+      "input": {
+        "html": "\u003ca\u0026b\u003e"
+      },
+      "canonical": "{\"html\":\"\u003ca\u0026b\u003e\"}",
+      "masked": "{\"html\":\"\u003ca\u0026b\u003e\"}",
+      "hash": "4fdf8e4af5158d46333db200cc6813bfe2d19a18d1c3a166c63d0499061ba0cf"
+    },
+    {
+      "name": "empty-containers",
+      "cfgType": "device",
+      "input": {
+        "a": [],
+        "b": {}
+      },
+      "canonical": "{\"a\":[],\"b\":{}}",
+      "masked": "{\"a\":[],\"b\":{}}",
+      "hash": "f84b16366a2fb6e094df06a4ab0669a460572c35434da35be7dabc8d8fe03453"
+    },
+    {
+      "name": "bool-null",
+      "cfgType": "runtime",
+      "input": {
+        "x": true,
+        "y": null,
+        "z": false
+      },
+      "canonical": "{\"x\":true,\"y\":null,\"z\":false}",
+      "masked": "{\"x\":true,\"y\":null,\"z\":false}",
+      "hash": "4750f45903dfc4e42fe74d790dccdc594b137cdf31f5970d5ecaa2613c6edf75"
+    },
+    {
+      "name": "unicode",
+      "cfgType": "thing_model",
+      "input": {
+        "zh": "温度"
+      },
+      "canonical": "{\"zh\":\"温度\"}",
+      "masked": "{\"zh\":\"温度\"}",
+      "hash": "dda7db875ef7f142d287716e3518f9013afa1d3106520538b3a07eedb568b8a7"
+    },
+    {
+      "name": "secret-empty",
+      "cfgType": "alarm_webhook",
+      "input": {
+        "secret": ""
+      },
+      "canonical": "{\"secret\":\"\"}",
+      "masked": "{\"secret\":\"\"}",
+      "hash": "5090c132dbe1dda4c37118025760f03793534616c16c0f5b182204317c92e509"
+    },
+    {
+      "name": "numeric-string",
+      "cfgType": "runtime",
+      "input": {
+        "v": "1.0"
+      },
+      "canonical": "{\"v\":\"1.0\"}",
+      "masked": "{\"v\":\"1.0\"}",
+      "hash": "7692d1e236320735f7aceccc8eb3c766250031db10c46e1a27f20d168f73cd32"
+    },
+    {
+      "name": "array-order-preserved",
+      "cfgType": "device",
+      "input": {
+        "points": [
+          {
+            "name": "b"
+          },
+          {
+            "name": "a"
+          }
+        ]
+      },
+      "canonical": "{\"points\":[{\"name\":\"b\"},{\"name\":\"a\"}]}",
+      "masked": "{\"points\":[{\"name\":\"b\"},{\"name\":\"a\"}]}",
+      "hash": "6700ffc4e571d032268420b2d11370ccfa09fea5a3fc7b31d5e65d8a37e4abfc"
+    }
+  ],
+  "keepVectors": [
+    {
+      "name": "keep-scalar",
+      "existing": {
+        "password": "real",
+        "host": "h1"
+      },
+      "incoming": {
+        "password": "***",
+        "host": "h2"
+      },
+      "want": "{\"host\":\"h2\",\"password\":\"real\"}"
+    },
+    {
+      "name": "keep-nested-array",
+      "existing": {
+        "arr": [
+          {
+            "token": "a"
+          },
+          {
+            "token": "b"
+          }
+        ]
+      },
+      "incoming": {
+        "arr": [
+          {
+            "token": "***"
+          },
+          {
+            "token": "***"
+          }
+        ]
+      },
+      "want": "{\"arr\":[{\"token\":\"a\"},{\"token\":\"b\"}]}"
+    },
+    {
+      "name": "missing-existing",
+      "existing": {},
+      "incoming": {
+        "secret": "***"
+      },
+      "want": "{\"secret\":\"\"}"
+    },
+    {
+      "name": "passthrough",
+      "existing": {
+        "password": "old",
+        "x": 1
+      },
+      "incoming": {
+        "password": "new",
+        "x": 2
+      },
+      "want": "{\"password\":\"new\",\"x\":2}"
+    }
+  ]
+}

@@ -168,13 +168,25 @@ func (s *DeviceAddressService) validatePropertyBinding(
 	propertyID, protocolName, internalType, addressRW string,
 	allowDisabled bool,
 ) error {
+	return validatePropertyBindingDB(ctx, s.sqliteDB, device, propertyID, protocolName, internalType, addressRW, allowDisabled)
+}
+
+// validatePropertyBindingDB 是 validatePropertyBinding 的事务版本：
+// 开放接口的设备批量 upsert 在同一个事务里先写设备再绑点位，不能另起连接查询。
+func validatePropertyBindingDB(
+	ctx context.Context,
+	db *gorm.DB,
+	device po.Device,
+	propertyID, protocolName, internalType, addressRW string,
+	allowDisabled bool,
+) error {
 	propertyID = strings.TrimSpace(propertyID)
 	if propertyID == "" {
 		return nil
 	}
 
 	var property po.ThingModelProperty
-	if err := s.sqliteDB.WithContext(ctx).Where("id = ?", propertyID).First(&property).Error; err != nil {
+	if err := db.WithContext(ctx).Where("id = ?", propertyID).First(&property).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return appError.NewAppErrorCtx(enums.ThingModelPropertyNotExistsEnum.GetCode(),
 				enums.ThingModelPropertyNotExistsEnum.GetMessage(), enums.ThingModelPropertyNotExistsEnum.GetMsgKey())
@@ -191,7 +203,7 @@ func (s *DeviceAddressService) validatePropertyBinding(
 				enums.ThingModelPropertyDisabledEnum.GetMessage(), enums.ThingModelPropertyDisabledEnum.GetMsgKey())
 		}
 		var model po.ThingModel
-		if err := s.sqliteDB.WithContext(ctx).Where("id = ?", property.ModelID).First(&model).Error; err != nil {
+		if err := db.WithContext(ctx).Where("id = ?", property.ModelID).First(&model).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return appError.NewAppErrorCtx(enums.ThingModelBindingMismatchEnum.GetCode(),
 					enums.ThingModelBindingMismatchEnum.GetMessage(), enums.ThingModelBindingMismatchEnum.GetMsgKey())

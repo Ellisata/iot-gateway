@@ -566,26 +566,39 @@ import {
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
 import { useExcelImport } from '@/composables/useExcelImport'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 
-// 分类是固定枚举 code，展示名来自 i18n；空串表示未分类，且不落库中文。
+// 内置分类的展示名来自 i18n；开放接口下发的平台自定义分类没有内置文案，
+// 直接展示 code（平台是分类词表的权威源，网关不跟随发版）。
 const CATEGORY_CODES = ['sensor', 'meter', 'actuator', 'robot', 'plc', 'other']
 const KIND_CODES = ['bool', 'int', 'uint', 'float', 'string', 'time']
 const ACCESS_CODES = ['R', 'W', 'RW']
 
-const categoryLabel = (code) =>
-  code ? t(`thingModel.category.${code}`) : t('thingModel.category.none')
+const categoryLabel = (code) => {
+  if (!code) return t('thingModel.category.none')
+  const key = `thingModel.category.${code}`
+  return te(key) ? t(key) : code
+}
 const kindLabel = (kind) => t(`thingModel.kind.${kind}`)
 const accessLabel = (mode) => t(`thingModel.access.${mode}`)
 
-const filterCategoryOptions = computed(() =>
-  CATEGORY_CODES.map((code) => ({ value: code, label: categoryLabel(code) })),
-)
+const filterCategoryOptions = computed(() => {
+  const custom = [...new Set(tableData.value.map((r) => r.category).filter((code) => code && !CATEGORY_CODES.includes(code)))]
+  return [...CATEGORY_CODES, ...custom].map((code) => ({ value: code, label: categoryLabel(code) }))
+})
 // 表单里的“未分类”是空串，和筛选框的“全部”不同：筛选空串 = 不过滤。
-const formCategoryOptions = computed(() => [
-  { value: '', label: t('thingModel.category.none') },
-  ...filterCategoryOptions.value,
-])
+const formCategoryOptions = computed(() => {
+  // 本地管理端只允许新建内置分类；编辑时保留开放接口已下发的自定义分类。
+  const options = [
+    { value: '', label: t('thingModel.category.none') },
+    ...CATEGORY_CODES.map((code) => ({ value: code, label: categoryLabel(code) })),
+  ]
+  const current = modelForm.category
+  if (current && !options.some((o) => o.value === current)) {
+    options.push({ value: current, label: categoryLabel(current) })
+  }
+  return options
+})
 const kindOptions = computed(() =>
   KIND_CODES.map((code) => ({ value: code, label: kindLabel(code) })),
 )

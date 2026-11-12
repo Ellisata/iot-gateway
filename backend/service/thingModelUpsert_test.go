@@ -160,6 +160,35 @@ func loadCount(t *testing.T, svc *ThingModelService) int64 {
 	return n
 }
 
+// TestBatchUpsertOpenApiThingModelsCustomCategory 平台自定义分类不再按内置枚举白名单拒绝，
+// 统一按小写 code 落库（平台是分类词表的权威源，新增分类不应要求网关发版）。
+func TestBatchUpsertOpenApiThingModelsCustomCategory(t *testing.T) {
+	db := newThingModelTestDB(t)
+	svc := NewThingModelService(db)
+	ctx := context.Background()
+
+	res, err := svc.BatchUpsertOpenApiThingModels(ctx, thingModelUpsertReq(dto.OpenApiThingModelUpsertDTO{
+		Code: "th_energy", Name: "能源模型", Category: strPtr(" energy "),
+	}))
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if res.Failed != 0 || res.Created != 1 {
+		t.Fatalf("res = %+v", res)
+	}
+	model := loadThingModelByCode(t, svc, "th_energy")
+	if model.Category != "energy" {
+		t.Fatalf("category = %q, want energy", model.Category)
+	}
+	page, err := svc.PageThingModel(ctx, &dto.PageThingModelDTO{Page: 1, Size: 10, Category: "energy"})
+	if err != nil {
+		t.Fatalf("filter custom category: %v", err)
+	}
+	if page.Total != 1 || page.Records[0].Code != "th_energy" {
+		t.Fatalf("filter custom category = %+v", page.Records)
+	}
+}
+
 // TestBatchUpsertOpenApiThingModelsAutoSort 新增属性从模型内当前最大值 +10 顺延。
 func TestBatchUpsertOpenApiThingModelsAutoSort(t *testing.T) {
 	db := newThingModelTestDB(t)
@@ -338,7 +367,7 @@ func TestBatchUpsertOpenApiThingModelsValidation(t *testing.T) {
 	}{
 		{"bad code", dto.OpenApiThingModelUpsertDTO{Code: "1bad", Name: "x"}, enums.ThingModelCodeInvalidEnum.GetCode()},
 		{"empty name", dto.OpenApiThingModelUpsertDTO{Code: "th_ok", Name: ""}, enums.ParamValidEnum.GetCode()},
-		{"bad category", dto.OpenApiThingModelUpsertDTO{Code: "th_ok", Name: "x", Category: strPtr("nope")}, enums.ThingModelCategoryInvalidEnum.GetCode()},
+		{"bad category", dto.OpenApiThingModelUpsertDTO{Code: "th_ok", Name: "x", Category: strPtr("Nope")}, enums.ThingModelCategoryInvalidEnum.GetCode()},
 		{"bad status", dto.OpenApiThingModelUpsertDTO{Code: "th_ok", Name: "x", Status: intPtr(2)}, enums.ParamValidEnum.GetCode()},
 		{
 			"bad identifier",

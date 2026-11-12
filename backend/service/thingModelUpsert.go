@@ -126,7 +126,13 @@ func (s *ThingModelService) upsertOpenApiThingModel(
 			return err
 		}
 		properties, failedIdentifier, err = upsertOpenApiThingModelProperties(tx, model.ID, req.Properties)
-		return err
+		if err != nil {
+			return err
+		}
+		if req.ReplaceProperties != nil && *req.ReplaceProperties {
+			return deleteOpenApiThingModelPropertiesNotIn(tx, model.ID, req.Properties)
+		}
+		return nil
 	})
 	if err != nil {
 		item = failThingModelItem(item, err, ctx)
@@ -144,7 +150,57 @@ func (s *ThingModelService) upsertOpenApiThingModel(
 	item.Action = action
 	item.ID = model.ID
 	item.Properties = properties
+	if hash, err := s.openApiThingModelContentHash(ctx, model.ID); err == nil {
+		item.ContentHash = hash
+	}
 	return item
+}
+
+// deleteOpenApiThingModelPropertiesNotIn 删除模型下未出现在本次 payload 的属性。
+//
+// 只由 replaceProperties=true 触发。被点位绑定的属性拒绝删除（41006），
+// 整个模型回滚，避免留下「点位绑着已删除属性」的悬空绑定。
+func deleteOpenApiThingModelPropertiesNotIn(tx *gorm.DB, modelID string, props []dto.OpenApiThingModelPropertyUpsertDTO) error {
+	keep := make(map[string]bool, len(props))
+	for _, p := range props {
+		if id := strings.TrimSpace(p.Identifier); id != "" {
+			keep[id] = true
+		}
+	}
+	var existing []po.ThingModelProperty
+	if err := tx.Where("model_id = ?", modelID).Find(&existing).Error; err != nil {
+		return err
+	}
+	for _, p := range existing {
+		if keep[p.Identifier] {
+			continue
+		}
+		var bound int64
+		if err := tx.Model(&po.DeviceAddress{}).Where("property_id = ?", p.ID).Count(&bound).Error; err != nil {
+			return err
+		}
+		if bound > 0 {
+			return thingModelErr(enums.ThingModelPropertyInUseEnum)
+		}
+		if err := tx.Where("id = ?", p.ID).Delete(&po.ThingModelProperty{}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// openApiThingModelContentHash 回读模型与属性并计算 contentHash。
+func (s *ThingModelService) openApiThingModelContentHash(ctx context.Context, modelID string) (string, error) {
+	var model po.ThingModel
+	if err := s.sqliteDB.WithContext(ctx).Where("id = ?", modelID).First(&model).Error; err != nil {
+		return "", err
+	}
+	var props []po.ThingModelProperty
+	if err := s.sqliteDB.WithContext(ctx).Where("model_id = ?", modelID).
+		Order("sort_order ASC, identifier ASC").Find(&props).Error; err != nil {
+		return "", err
+	}
+	return thingModelConfigHash(model, props)
 }
 
 // upsertOpenApiThingModelRow 在事务内按 code 创建或更新模型行。
@@ -164,7 +220,8 @@ func upsertOpenApiThingModelRow(tx *gorm.DB, req *dto.OpenApiThingModelUpsertDTO
 
 		category := ""
 		if req.Category != nil {
-			category = *req.Category
+			// 平台可以下发自定义分类，统一按小写 code 落库，避免同一分类出现大小写副本。
+			category = strings.ToLower(strings.TrimSpace(*req.Category))
 		}
 		version := "1.0.0"
 		if req.Version != nil {
@@ -216,7 +273,7 @@ func upsertOpenApiThingModelRow(tx *gorm.DB, req *dto.OpenApiThingModelUpsertDTO
 		"updated_at": nowString(),
 	}
 	if req.Category != nil {
-		updates["category"] = *req.Category
+		updates["category"] = strings.ToLower(strings.TrimSpace(*req.Category))
 	}
 	if req.Version != nil {
 		version := strings.TrimSpace(*req.Version)
@@ -402,7 +459,7 @@ func validateOpenApiThingModelItem(req *dto.OpenApiThingModelUpsertDTO, code, na
 	if utf8.RuneCountInString(name) > 100 {
 		return openApiThingModelParamErr("模型名称不能超过100个字符")
 	}
-	if req.Category != nil && !constants.IsValidThingModelCategory(*req.Category) {
+	if req.Category != nil && !constants.IsValidOpenApiThingModelCategory(*req.Category) {
 		return thingModelErr(enums.ThingModelCategoryInvalidEnum)
 	}
 	if req.Version != nil && utf8.RuneCountInString(strings.TrimSpace(*req.Version)) > 32 {
