@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"iot-gateway/appError"
 	"iot-gateway/enums"
@@ -73,6 +74,50 @@ func (s *PluginService) Info(ctx context.Context) (*vo.PluginInfoVO, error) {
 		FileExt: pluginFileExt(runtime.GOOS),
 		Enabled: s.manager.Enabled(),
 	}, nil
+}
+
+// OpenApiInfo 返回开放接口所需的插件环境信息（不含本机目录）。
+func (s *PluginService) OpenApiInfo(ctx context.Context) (*vo.OpenApiPluginInfoVO, error) {
+	info, err := s.Info(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &vo.OpenApiPluginInfoVO{
+		OS:                  info.OS,
+		Arch:                info.Arch,
+		Glob:                info.Glob,
+		FileExt:             info.FileExt,
+		Enabled:             info.Enabled,
+		MaxFileSize:         pluginhost.MaxPluginFileSize,
+		MaxBatch:            MaxPluginBatch,
+		ScanIntervalSeconds: int(s.manager.ScanInterval() / time.Second),
+	}, nil
+}
+
+// OpenApiStatus 返回已加载插件的诊断快照（路径换成文件名）。
+//
+// 注意这是**已加载**的插件，不是插件目录里的全部文件：刚上传、尚未被下一轮
+// 扫描拉起的插件不会出现在这里。管理平台应在上传后轮询本接口，直到看到目标
+// sha256 或加载失败。
+func (s *PluginService) OpenApiStatus() []vo.OpenApiPluginStatusVO {
+	statuses := s.manager.Status()
+	out := make([]vo.OpenApiPluginStatusVO, 0, len(statuses))
+	for _, st := range statuses {
+		out = append(out, vo.OpenApiPluginStatusVO{
+			Name:             filepath.Base(st.Path),
+			Protocols:        st.Protocols,
+			Scope:            st.Scope,
+			Version:          st.Version,
+			SHA256:           st.SHA256,
+			Up:               st.Up,
+			Epoch:            st.Epoch,
+			Upgrades:         st.Upgrades,
+			UpgradedAt:       st.UpgradedAt,
+			PreviousSHA256:   st.PreviousSHA256,
+			LastUpgradeError: st.LastUpgradeError,
+		})
+	}
+	return out
 }
 
 // ImportPlugins 批量安装插件，返回逐文件成败明细。

@@ -55,6 +55,10 @@ func TestOpenApiRoutesRegistered(t *testing.T) {
 		"POST /openApi/systemConfig/batchReset",
 		"POST /openApi/deviceConfig/batchUpsert",
 		"POST /openApi/deviceConfig/batchDelete",
+		// 协议插件二进制下发（管理平台按平台选包）
+		"GET /openApi/plugin/info",
+		"GET /openApi/plugin/status",
+		"POST /openApi/plugin/importPlugin",
 	}
 	for _, key := range want {
 		if !routes[key] {

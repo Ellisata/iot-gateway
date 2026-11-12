@@ -245,6 +245,8 @@ var (
 	PluginDuplicateEnum   = NewBusinessEnum("90004", "同一批次中存在重名的插件文件", "err.plugin_duplicate")
 	PluginDirInvalidEnum  = NewBusinessEnum("90005", "插件目录不可用", "err.plugin_dir_invalid")
 	PluginInstallFailEnum = NewBusinessEnum("90006", "插件安装失败", "err.plugin_install_fail")
+	// PluginChecksumMismatchEnum 上传内容与 X-Content-SHA256 声明不一致。
+	PluginChecksumMismatchEnum = NewBusinessEnum("90007", "插件内容校验和不一致", "err.plugin_checksum_mismatch")
 
 	// 报警通知 Webhook 相关错误码（钉钉 / 企微 / 飞书 / 自定义）
 	AlarmWebhookExistsEnum        = NewBusinessEnum("95001", "报警通知名称已存在", "err.alarm_webhook_exists")

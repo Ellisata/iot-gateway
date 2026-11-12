@@ -14,6 +14,8 @@ each release, followed by English entries.
 - **开放接口配置同步**：`/openApi` 新增配置同步接口（文档 4.16）：能力协商 `GET /config/capabilities`、物模型 / 设备点位 / 推送通道 / 告警 Webhook / 运行开关的脱敏只读（附 `contentHash`），以及推送通道、告警 Webhook、运行开关、设备点位的批量写入。只改网关配置、不触达设备，逐条部分成功；`"***"` 表示保留现有密钥，hash 采用 `sha256-canonical-json-v1`（密钥只计存在性）。物模型 upsert 新增 `replaceProperties` 删除未出现的属性；新增错误码 `42001`–`42009`。
 - **物模型分类支持平台自定义 code**：开放接口的分类校验由内置枚举改为格式校验（小写字母开头、≤32），词表由管理平台维护；本地管理端仍只能新建内置分类，但会保留并展示已下发的自定义分类。
 - **Docker 基础镜像可覆盖**：`Dockerfile` 新增 `NODE_IMAGE` / `GOLANG_IMAGE` / `ALPINE_IMAGE` 构建参数，`docker-compose.yml` 透传同名环境变量，便于切换国内镜像源或私有 registry，默认仍为官方标签。
+- **发现广播携带平台信息**：`notify` / `reply` 新增 `os` / `arch` 字段，取自 Go 的 `runtime.GOOS` / `runtime.GOARCH`（如 `linux/amd64`、`linux/arm64`、`windows/amd64`），供管理平台发现网关后下发与它匹配的插件二进制。字段带 `omitempty`，旧版接收方照常解析。
+- **开放接口插件二进制下发**：`/openApi` 新增 `GET /plugin/info`（平台 / 命名规则 / 上传限制）、`GET /plugin/status`（已加载插件的 sha256 快照）与 `POST /plugin/importPlugin`（multipart 上传，可选 `X-Content-SHA256` 完整性校验），供管理平台按 `os/arch` 选包下发；上传仍受 `plugin.enabled`、单文件 / 单批 / 请求体上限约束，新增错误码 `90007`（文档 4.17）。
 
 ### 修复
 
@@ -26,6 +28,8 @@ each release, followed by English entries.
 - **OpenAPI configuration sync**: adds a configuration-sync API group under `/openApi` (docs 4.16): capability negotiation via `GET /config/capabilities`, masked reads for thing models / devices & points / push channels / alarm webhooks / runtime switches (each with `contentHash`), and batch writes for push channels, alarm webhooks, runtime switches and device points. Writes only change gateway configuration — never field devices — and report per-item results; `"***"` keeps the existing secret, and hashes use `sha256-canonical-json-v1` (secrets count by presence only). Thing-model upsert gains `replaceProperties` to drop absent properties; new error codes `42001`–`42009`.
 - **Platform-defined thing-model categories**: OpenAPI category validation now checks the format (lowercase letter start, ≤32) instead of a built-in whitelist, so the management platform owns the vocabulary; the local console still creates only built-in categories but keeps and displays custom codes delivered through the API.
 - **Overridable Docker base images**: `Dockerfile` gains `NODE_IMAGE` / `GOLANG_IMAGE` / `ALPINE_IMAGE` build args wired through `docker-compose.yml`, easing the switch to mainland mirrors or a private registry; defaults stay on the official tags.
+- **Discovery broadcasts carry platform info**: `notify` / `reply` gain `os` / `arch` fields taken from Go's `runtime.GOOS` / `runtime.GOARCH` (e.g. `linux/amd64`, `linux/arm64`, `windows/amd64`), so the management platform can deliver the matching plugin binaries. Both fields use `omitempty`, so older receivers parse the rest unchanged.
+- **OpenAPI plugin binary delivery**: `/openApi` gains `GET /plugin/info` (platform / naming rules / upload limits), `GET /plugin/status` (sha256 snapshot of loaded plugins) and `POST /plugin/importPlugin` (multipart upload with optional `X-Content-SHA256` integrity check), so the management platform can select and deliver a package by `os/arch`. Uploads remain bounded by `plugin.enabled` and the per-file / per-batch / request-body limits; new error code `90007` (docs 4.17).
 
 ## [0.8.1] - 2026-11-11
 

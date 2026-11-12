@@ -120,6 +120,7 @@
     "err.plugin_duplicate": "同一批次中存在重名的插件文件",
     "err.plugin_dir_invalid": "插件目录不可用",
     "err.plugin_install_fail": "插件安装失败",
+    "err.plugin_checksum_mismatch": "插件内容校验和不一致",
     "err.alarm_webhook_exists": "报警Webhook名称已存在",
     "err.alarm_webhook_not_found": "报警Webhook不存在",
     "err.alarm_webhook_config_invalid": "报警Webhook配置非法",

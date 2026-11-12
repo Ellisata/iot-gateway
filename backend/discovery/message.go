@@ -72,6 +72,14 @@ type Message struct {
 	Port int `json:"port,omitempty"`
 	// FirmwareVersion 网关软件版本。
 	FirmwareVersion string `json:"firmwareVersion,omitempty"`
+	// OS 网关二进制所运行的平台，取自 Go 的 runtime.GOOS（linux / windows）。
+	//
+	// 管理平台据此**选择与本网关匹配的插件二进制**：插件必须与主程序同为
+	// GOOS/GOARCH 才能加载，而发现阶段是平台唯一能免人工拿到这个信息的时机。
+	OS string `json:"os,omitempty"`
+	// Arch 网关二进制的架构，取自 Go 的 runtime.GOARCH（amd64 / arm64 / arm）。
+	// 与 OS 成对使用，合起来就是 linux/amd64 这类平台标识。
+	Arch string `json:"arch,omitempty"`
 	// Description 网关描述。
 	Description string `json:"description,omitempty"`
 	// ApiKey 默认开放接口密钥（open_api_secret 里名为 default 那一条的内容）。

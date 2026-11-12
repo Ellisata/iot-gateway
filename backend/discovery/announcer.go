@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime"
 	"sync"
 	"time"
 
@@ -311,6 +312,8 @@ func (a *Announcer) announce(conn net.PacketConn) {
 			IP:              t.ip.String(),
 			Port:            port,
 			FirmwareVersion: gw.FirmwareVersion,
+			OS:              runtime.GOOS,
+			Arch:            runtime.GOARCH,
 			Description:     gw.Description,
 			ApiKey:          apiKey,
 			Timestamp:       ts,
@@ -480,6 +483,8 @@ func (a *Announcer) reply(conn net.PacketConn, to *net.UDPAddr) {
 		IP:              a.localIPv4For(to),
 		Port:            a.announcePort(gw),
 		FirmwareVersion: gw.FirmwareVersion,
+		OS:              runtime.GOOS,
+		Arch:            runtime.GOARCH,
 		Description:     gw.Description,
 		ApiKey:          a.defaultApiKey(),
 		Timestamp:       time.Now().UnixMilli(),

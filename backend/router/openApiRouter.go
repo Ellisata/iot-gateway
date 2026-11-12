@@ -15,8 +15,9 @@ import (
 // 供外部系统调用。该分组即对外白名单——默认关闭，只有显式挂载到
 // 此分组下的接口才对外开放；新接口在此追加。
 //
-// 除 /control/write（控制下发，高风险管理动作）与 /thingModel/*（物模型配置
-// 写入 / 删除）外，其余接口均为只读查询。
+// 除 /control/write（控制下发）、/thingModel/*（物模型配置写入 / 删除）与
+// /plugin/importPlugin（上传可执行插件，等价远程代码执行）外，其余接口均为
+// 只读查询。那三条写入口的共同前提是：密钥持有者本就是受信管理者。
 func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService, oac *controller.OpenApiController) {
 	openApi := r.Group("/openApi", middleware.OpenApiAuthMiddleware(oass))
 	{
@@ -78,5 +79,13 @@ func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService, oac *contr
 		// 模型（连带其属性）或单个属性；逐条独立，绑定保护与单条删除一致。
 		openApi.POST("/thingModel/batchDelete", oac.BatchDeleteThingModels)
 		openApi.POST("/thingModelProperty/batchDelete", oac.BatchDeleteThingModelProperties)
+
+		// ==================== 协议插件二进制下发（管理平台按平台选包） ====================
+		// info 给出网关平台（os/arch）、命名规则、单文件/单批上限与扫描间隔；
+		// status 给出已加载插件的 sha256 供对账；importPlugin 是 multipart 上传，
+		// 写入后需等下一轮目录扫描才加载。见 docs/openApi.md 4.17。
+		openApi.GET("/plugin/info", oac.PluginInfo)
+		openApi.GET("/plugin/status", oac.PluginStatus)
+		openApi.POST("/plugin/importPlugin", oac.PluginImport)
 	}
 }

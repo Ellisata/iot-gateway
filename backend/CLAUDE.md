@@ -261,7 +261,8 @@
 - 协议名与 scope 沿用内置时代的原值(`ModBus.TCP`/`modbus` 等),因此 `iot_protocol` 行、`device.protocol_id` 与前端表单**零迁移**;约束只剩「不得与另一个插件的 scope/协议名撞名(含大小写变体)」。
 
 ### 局域网自动发现([discovery/announcer.go](discovery/announcer.go))
-- 网关周期性把 `iot_gateway` 单行表里的身份(id/名称/IP/端口/版本/描述)以 UDP 广播发到
+- 网关周期性把 `iot_gateway` 单行表里的身份(id/名称/IP/端口/版本/描述)以及运行期平台信息
+  `os`/`arch`(`runtime.GOOS`/`runtime.GOARCH`,如 `linux/amd64`,供平台下发匹配的插件)以 UDP 广播发到
   各网段的广播地址,并单播应答管理平台发来的探询,使其**无需预配置、无需凭据**即可发现本网关。
 - **一个套接字双向**(绑定 `0.0.0.0:9083`):拆成收发两个套接字后回包源端口会变成随机值,
   探询方就没法把请求与应答对起来。逐网卡发定向广播(`ip | ^mask`),**不发 255.255.255.255**。

@@ -4,11 +4,14 @@
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -34,6 +37,13 @@ const (
 	// pluginFormMemory 解析时驻留内存的上限，超出部分落临时文件。
 	// 取值与 gin 的默认 MaxMultipartMemory 一致。
 	pluginFormMemory = 32 << 20
+
+	// pluginChecksumHeader 单文件内容 SHA-256（小写十六进制）。
+	//
+	// 可选头：管理平台下发时带上它，网关在落盘前核对传输完整性。不传则跳过
+	// 校验（保持管理端手工上传的既有行为）。仅适用于单文件：一个头无法描述
+	// 多个文件各自的摘要，多文件上传时带这个头会被拒绝。
+	pluginChecksumHeader = "X-Content-SHA256"
 )
 
 // PluginController 协议插件安装控制器
@@ -59,6 +69,15 @@ func (ctr *PluginController) PluginInfo(c *gin.Context) {
 
 // ImportPlugin 批量上传协议插件
 func (ctr *PluginController) ImportPlugin(c *gin.Context) {
+	importPlugins(c, ctr.pluginService, true)
+}
+
+// importPlugins 管理端与开放接口共用的上传处理。
+//
+// 两条入口的差异只在鉴权（JWT vs X-Api-Key）与是否回显本机目录，限流、大小
+// 上限、校验和与结果结构必须完全一致 —— 各写一份迟早会漂移，而这条通路能
+// 执行任意插件二进制。
+func importPlugins(c *gin.Context, pluginService *service.PluginService, includeDir bool) {
 	ctx := c.Request.Context()
 
 	// 先卡住整个请求体再解析：超限会在读取时报错，而不是先落满磁盘再发现。
@@ -69,13 +88,53 @@ func (ctr *PluginController) ImportPlugin(c *gin.Context) {
 		c.JSON(200, appError.HandleErrorCtx(ctx, err))
 		return
 	}
+	if err := verifyPluginChecksum(c, files); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
 
-	result, err := ctr.pluginService.ImportPlugins(ctx, files)
+	result, err := pluginService.ImportPlugins(ctx, files)
 	if err != nil {
 		c.JSON(200, appError.HandleErrorCtx(ctx, err))
 		return
 	}
+	if !includeDir {
+		// 开放接口不回显网关本机插件目录。
+		result.Dir = ""
+	}
 	c.JSON(200, response.Success(result))
+}
+
+// verifyPluginChecksum 核对客户端声明的 SHA-256 与实际收到的内容。
+//
+// 只做"传输完整性"：它证明收到的字节与平台发出的字节一致，但不证明来源可信
+// —— 那需要签名，不在本头的职责范围内。
+func verifyPluginChecksum(c *gin.Context, files []service.PluginUpload) error {
+	want := strings.ToLower(strings.TrimSpace(c.GetHeader(pluginChecksumHeader)))
+	if want == "" {
+		return nil
+	}
+	if len(files) != 1 {
+		return appError.NewAppError(
+			enums.ParamValidEnum.GetCode(),
+			fmt.Sprintf("%s 只适用于单文件上传（本次 %d 个）", pluginChecksumHeader, len(files)))
+	}
+	f := files[0]
+	if f.RejectReason != "" {
+		// 文件都没被读取，交给服务层按 RejectReason 记一条失败；
+		// 在这里报校验和不一致只会掩盖真正的原因（超限）。
+		return nil
+	}
+	sum := sha256.Sum256(f.Data)
+	got := hex.EncodeToString(sum[:])
+	if got != want {
+		return appError.NewAppErrorCtx(
+			enums.PluginChecksumMismatchEnum.GetCode(),
+			fmt.Sprintf("%s：期望 %s，实际 %s",
+				enums.PluginChecksumMismatchEnum.GetMessage(), want, got),
+			enums.PluginChecksumMismatchEnum.GetMsgKey())
+	}
+	return nil
 }
 
 // readPluginUploads 把 multipart 中的插件部件读成待安装列表。

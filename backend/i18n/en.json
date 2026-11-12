@@ -120,6 +120,7 @@
     "err.plugin_duplicate": "Duplicate plugin file names in the same batch",
     "err.plugin_dir_invalid": "Plugin directory is unusable",
     "err.plugin_install_fail": "Failed to install plugin",
+    "err.plugin_checksum_mismatch": "Plugin content checksum mismatch",
     "err.alarm_webhook_exists": "Alarm webhook name already exists",
     "err.alarm_webhook_not_found": "Alarm webhook not found",
     "err.alarm_webhook_config_invalid": "Invalid alarm webhook configuration",

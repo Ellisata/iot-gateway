@@ -14,14 +14,16 @@ import (
 
 // OpenApiController 开放接口控制器（供外部系统凭密钥调用）。
 //
-// 除控制下发与物模型批量 upsert 外均为只读查询。控制下发仍受 control.enabled、
-// 协议 Writable、点位 rw_permission 与物模型属性 access_mode 四层约束，见
-// service.ControlService；物模型 upsert 只维护配置，不触达现场设备。
+// 除控制下发、物模型批量 upsert 与插件上传外均为只读查询。控制下发仍受
+// control.enabled、协议 Writable、点位 rw_permission 与物模型属性 access_mode
+// 四层约束，见 service.ControlService；物模型 upsert 只维护配置，不触达现场
+// 设备；插件上传会向网关写入可执行文件，风险最高，见 PluginImport 的说明。
 type OpenApiController struct {
 	openApiService    *service.OpenApiService
 	controlService    *service.ControlService
 	thingModelService *service.ThingModelService
 	configService     *service.OpenApiConfigService
+	pluginService     *service.PluginService
 }
 
 // NewOpenApiController 创建开放接口控制器
@@ -30,12 +32,14 @@ func NewOpenApiController(
 	controlService *service.ControlService,
 	thingModelService *service.ThingModelService,
 	configService *service.OpenApiConfigService,
+	pluginService *service.PluginService,
 ) *OpenApiController {
 	return &OpenApiController{
 		openApiService:    openApiService,
 		controlService:    controlService,
 		thingModelService: thingModelService,
 		configService:     configService,
+		pluginService:     pluginService,
 	}
 }
 
@@ -48,6 +52,32 @@ func (ctr *OpenApiController) Capabilities(c *gin.Context) {
 		return
 	}
 	c.JSON(200, response.Success(data))
+}
+
+// PluginInfo 插件环境（平台 / 命名规则 / 上传限制），不含网关本机目录。
+func (ctr *OpenApiController) PluginInfo(c *gin.Context) {
+	ctx := c.Request.Context()
+	data, err := ctr.pluginService.OpenApiInfo(ctx)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// PluginStatus 已加载插件的诊断快照。
+func (ctr *OpenApiController) PluginStatus(c *gin.Context) {
+	c.JSON(200, response.Success(ctr.pluginService.OpenApiStatus()))
+}
+
+// PluginImport 上传插件二进制（multipart，字段名 files）。
+//
+// ⚠️ 这是开放接口里**唯一会写入可执行文件**的一条：拿到 X-Api-Key 的调用方
+// 等于获得在网关上执行任意插件代码的能力。约束有三层：密钥、plugin.enabled
+// 开关、以及单文件/单批/请求体大小上限。可选 X-Content-SHA256 头用于核对
+// 传输完整性（不提供来源认证，来源认证需要签名）。
+func (ctr *OpenApiController) PluginImport(c *gin.Context) {
+	importPlugins(c, ctr.pluginService, false)
 }
 
 // PageThingModelsForConfig 物模型配置分页读（含属性与 contentHash）。

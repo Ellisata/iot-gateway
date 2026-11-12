@@ -75,6 +75,8 @@ UDP 端口 **9083**，载荷为 UTF-8 JSON。
   "ip": "192.168.1.50",
   "port": 9082,
   "firmwareVersion": "1.0.0",
+  "os": "linux",
+  "arch": "amd64",
   "description": "1 号车间",
   "apiKey": "9f2c...64 位 hex...",
   "timestamp": 1757999999000
@@ -91,6 +93,8 @@ UDP 端口 **9083**，载荷为 UTF-8 JSON。
 | `ip` | string | 本端地址。`notify` 中=**本次广播所用网卡的地址**；`reply` 中=路由选出的、探询方能回连的地址。**接收方应以 UDP 源地址为准**，本字段仅作参考 |
 | `port` | int | 网关 HTTP 服务端口（**当前运行值**） |
 | `firmwareVersion` | string | 网关软件版本 |
+| `os` | string | 网关二进制运行的操作系统，取自 Go 的 `runtime.GOOS`（`linux` / `windows`），**不是**接入设备的平台 |
+| `arch` | string | 网关二进制的架构，取自 Go 的 `runtime.GOARCH`（`amd64` / `arm64` / `arm`）。与 `os` 合起来即 `linux/amd64` 这类平台标识，平台据此下发匹配的插件二进制 —— 插件必须与主程序同 GOOS/GOARCH 才能加载 |
 | `description` | string | 网关描述 |
 | `apiKey` | string | **默认开放接口密钥**（`open_api_secret` 里名为 `default` 那条的内容，64 位 hex），供平台免人工录入调用开放接口。缺失表示该网关没有默认密钥（老库未升级或被改过库），平台需回退到人工录入。见第 1 节的取舍说明 |
 | `timestamp` | int64 | 发出时刻的 Unix 毫秒。**仅供参考，不应信任**：不参与校验也不参与排序（跨主机时钟不可比） |

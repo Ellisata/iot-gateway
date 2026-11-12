@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"runtime"
 	"strconv"
 	"sync"
 	"testing"
@@ -206,6 +207,10 @@ func TestAnnouncerSendsNotify(t *testing.T) {
 	if m.IP != "127.0.0.1" {
 		t.Errorf("ip = %q, 期望 127.0.0.1", m.IP)
 	}
+	// 平台/架构取自编译该二进制的 GOOS/GOARCH，供平台挑选匹配的插件。
+	if m.OS != runtime.GOOS || m.Arch != runtime.GOARCH {
+		t.Errorf("os/arch = %q/%q, 期望 %q/%q", m.OS, m.Arch, runtime.GOOS, runtime.GOARCH)
+	}
 	if m.Timestamp == 0 {
 		t.Error("timestamp 未填写")
 	}
@@ -294,6 +299,10 @@ func TestAnnouncerRepliesToProbe(t *testing.T) {
 	// 回包里的 ip 应当是路由选出来的本机地址（回环场景下就是 127.0.0.1）。
 	if m.IP != "127.0.0.1" {
 		t.Errorf("ip = %q, 期望 127.0.0.1", m.IP)
+	}
+	// reply 与 notify 是两条各自构造 Message 的路径，os/arch 两边都要带。
+	if m.OS != runtime.GOOS || m.Arch != runtime.GOARCH {
+		t.Errorf("os/arch = %q/%q, 期望 %q/%q", m.OS, m.Arch, runtime.GOOS, runtime.GOARCH)
 	}
 }
 
