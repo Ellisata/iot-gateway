@@ -1,8 +1,16 @@
 # 多阶段构建: 前端构建 -> Go 编译 -> 运行镜像
 # 构建上下文为仓库根目录(compose 中 context: .),需要 frontend/ 与 backend/ 源码。
 
+# 基础镜像可经构建参数覆盖,用于走国内镜像源 / 私有 registry(默认仍是 Docker Hub 官方标签)。
+# 注意: RUN apk 换 Alpine 源只影响 apk 包,不影响 FROM 阶段的镜像拉取。
+# 覆盖方式: docker build --build-arg ALPINE_IMAGE=<镜像源>/library/alpine:3.23.2 .
+# 三个变量: NODE_IMAGE / GOLANG_IMAGE / ALPINE_IMAGE
+ARG NODE_IMAGE=node:22-alpine
+ARG GOLANG_IMAGE=golang:1.26-alpine
+ARG ALPINE_IMAGE=alpine:3.23.2
+
 # ========== 第一阶段: 前端构建 ==========
-FROM node:22-alpine AS frontend
+FROM ${NODE_IMAGE} AS frontend
 
 WORKDIR /src
 
@@ -20,7 +28,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ========== 第二阶段: Go 编译 ==========
-FROM golang:1.26-alpine AS builder
+FROM ${GOLANG_IMAGE} AS builder
 
 # go mod download 直连时代仓库时可能需要 git
 RUN apk --no-cache add git
@@ -82,7 +90,7 @@ RUN mkdir -p /out/plugins /tmp/driverbuild && built=0 && \
     { echo "[FAIL] drivers.txt 列了 $expected 个插件，实际编出 $built 个"; exit 1; }
 
 # ========== 第三阶段: 运行镜像 ==========
-FROM alpine:3.23.2
+FROM ${ALPINE_IMAGE}
 RUN apk --no-cache add poppler-utils tzdata
 
 WORKDIR /app

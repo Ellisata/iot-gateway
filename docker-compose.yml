@@ -10,6 +10,12 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      # 基础镜像可经环境变量覆盖(默认走 Docker Hub 官方标签),用于国内镜像源/私有 registry。
+      # 例如在 .env 里写 ALPINE_IMAGE=m.daocloud.io/docker.io/library/alpine:3.23.2
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+        GOLANG_IMAGE: ${GOLANG_IMAGE:-golang:1.26-alpine}
+        ALPINE_IMAGE: ${ALPINE_IMAGE:-alpine:3.23.2}
     image: iot-gateway:1.0
     container_name: iot-gateway
     restart: unless-stopped
