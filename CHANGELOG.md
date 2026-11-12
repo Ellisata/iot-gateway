@@ -11,10 +11,16 @@ each release, followed by English entries.
 ### 新增
 
 - **点位级工程量变换**：设备点位新增「工程量变换」（`device_address.transform_json`，迁移 `036_device_address_transform.sql`），在采集侧对原始值执行一次 `scale / round / trim / default` 流水线。实时值、点位阈值报警、触发规则、断网缓存与全部推送通道（MQTT / Kafka / HTTP / OPC UA / TDengine / InfluxDB）使用同一个工程值，时序库不再需要单独配置换算。`scale`（或保留小数位的 `round`）会把数值点位的 `kind` 提升为 `float`，OPC UA 整数节点相应提升为 Double；变换失败保留原值并限频记录日志。出站 `mapping-json` 的 transform 仍作为展示层保留，迁移到点位级后应删除通道侧重复的 `scale`。
+- **开放接口配置同步**：`/openApi` 新增配置同步接口（文档 4.16）：能力协商 `GET /config/capabilities`、物模型 / 设备点位 / 推送通道 / 告警 Webhook / 运行开关的脱敏只读（附 `contentHash`），以及推送通道、告警 Webhook、运行开关、设备点位的批量写入。只改网关配置、不触达设备，逐条部分成功；`"***"` 表示保留现有密钥，hash 采用 `sha256-canonical-json-v1`（密钥只计存在性）。物模型 upsert 新增 `replaceProperties` 删除未出现的属性；新增错误码 `42001`–`42009`。
+- **物模型分类支持平台自定义 code**：开放接口的分类校验由内置枚举改为格式校验（小写字母开头、≤32），词表由管理平台维护；本地管理端仍只能新建内置分类，但会保留并展示已下发的自定义分类。
+- **Docker 基础镜像可覆盖**：`Dockerfile` 新增 `NODE_IMAGE` / `GOLANG_IMAGE` / `ALPINE_IMAGE` 构建参数，`docker-compose.yml` 透传同名环境变量，便于切换国内镜像源或私有 registry，默认仍为官方标签。
 
 ### Added
 
 - **Per-point engineering transform**: device points gain an "engineering transform" (`device_address.transform_json`, migration `036_device_address_transform.sql`) that runs a `scale / round / trim / default` pipeline once at collection. Live values, point threshold alarms, trigger rules, the offline spool and every push channel (MQTT / Kafka / HTTP / OPC UA / TDengine / InfluxDB) see the same engineering value, so TSDB channels no longer need their own conversion. `scale` (or `round` with decimal digits) promotes numeric points' `kind` to `float`, and integer OPC UA nodes become Double accordingly; on failure the raw value is kept and the error is logged with rate limiting. The outbound `mapping-json` transform remains a presentation layer — remove any duplicate `scale` from channel mappings after moving it to the point.
+- **OpenAPI configuration sync**: adds a configuration-sync API group under `/openApi` (docs 4.16): capability negotiation via `GET /config/capabilities`, masked reads for thing models / devices & points / push channels / alarm webhooks / runtime switches (each with `contentHash`), and batch writes for push channels, alarm webhooks, runtime switches and device points. Writes only change gateway configuration — never field devices — and report per-item results; `"***"` keeps the existing secret, and hashes use `sha256-canonical-json-v1` (secrets count by presence only). Thing-model upsert gains `replaceProperties` to drop absent properties; new error codes `42001`–`42009`.
+- **Platform-defined thing-model categories**: OpenAPI category validation now checks the format (lowercase letter start, ≤32) instead of a built-in whitelist, so the management platform owns the vocabulary; the local console still creates only built-in categories but keeps and displays custom codes delivered through the API.
+- **Overridable Docker base images**: `Dockerfile` gains `NODE_IMAGE` / `GOLANG_IMAGE` / `ALPINE_IMAGE` build args wired through `docker-compose.yml`, easing the switch to mainland mirrors or a private registry; defaults stay on the official tags.
 
 ## [0.8.1] - 2026-11-11
 
