@@ -239,7 +239,7 @@ func (m *Manager) Start() error {
 
 	m.started = true
 	m.stopped.Store(false)
-	m.scanOnce()
+	m.scanOnceNoRefresh()
 
 	go m.loop()
 	logger.Info("pluginhost: 外部协议插件已启用，目录 %s（匹配 %s，扫描间隔 %s）", dir, m.cfg.Glob, m.scan)
@@ -477,20 +477,45 @@ func (m *Manager) withScanLock(fn func()) {
 	fn()
 }
 
-// scanOnce 执行一轮扫描：加载新插件、热升级被替换的插件、卸载消失的插件。
+// scanOnce 执行一轮扫描：加载新插件、热升级被替换的插件、卸载消失的插件，
+// 并在驱动集变化时安排一次采集配置刷新。
 func (m *Manager) scanOnce() {
-	m.withScanLock(m.scanOnceLocked)
+	m.runScan(true)
 }
 
-func (m *Manager) scanOnceLocked() {
+// scanOnceNoRefresh 用于 Start 的首次扫描：驱动集变化**不**安排刷新。
+//
+// Start 被约定为早于 CollectorEngine.Start 调用（见其文档），首次扫描加载到
+// 的驱动与协议行会自然进入采集引擎建的首个任务，无需刷新。而若照常安排刷新，
+// 2s 防抖窗口到期时采集引擎早已启动，doRefresh 的「引擎未运行则不刷新」守卫
+// 拦不住它 —— 表现就是每次开机 2s 后白白重建一轮全部采集任务（测试里还会
+// 把这次启动期刷新算到后续热升级头上）。
+func (m *Manager) scanOnceNoRefresh() {
+	m.runScan(false)
+}
+
+// runScan 在扫描锁内执行一轮扫描；refreshOnChange 为 true 时，驱动集变化会
+// 安排一次防抖后的采集配置刷新。
+func (m *Manager) runScan(refreshOnChange bool) {
+	m.scanMu.Lock()
+	defer m.scanMu.Unlock()
+
+	if m.scanOnceLocked() && refreshOnChange {
+		m.scheduleRefresh()
+	}
+}
+
+// scanOnceLocked 执行一轮扫描，返回驱动集是否发生变化。
+// 调用方必须持有 scanMu。
+func (m *Manager) scanOnceLocked() bool {
 	if m.stopped.Load() {
-		return // 已停机，迟到的 Reload() 不得再拉起任何进程
+		return false // 已停机，迟到的 Reload() 不得再拉起任何进程
 	}
 
 	matches, err := filepath.Glob(filepath.Join(m.baseDir, m.cfg.Glob))
 	if err != nil {
 		logger.Error("pluginhost: 扫描插件目录失败: %v", err)
-		return
+		return false
 	}
 	sort.Strings(matches) // 保证加载顺序确定
 
@@ -602,9 +627,7 @@ func (m *Manager) scanOnceLocked() {
 		setChanged = true
 	}
 
-	if setChanged {
-		m.scheduleRefresh()
-	}
+	return setChanged
 }
 
 // resolveCandidate 把候选路径解析为绝对路径，并阻止符号链接逃逸。

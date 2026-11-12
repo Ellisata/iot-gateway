@@ -288,6 +288,31 @@ func TestManagerRefreshIsDebouncedAndGuarded(t *testing.T) {
 	}
 }
 
+// TestManagerInitialScanDoesNotRefresh 首次扫描（Start）不得安排刷新，
+// 即便采集引擎在 Start 期间已经运行。
+//
+// Start 约定早于 CollectorEngine.Start：首次扫描加载的驱动会进入采集引擎
+// 建的首个任务。若仍安排 2s 防抖刷新，定时器到期时引擎早已运行，
+// doRefresh 的「引擎未运行」守卫拦不住 —— 表现为开机 2s 后白白重建全部采集
+// 任务，也会污染「热升级不触发刷新」的断言（见 integration_test.go 的
+// TestCollectionContinuesAcrossPluginHotUpgrade）。
+func TestManagerInitialScanDoesNotRefresh(t *testing.T) {
+	reload := &fakeReloader{}
+	reload.running.Store(true) // 模拟引擎已运行（比 Start 更早或同时启动）
+	m, _, _ := newTestManager(t, reload)
+
+	if err := m.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitForDriverRegistered(t, fixtureProtocol)
+
+	// 超过防抖窗口：若首次扫描安排了刷新，这里必然被计数。
+	time.Sleep(200 * time.Millisecond)
+	if n := reload.calls.Load(); n != 0 {
+		t.Fatalf("首次扫描不应安排刷新，实际 %d 次", n)
+	}
+}
+
 // TestManagerProvisionNeverOverwrites 已存在的协议行绝不被覆盖：
 // 运维可能已按现场需求改过表单。
 func TestManagerProvisionNeverOverwrites(t *testing.T) {
