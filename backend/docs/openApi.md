@@ -1,10 +1,11 @@
 # IoT 网关对外开放接口文档
 
 > 本文档面向**第三方系统开发人员**，描述通过网关开放接口（`/openApi/*`）查询设备数据、同步物模型配置的方式。
-> 除 **4.8 控制下发**、**4.13~4.15 物模型配置写入/删除**与 **4.17 插件二进制下发**外，
-> 接口均为只读查询；4.8 会改变现场设备状态，调用前请确认已获得操作授权；
-> 4.13~4.15 只修改网关内物模型配置，不触达现场设备；4.17 会向网关写入并加载可执行文件，
-> 等价于远程代码执行，只应部署在受信管理网络。
+> 除 **4.8 控制下发**、**4.13~4.15 物模型配置写入/删除**、**4.16.3 配置写入**、
+> **4.17 插件二进制下发**与 **4.18 设备扫描**外，接口均为只读查询；
+> 4.8 会改变现场设备状态，调用前请确认已获得操作授权；
+> 4.13~4.15 与 4.16.3 只修改网关内配置，不触达现场设备；4.17 会向网关写入并加载可执行文件，
+> 等价于远程代码执行；4.18 会主动向本机网段发起 TCP/UDP 探测，只应部署在受信管理网络。
 
 ## 版本记录
 
@@ -23,6 +24,7 @@
 | v1.10 | 2026-11-09 | 新增：物模型批量删除（4.14）、物模型属性批量删除（4.15），按自然键逐条删除并返回逐条结果 | - |
 | v1.11 | 2026-11-11 | 新增：配置同步（4.16）—— 能力协商、五域只读、推送通道/告警 Webhook/运行开关/设备点位批量写。读接口返回脱敏期望态与 `contentHash`，供管理平台做模板部署与漂移检测 | - |
 | v1.12 | 2026-11-12 | 新增：协议插件二进制下发（4.17）—— 插件环境/上传限制、已加载插件快照、multipart 上传与可选 `X-Content-SHA256` 完整性校验，供管理平台按 `os/arch` 选包 | - |
+| v1.13 | 2026-11-13 | 新增：设备扫描（4.18）—— 局域网设备扫描、任务进度/续扫/取消、点位扫描。只提供扫描能力，不提供“扫描后直接建库”；设备与点位下发仍走 4.16.3 的 `deviceConfig/batchUpsert` | - |
 
 ## 兼容性承诺
 
@@ -1484,6 +1486,171 @@ Content-Type: multipart/form-data
 `90001-90007` 为插件上传专用：功能未启用、未接收到文件、数量超限、批内重名、
 插件目录不可用、安装失败（逐文件）、内容校验和不一致。
 
+### 4.18 设备扫描（管理平台设备对象主数据）
+
+> 本节只提供**扫描**能力，不提供“扫描后直接在网关建库”的接口。推荐的平台流程是：
+> 扫描结果先落管理平台暂存库，审核后通过 **4.16.3 `/openApi/deviceConfig/batchUpsert`**
+> 把设备与点位下发到目标网关。
+>
+> 扫描会主动向网关本机网段发起 TCP 连接（广播型协议还会发 UDP 广播）。受
+> `deviceScan.enabled` 总开关控制，关闭后本节接口统一返回 `40021`。
+
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| GET | `/openApi/deviceScan/capabilities` | 开关、可扫描协议、本机网段、单批上限 |
+| POST | `/openApi/deviceScan/start` | 发起扫描，登记任务即返回 `jobId` |
+| GET | `/openApi/deviceScan/status` | 查询进度与结果，支持 `withDevices=false` |
+| POST | `/openApi/deviceScan/continue` | 续扫下一批目标 |
+| POST | `/openApi/deviceScan/cancel` | 取消扫描 |
+| GET | `/openApi/deviceScan/pointCapability` | 查询某个协议的点位扫描能力 |
+| POST | `/openApi/deviceScan/discoverPoints` | 对已下发到该网关的设备（按 `deviceCode`）做点位扫描 |
+| POST | `/openApi/deviceScan/discoverPointsFromScan` | 对扫描结果中的一台设备做点位扫描 |
+
+#### 4.18.1 扫描能力
+
+```
+GET /openApi/deviceScan/capabilities
+```
+
+`data`：
+
+```json
+{
+  "enabled": true,
+  "protocols": [
+    {
+      "name": "Modbus.TCP",
+      "protocolId": "…",
+      "title": "Modbus TCP",
+      "description": "…",
+      "defaultPort": 502,
+      "targetMode": "unicast",
+      "scanFormJson": { }
+    }
+  ],
+  "subnets": [
+    {"iface": "eth0", "cidr": "192.168.1.0/24", "localIp": "192.168.1.10",
+     "broadcast": "192.168.1.255", "hostCount": 254}
+  ],
+  "maxTargets": 1024
+}
+```
+
+`scanFormJson` 是该协议扫描选项的 form-create schema，直接渲染成表单后作为
+`start.options` 原样传回。
+
+#### 4.18.2 发起 / 查询 / 续扫 / 取消
+
+```
+POST /openApi/deviceScan/start
+```
+
+```json
+{
+  "protocol": "Modbus.TCP",
+  "subnets": ["192.168.1.0/24"],
+  "port": 0,
+  "options": {}
+}
+```
+
+- `subnets` 只能从 `capabilities.subnets` 里选，留空表示全部本机网段；
+- `port` 为 0 表示使用协议默认端口；
+- 登记任务即返回，`data` 是任务快照（含 `jobId`、`state`、`requestedTargets` 等）。
+
+```
+GET /openApi/deviceScan/status?jobId=…&withDevices=false
+```
+
+- `withDevices=false` 时只返回进度与计数，`devices`/`errors` 为 `null`；
+- 省略或 `true` 时返回完整快照，`devices` 为数组，元素含 `host/port/unitId/
+  name/vendor/model/version/protocolJson/suggestedCode`；
+- 轮询建议：先轻量取 `found`，发现数变化或任务结束时再补一次完整快照。
+
+```
+POST /openApi/deviceScan/continue  {"jobId": "…"}
+POST /openApi/deviceScan/cancel    {"jobId": "…"}
+```
+
+`truncated=true` 表示本批只扫了前 `maxTargets` 个目标，调用方应继续调用
+`continue`，直到 `truncated=false`。取消后已扫到的结果保留。
+
+#### 4.18.3 点位扫描
+
+```
+GET /openApi/deviceScan/pointCapability?protocolName=Modbus.TCP
+```
+
+`data`：`{enabled, supported, protocol, spec?}`。`supported=false` 是正常答案，
+不是错误。
+
+```
+POST /openApi/deviceScan/discoverPoints
+```
+
+两种定位方式，二选一：
+
+**已下发（网关侧配置为准）**
+
+```json
+{
+  "deviceCode": "管理平台下发的设备编码",
+  "options": {}
+}
+```
+
+- 按自然键 `deviceCode` 定位**已下发到该网关**的设备；
+- 连接配置由服务端从网关自己的 `device` 行读取。
+
+**未下发（平台主数据配置为准）**
+
+```json
+{
+  "protocolName": "Modbus.TCP",
+  "protocolJson": {"host": "192.168.1.10", "port": 502, "unitId": 1},
+  "options": {}
+}
+```
+
+- 网关上没有该设备行时使用这一形态，按调用方给的连接配置直接扫描；
+- `protocolJson` 必须是 **JSON 对象**，非空；协议必须在网关上已加载且声明了点位扫描
+  （否则 `40027`）；
+- 这一形态用于管理平台「先建主数据 → 扫点位 → 一次性下发」的流程；调用方
+  （平台服务端）持有 `X-Api-Key`，与 4.16.3 `deviceConfig/batchUpsert` 属同一
+  信任域；
+- 给了 `deviceCode` 时忽略 `protocolName` / `protocolJson`，避免两份配置来源打架。
+
+共同约定：
+
+- 同步返回，网关侧预算约 9 秒；`truncated` / `incomplete` / `warning`
+  表示结果不完整，调用方应原样展示并允许采纳已读到的点位；
+- 两个定位方式都没给时返回 `40026`；`deviceCode` 查不到设备时返回 `40002`。
+
+```
+POST /openApi/deviceScan/discoverPointsFromScan
+```
+
+```json
+{
+  "jobId": "扫描任务 id",
+  "index": 0,
+  "options": {}
+}
+```
+
+- `index` 是 `status` 完整快照里 `devices` 数组的下标；
+- 连接配置由服务端从扫描任务快照取，**不接收客户端传来的 `protocolJson`**；
+- 同步返回，网关侧预算约 9 秒；`truncated` / `incomplete` / `warning`
+  表示结果不完整，调用方应原样展示并允许采纳已读到的点位；
+- 依赖扫描任务快照，默认任务 TTL 为 10 分钟（`deviceScan.jobTTLMinutes` 可调）。
+  过期后需重新扫描设备。
+
+#### 4.18.4 错误码
+
+`40021` 扫描功能未启用、`40022` 已有扫描任务运行、`40023` 任务不存在或过期、
+`40024` 协议不支持设备扫描、`40025` 没有可扫描目标、`40026` 扫描参数不合法、
+`40027` 协议不支持点位扫描。
+
 ## 5. 错误码总表
 
 开放接口可能返回的错误码如下（完整列表见本节，其他内部错误码不会出现在开放接口中）：
@@ -1494,6 +1661,13 @@ Content-Type: multipart/form-data
 | `70003` | 401 | 开放接口密钥为空 | 请求头未携带 `X-Api-Key`，检查请求构造 |
 | `70004` | 401 | 开放接口密钥无效 | 密钥错误或已被删除，联系管理员确认 |
 | `PARAM_ERROR` | 200 | 参数校验失败 | 按 msg 提示修正请求参数（msg 形如 `参数校验失败: size max`） |
+| `40021` | 200 | 局域网扫描功能未启用 | 联系管理员确认 `deviceScan.enabled` |
+| `40022` | 200 | 已有扫描任务在运行 | 等待当前任务结束或先取消 |
+| `40023` | 200 | 扫描任务不存在或已过期 | 重新发起扫描；任务默认只保留 10 分钟 |
+| `40024` | 200 | 协议不支持局域网扫描 | 换一个协议或安装带扫描能力的插件 |
+| `40025` | 200 | 没有可扫描的目标 | 检查所选网段与端口 |
+| `40026` | 200 | 扫描参数不合法 | 按 msg 修正协议、网段、端口或选项 |
+| `40027` | 200 | 协议不支持点位扫描 | 该协议插件未声明点位扫描能力 |
 | `40031` | 200 | 控制下发功能未启用 | 请联系管理员确认 `control.enabled` |
 | `40032` | 200 | 该协议不支持控制下发 | 该协议插件未声明 `Writable`，只能读 |
 | `40033` | 200 | 该点位没有写权限 | 点位 `rw_permission` 需为 `W` 或 `RW` |

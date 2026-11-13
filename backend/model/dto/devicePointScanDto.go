@@ -33,6 +33,46 @@ type DiscoverPointsDTO struct {
 	Options json.RawMessage `json:"options"`
 }
 
+// OpenApiDiscoverPointsDTO 管理平台发起的点位扫描。
+//
+// 两种定位方式，二选一：
+//   - 已下发：`deviceCode`，连接配置由网关从自己的 device 行读取；
+//   - 未下发：`protocolName` + `protocolJson`，连接配置由平台（主数据的事实源）给出。
+//
+// 管理平台没有网关本地自增的设备 id，所以只收自然键 code，不收 deviceId。
+// 两个分支都不接收 Options 之外的其它字段。
+type OpenApiDiscoverPointsDTO struct {
+	// DeviceCode 设备编码（= device.code = /openApi/deviceConfig/batchUpsert 的自然键）。
+	// 非空时优先走网关侧配置。
+	DeviceCode string `json:"deviceCode"`
+
+	// ProtocolName 协议名（Meta.Protocols[].Name）。未下发设备扫描时必填。
+	ProtocolName string `json:"protocolName"`
+
+	// ProtocolJSON 连接配置（JSON 对象）。未下发设备扫描时必填。
+	// 与 deviceCode 互斥：给了 deviceCode 时忽略它，避免两份配置来源打架。
+	ProtocolJSON json.RawMessage `json:"protocolJson"`
+
+	// Options 扫描选项，形状由该协议的 pointFormJson 定义，原样透传给插件。
+	Options json.RawMessage `json:"options"`
+}
+
+// DiscoverPointsFromScanDTO 对**设备扫描结果**中的某一台设备发起点位扫描。
+//
+// 与 DiscoverPointsDTO 的差异只在"连接配置从哪里来"：这里接收扫描任务 id 与
+// 结果下标，protocolJson 由服务端从扫描快照里取 —— 与 CreateDevicesFromScanDTO
+// 同一条安全边界，绝不采信客户端传来的连接配置。
+type DiscoverPointsFromScanDTO struct {
+	// JobID 设备扫描任务 id（/openApi/deviceScan/start 返回）。
+	JobID string `json:"jobId" binding:"required"`
+
+	// Index 该任务 Devices 数组里的下标。
+	Index int `json:"index" binding:"min=0"`
+
+	// Options 扫描选项，形状由该协议的 pointFormJson 定义，原样透传给插件。
+	Options json.RawMessage `json:"options"`
+}
+
 // CreateAddressesFromScanDTO 把勾选的点位批量建成 device_address 行。
 type CreateAddressesFromScanDTO struct {
 	// DeviceID 这批点位挂在哪台设备下。

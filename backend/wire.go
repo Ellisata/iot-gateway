@@ -252,7 +252,7 @@ func ProvideRouteOptions(
 		router.WithAlarmWebhookFormRoutes(awfc),
 		router.WithLogFileRoutes(lc),
 		router.WithOpenApiSecretRoutes(oasc),
-		router.WithOpenApiRoutes(oass, oac),
+		router.WithOpenApiRoutes(oass, oac, dsc),
 		router.WithGatewayRoutes(gc),
 		router.WithPluginRoutes(plc),
 		router.WithDeviceScanRoutes(dsc),

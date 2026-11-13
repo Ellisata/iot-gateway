@@ -16,6 +16,7 @@ each release, followed by English entries.
 - **Docker 基础镜像可覆盖**：`Dockerfile` 新增 `NODE_IMAGE` / `GOLANG_IMAGE` / `ALPINE_IMAGE` 构建参数，`docker-compose.yml` 透传同名环境变量，便于切换国内镜像源或私有 registry，默认仍为官方标签。
 - **发现广播携带平台信息**：`notify` / `reply` 新增 `os` / `arch` 字段，取自 Go 的 `runtime.GOOS` / `runtime.GOARCH`（如 `linux/amd64`、`linux/arm64`、`windows/amd64`），供管理平台发现网关后下发与它匹配的插件二进制。字段带 `omitempty`，旧版接收方照常解析。
 - **开放接口插件二进制下发**：`/openApi` 新增 `GET /plugin/info`（平台 / 命名规则 / 上传限制）、`GET /plugin/status`（已加载插件的 sha256 快照）与 `POST /plugin/importPlugin`（multipart 上传，可选 `X-Content-SHA256` 完整性校验），供管理平台按 `os/arch` 选包下发；上传仍受 `plugin.enabled`、单文件 / 单批 / 请求体上限约束，新增错误码 `90007`（文档 4.17）。
+- **开放接口设备扫描**：`/openApi` 新增设备扫描接口（文档 4.18）：能力查询、发起 / 查询 / 续扫 / 取消、点位扫描能力，以及两种点位扫描——已下发设备按 `deviceCode` 取网关侧配置，未下发设备按 `protocolName` + `protocolJson` 用平台主数据配置直接扫描；`discoverPointsFromScan` 按 `jobId` + `index` 扫描结果中的设备，连接配置由服务端从任务快照取，不采信客户端。只提供扫描能力，结果不直接落库，设备与点位仍走 4.16.3 `deviceConfig/batchUpsert` 下发；受 `deviceScan.enabled` 控制，新增错误码 `40021`–`40027`。
 
 ### 修复
 
@@ -30,6 +31,7 @@ each release, followed by English entries.
 - **Overridable Docker base images**: `Dockerfile` gains `NODE_IMAGE` / `GOLANG_IMAGE` / `ALPINE_IMAGE` build args wired through `docker-compose.yml`, easing the switch to mainland mirrors or a private registry; defaults stay on the official tags.
 - **Discovery broadcasts carry platform info**: `notify` / `reply` gain `os` / `arch` fields taken from Go's `runtime.GOOS` / `runtime.GOARCH` (e.g. `linux/amd64`, `linux/arm64`, `windows/amd64`), so the management platform can deliver the matching plugin binaries. Both fields use `omitempty`, so older receivers parse the rest unchanged.
 - **OpenAPI plugin binary delivery**: `/openApi` gains `GET /plugin/info` (platform / naming rules / upload limits), `GET /plugin/status` (sha256 snapshot of loaded plugins) and `POST /plugin/importPlugin` (multipart upload with optional `X-Content-SHA256` integrity check), so the management platform can select and deliver a package by `os/arch`. Uploads remain bounded by `plugin.enabled` and the per-file / per-batch / request-body limits; new error code `90007` (docs 4.17).
+- **OpenAPI device scan**: `/openApi` gains device-scan endpoints (docs 4.18): capabilities, start / status / continue / cancel, point-scan capability, and two point-scan modes — by `deviceCode` using the gateway's own device config, or by `protocolName` + `protocolJson` using the platform's master data for not-yet-delivered devices; `discoverPointsFromScan` scans one device in a job result by `jobId` + `index`, with the connection config taken from the job snapshot rather than the client. Scan results are not persisted here — devices and points still go through 4.16.3 `deviceConfig/batchUpsert` — and everything is gated by `deviceScan.enabled`; new error codes `40021`–`40027`.
 
 ## [0.8.1] - 2026-11-11
 

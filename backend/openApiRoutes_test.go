@@ -55,6 +55,15 @@ func TestOpenApiRoutesRegistered(t *testing.T) {
 		"POST /openApi/systemConfig/batchReset",
 		"POST /openApi/deviceConfig/batchUpsert",
 		"POST /openApi/deviceConfig/batchDelete",
+		// 设备扫描（管理平台设备对象主数据）
+		"GET /openApi/deviceScan/capabilities",
+		"POST /openApi/deviceScan/start",
+		"GET /openApi/deviceScan/status",
+		"POST /openApi/deviceScan/continue",
+		"POST /openApi/deviceScan/cancel",
+		"GET /openApi/deviceScan/pointCapability",
+		"POST /openApi/deviceScan/discoverPoints",
+		"POST /openApi/deviceScan/discoverPointsFromScan",
 		// 协议插件二进制下发（管理平台按平台选包）
 		"GET /openApi/plugin/info",
 		"GET /openApi/plugin/status",

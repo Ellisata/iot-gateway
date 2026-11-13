@@ -104,7 +104,7 @@ func TestOpenApiControlWriteEndToEnd(t *testing.T) {
 	), controlSvc, service.NewThingModelService(db), nil, nil)
 
 	engine := gin.New()
-	router.OpenApiRoutes(engine, secretSvc, openApiCtrl)
+	router.OpenApiRoutes(engine, secretSvc, openApiCtrl, controller.NewDeviceScanController(nil))
 
 	body := `{"deviceId":"dev-1","requestId":"openapi-req-1","items":[{"deviceAddressId":"addr-1","value":"42"}]}`
 	req := httptest.NewRequest("POST", "/openApi/control/write", strings.NewReader(body))

@@ -649,3 +649,96 @@ func TestCreateAddressesUnknownDevice(t *testing.T) {
 	})
 	assertBusinessCode(t, err, enums.DeviceNotExistsEnum.GetCode())
 }
+
+// ==================== DiscoverPointsForOpenApi（管理平台入口） ====================
+
+// TestDiscoverPointsForOpenApiUsesDeviceRow 给了 deviceCode 时，连接配置从
+// 网关自己的 device 行读取 —— 以网关侧实际生效的那份为准。
+func TestDiscoverPointsForOpenApiUsesDeviceRow(t *testing.T) {
+	src := &fakePointSource{
+		specs: pointSpecs(drivertest.TestProtocol),
+		result: &driver.PointScanResult{
+			Scanned: 1, Readable: 1,
+			Points: []driver.DiscoveredPoint{{Name: "%MW100", Value: "7"}},
+		},
+	}
+	svc, db, dev := pointScanFixture(t, true, src)
+	if err := db.Model(dev).Update("code", "dev_plc_01").Error; err != nil {
+		t.Fatalf("设置设备编码: %v", err)
+	}
+
+	out, err := svc.DiscoverPointsForOpenApi(context.Background(), &dto.OpenApiDiscoverPointsDTO{
+		DeviceCode: "dev_plc_01",
+	})
+	if err != nil {
+		t.Fatalf("DiscoverPointsForOpenApi: %v", err)
+	}
+	if src.gotProtocol != drivertest.TestProtocol {
+		t.Errorf("协议 = %q，期望 %q", src.gotProtocol, drivertest.TestProtocol)
+	}
+	if src.gotProtocolJSON != pointTestDeviceJSON {
+		t.Errorf("连接配置 = %q，应取自 device 行", src.gotProtocolJSON)
+	}
+	if len(out.Points) != 1 || out.Points[0].Name != "%MW100" {
+		t.Fatalf("结果 = %+v", out)
+	}
+}
+
+// TestDiscoverPointsForOpenApiUsesProvidedConfig 未下发设备没有 device 行，
+// 直接按 protocolName + protocolJson 扫描（平台是主数据的事实源）。
+func TestDiscoverPointsForOpenApiUsesProvidedConfig(t *testing.T) {
+	src := &fakePointSource{
+		specs: pointSpecs(drivertest.TestProtocol),
+		result: &driver.PointScanResult{
+			Scanned: 1, Readable: 1,
+			Points: []driver.DiscoveredPoint{{Name: "%MW200", Value: "9"}},
+		},
+	}
+	svc, _, _ := pointScanFixture(t, true, src)
+	provided := `{"host":"10.0.0.9","port":502,"unitId":1}`
+
+	out, err := svc.DiscoverPointsForOpenApi(context.Background(), &dto.OpenApiDiscoverPointsDTO{
+		ProtocolName: drivertest.TestProtocol,
+		ProtocolJSON: json.RawMessage(provided),
+	})
+	if err != nil {
+		t.Fatalf("DiscoverPointsForOpenApi: %v", err)
+	}
+	if src.gotProtocolJSON != provided {
+		t.Errorf("连接配置 = %q，应为调用方给的那一份", src.gotProtocolJSON)
+	}
+	if len(out.Points) != 1 || out.Points[0].Name != "%MW200" {
+		t.Fatalf("结果 = %+v", out)
+	}
+}
+
+// TestDiscoverPointsForOpenApiUnknownCode 编码查不到按"设备不存在"报，而不是 500。
+func TestDiscoverPointsForOpenApiUnknownCode(t *testing.T) {
+	svc, _, _ := pointScanFixture(t, true, &fakePointSource{specs: pointSpecs(drivertest.TestProtocol)})
+
+	_, err := svc.DiscoverPointsForOpenApi(context.Background(), &dto.OpenApiDiscoverPointsDTO{
+		DeviceCode: "no-such-code",
+	})
+	assertBusinessCode(t, err, enums.DeviceNotExistsEnum.GetCode())
+}
+
+// TestDiscoverPointsForOpenApiMissingLocator 两个定位方式都没给是参数错误。
+func TestDiscoverPointsForOpenApiMissingLocator(t *testing.T) {
+	svc, _, _ := pointScanFixture(t, true, &fakePointSource{specs: pointSpecs(drivertest.TestProtocol)})
+
+	_, err := svc.DiscoverPointsForOpenApi(context.Background(), &dto.OpenApiDiscoverPointsDTO{})
+	assertBusinessCode(t, err, enums.DeviceScanParamInvalidEnum.GetCode())
+}
+
+// TestDiscoverPointsForOpenApiRejectsBadProtocolJSON 连接配置必须是 JSON 对象。
+func TestDiscoverPointsForOpenApiRejectsBadProtocolJSON(t *testing.T) {
+	svc, _, _ := pointScanFixture(t, true, &fakePointSource{specs: pointSpecs(drivertest.TestProtocol)})
+
+	for _, raw := range []string{"", "null", "[1,2]", "{bad"} {
+		_, err := svc.DiscoverPointsForOpenApi(context.Background(), &dto.OpenApiDiscoverPointsDTO{
+			ProtocolName: drivertest.TestProtocol,
+			ProtocolJSON: json.RawMessage(raw),
+		})
+		assertBusinessCode(t, err, enums.DeviceScanParamInvalidEnum.GetCode())
+	}
+}

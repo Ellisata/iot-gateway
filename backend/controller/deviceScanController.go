@@ -211,6 +211,48 @@ func (ctr *DeviceScanController) DiscoverPoints(c *gin.Context) {
 	c.JSON(200, response.Success(data))
 }
 
+// DiscoverPointsForOpenApi 管理平台发起的点位扫描。
+//
+// 与 DiscoverPoints 同一实现，区别在定位：已下发用 deviceCode（网关侧配置为准），
+// 未下发用 protocolName + protocolJson（主数据配置）。管理平台没有网关本地设备 id。
+func (ctr *DeviceScanController) DiscoverPointsForOpenApi(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req dto.OpenApiDiscoverPointsDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+
+	data, err := ctr.deviceScanService.DiscoverPointsForOpenApi(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// DiscoverPointsFromScan 对设备扫描结果中的一台设备发起点位扫描。
+//
+// 与 DiscoverPoints 一样同步返回；连接配置由服务端从任务快照取，客户端只给
+// 任务 id 与结果下标。
+func (ctr *DeviceScanController) DiscoverPointsFromScan(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req dto.DiscoverPointsFromScanDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+
+	data, err := ctr.deviceScanService.DiscoverPointsFromScan(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
 // CreateAddresses 把勾选的点位批量建成 device_address 行。
 //
 // 与 CreateDevices 一致：逐条成败明细走统一响应，**HTTP 始终 200** ——

@@ -102,7 +102,7 @@ func TestOpenApiSyncDevicePointsEndToEnd(t *testing.T) {
 		service.NewMqttSubscriptionService(db, nil),
 	), controlSvc, service.NewThingModelService(db), nil, nil)
 	engine := gin.New()
-	router.OpenApiRoutes(engine, secretSvc, openApiCtrl)
+	router.OpenApiRoutes(engine, secretSvc, openApiCtrl, controller.NewDeviceScanController(nil))
 
 	// ① 带密钥：应拿到统一信封 + 嵌套点位
 	body, status := doRequestWithKey(t, engine, apiKey, "/openApi/device/sync?size=10")

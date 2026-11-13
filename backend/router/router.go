@@ -161,9 +161,10 @@ func WithOpenApiSecretRoutes(oasc *controller.OpenApiSecretController) RouteOpti
 }
 
 // WithOpenApiRoutes 开放接口路由选项（X-Api-Key 密钥鉴权，不走 JWT）
-func WithOpenApiRoutes(oass *service.OpenApiSecretService, oac *controller.OpenApiController) RouteOption {
+func WithOpenApiRoutes(oass *service.OpenApiSecretService, oac *controller.OpenApiController,
+	dsc *controller.DeviceScanController) RouteOption {
 	return func(r *gin.Engine) {
-		OpenApiRoutes(r, oass, oac)
+		OpenApiRoutes(r, oass, oac, dsc)
 	}
 }
 

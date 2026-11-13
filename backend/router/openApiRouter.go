@@ -15,10 +15,12 @@ import (
 // 供外部系统调用。该分组即对外白名单——默认关闭，只有显式挂载到
 // 此分组下的接口才对外开放；新接口在此追加。
 //
-// 除 /control/write（控制下发）、/thingModel/*（物模型配置写入 / 删除）与
-// /plugin/importPlugin（上传可执行插件，等价远程代码执行）外，其余接口均为
-// 只读查询。那三条写入口的共同前提是：密钥持有者本就是受信管理者。
-func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService, oac *controller.OpenApiController) {
+// 除 /control/write（控制下发）、/thingModel/*（物模型配置写入 / 删除）、
+// /plugin/importPlugin（上传可执行插件，等价远程代码执行）与 /deviceScan/*
+// （局域网探测）外，其余接口均为只读查询。这些写/探测入口的共同前提是：
+// 密钥持有者本就是受信管理者。
+func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService,
+	oac *controller.OpenApiController, dsc *controller.DeviceScanController) {
 	openApi := r.Group("/openApi", middleware.OpenApiAuthMiddleware(oass))
 	{
 		// 对外只读查询
@@ -79,6 +81,22 @@ func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService, oac *contr
 		// 模型（连带其属性）或单个属性；逐条独立，绑定保护与单条删除一致。
 		openApi.POST("/thingModel/batchDelete", oac.BatchDeleteThingModels)
 		openApi.POST("/thingModelProperty/batchDelete", oac.BatchDeleteThingModelProperties)
+
+		// ==================== 设备扫描（管理平台设备对象主数据） ====================
+		// 只提供"扫描"能力，不提供"扫描后直接建库"（createDevices/createAddresses）：
+		// 管理平台的设备对象主数据模式是「扫描结果先落平台库，审核后走
+		// /openApi/deviceConfig/batchUpsert 下发」。
+		// discoverPoints 支持两种定位：已下发按 deviceCode 取网关侧配置；未下发按
+		// protocolName + protocolJson 用平台主数据配置扫描（平台是设备配置的事实源）。
+		// discoverPointsFromScan 用于设备还没建库时的扫描结果。
+		openApi.GET("/deviceScan/capabilities", dsc.Capabilities)
+		openApi.POST("/deviceScan/start", dsc.Start)
+		openApi.GET("/deviceScan/status", dsc.Status)
+		openApi.POST("/deviceScan/continue", dsc.Continue)
+		openApi.POST("/deviceScan/cancel", dsc.Cancel)
+		openApi.GET("/deviceScan/pointCapability", dsc.PointCapability)
+		openApi.POST("/deviceScan/discoverPoints", dsc.DiscoverPointsForOpenApi)
+		openApi.POST("/deviceScan/discoverPointsFromScan", dsc.DiscoverPointsFromScan)
 
 		// ==================== 协议插件二进制下发（管理平台按平台选包） ====================
 		// info 给出网关平台（os/arch）、命名规则、单文件/单批上限与扫描间隔；

@@ -4,17 +4,20 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 
 	"github.com/Ellisata/iot-gateway-sdk/driver"
 	"iot-gateway/appError"
+	"iot-gateway/devicescan"
 	"iot-gateway/enums"
 	"iot-gateway/model/dto"
 	"iot-gateway/model/po"
@@ -91,6 +94,55 @@ func (s *DeviceScanService) DiscoverPoints(ctx context.Context, req *dto.Discove
 	if err != nil {
 		return nil, err
 	}
+	return s.discoverPointsForDevice(ctx, device, protocolName, req.Options)
+}
+
+// DiscoverPointsForOpenApi 管理平台发起的点位扫描。
+//
+// 两种定位方式，与 OpenApiDiscoverPointsDTO 的注释一致：
+//   - 给了 deviceCode：从网关自己的 device 行取配置（网关侧实际生效的那份）；
+//   - 只给 protocolName + protocolJson：按调用方给的配置扫，用于**尚未下发**的
+//     设备对象（平台是主数据的事实源，先扫点位再一次性下发）。
+func (s *DeviceScanService) DiscoverPointsForOpenApi(ctx context.Context, req *dto.OpenApiDiscoverPointsDTO) (*vo.PointScanResultVO, error) {
+	if !s.engine.Enabled() {
+		return nil, appError.NewAppErrorCtx(
+			enums.DeviceScanDisabledEnum.GetCode(),
+			enums.DeviceScanDisabledEnum.GetMessage(),
+			enums.DeviceScanDisabledEnum.GetMsgKey())
+	}
+
+	if code := strings.TrimSpace(req.DeviceCode); code != "" {
+		device, protocolName, err := s.deviceForScanByCode(ctx, code)
+		if err != nil {
+			return nil, err
+		}
+		return s.discoverPointsForDevice(ctx, device, protocolName, req.Options)
+	}
+
+	protocolName := strings.TrimSpace(req.ProtocolName)
+	if protocolName == "" {
+		return nil, appError.NewAppErrorCtx(
+			enums.DeviceScanParamInvalidEnum.GetCode(),
+			"deviceCode 与 protocolName 至少提供一个",
+			enums.DeviceScanParamInvalidEnum.GetMsgKey())
+	}
+	protocolJSON, err := normalizeScanProtocolJSON(req.ProtocolJSON)
+	if err != nil {
+		return nil, appError.NewAppErrorCtx(
+			enums.DeviceScanParamInvalidEnum.GetCode(),
+			err.Error(),
+			enums.DeviceScanParamInvalidEnum.GetMsgKey())
+	}
+	return s.discoverPointsWithConfig(ctx, protocolName, protocolJSON, req.Options)
+}
+
+// discoverPointsForDevice 对一台网关设备执行点扫。
+func (s *DeviceScanService) discoverPointsForDevice(ctx context.Context, device *po.Device, protocolName string, options json.RawMessage) (*vo.PointScanResultVO, error) {
+	return s.discoverPointsWithConfig(ctx, protocolName, device.ProtocolJSON, options)
+}
+
+// discoverPointsWithConfig 按一份连接配置执行点扫，并保留中断前的部分结果。
+func (s *DeviceScanService) discoverPointsWithConfig(ctx context.Context, protocolName, protocolJSON string, options json.RawMessage) (*vo.PointScanResultVO, error) {
 	// 能力**现算**，不建缓存表：热升级只换 lp.meta，而 registrationSig 不含
 	// PointDiscovery，缓存会陈旧（与 devicescan 的 specOf 同一条理由）。
 	if !s.protocolSupportsPointScan(protocolName) {
@@ -98,7 +150,7 @@ func (s *DeviceScanService) DiscoverPoints(ctx context.Context, req *dto.Discove
 			enums.DevicePointScanUnsupportedEnum.GetMessage())
 	}
 
-	result, err := s.manager.DiscoverPoints(ctx, protocolName, device.ProtocolJSON, req.Options)
+	result, err := s.manager.DiscoverPoints(ctx, protocolName, protocolJSON, options)
 	if err != nil {
 		// **带着部分结果的失败**：这份结果是一路刻意保下来的（插件侧
 		// ScanPoints 在链路中断时 return sc.finish(), chunkErr，宿主
@@ -116,13 +168,81 @@ func (s *DeviceScanService) DiscoverPoints(ctx context.Context, req *dto.Discove
 			// 截断的清单里得出"这个范围只有这些点位"的错误结论 —— 与设备扫描的
 			// Truncated 是同一条要求（见 driver.PointScanResult 对五个标志的说明）。
 			out.Incomplete = true
-			out.Warning = s.pointScanInterruptMessage(err, device.ProtocolJSON)
+			out.Warning = s.pointScanInterruptMessage(err, protocolJSON)
 			return out, nil
 		}
-		return nil, s.pointScanError(ctx, err, device.ProtocolJSON)
+		return nil, s.pointScanError(ctx, err, protocolJSON)
 	}
-	out := pointScanResultVO(protocolName, result)
-	return out, nil
+	return pointScanResultVO(protocolName, result), nil
+}
+
+// normalizeScanProtocolJSON 校验并规整开放接口传入的连接配置。
+//
+// 只接受 JSON 对象：插件配置解析器期望的是对象，数组/标量会在插件里报一句
+// 与根因相隔很远的解析错误；空值则会让插件去连一个默认地址。
+func normalizeScanProtocolJSON(raw json.RawMessage) (string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return "", errors.New("protocolJson 不能为空")
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(trimmed, &obj); err != nil {
+		return "", errors.New("protocolJson 必须是 JSON 对象")
+	}
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// DiscoverPointsFromScan 对设备扫描结果中的一台设备发起点位扫描。
+//
+// 连接配置（protocolJson）由服务端从任务快照里取，不采信客户端 —— 与
+// CreateDevicesFromScanDTO 同一条边界。要求任务已结束：扫描还在跑时结果清单
+// 仍在增长，此时点扫会让"看到的设备"与"扫到的点位"来自两个不同时刻。
+func (s *DeviceScanService) DiscoverPointsFromScan(ctx context.Context, req *dto.DiscoverPointsFromScanDTO) (*vo.PointScanResultVO, error) {
+	if !s.engine.Enabled() {
+		return nil, appError.NewAppErrorCtx(
+			enums.DeviceScanDisabledEnum.GetCode(),
+			enums.DeviceScanDisabledEnum.GetMessage(),
+			enums.DeviceScanDisabledEnum.GetMsgKey())
+	}
+
+	snap, err := s.engine.Status(req.JobID)
+	if err != nil {
+		return nil, scanError(err)
+	}
+	if snap.State == devicescan.JobRunning {
+		return nil, appError.NewAppErrorCtx(
+			enums.DeviceScanBusyEnum.GetCode(),
+			"扫描还在进行中，请等它结束后再扫描点位",
+			enums.DeviceScanBusyEnum.GetMsgKey())
+	}
+	if req.Index < 0 || req.Index >= len(snap.Devices) {
+		return nil, appError.NewAppErrorCtx(
+			enums.DeviceScanParamInvalidEnum.GetCode(),
+			"扫描结果已失效（下标越界），请重新扫描",
+			enums.DeviceScanParamInvalidEnum.GetMsgKey())
+	}
+	dev := snap.Devices[req.Index]
+	if !s.protocolSupportsPointScan(snap.Protocol) {
+		return nil, appError.NewAppError(enums.DevicePointScanUnsupportedEnum.GetCode(),
+			enums.DevicePointScanUnsupportedEnum.GetMessage())
+	}
+
+	result, err := s.manager.DiscoverPoints(ctx, snap.Protocol, dev.ProtocolJSON, req.Options)
+	if err != nil {
+		// 与 DiscoverPoints 完全相同：带部分结果的中断仍返回结果，只补 Incomplete/Warning。
+		if result != nil && (result.Scanned > 0 || len(result.Points) > 0) {
+			out := pointScanResultVO(snap.Protocol, result)
+			out.Incomplete = true
+			out.Warning = s.pointScanInterruptMessage(err, dev.ProtocolJSON)
+			return out, nil
+		}
+		return nil, s.pointScanError(ctx, err, dev.ProtocolJSON)
+	}
+	return pointScanResultVO(snap.Protocol, result), nil
 }
 
 // pointScanInterruptMessage 部分结果随附的提示语。
@@ -259,15 +379,44 @@ func (s *DeviceScanService) deviceForScan(ctx context.Context, deviceID string) 
 		}
 		return nil, "", err
 	}
+	return &device, s.protocolNameOf(ctx, device.ProtocolID), nil
+}
 
-	protocolName := ""
-	if device.ProtocolID != "" {
-		var protocol po.IotProtocol
-		if err := s.sqliteDB.WithContext(ctx).Where("id = ?", device.ProtocolID).First(&protocol).Error; err == nil {
-			protocolName = protocol.Name
-		}
+// deviceForScanByCode 按自然键 code 定位设备（管理平台只知道下发用的编码）。
+//
+// 编码为空或查不到都按"设备不存在"处理：空编码在网关里是旧数据的可能值，
+// 拿它去匹配只会命中一台不该被更新的设备。
+func (s *DeviceScanService) deviceForScanByCode(ctx context.Context, code string) (*po.Device, string, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return nil, "", appError.NewAppErrorCtx(
+			enums.DeviceScanParamInvalidEnum.GetCode(),
+			"设备编码不能为空",
+			enums.DeviceScanParamInvalidEnum.GetMsgKey())
 	}
-	return &device, protocolName, nil
+	var device po.Device
+	if err := s.sqliteDB.WithContext(ctx).Where("code = ?", code).First(&device).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, "", appError.NewAppErrorCtx(
+				enums.DeviceNotExistsEnum.GetCode(),
+				"网关上不存在该设备编码，请先下发设备配置",
+				enums.DeviceNotExistsEnum.GetMsgKey())
+		}
+		return nil, "", err
+	}
+	return &device, s.protocolNameOf(ctx, device.ProtocolID), nil
+}
+
+// protocolNameOf 把协议行 id 解析成协议名；查不到返回空串（由能力检查统一报不支持）。
+func (s *DeviceScanService) protocolNameOf(ctx context.Context, protocolID string) string {
+	if protocolID == "" {
+		return ""
+	}
+	var protocol po.IotProtocol
+	if err := s.sqliteDB.WithContext(ctx).Where("id = ?", protocolID).First(&protocol).Error; err == nil {
+		return protocol.Name
+	}
+	return ""
 }
 
 // protocolSupportsPointScan 现算该协议是否声明了点位扫描能力。
