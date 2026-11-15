@@ -32,3 +32,12 @@ type ControlDTO struct {
 type ControlCapabilityDTO struct {
 	DeviceID string `form:"deviceId" binding:"required"`
 }
+
+// OpenApiControlCapabilityDTO 开放接口的控制能力查询。
+//
+// 外部系统通常只持有设备编码 code（下发自然键），不一定知道网关内部 UUID，
+// 因此 deviceId 与 code 二选一，优先 deviceId。
+type OpenApiControlCapabilityDTO struct {
+	DeviceID string `form:"deviceId"`
+	Code     string `form:"code"`
+}

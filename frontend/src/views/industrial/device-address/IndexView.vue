@@ -153,7 +153,6 @@
           class-name="iot-col-muted"
         />
         <el-table-column
-          v-if="!compact"
           :label="t('deviceAddress.property')"
           width="180"
           show-overflow-tooltip
@@ -164,6 +163,21 @@
               <span class="iot-cell-muted"> · {{ row.propertyName }}</span>
             </span>
             <span v-else class="iot-cell-muted">{{ t('deviceAddress.unboundProperty') }}</span>
+          </template>
+        </el-table-column>
+        <!-- 工程量变换：采集侧对原始值执行的流水线。列表里只给可读摘要（如
+             「缩放 ×0.1 → 四舍五入 2 位」），完整表达式悬停可见 —— 单元格窄，
+             箭头链一截断就只剩半条规则，比不显示更容易误判。 -->
+        <el-table-column :label="t('deviceAddress.engineeringTransform')" width="200">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="transformSummaries.get(row.id)"
+              :content="transformSummaries.get(row.id)"
+              placement="top"
+            >
+              <span class="iot-transform">{{ transformSummaries.get(row.id) }}</span>
+            </el-tooltip>
+            <span v-else class="iot-cell-muted">{{ t('deviceAddress.transformNone') }}</span>
           </template>
         </el-table-column>
         <!-- 实时值：配置页顺带看一眼「这个地址现在读到什么」。
@@ -455,6 +469,7 @@ import PointDiscoveryDialog from './PointDiscoveryDialog.vue'
 import { useExcelImport } from '@/composables/useExcelImport'
 import { useRealtimeValues } from '@/composables/useRealtimeValues'
 import { parseConditionValues } from '@/utils/addressThreshold'
+import { addressTransformText } from '@/utils/addressTransform'
 import { qualityBadText } from '@/utils/pointQuality'
 import { useI18n } from 'vue-i18n'
 
@@ -547,6 +562,16 @@ function syncQuery() {
 // ---------- 表格数据 ----------
 const loading = ref(false)
 const tableData = ref([])
+
+// 工程量变换摘要按行算一次，避免模板里每行重复解析 JSON（完整表达式同时用于 tooltip）。
+// 依赖 t：切换语言时摘要随 locale 一起重算。
+const transformSummaries = computed(() => {
+  const summaries = new Map()
+  for (const row of tableData.value) {
+    summaries.set(row.id, addressTransformText(t, row.transformJson))
+  }
+  return summaries
+})
 
 // 首屏还没拿到数时显示占位符而不是 0：「0 个点位」是一个会被信以为真的假事实
 const displayTotal = computed(() =>
@@ -876,6 +901,17 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--ink-2);
   font-variant-numeric: tabular-nums;
+}
+
+/* 变换流水线摘要：与报警条件同属技术表达式，窄单元格里截断，完整内容在 tooltip */
+.iot-transform {
+  display: block;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 实时值列：表头带一个暂停按钮，让「等一会看变化」和「别一直刷」都能就地做到 */

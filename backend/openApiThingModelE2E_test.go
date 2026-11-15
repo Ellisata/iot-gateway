@@ -65,7 +65,7 @@ func TestOpenApiThingModelBatchUpsertEndToEnd(t *testing.T) {
 		service.NewDeviceAddressService(db, nil),
 		service.NewAlarmService(db),
 		service.NewMqttSubscriptionService(db, nil),
-	), controlSvc, service.NewThingModelService(db), nil, nil)
+	), controlSvc, service.NewThingModelService(db), nil, nil, nil, nil)
 	engine := gin.New()
 	router.OpenApiRoutes(engine, secretSvc, openApiCtrl, controller.NewDeviceScanController(nil))
 

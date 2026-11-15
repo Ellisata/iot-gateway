@@ -24,6 +24,8 @@ type OpenApiController struct {
 	thingModelService *service.ThingModelService
 	configService     *service.OpenApiConfigService
 	pluginService     *service.PluginService
+	realtimeService   *service.OpenApiRealtimeService
+	deviceService     *service.DeviceService
 }
 
 // NewOpenApiController 创建开放接口控制器
@@ -33,6 +35,8 @@ func NewOpenApiController(
 	thingModelService *service.ThingModelService,
 	configService *service.OpenApiConfigService,
 	pluginService *service.PluginService,
+	realtimeService *service.OpenApiRealtimeService,
+	deviceService *service.DeviceService,
 ) *OpenApiController {
 	return &OpenApiController{
 		openApiService:    openApiService,
@@ -40,7 +44,73 @@ func NewOpenApiController(
 		thingModelService: thingModelService,
 		configService:     configService,
 		pluginService:     pluginService,
+		realtimeService:   realtimeService,
+		deviceService:     deviceService,
 	}
+}
+
+// TestDeviceConnection 用未保存的协议 + 连接配置测试设备连通性。
+//
+// 与管理端 POST /device/testDeviceConnection 走同一条服务路径（driver.PingDevice）：
+// 真实连接一次现场设备，失败时把驱动原文原样带回去，调用方才能区分「地址不对」
+// 「串口被占用」「超时」这些不同原因。只探测、不写任何配置，也不改设备状态。
+//
+// 供管理平台「新建设备对象」时在保存前校验连接配置；同样受 X-Api-Key 保护。
+func (ctr *OpenApiController) TestDeviceConnection(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.TestDeviceConnectionDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	if err := ctr.deviceService.TestDeviceConnection(ctx, &req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(nil))
+}
+
+// ControlCapability 查询设备是否具备控制下发条件（按 deviceId 或设备编码 code 定位）。
+//
+// 只读：不触达现场设备。返回 control.enabled、协议 Writable 与不可写原因，
+// 供管理平台决定是否展示写值入口。
+func (ctr *OpenApiController) ControlCapability(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiControlCapabilityDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	deviceID, err := ctr.realtimeService.ResolveDeviceID(ctx, req.DeviceID, req.Code)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.controlService.Capability(ctx, deviceID)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// RealtimeSnapshot 设备实时数据快照（按 deviceId 或设备编码 code 定位）。
+//
+// 返回在线/采集中/采集引擎状态、最近成功时间与逐点最新值、质量码、是否过期。
+// 只读，不触达现场设备。
+func (ctr *OpenApiController) RealtimeSnapshot(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.OpenApiRealtimeSnapshotDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.realtimeService.Snapshot(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
 }
 
 // Capabilities 配置同步能力协商。

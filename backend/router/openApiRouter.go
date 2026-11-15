@@ -28,6 +28,12 @@ func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService,
 		openApi.POST("/device/names", oac.ListDeviceNames)
 		openApi.POST("/deviceAddress/labels", oac.ListAddressLabels)
 		openApi.GET("/deviceAddress/page", oac.PageDeviceAddresses)
+		// 连通性测试：用调用方传来的协议 + 未保存的连接配置真实连一次设备。
+		// 不改网关配置、不写设备状态，但会触达现场设备；供管理平台新建设备对象时校验。
+		openApi.POST("/device/testConnection", oac.TestDeviceConnection)
+		// 实时快照：设备当前在线/采集状态与逐点最新值（管理平台设备实时监控）。
+		// 只读，值来自采集引擎内存快照，不读时序库、不触达现场设备。
+		openApi.GET("/realtime/snapshot", oac.RealtimeSnapshot)
 		// 全量同步：游标分批返回「设备 + 其全部点位」（见 docs/openApi.md 4.5）
 		openApi.GET("/device/sync", oac.SyncDevicePoints)
 		// 全量同步：游标分批返回「订阅设备 + 其全部点位」，数据源是订阅报文
@@ -45,6 +51,7 @@ func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService,
 
 		// 控制下发（**唯一会改变现场设备状态的对外接口**）。
 		// 仍需 control.enabled + 协议 Writable + 点位 W 权限三层同时满足。
+		openApi.GET("/control/capability", oac.ControlCapability)
 		openApi.POST("/control/write", oac.WriteControl)
 
 		// ==================== 配置同步（管理平台统一配置管理） ====================

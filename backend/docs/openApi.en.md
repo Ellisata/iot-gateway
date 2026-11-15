@@ -1,9 +1,10 @@
 # IoT Gateway Public API Documentation
 
 > This document is intended for **third-party system developers**, describing how to query device data and synchronize thing-model configuration via the gateway public API (`/openApi/*`).
-> Except for **4.8 Control Write** and **4.13~4.15 thing-model configuration writes/deletes**, all endpoints are read-only queries.
+> Except for **4.8 Control Write**, **4.13~4.15 thing-model configuration writes/deletes**, **4.16.3 configuration writes**, **4.17 plugin binary delivery**, **4.18 device scan** and **4.21 Device Connection Test**, all endpoints are read-only queries.
 > 4.8 changes the physical device state; make sure you have operational authorization before calling it.
-> 4.13~4.15 only modify thing-model configuration inside the gateway and never touch field devices.
+> 4.13~4.15 and 4.16.3 only modify configuration inside the gateway and never touch field devices; 4.17 writes and loads executable files into the gateway, equivalent to remote code execution.
+> 4.18 actively probes the local subnets over TCP/UDP, while 4.21 opens a real connection to a field device and closes it immediately without changing any configuration or device state; both should only be deployed on a trusted management network.
 
 ## Version History
 
@@ -21,6 +22,11 @@
 | v1.9 | 2026-11-09 | Added: thing model and property batch upsert (4.13, create-or-update by the `code` / `identifier` natural keys, partial success across models) | - |
 | v1.10 | 2026-11-09 | Added: thing-model batch delete (4.14) and thing-model property batch delete (4.15), deleting per natural key and returning per-item results | - |
 | v1.11 | 2026-11-11 | Added: configuration sync (4.16) — capability negotiation, read APIs for five domains, and batch writes for push channels / alarm webhooks / runtime switches / device points. Read APIs return masked desired state plus `contentHash` for template deployment and drift detection | - |
+| v1.12 | 2026-11-12 | Added: protocol plugin binary delivery (4.17) — plugin environment / upload limits, loaded-plugin snapshot, multipart upload with optional `X-Content-SHA256` integrity check, for the management platform to select a package by `os/arch` | - |
+| v1.13 | 2026-11-13 | Added: device scan (4.18) — LAN device scan, task progress / continue / cancel, and point scan. Scanning only; no "create directly after scan" — devices and points are still delivered via 4.16.3 `deviceConfig/batchUpsert` | - |
+| v1.14 | 2026-11-14 | Added: device realtime snapshot (4.19) — device online / collecting / collector-engine status plus each point's latest value, quality code and staleness, for the management platform's realtime monitoring. Read-only; values come from the collector engine's in-memory snapshot | - |
+| v1.15 | 2026-11-14 | Added: control capability query (4.20) — `control.enabled`, protocol writability and the reason when not writable, by device code, for the management platform to decide whether to show a write entry. Writes still go through 4.8 | - |
+| v1.16 | 2026-11-14 | Added: device connection test (4.21) — connect once to a field device using an unsaved protocol + connection config, for the management platform to validate before creating a device object. Probe only; no configuration or device-state changes | - |
 
 ## Compatibility Commitment
 
@@ -1421,6 +1427,411 @@ thing model missing/disabled, model change missing points, protocol change missi
 all points, collector group missing, unsupported hash version, batch limit exceeded,
 invalid device configuration. Per-item `errorCode` reflects the gateway's actual result.
 
+### 4.17 Protocol Plugin Binary Delivery (management platform selects by platform)
+
+> ⚠️ Unlike the read-only endpoints above, `importPlugin` writes **executable files**
+> into the gateway, which the gateway later loads with its own process privileges —
+> equivalent to remote code execution. Deploy only on a trusted management network and
+> treat `X-Api-Key` as an administrator credential. The gateway also has a
+> `plugin.enabled` master switch; when it is off, uploads are rejected (`90001`).
+
+#### 4.17.1 Plugin Environment and Upload Limits
+
+```
+GET /openApi/plugin/info
+```
+
+Returns:
+
+| Field | Description |
+| ----- | ----------- |
+| `os` / `arch` | Gateway runtime platform (`GOOS` / `GOARCH`); the plugin build target must match exactly |
+| `glob` | Plugin file-name pattern (default `iot-driver-*`); non-matching files are not loaded |
+| `fileExt` | Required extension on this platform (`.exe` on Windows, empty otherwise) |
+| `enabled` | Plugin master switch; when `false`, uploads return `90001` |
+| `maxFileSize` | Per-file byte limit |
+| `maxBatch` | Files per upload |
+| `scanIntervalSeconds` | Directory scan interval (seconds); after a write, wait for the next scan before the plugin loads |
+
+This endpoint **does not return the plugin directory**: the local path is of no use
+to an external system.
+
+#### 4.17.2 Loaded Plugin Snapshot
+
+```
+GET /openApi/plugin/status
+```
+
+`data` is an array; each item carries `name`, `protocols`, `scope`, `version`,
+`sha256`, `up`, `epoch`, `upgrades`, `upgradedAt`, `previousSha256`,
+`lastUpgradeError`.
+
+Only **loaded** plugins are included; files uploaded but not yet picked up by a scan
+do not appear. A non-empty `lastUpgradeError` means the new binary on disk failed to
+come up (the previous version is still running).
+
+#### 4.17.3 Upload Install
+
+```
+POST /openApi/plugin/importPlugin
+Content-Type: multipart/form-data
+```
+
+- The file field name is fixed as `files` and may repeat (multiple files).
+- Optional header `X-Content-SHA256`: SHA-256 of a single file (lowercase hex).
+  **Only valid for single-file uploads**; sending it with multiple files is rejected.
+  It proves transport integrity only, not origin (origin authentication needs signatures).
+- Limits: per file ≤ `maxFileSize`, per batch ≤ `maxBatch`; the total request body has
+  its own gateway-side limit.
+
+`data`:
+
+| Field | Description |
+| ----- | ----------- |
+| `total` / `success` / `failed` | Batch statistics |
+| `errors[]` | Per-file failure detail `{name, reason}` |
+| `pending` | Files written this round and waiting for the scan to load |
+| `hint` | When changes take effect and how "same name = hot upgrade" works |
+| `warnings[]` | Non-fatal notices, e.g. skipped because the content was unchanged |
+
+Semantics:
+
+- **Same name, same content**: not written; counted as success with a `warnings` entry;
+- **Same name, different content**: atomic replacement, loaded as a hot upgrade on the
+  next scan, and devices under that plugin reconnect;
+- Each file is validated independently, so partial success is allowed; batch-level errors
+  (switch off, count exceeded, duplicate names, checksum mismatch) reject the whole request.
+- Upload **only writes to disk** and does not wait for loading. The management platform
+  should poll `/openApi/plugin/status` until the target `sha256` appears with `up=true`.
+
+#### 4.17.4 Recommended Order
+
+1. `GET /openApi/plugin/info`: verify `os/arch`, `enabled` and the file-name rule;
+2. `POST /openApi/plugin/importPlugin`: one file at a time, with `X-Content-SHA256`;
+3. Poll `GET /openApi/plugin/status` at `scanIntervalSeconds` intervals;
+4. Treat the target `sha256` with `up=true` as success; a non-empty `lastUpgradeError`
+   means failure — re-deliver the previous version to roll back.
+
+#### 4.17.5 Error Codes
+
+`90001-90007` are plugin-upload specific: feature disabled, no files received, count
+exceeded, duplicate names in the batch, plugin directory unavailable, install failed
+(per file), content checksum mismatch.
+
+### 4.18 Device Scan (management platform device-object master data)
+
+> This section provides **scanning** only; there is no "scan then create directly in the
+> gateway" endpoint. The recommended platform flow: store scan results in the platform's
+> staging database, review them, then deliver devices and points to the target gateway
+> via **4.16.3 `/openApi/deviceConfig/batchUpsert`**.
+>
+> Scanning actively initiates TCP connections to the gateway's own subnets (and UDP
+> broadcasts for broadcast protocols). It is gated by the `deviceScan.enabled` master
+> switch; when off, every endpoint in this section returns `40021`.
+
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| GET | `/openApi/deviceScan/capabilities` | Switch, scannable protocols, local subnets, per-batch limit |
+| POST | `/openApi/deviceScan/start` | Start a scan; returns a `jobId` as soon as the job is registered |
+| GET | `/openApi/deviceScan/status` | Progress and results; supports `withDevices=false` |
+| POST | `/openApi/deviceScan/continue` | Scan the next batch of targets |
+| POST | `/openApi/deviceScan/cancel` | Cancel the scan |
+| GET | `/openApi/deviceScan/pointCapability` | Point-scan capability of a protocol |
+| POST | `/openApi/deviceScan/discoverPoints` | Point scan for a device already delivered to this gateway (by `deviceCode`) |
+| POST | `/openApi/deviceScan/discoverPointsFromScan` | Point scan for one device in a scan result |
+
+#### 4.18.1 Scan Capabilities
+
+```
+GET /openApi/deviceScan/capabilities
+```
+
+`data`:
+
+```json
+{
+  "enabled": true,
+  "protocols": [
+    {
+      "name": "Modbus.TCP",
+      "protocolId": "…",
+      "title": "Modbus TCP",
+      "description": "…",
+      "defaultPort": 502,
+      "targetMode": "unicast",
+      "scanFormJson": { }
+    }
+  ],
+  "subnets": [
+    {"iface": "eth0", "cidr": "192.168.1.0/24", "localIp": "192.168.1.10",
+     "broadcast": "192.168.1.255", "hostCount": 254}
+  ],
+  "maxTargets": 1024
+}
+```
+
+`scanFormJson` is the form-create schema for that protocol's scan options; render it
+as a form and pass it back verbatim as `start.options`.
+
+#### 4.18.2 Start / Status / Continue / Cancel
+
+```
+POST /openApi/deviceScan/start
+```
+
+```json
+{
+  "protocol": "Modbus.TCP",
+  "subnets": ["192.168.1.0/24"],
+  "port": 0,
+  "options": {}
+}
+```
+
+- `subnets` must come from `capabilities.subnets`; empty means all local subnets;
+- `port` 0 means the protocol's default port;
+- The job is registered and returned immediately; `data` is the job snapshot (including
+  `jobId`, `state`, `requestedTargets`, …).
+
+```
+GET /openApi/deviceScan/status?jobId=…&withDevices=false
+```
+
+- With `withDevices=false` only progress and counters are returned, `devices`/`errors` are `null`;
+- When omitted or `true`, the full snapshot is returned; `devices` is an array whose items
+  carry `host/port/unitId/name/vendor/model/version/protocolJson/suggestedCode`;
+- Polling advice: read the lightweight `found` first, then fetch a full snapshot only when
+  the count changes or the job finishes.
+
+```
+POST /openApi/deviceScan/continue  {"jobId": "…"}
+POST /openApi/deviceScan/cancel    {"jobId": "…"}
+```
+
+`truncated=true` means this batch scanned only the first `maxTargets` targets; callers
+should keep calling `continue` until `truncated=false`. Cancelling keeps results already found.
+
+#### 4.18.3 Point Scan
+
+```
+GET /openApi/deviceScan/pointCapability?protocolName=Modbus.TCP
+```
+
+`data`: `{enabled, supported, protocol, spec?}`. `supported=false` is a normal answer,
+not an error.
+
+```
+POST /openApi/deviceScan/discoverPoints
+```
+
+Two mutually exclusive addressing modes:
+
+**Delivered (gateway-side config wins)**
+
+```json
+{
+  "deviceCode": "device code delivered by the management platform",
+  "options": {}
+}
+```
+
+- Locates a device **already delivered to this gateway** by the natural key `deviceCode`;
+- The connection config is read server-side from the gateway's own `device` row.
+
+**Not delivered (platform master-data config wins)**
+
+```json
+{
+  "protocolName": "Modbus.TCP",
+  "protocolJson": {"host": "192.168.1.10", "port": 502, "unitId": 1},
+  "options": {}
+}
+```
+
+- Used when the gateway has no row for the device: scan directly with the caller's
+  connection config;
+- `protocolJson` must be a **non-empty JSON object**; the protocol must be loaded on the
+  gateway and declare point scan (otherwise `40027`);
+- This mode serves the platform flow "create master data → scan points → deliver once".
+  The caller (the platform server) holds `X-Api-Key` and is in the same trust domain as
+  4.16.3 `deviceConfig/batchUpsert`;
+- When `deviceCode` is given, `protocolName` / `protocolJson` are ignored so two config
+  sources cannot conflict.
+
+Common rules:
+
+- Synchronous; the gateway-side budget is about 9 seconds. `truncated` / `incomplete` /
+  `warning` mean the result is incomplete — display them as-is and allow adopting the
+  points already read;
+- Missing both addressing modes returns `40026`; an unknown `deviceCode` returns `40002`.
+
+```
+POST /openApi/deviceScan/discoverPointsFromScan
+```
+
+```json
+{
+  "jobId": "scan job id",
+  "index": 0,
+  "options": {}
+}
+```
+
+- `index` is the position in the `devices` array of a full `status` snapshot;
+- The connection config is taken server-side from the job snapshot; **a client-supplied
+  `protocolJson` is not accepted**;
+- Synchronous; the gateway-side budget is about 9 seconds. `truncated` / `incomplete` /
+  `warning` mean the result is incomplete — display them as-is and allow adopting the
+  points already read;
+- Depends on the scan job snapshot; the default job TTL is 10 minutes
+  (`deviceScan.jobTTLMinutes`). After it expires the device must be scanned again.
+
+#### 4.18.4 Error Codes
+
+`40021` scan feature disabled, `40022` another scan job is running, `40023` job missing
+or expired, `40024` protocol does not support device scan, `40025` no scannable targets,
+`40026` invalid scan parameters, `40027` protocol does not support point scan.
+
+### 4.19 Device Realtime Snapshot
+
+> Read-only. Values come from the collector engine's most recent in-memory collection
+> result — no time-series store reads and no field-device access. Intended for the
+> management platform's "device realtime monitoring"; poll every 1–3 seconds with
+> `page`/`size` paging.
+
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| GET | `/openApi/realtime/snapshot` | Device status + latest value of the current page of points |
+
+#### 4.19.1 Request Parameters
+
+| Parameter | Required | Description |
+| --------- | -------- | ----------- |
+| `page` | yes | Page number, ≥1 |
+| `size` | yes | Page size, 1–100 |
+| `deviceId` | one of two | Gateway-internal device UUID |
+| `code` | one of two | Device code (the natural key used for delivery). `deviceId` wins when both are given |
+| `name` | no | Fuzzy search on point address or label |
+| `addressIds` | no | Comma-separated point IDs; when given, exactly those points are returned and paging is ignored |
+
+#### 4.19.2 Response
+
+```json
+{
+  "deviceId": "01J…",
+  "deviceName": "PLC #1",
+  "protocolName": "Modbus.TCP",
+  "online": true,
+  "collecting": true,
+  "collectorRunning": true,
+  "lastSuccessTime": "2026-11-14 14:20:03",
+  "serverTime": "2026-11-14 14:20:04",
+  "page": 1,
+  "size": 20,
+  "total": 120,
+  "records": [
+    {
+      "addressId": "01J…",
+      "name": "%MW100",
+      "label": "Temperature",
+      "value": "23.5",
+      "dataType": "uint16",
+      "commonDataType": "Word",
+      "rwPermission": "R",
+      "propertyAccessMode": "R",
+      "groupId": "01J…",
+      "groupName": "Fast group",
+      "scanFrequency": 1000,
+      "quality": 0,
+      "collected": true,
+      "stale": false,
+      "updatedAt": "2026-11-14 14:20:03"
+    }
+  ]
+}
+```
+
+- `online` / `collecting` / `collectorRunning` together distinguish "not collected",
+  "online" and "offline";
+- Points not yet collected still occupy a row (`collected=false`) so row order stays
+  stable between polls;
+- `stale=true` means the last update is older than 3 collection periods (using the point's
+  effective period, which is the group period when bound to a collector group);
+- `quality` is the collection quality code: `192` means good; `0~3` are bad-point causes
+  (`0` unattributed, `1` invalid address, `2` communication failure, `3` parse failure);
+  `128` means uncertain but usable; other unknown codes are returned as-is;
+- Write-only points (`rwPermission=W`) and unreadable properties do not return collected values.
+
+### 4.20 Control Capability Query
+
+> Read-only; never touches field devices. Actual writes still go through **4.8
+> `/openApi/control/write`** (the only public endpoint that changes field-device state).
+> This endpoint lets the management platform decide, before showing a write entry,
+> "can this device be written now, and why not".
+
+```
+GET /openApi/control/capability
+```
+
+| Parameter | Required | Description |
+| --------- | -------- | ----------- |
+| `deviceId` | one of two | Gateway-internal device UUID |
+| `code` | one of two | Device code (the natural key used for delivery). `deviceId` wins when both are given |
+
+`data`:
+
+```json
+{
+  "deviceId": "01J…",
+  "deviceName": "PLC #1",
+  "protocolName": "ModBus.TCP",
+  "enabled": true,
+  "writable": true,
+  "reason": ""
+}
+```
+
+- `enabled`: whether the gateway runtime switch `control.enabled` is on;
+- `writable`: besides the master switch, the device is enabled and the protocol plugin
+  declares `Writable`;
+- `reason`: the reason code when not writable: `disabled` (master switch off),
+  `device_disabled` (device disabled), `protocol_missing` (protocol missing),
+  `protocol_not_writable` (protocol does not support writing).
+
+### 4.21 Device Connection Test (management platform device-object creation)
+
+> Connectivity probe only: open a real connection to the field device and close it
+> immediately. It writes no gateway configuration and changes no device state.
+> Used by the management platform to validate connection settings before saving a
+> new device object; it shares the same driver path as the admin endpoint
+> `POST /device/testDeviceConnection`.
+
+```
+POST /openApi/device/testConnection
+```
+
+```json
+{
+  "protocolName": "ModBus.TCP",
+  "protocolJson": {"host": "192.168.1.10", "port": 502, "unitId": 1}
+}
+```
+
+| Parameter | Required | Description |
+| --------- | -------- | ----------- |
+| `protocolName` | yes | Protocol name already loaded by the gateway |
+| `protocolJson` | yes | Connection config for that protocol; must be a JSON object, shape defined by the protocol |
+
+`data` is `null` on success. On failure the gateway returns `40003` (device connection
+test failed) with the **raw driver error** in `msg` (unreachable address, serial port
+busy, timeout, …); callers should surface it verbatim.
+
+- The probe shares the device collection session; exclusive resources such as serial
+  ports may fail while collection is running;
+- The timeout depends on the driver and device reachability; callers should use an
+  HTTP timeout of at least 30 seconds;
+- Older gateways do not expose this endpoint and return 404; callers should prompt an upgrade.
+
 ## 5. Error Code Reference
 
 The error codes the public API may return are listed below (the complete list is in this section; other internal error codes never appear in public APIs):
@@ -1431,6 +1842,13 @@ The error codes the public API may return are listed below (the complete list is
 | `70003` | 401 | Public API key is empty | The `X-Api-Key` header is missing; check the request construction |
 | `70004` | 401 | Public API key invalid | Key is wrong or has been deleted; contact the administrator |
 | `PARAM_ERROR` | 200 | Parameter validation failed | Fix the request parameters per msg (msg looks like `参数校验失败: size max`) |
+| `40021` | 200 | LAN scan is not enabled | Ask the administrator to check `deviceScan.enabled` |
+| `40022` | 200 | Another scan job is running | Wait for it to finish or cancel it first |
+| `40023` | 200 | Scan job not found or expired | Start a new scan; jobs are kept for 10 minutes by default |
+| `40024` | 200 | Protocol does not support LAN scan | Choose another protocol or install a plugin with scan support |
+| `40025` | 200 | No scannable targets | Check the selected subnets and port |
+| `40026` | 200 | Invalid scan parameters | Fix the protocol, subnet, port or options per msg |
+| `40027` | 200 | Protocol does not support point scan | The protocol plugin does not declare point-scan capability |
 | `40031` | 200 | Control writes are disabled | Ask the administrator to check `control.enabled` |
 | `40032` | 200 | Protocol does not support control writes | The plugin does not declare `Writable`; read-only |
 | `40033` | 200 | Point is not writable | `rw_permission` must be `W` or `RW` |
@@ -1451,6 +1869,13 @@ The error codes the public API may return are listed below (the complete list is
 | `41008` | 200 | Invalid property identifier (per item) | Starts with a letter; letters, digits, `_`; ≤64 |
 | `41010` | 200 | Invalid thing-model category format (per item) | Empty, or a code that starts with a lowercase letter, contains only lowercase letters/digits/`_`/`-`, and is ≤32 characters (built-in `sensor/meter/actuator/robot/plc/other` also valid) |
 | `41018` | 200 | Property is bound to a point and cannot change data type or access mode (per item) | Unbind the point in the admin console first, then change `kind`/`accessMode` |
+| `90001` | 200 | Plugin feature is not enabled | Ask the administrator to enable `plugin.enabled` |
+| `90002` | 200 | No plugin files received | Check that the multipart field name is `files` |
+| `90003` | 200 | Too many plugin files in one upload | Upload in batches per `maxBatch` |
+| `90004` | 200 | Duplicate file names in the batch | A later file overwrites an earlier one; deduplicate and re-upload |
+| `90005` | 200 | Plugin directory unavailable | Check the plugin directory permissions and disk |
+| `90006` | 200 | Plugin install failed (per file) | Fix the file or platform mismatch per `errors[].reason` |
+| `90007` | 200 | Plugin content checksum mismatch | Recompute and verify `X-Content-SHA256`, then re-upload |
 | `-1` | 200 | System error | Retry later; if persistent, contact the administrator and check gateway logs |
 
 ## 6. FAQ
@@ -1459,7 +1884,7 @@ The error codes the public API may return are listed below (the complete list is
 Troubleshooting order: ① Confirm the header name is `X-Api-Key` (HTTP header names are case-insensitive — `x-api-key` works too — but the header must be present); ② Confirm the key value matches the one issued — **the key value itself is case-sensitive**, beware of stray whitespace when copying; ③ Confirm the key has not been deleted or regenerated by the administrator. If it still fails, contact the administrator.
 
 **Q: How do I read the current real-time value of an address?**
-The public API currently only provides queries at the configuration level (devices and address definitions). For **real-time data**, subscribe via one of the gateway's push channels (e.g. MQTT), or contact the administrator to extend the public API.
+Read the collector engine's in-memory snapshot via **4.19 `/openApi/realtime/snapshot`** (device status plus each point's latest value, paginated), or subscribe via one of the gateway's push channels (e.g. MQTT) when you need a continuous stream.
 
 **Q: How long until address configuration changes take effect?**
 After the admin console modifies device/address configuration, the gateway hot-reloads it within about 10 seconds; subsequent queries return the latest configuration.

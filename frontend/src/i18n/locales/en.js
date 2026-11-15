@@ -711,6 +711,15 @@ export default {
     engineeringTransform: 'Engineering Transform',
     transformHint: 'Applied once at collection (scale/round/etc.). Live values, alarms, trigger rules and all push channels (including TSDB) use the transformed engineering value. If a downstream mapping already scales the same point, remove that scale to avoid double conversion.',
     transformInvalid: 'Invalid engineering transform: check the operators and parameters; default must come first',
+    // Pipeline summary shown in the point list (rendered by utils/addressTransform)
+    transformNone: 'Raw',
+    transformSummary: {
+      scale: 'Scale ×{factor}',
+      scaleOffset: 'Scale ×{factor} {offset}',
+      round: 'Round {digits} dp',
+      trim: 'Trim',
+      default: 'Default {value}',
+    },
     transformEditor: {
       transform: 'Transforms',
       addTransform: 'Add Transform',

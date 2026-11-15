@@ -708,6 +708,15 @@ export default {
     engineeringTransform: '工程量变换',
     transformHint: '在采集侧对原始值执行一次（缩放/取整等），实时值、报警、触发规则和所有推送通道（含时序库）都使用变换后的工程值。若下游映射里已配过同一个缩放，请删除下游那条，避免重复换算。',
     transformInvalid: '工程量变换配置不合法：请检查算子与参数，default 必须放在第一位',
+    // 点位配置列表里的流水线摘要（utils/addressTransform 按这些 key 渲染）
+    transformNone: '原始值',
+    transformSummary: {
+      scale: '缩放 ×{factor}',
+      scaleOffset: '缩放 ×{factor} {offset}',
+      round: '四舍五入 {digits} 位',
+      trim: '去空白',
+      default: '默认值 {value}',
+    },
     transformEditor: {
       transform: '变换',
       addTransform: '添加变换',

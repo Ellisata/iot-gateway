@@ -17,3 +17,18 @@ type RealtimeSnapshotDTO struct {
 	// DeviceID 之下，别台设备的点位 ID 不会因为被人拼进来而泄漏。
 	AddressIDs string `form:"addressIds"`
 }
+
+// OpenApiRealtimeSnapshotDTO 开放接口的设备实时数据快照查询。
+//
+// 与管理端接口的区别：外部系统通常只持有设备编码 code（下发自然键），
+// 不一定知道网关内部 UUID，因此 deviceId 与 code 二选一，优先 deviceId。
+// 点位分页/搜索/AddressIDs 语义与 RealtimeSnapshotDTO 一致。
+type OpenApiRealtimeSnapshotDTO struct {
+	Page     int    `form:"page" binding:"required,min=1"`
+	Size     int    `form:"size" binding:"required,min=1,max=100"`
+	DeviceID string `form:"deviceId"`
+	Code     string `form:"code"`
+	Name     string `form:"name"`
+	// AddressIDs 可选：仅用于按当前页精确取值，仍限定在解析出的设备之下。
+	AddressIDs string `form:"addressIds"`
+}
