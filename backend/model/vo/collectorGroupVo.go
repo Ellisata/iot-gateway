@@ -8,6 +8,9 @@ type CollectorGroupVO struct {
 	ID         string `json:"id"`
 	DeviceID   string `json:"deviceId"`
 	DeviceName string `json:"deviceName"` // 展示用冗余字段
+	// DeviceCode 设备编码（下发自然键）。管理平台的采集组按「设备编码 + 组编码」
+	// 与主数据对齐，开放接口的订阅下拉需要它。
+	DeviceCode string `json:"deviceCode"`
 	// Code 采集组编码（设备内唯一，创建后不可修改，供 MQTT 主题使用）。
 	Code        string `json:"code"`
 	Name        string `json:"name"`

@@ -319,13 +319,15 @@ func (s *CollectorGroupService) enrichCollectorGroupVOs(ctx context.Context, gro
 	}
 
 	var devices []po.Device
-	if err := s.sqliteDB.WithContext(ctx).Select("id", "name").
+	if err := s.sqliteDB.WithContext(ctx).Select("id", "name", "code").
 		Where("id IN ?", deviceIDs).Find(&devices).Error; err != nil {
 		return nil, err
 	}
 	deviceNames := make(map[string]string, len(devices))
+	deviceCodes := make(map[string]string, len(devices))
 	for _, d := range devices {
 		deviceNames[d.ID] = d.Name
+		deviceCodes[d.ID] = d.Code
 	}
 
 	type countRow struct {
@@ -348,6 +350,7 @@ func (s *CollectorGroupService) enrichCollectorGroupVOs(ctx context.Context, gro
 			ID:          g.ID,
 			DeviceID:    g.DeviceID,
 			DeviceName:  deviceNames[g.DeviceID],
+			DeviceCode:  deviceCodes[g.DeviceID],
 			Code:        g.Code,
 			Name:        g.Name,
 			IntervalMs:  g.IntervalMs,

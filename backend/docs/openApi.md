@@ -29,6 +29,9 @@
 | v1.14 | 2026-11-14 | 新增：设备实时数据快照（4.19）—— 设备在线/采集中/采集引擎状态与逐点最新值、质量码、是否过期，供管理平台实时监控。只读，值来自采集引擎内存快照 | - |
 | v1.15 | 2026-11-14 | 新增：控制能力查询（4.20）—— 按设备编码查询 `control.enabled`、协议可写性与不可写原因，供管理平台决定是否展示写值入口。写值仍走 4.8 | - |
 | v1.16 | 2026-11-14 | 新增：设备连接测试（4.21）—— 用未保存的协议 + 连接配置真实连接一次设备，供管理平台新建设备对象时校验。只探测，不改配置、不改设备状态 | - |
+| v1.17 | 2026-11-15 | 新增：推送通道连通性测试（4.16.7）—— 用未保存的通道配置真实连接一次下游，供管理平台保存推送通道前校验。只探测，不落库、不改网关配置 | - |
+| v1.18 | 2026-11-15 | 新增：采集组列表（4.16.2）—— 返回网关各设备的采集组 ID/编码/名称，供管理平台的推送通道「采集组订阅」下拉框使用（`config.groupIds` 是网关本地主键） | - |
+| v1.19 | 2026-11-15 | 新增：出站映射预览（4.16.8）—— 用固定样例批次试编码 mapping-json / script，供管理平台可视化映射编辑器即时预览。只编码，不发送、不落库 | - |
 
 ## 兼容性承诺
 
@@ -1361,6 +1364,7 @@ GET /openApi/config/capabilities
 | GET | `/openApi/alarmWebhook/forms` | Webhook 动态表单 |
 | GET | `/openApi/systemConfig/list` | 运行开关当前值 |
 | GET | `/openApi/config/protocols` | 协议与点位数据类型 |
+| GET | `/openApi/collectorGroup/list` | 采集组列表（`deviceId` 可选），供推送通道 `groupIds` 订阅选择 |
 
 分页接口使用 `page/size`，返回 `{page,size,total,records}`；每条记录为
 `{targetKey,payload,contentHash}`。
@@ -1403,6 +1407,38 @@ GET /openApi/config/capabilities
 物模型不存在/停用、模型变更缺点位、协议变更缺全部点位、采集组不存在、
 hash 版本不支持、批量超限、设备配置不合法。逐条结果中的 `errorCode`
 以网关实际返回为准。
+
+#### 4.16.7 推送通道连通性测试
+
+```
+POST /openApi/pushChannel/testConnectivity
+```
+
+```json
+{ "type": "mqtt", "name": "mes-out", "configJson": { "broker": "...", "port": 1883 } }
+```
+
+用未保存的通道配置真实连接一次下游（MQTT broker、HTTP 下游、时序库等），
+成功后立即断开：不落库、不改网关配置。`configJson` 与 4.16.3
+`pushChannel/batchUpsert` 的 `config` 同结构，但密钥字段必须是**真实值**，
+`"***"` 无法用于鉴权。失败时返回网关的具体原因（口令错误、地址不可达、
+端口拒绝等），供管理平台在保存通道前提示用户。`type` 可省略，旧客户端把
+类型放在 `name` 里，服务端兼容回落。
+
+#### 4.16.8 出站映射预览
+
+```
+POST /openApi/pushChannel/previewMapping
+```
+
+```json
+{ "format": "mapping-json", "mapping": { "version": 1, "fields": { "value": { "source": "path", "value": "value" } } } }
+```
+
+用网关内固定的样例批次（一台启用设备的一条点位记录）试编码，返回
+`{payload | payloads, count, error?}`。`format` 支持 `mapping-json` 与 `script`，
+为空时按 `mapping-json` 处理；`script` 时 `mapping` 为 `{script, timeoutMs, maxMessages}`。
+只编码，不发送到下游、不落库；映射或编码错误放在 `data.error`，不视为接口失败。
 
 ### 4.17 协议插件二进制下发（管理平台按平台选包）
 

@@ -214,6 +214,49 @@ func (ctr *OpenApiController) ListPushChannelTypes(c *gin.Context) {
 	c.JSON(200, response.Success(ctr.configService.ListPushChannelTypes()))
 }
 
+// TestPushChannel 用调用方传来的类型 + 未保存的通道配置真实连接一次下游。
+//
+// 只探测：建立连接后立即断开，不落库、不改网关配置。会真实触达下游系统
+// （MQTT broker、时序库等），失败原因（口令错误、地址不可达）原样返回。
+func (ctr *OpenApiController) TestPushChannel(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.TestPushChannelDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	if err := ctr.configService.TestPushChannel(ctx, &req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(nil))
+}
+
+// PreviewPushChannelMapping 用固定样例批次试编码出站映射（不发送、不落库）。
+func (ctr *OpenApiController) PreviewPushChannelMapping(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.PreviewPushChannelMappingDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(ctr.configService.PreviewPushChannelMapping(ctx, &req)))
+}
+
+// ListCollectorGroupsForConfig 采集组列表（推送通道 groupIds 订阅的数据源）。
+//
+// 组 ID 是网关本地主键，管理平台的订阅下拉框必须用这份列表；deviceId 可选，
+// 不传返回全部设备的组。
+func (ctr *OpenApiController) ListCollectorGroupsForConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	data, err := ctr.configService.ListCollectorGroups(ctx, c.Query("deviceId"))
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
 // PageAlarmWebhooksForConfig 告警 Webhook 配置分页读（secret 脱敏 + contentHash）。
 func (ctr *OpenApiController) PageAlarmWebhooksForConfig(c *gin.Context) {
 	ctx := c.Request.Context()

@@ -348,6 +348,31 @@ func (s *OpenApiConfigService) ListPushChannelTypes() []vo.OpenApiPushChannelTyp
 	return s.pushChannelService.ListPushChannelTypes()
 }
 
+// TestPushChannel 用未保存的通道配置在网关侧做一次真实连通性探测。
+//
+// 与管理端「测试连接」是同一条实现：只校验配置并建立一次连接后立即断开，
+// 不落库、不改网关配置。管理平台通常到不了下游（MQTT broker / 时序库），
+// 所以这件事只能由网关代做。
+func (s *OpenApiConfigService) TestPushChannel(ctx context.Context, req *dto.TestPushChannelDTO) error {
+	return s.pushChannelService.TestPushChannel(ctx, req)
+}
+
+// PreviewPushChannelMapping 用固定样例批次试编码出站映射（不发送、不落库）。
+//
+// 管理平台的可视化映射编辑器用它做即时预览；映射/编码错误放在 data.error，
+// 不当作接口失败。
+func (s *OpenApiConfigService) PreviewPushChannelMapping(ctx context.Context, req *dto.PreviewPushChannelMappingDTO) *vo.PushChannelPreviewVO {
+	return s.pushChannelService.PreviewPushChannelMapping(ctx, req)
+}
+
+// ListCollectorGroups 采集组列表（推送通道按组 ID 订阅的数据源）。
+//
+// 消息类通道的 config.groupIds 是网关本地主键，管理平台要给出订阅下拉框就
+// 必须从网关取这份列表；deviceId 为空时返回全部设备的组。
+func (s *OpenApiConfigService) ListCollectorGroups(ctx context.Context, deviceID string) ([]vo.CollectorGroupVO, error) {
+	return s.collectorGroupService.ListCollectorGroups(ctx, &dto.ListCollectorGroupsDTO{DeviceID: deviceID})
+}
+
 // PageAlarmWebhooks 告警 Webhook 分页读（secret 脱敏 + contentHash）。
 func (s *OpenApiConfigService) PageAlarmWebhooks(ctx context.Context, req *dto.OpenApiAlarmWebhookPageDTO) (*response.PageVo[vo.OpenApiConfigItemVO], error) {
 	db := s.sqliteDB.WithContext(ctx).Model(&po.AlarmWebhook{})

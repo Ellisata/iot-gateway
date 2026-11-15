@@ -27,6 +27,9 @@
 | v1.14 | 2026-11-14 | Added: device realtime snapshot (4.19) — device online / collecting / collector-engine status plus each point's latest value, quality code and staleness, for the management platform's realtime monitoring. Read-only; values come from the collector engine's in-memory snapshot | - |
 | v1.15 | 2026-11-14 | Added: control capability query (4.20) — `control.enabled`, protocol writability and the reason when not writable, by device code, for the management platform to decide whether to show a write entry. Writes still go through 4.8 | - |
 | v1.16 | 2026-11-14 | Added: device connection test (4.21) — connect once to a field device using an unsaved protocol + connection config, for the management platform to validate before creating a device object. Probe only; no configuration or device-state changes | - |
+| v1.17 | 2026-11-15 | Added: push channel connectivity test (4.16.7) — connect once downstream using an unsaved channel config, for the management platform to validate before saving a push channel. Probe only; nothing is persisted and gateway configuration is unchanged | - |
+| v1.18 | 2026-11-15 | Added: collector group list (4.16.2) — collector group IDs/codes/names across devices, for the management platform's push channel "collector group subscription" selector (`config.groupIds` are gateway-local keys) | - |
+| v1.19 | 2026-11-15 | Added: outbound mapping preview (4.16.8) — encode `mapping-json` / `script` against a fixed sample batch, for the management platform's visual mapping editor. Encoding only; nothing is sent or persisted | - |
 
 ## Compatibility Commitment
 
@@ -1381,6 +1384,7 @@ detection must be disabled.
 | GET | `/openApi/alarmWebhook/forms` | Webhook dynamic forms |
 | GET | `/openApi/systemConfig/list` | Current runtime switch values |
 | GET | `/openApi/config/protocols` | Protocols and point data types |
+| GET | `/openApi/collectorGroup/list` | Collector groups (`deviceId` optional), used to pick push channel `groupIds` |
 
 Paginated endpoints use `page/size` and return `{page,size,total,records}`; each
 record is `{targetKey,payload,contentHash}`.
@@ -1426,6 +1430,41 @@ models and protocols; reversing the order fails on missing references.
 thing model missing/disabled, model change missing points, protocol change missing
 all points, collector group missing, unsupported hash version, batch limit exceeded,
 invalid device configuration. Per-item `errorCode` reflects the gateway's actual result.
+
+#### 4.16.7 Push Channel Connectivity Test
+
+```
+POST /openApi/pushChannel/testConnectivity
+```
+
+```json
+{ "type": "mqtt", "name": "mes-out", "configJson": { "broker": "...", "port": 1883 } }
+```
+
+Connects once to the downstream (MQTT broker, HTTP endpoint, time-series database,
+etc.) using the unsaved channel config and disconnects immediately: nothing is
+persisted and gateway configuration is unchanged. `configJson` has the same shape
+as `config` in 4.16.3 `pushChannel/batchUpsert`, but secret fields must hold real
+values — `"***"` cannot be used for authentication. On failure the gateway's
+concrete reason (bad credentials, unreachable host, refused port, ...) is returned
+so the management platform can show it before saving. `type` may be omitted; legacy
+clients put the type in `name` and the server falls back to it.
+
+#### 4.16.8 Outbound Mapping Preview
+
+```
+POST /openApi/pushChannel/previewMapping
+```
+
+```json
+{ "format": "mapping-json", "mapping": { "version": 1, "fields": { "value": { "source": "path", "value": "value" } } } }
+```
+
+Encodes against the gateway's fixed sample batch (one point from one enabled device)
+and returns `{payload | payloads, count, error?}`. `format` accepts `mapping-json`
+and `script`; an empty value means `mapping-json`. For `script`, `mapping` is
+`{script, timeoutMs, maxMessages}`. Encoding only — nothing is sent downstream or
+persisted; mapping/encoding errors are returned in `data.error`, not as API failures.
 
 ### 4.17 Protocol Plugin Binary Delivery (management platform selects by platform)
 

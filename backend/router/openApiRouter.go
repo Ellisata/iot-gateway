@@ -64,6 +64,15 @@ func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService,
 		openApi.GET("/pushChannel/page", oac.PagePushChannelsForConfig)
 		openApi.GET("/pushChannel/types", oac.ListPushChannelTypes)
 		openApi.GET("/pushChannel/forms", oac.ListPushChannelForms)
+		// 连通性测试：用调用方传来的类型 + 未保存的通道配置真实连接一次下游。
+		// 不落库、不改网关配置，但会触达下游系统；供管理平台保存推送通道前校验。
+		openApi.POST("/pushChannel/testConnectivity", oac.TestPushChannel)
+		// 采集组列表：推送通道 config.groupIds 是网关本地主键，管理平台的
+		// 「采集组订阅」下拉框要按 ID 取这份列表（deviceId 可选）。
+		openApi.GET("/collectorGroup/list", oac.ListCollectorGroupsForConfig)
+		// 出站映射预览：用固定样例批次试编码，不发送、不落库；供管理平台的
+		// 可视化映射 / 脚本编辑器即时预览。
+		openApi.POST("/pushChannel/previewMapping", oac.PreviewPushChannelMapping)
 		openApi.GET("/alarmWebhook/page", oac.PageAlarmWebhooksForConfig)
 		openApi.GET("/alarmWebhook/types", oac.ListAlarmWebhookTypes)
 		openApi.GET("/alarmWebhook/forms", oac.ListAlarmWebhookForms)
