@@ -8,6 +8,7 @@ import (
 
 	"iot-gateway/appError"
 	"iot-gateway/model/dto"
+	"iot-gateway/push"
 	"iot-gateway/response"
 	"iot-gateway/service"
 )
@@ -26,6 +27,7 @@ type OpenApiController struct {
 	pluginService     *service.PluginService
 	realtimeService   *service.OpenApiRealtimeService
 	deviceService     *service.DeviceService
+	pushEngine        *push.Engine
 }
 
 // NewOpenApiController 创建开放接口控制器
@@ -37,6 +39,7 @@ func NewOpenApiController(
 	pluginService *service.PluginService,
 	realtimeService *service.OpenApiRealtimeService,
 	deviceService *service.DeviceService,
+	pushEngine *push.Engine,
 ) *OpenApiController {
 	return &OpenApiController{
 		openApiService:    openApiService,
@@ -46,6 +49,7 @@ func NewOpenApiController(
 		pluginService:     pluginService,
 		realtimeService:   realtimeService,
 		deviceService:     deviceService,
+		pushEngine:        pushEngine,
 	}
 }
 
@@ -212,6 +216,19 @@ func (ctr *OpenApiController) ListPushChannelForms(c *gin.Context) {
 // ListPushChannelTypes 推送通道类型元数据。
 func (ctr *OpenApiController) ListPushChannelTypes(c *gin.Context) {
 	c.JSON(200, response.Success(ctr.configService.ListPushChannelTypes()))
+}
+
+// PushChannelStatus 推送通道运行状态（管理平台统一监控）。
+//
+// 只读，返回推送引擎的**内存快照**：计数自引擎启动累计、重启清零，仅包含
+// 已启用且加载成功的通道。不读时序库、不触达下游系统；热加载后的新配置
+// 可能延迟数秒才出现在快照里。
+func (ctr *OpenApiController) PushChannelStatus(c *gin.Context) {
+	if ctr.pushEngine == nil {
+		c.JSON(200, response.Success([]push.ChannelStatusVO{}))
+		return
+	}
+	c.JSON(200, response.Success(ctr.pushEngine.GetStatus()))
 }
 
 // TestPushChannel 用调用方传来的类型 + 未保存的通道配置真实连接一次下游。

@@ -32,6 +32,7 @@
 | v1.17 | 2026-11-15 | 新增：推送通道连通性测试（4.16.7）—— 用未保存的通道配置真实连接一次下游，供管理平台保存推送通道前校验。只探测，不落库、不改网关配置 | - |
 | v1.18 | 2026-11-15 | 新增：采集组列表（4.16.2）—— 返回网关各设备的采集组 ID/编码/名称，供管理平台的推送通道「采集组订阅」下拉框使用（`config.groupIds` 是网关本地主键） | - |
 | v1.19 | 2026-11-15 | 新增：出站映射预览（4.16.8）—— 用固定样例批次试编码 mapping-json / script，供管理平台可视化映射编辑器即时预览。只编码，不发送、不落库 | - |
+| v1.20 | 2026-11-16 | 新增：推送通道运行状态（4.22）—— 推送引擎内存快照，含连接状态、队列/补发深度、发布/写出计数、最近成功与错误，供管理平台按网关聚合监控。只读，不触达下游；重启清零 | - |
 
 ## 兼容性承诺
 
@@ -1436,9 +1437,11 @@ POST /openApi/pushChannel/previewMapping
 ```
 
 用网关内固定的样例批次（一台启用设备的一条点位记录）试编码，返回
-`{payload | payloads, count, error?}`。`format` 支持 `mapping-json` 与 `script`，
-为空时按 `mapping-json` 处理；`script` 时 `mapping` 为 `{script, timeoutMs, maxMessages}`。
-只编码，不发送到下游、不落库；映射或编码错误放在 `data.error`，不视为接口失败。
+`{payload | payloads, count, error?}`。`format` 支持 `native-json` / `group-json` /
+`mapping-json` / `script`，为空时按 `mapping-json` 处理。`native-json` / `group-json`
+不需要 `mapping`（传了会被拒绝）；`mapping-json` 的 `mapping` 是字段映射对象，
+`script` 时 `mapping` 为 `{script, timeoutMs, maxMessages}`。只编码，不发送到下游、
+不落库；映射或编码错误放在 `data.error`，不视为接口失败。
 
 ### 4.17 协议插件二进制下发（管理平台按平台选包）
 
@@ -1817,6 +1820,40 @@ POST /openApi/device/testConnection
 
 - 该接口会占用设备的采集会话（与采集共用），串口等独占资源正在被采集时可能失败；
 - 超时取决于协议驱动与设备可达性，建议调用方 HTTP 超时不低于 30 秒；
+- 旧版网关没有该接口，会返回 404，调用方应提示升级网关。
+
+### 4.22 推送通道运行状态（管理平台统一监控）
+
+> 只读。返回推送引擎的**内存快照**：计数自引擎启动累计、重启清零，仅包含已启用
+> 且加载成功的通道。不读时序库、不触达下游系统；热加载后的新配置可能延迟数秒才出现。
+
+```
+GET /openApi/pushChannel/status
+```
+
+无请求参数。`data` 为数组（无通道时为 `[]`），每项字段如下：
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| `id` | string | 通道主键 |
+| `name` | string | 通道名 |
+| `type` | string | 通道类型（mqtt / http / kafka / tdengine-v3 / influxdb-v3 / opcua …） |
+| `running` | bool | 引擎中的运行实例是否已启动 |
+| `connected` | bool | 下游连接是否正常（语义随通道实现：MQTT 表示已连上 broker） |
+| `broker` | string | 连接目标（MQTT broker 地址等） |
+| `topic` | string | 消息类通道的发布主题 |
+| `queueDepth` | uint | 待发送队列深度 |
+| `spoolDepth` | uint | 断网本地缓存待补发批次数 |
+| `publishCount` | uint | 下发次数（时序库=写入批次，OPC UA=地址空间更新批次） |
+| `rowsCount` | uint | 成功写出的记录行数（OPC UA=更新点位数） |
+| `droppedCount` | uint | 因背压或不可恢复错误丢弃的批次数 |
+| `lastPublishTime` | string | 最近一次下发时间（空=尚未下发） |
+| `lastSuccessTime` | string | 最近一次成功时间（空=尚未成功） |
+| `error` | string | 最近一次错误信息（空=无错误） |
+| `extra` | object | 通道类型特有观测项，键为稳定标识；无特有指标时为 `{}` |
+
+- `running=true, connected=false` 通常表示下游不可达，网关会持续重连；
+- 通道在网关被停用或配置无效时**不会出现在数组中**，调用方应将其显示为「未运行」；
 - 旧版网关没有该接口，会返回 404，调用方应提示升级网关。
 
 ## 5. 错误码总表

@@ -48,10 +48,10 @@ type TestSendPushChannelDTO struct {
 
 // PreviewPushChannelMappingDTO 只预览出站编码，不需要通道类型与连接配置。
 // Format 为空时按 mapping-json 处理（兼容旧前端）；script 格式同样把脚本配置
-// 放在 Mapping 里。
+// 放在 Mapping 里。native-json / group-json 没有 mapping，Mapping 可为空。
 type PreviewPushChannelMappingDTO struct {
 	Format  string          `json:"format" binding:"max=30"`
-	Mapping json.RawMessage `json:"mapping" binding:"required"`
+	Mapping json.RawMessage `json:"mapping"`
 }
 
 // RecentPushMessagesDTO 查询某个通道最近推送的报文。

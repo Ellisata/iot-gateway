@@ -22,6 +22,7 @@
 | v1.5 | 2026-10-24 | 新增只读接口 `POST /pushChannel/previewMapping`（只试编码出站映射，不依赖通道类型/连接配置）；按实际路由把 `/agentApi` 领域接口数校正为 111 |
 | v1.6 | 2026-11-09 | 设备 / 点位删除新增触发规则引用保护：被事件触发规则引用时返回 `40063` / `40064`，批量整批不删 |
 | v1.7 | 2026-11-11 | `/openApi` 新增配置同步接口（能力协商、五域只读、推送通道/告警 Webhook/运行开关/设备点位批量写），见 [openApi.md](openApi.md) 4.16 |
+| v1.8 | 2026-11-16 | `/openApi` 新增推送通道运行状态 `GET /openApi/pushChannel/status`（引擎内存快照，管理平台按网关聚合监控），见 [openApi.md](openApi.md) 4.22 |
 
 ---
 
@@ -357,6 +358,7 @@ Agent 不应在无用户意图时自行调用。
 | POST | `/openApi/thingModel/batchUpsert` | **物模型与属性批量 upsert**（按 `code` / `identifier`，无则创建、有则更新） | Body: `models`*[] | `OpenApiThingModelBatchUpsertVO` |
 | POST | `/openApi/thingModel/batchDelete` | **物模型批量删除**（按 `code`，连带其属性） | Body: `codes`*[]（≤200） | `OpenApiThingModelBatchDeleteVO` |
 | POST | `/openApi/thingModelProperty/batchDelete` | **物模型属性批量删除**（按 `modelCode` + `identifier`） | Body: `items`*[]（≤200） | `OpenApiThingModelPropertyBatchDeleteVO` |
+| GET | `/openApi/pushChannel/status` | 推送通道运行状态（引擎内存快照，计数重启清零） | — | `[]ChannelStatusVO` |
 
 > 注意 `POST /openApi/device/names` 与 `POST /openApi/deviceAddress/labels` 虽是 POST，
 > 但**是纯查询、无副作用** —— 用 POST 是因为 ID 数组放在 Body 里（列表可能很长）。
@@ -386,7 +388,7 @@ Agent 不应在无用户意图时自行调用。
 | GET | `/pushChannel/getPushChannelById/:id` | 按 ID 查通道 | 路径 `id` | `PushChannelVO` |
 | GET | `/pushChannel/listTypes` | 已注册通道类型（是否消息类、可选载荷格式、预览/测试发送能力） | — | `[]ChannelTypeMeta` |
 | POST | `/pushChannel/preview` | 用第一台启用设备/点位试编码出站载荷，不发送、不落库 | `type`*, `configJson`* | `PushChannelPreviewVO` |
-| POST | `/pushChannel/previewMapping` | 只试编码出站映射/脚本，不依赖通道类型/连接配置，不发送、不落库 | `format`（默认 `mapping-json`）, `mapping`* | `PushChannelPreviewVO` |
+| POST | `/pushChannel/previewMapping` | 只试编码出站载荷，不依赖通道类型/连接配置，不发送、不落库；`native-json` / `group-json` 不需要 `mapping` | `format`（默认 `mapping-json`）, `mapping`（native/group 可省略） | `PushChannelPreviewVO` |
 | GET | `/pushChannelForm/getPushChannelFormByName` | 按名查通道表单 | `name`* | `PushChannelFormVO` |
 | GET | `/push/status` | 推送通道运行状态 | — | `[]ChannelStatusVO` |
 | GET | `/alarm/pageAlarm` | 报警历史分页（`targetType`=device\|channel\|point\|point_threshold，`alarmType`=offline\|quality\|threshold\|recover） | `page`*, `size`*, `targetName`, `targetType`, `alarmType`, `status` | `PageVo<AlarmVO>` |
@@ -602,7 +604,7 @@ Agent 调用前应先获得用户明确意图。
 | POST | `/pushChannel/updatePushChannel` | 更新通道；`type` 不可修改 | `id`*, `type`, `name`, `description`, `configJson`, `status` |
 | 🗑 GET | `/pushChannel/deletePushChannel/:id` | **删除通道** | 路径 `id` |
 | POST | `/pushChannel/preview` | 试编码出站载荷（不发送、不落库） | `type`*, `configJson`* |
-| POST | `/pushChannel/previewMapping` | 只试编码映射/脚本（不依赖连接配置，不发送、不落库） | `format`, `mapping`* |
+| POST | `/pushChannel/previewMapping` | 只试编码出站载荷（不依赖连接配置，不发送、不落库；`native-json` / `group-json` 不需要 `mapping`） | `format`, `mapping`（native/group 可省略） |
 | POST | `/pushChannel/testSend` | ⚠️ **真的发送一条样例数据** | `type`*, `configJson`* |
 | GET | `/pushChannel/listTypes` | 通道类型元数据 | — |
 | POST | `/pushChannelForm/createPushChannelForm` | 创建通道表单 | `name`*, `formJson`* |

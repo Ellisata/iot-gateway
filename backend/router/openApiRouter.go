@@ -64,6 +64,9 @@ func OpenApiRoutes(r gin.IRouter, oass *service.OpenApiSecretService,
 		openApi.GET("/pushChannel/page", oac.PagePushChannelsForConfig)
 		openApi.GET("/pushChannel/types", oac.ListPushChannelTypes)
 		openApi.GET("/pushChannel/forms", oac.ListPushChannelForms)
+		// 运行状态：推送引擎内存快照（管理平台按网关聚合监控）。只读，不触达下游；
+		// 计数自引擎启动累计、重启清零，只列已启用且加载成功的通道。见 docs/openApi.md 4.22。
+		openApi.GET("/pushChannel/status", oac.PushChannelStatus)
 		// 连通性测试：用调用方传来的类型 + 未保存的通道配置真实连接一次下游。
 		// 不落库、不改网关配置，但会触达下游系统；供管理平台保存推送通道前校验。
 		openApi.POST("/pushChannel/testConnectivity", oac.TestPushChannel)

@@ -30,6 +30,7 @@
 | v1.17 | 2026-11-15 | Added: push channel connectivity test (4.16.7) — connect once downstream using an unsaved channel config, for the management platform to validate before saving a push channel. Probe only; nothing is persisted and gateway configuration is unchanged | - |
 | v1.18 | 2026-11-15 | Added: collector group list (4.16.2) — collector group IDs/codes/names across devices, for the management platform's push channel "collector group subscription" selector (`config.groupIds` are gateway-local keys) | - |
 | v1.19 | 2026-11-15 | Added: outbound mapping preview (4.16.8) — encode `mapping-json` / `script` against a fixed sample batch, for the management platform's visual mapping editor. Encoding only; nothing is sent or persisted | - |
+| v1.20 | 2026-11-16 | Added: push channel runtime status (4.22) — in-memory snapshot of the push engine with connection state, queue/spool depth, publish/write counters, last success and last error, for the management platform to aggregate per gateway. Read-only, does not touch downstreams; counters reset on restart | - |
 
 ## Compatibility Commitment
 
@@ -1461,8 +1462,10 @@ POST /openApi/pushChannel/previewMapping
 ```
 
 Encodes against the gateway's fixed sample batch (one point from one enabled device)
-and returns `{payload | payloads, count, error?}`. `format` accepts `mapping-json`
-and `script`; an empty value means `mapping-json`. For `script`, `mapping` is
+and returns `{payload | payloads, count, error?}`. `format` accepts `native-json` /
+`group-json` / `mapping-json` / `script`; an empty value means `mapping-json`.
+`native-json` / `group-json` need no `mapping` (supplying one is rejected); the
+`mapping` of `mapping-json` is a field-mapping object, and for `script` it is
 `{script, timeoutMs, maxMessages}`. Encoding only — nothing is sent downstream or
 persisted; mapping/encoding errors are returned in `data.error`, not as API failures.
 
@@ -1869,6 +1872,42 @@ busy, timeout, …); callers should surface it verbatim.
   ports may fail while collection is running;
 - The timeout depends on the driver and device reachability; callers should use an
   HTTP timeout of at least 30 seconds;
+- Older gateways do not expose this endpoint and return 404; callers should prompt an upgrade.
+
+### 4.22 Push Channel Runtime Status (management platform monitoring)
+
+> Read-only. Returns an **in-memory snapshot** of the push engine: counters accumulate
+> since engine start and reset on restart; only enabled and successfully loaded channels
+> are included. It does not read the time-series store or touch downstream systems, and
+> newly hot-reloaded configuration may take a few seconds to appear.
+
+```
+GET /openApi/pushChannel/status
+```
+
+No request parameters. `data` is an array (`[]` when there are no channels); each item has:
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `id` | string | Channel primary key |
+| `name` | string | Channel name |
+| `type` | string | Channel type (mqtt / http / kafka / tdengine-v3 / influxdb-v3 / opcua …) |
+| `running` | bool | Whether the runtime instance is started in the engine |
+| `connected` | bool | Whether the downstream connection is healthy (semantics vary by channel; for MQTT it means connected to the broker) |
+| `broker` | string | Connection target (e.g. MQTT broker address) |
+| `topic` | string | Publish topic for message channels |
+| `queueDepth` | uint | Pending send-queue depth |
+| `spoolDepth` | uint | Batches cached locally for replay after a network outage |
+| `publishCount` | uint | Publish operations (time-series = write batches, OPC UA = address-space update batches) |
+| `rowsCount` | uint | Successfully written record rows (OPC UA = updated points) |
+| `droppedCount` | uint | Batches dropped due to backpressure or unrecoverable errors |
+| `lastPublishTime` | string | Time of the last publish (empty = never) |
+| `lastSuccessTime` | string | Time of the last success (empty = never) |
+| `error` | string | Most recent error (empty = none) |
+| `extra` | object | Channel-type-specific metrics keyed by stable identifiers; `{}` when none |
+
+- `running=true, connected=false` usually means the downstream is unreachable and the gateway keeps retrying;
+- Channels disabled or invalid on the gateway **do not appear in the array**; callers should display them as "not running";
 - Older gateways do not expose this endpoint and return 404; callers should prompt an upgrade.
 
 ## 5. Error Code Reference

@@ -250,16 +250,20 @@ func (s *PushChannelService) PreviewPushChannel(ctx context.Context, req *dto.Pr
 }
 
 // PreviewPushChannelMapping 只试编码出站映射，不依赖通道类型与连接配置。
+//
+// native-json / group-json 没有 mapping，只按 format 选择编码器；mapping-json /
+// script 缺 mapping 时由 codec.New 给出对应错误，不在这里统一判空。
 func (s *PushChannelService) PreviewPushChannelMapping(ctx context.Context, req *dto.PreviewPushChannelMappingDTO) *vo.PushChannelPreviewVO {
-	raw := bytes.TrimSpace(req.Mapping)
-	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-		return &vo.PushChannelPreviewVO{Error: "mapping 不能为空"}
-	}
 	format := strings.TrimSpace(req.Format)
 	if format == "" {
 		format = push.FormatMappingJSON
 	}
-	enc, err := codec.New(format, req.Mapping)
+	// JSON null 与缺省同义，避免 mapping-json 把 null 解成空映射后报“至少一个字段”。
+	mapping := req.Mapping
+	if bytes.Equal(bytes.TrimSpace(mapping), []byte("null")) {
+		mapping = nil
+	}
+	enc, err := codec.New(format, mapping)
 	if err != nil {
 		return &vo.PushChannelPreviewVO{Error: err.Error()}
 	}

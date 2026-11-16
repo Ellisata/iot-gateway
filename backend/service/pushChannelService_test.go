@@ -264,13 +264,38 @@ func TestPreviewPushChannelMapping(t *testing.T) {
 		}
 	})
 
+	// native-json / group-json 没有 mapping：只按 format 选编码器，应能正常出样例载荷。
+	t.Run("native json without mapping", func(t *testing.T) {
+		res := s.PreviewPushChannelMapping(ctx, &dto.PreviewPushChannelMappingDTO{
+			Format: push.FormatNativeJSON,
+		})
+		if res.Error != "" {
+			t.Fatalf("error: %s", res.Error)
+		}
+		if res.Count != 1 || !strings.Contains(res.Payload, `"deviceAddressId":"demo-point"`) {
+			t.Fatalf("preview = %+v", res)
+		}
+	})
+
+	t.Run("group json without mapping", func(t *testing.T) {
+		res := s.PreviewPushChannelMapping(ctx, &dto.PreviewPushChannelMappingDTO{
+			Format: push.FormatGroupJSON,
+		})
+		if res.Error != "" {
+			t.Fatalf("error: %s", res.Error)
+		}
+		if res.Count != 1 || !strings.Contains(res.Payload, `"points"`) {
+			t.Fatalf("preview = %+v", res)
+		}
+	})
+
 	bad := map[string]struct {
 		raw  string
 		want string
 	}{
 		"empty":          {`{}`, "至少需要配置一个字段映射"},
-		"null":           {`null`, "mapping 不能为空"},
-		"blank":          {``, "mapping 不能为空"},
+		"null":           {`null`, "mapping-json 需要配置 mapping"},
+		"blank":          {``, "mapping-json 需要配置 mapping"},
 		"unknown type":   {`{"fields":{"v":{"source":"path","value":"value","type":"date"}}}`, "未知的输出类型"},
 		"envelope clash": {`{"envelope":"data","batchFields":{"data.x":{"source":"const","value":"1"}},"fields":{"v":{"source":"path","value":"value"}}}`, "冲突"},
 	}
