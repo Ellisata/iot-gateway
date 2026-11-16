@@ -11,10 +11,14 @@ type RealtimePointVO struct {
 	AddressID      string `json:"addressId"`
 	Name           string `json:"name"`
 	Label          string `json:"label"` // 点位说明（如温度、电流）
-	Value          string `json:"value"` // 最新值；未采集到时为空串，用 collected 区分
+	Value          string `json:"value"` // 最新值（已按 TransformJSON 换算的工程值）；未采集到时为空串，用 collected 区分
 	DataType       string `json:"dataType"`
 	CommonDataType string `json:"commonDataType"`
 	RwPermission   string `json:"rwPermission"`
+	// TransformJSON 点位工程量变换流水线，原样透传给前端。
+	// Value 是变换后的工程值，而控制下发走原始值且没有逆变换 —— 前端据此
+	// 区分两个值域并给出正向换算预览，避免把工程值当成原始值下发。
+	TransformJSON string `json:"transformJson"`
 	// PropertyAccessMode 绑定的物模型属性读写模式（R/W/RW；未绑定属性为空串）。
 	// 写入能力是它与 rwPermission 的交集：属性为 R 时点位即使 RW 也不能写，
 	// 前端据此隐藏写入口（最终仍由 ControlService 拒绝）。

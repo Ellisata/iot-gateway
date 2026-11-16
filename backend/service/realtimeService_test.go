@@ -229,6 +229,35 @@ func TestRealtimeSnapshotAlignsPointsAndValues(t *testing.T) {
 	}
 }
 
+// 变换流水线随快照透传：value 是变换后的工程值，而控制下发只接受原始值
+// （没有逆变换）。前端要靠 TransformJSON 区分两个值域并给出正向换算预览。
+func TestRealtimeSnapshotPassesThroughTransformJSON(t *testing.T) {
+	db := newRealtimeTestDB(t)
+	withTransform := addr("a1", "temp", "温度", 1)
+	withTransform.TransformJSON = `[{"op":"scale","factor":0.1}]`
+	seedRealtimeDevice(t, db, "d1", "p1", testCreatedAt, []po.DeviceAddress{
+		withTransform,
+		addr("a2", "pressure", "压力", 1),
+	})
+
+	svc, _ := newRealtimeTestService(t, db)
+	got, err := svc.GetDeviceSnapshot(context.Background(), req("d1", 1, 50, ""))
+	if err != nil {
+		t.Fatalf("GetDeviceSnapshot: %v", err)
+	}
+	byID := map[string]int{}
+	for i, r := range got.Records {
+		byID[r.AddressID] = i
+	}
+
+	if a1 := got.Records[byID["a1"]]; a1.TransformJSON != withTransform.TransformJSON {
+		t.Errorf("a1.transformJson = %q, want %q", a1.TransformJSON, withTransform.TransformJSON)
+	}
+	if a2 := got.Records[byID["a2"]]; a2.TransformJSON != "" {
+		t.Errorf("未配置变换的点位 transformJson 应为空，得到 %q", a2.TransformJSON)
+	}
+}
+
 // 只写点位不参与采集：即使内存快照里还留着「改成 W 之前」采到的旧值，
 // 快照也必须报 collected=false，否则前端会把它显示成一个看似正常的实时值。
 func TestRealtimeSnapshotIgnoresWriteOnlyValues(t *testing.T) {

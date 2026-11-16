@@ -281,28 +281,64 @@
       :close-on-click-modal="false"
     >
       <div v-if="writeTarget" class="control-write">
-        <div class="control-write-head">
-          <div class="control-write-name">
-            <span class="control-write-label">{{ writeTarget.label || writeTarget.name }}</span>
-            <span class="iot-mono control-write-addr">{{ writeTarget.name }}</span>
-            <span v-if="writeTarget.dataType" class="iot-chip">{{ writeTarget.dataType }}</span>
+        <div class="control-identity">
+          <div class="control-identity-head">
+            <span class="control-identity-mark" aria-hidden="true">
+              <el-icon><Point /></el-icon>
+            </span>
+            <span class="control-identity-name">{{ writeTarget.label || writeTarget.name }}</span>
+            <span class="iot-pill control-identity-perm" :class="writePermissionClass(writeTarget)">
+              <span class="iot-pill-dot" aria-hidden="true" />
+              {{ writePermissionText(writeTarget) }}
+              <span class="control-identity-perm-code">{{ writeTarget.rwPermission }}</span>
+            </span>
           </div>
-          <span class="iot-pill" :class="writeTarget.rwPermission?.includes('W') ? 'is-amber' : 'is-gray'">
-            {{ writeTarget.rwPermission || '—' }}
-          </span>
+
+          <dl class="control-identity-meta">
+            <div class="control-identity-field">
+              <dt>{{ t('control.pointAddress') }}</dt>
+              <dd>
+                <button
+                  type="button"
+                  class="control-identity-addr"
+                  :title="t('control.copyAddress')"
+                  @click="copyPointAddress(writeTarget.name)"
+                >
+                  <span class="iot-mono">{{ writeTarget.name }}</span>
+                  <el-icon><Copy /></el-icon>
+                </button>
+              </dd>
+            </div>
+            <div class="control-identity-field">
+              <dt>{{ t('control.dataType') }}</dt>
+              <dd class="control-identity-type">
+                <span class="iot-mono">{{ writeTarget.dataType || '—' }}</span>
+                <span v-if="writeTarget.commonDataType" class="control-identity-type-sub">
+                  {{ writeTarget.commonDataType }}
+                </span>
+              </dd>
+            </div>
+          </dl>
         </div>
 
         <el-form label-width="96px" @submit.prevent>
           <el-form-item :label="t('control.currentValue')">
             <span class="iot-mono">{{ writeTarget.value || '—' }}</span>
+            <span v-if="writeHasTransform" class="control-inline-hint">{{ t('control.engineeringValueHint') }}</span>
             <span v-if="writeTarget.stale" class="control-inline-hint">{{ t('control.staleHint') }}</span>
           </el-form-item>
           <el-form-item :label="t('control.targetValue')" required>
-            <el-input
-              v-model="writeForm.value"
-              :placeholder="t('control.valuePlaceholder')"
-              @keyup.enter="submitWrite"
-            />
+            <div class="control-field">
+              <el-input
+                v-model="writeForm.value"
+                :placeholder="writeHasTransform ? t('control.rawValuePlaceholder') : t('control.valuePlaceholder')"
+                @keyup.enter="submitWrite"
+              />
+              <p v-if="writeHasTransform" class="control-field-hint">{{ t('control.rawValueHint') }}</p>
+              <p v-if="writePreview !== null" class="control-field-hint control-field-preview">
+                {{ t('control.previewText', { value: writePreview }) }}
+              </p>
+            </div>
           </el-form-item>
           <el-form-item :label="t('control.verify')">
             <el-switch v-model="writeForm.verify" />
@@ -322,6 +358,7 @@
             <span>{{ writeResult.duplicate ? t('control.duplicate') : t('control.resultTitle') }}</span>
             <span class="control-result-meta">{{ writeResult.requestId }}</span>
           </div>
+          <p v-if="writeHasTransform" class="control-result-hint">{{ t('control.resultRawHint') }}</p>
           <el-table :data="writeResult.results" class="iot-table is-compact" size="small">
             <el-table-column prop="addressName" :label="t('control.point')" min-width="120" />
             <el-table-column prop="value" :label="t('control.requested')" width="100" />
@@ -372,6 +409,7 @@ import {
   IconActivityHeartbeat as ActivityHeartbeat,
   IconAlertTriangle as AlertTriangle,
   IconArrowLeft as ArrowLeft,
+  IconCopy as Copy,
   IconEdit as Edit,
   IconInfoCircle as InfoCircle,
   IconPencil as EditPen,
@@ -385,6 +423,7 @@ import { getControlCapability, writeControl } from '@/api/modules/control'
 import DeviceWorkspaceTabs from '@/components/DeviceWorkspaceTabs.vue'
 import AddressFormDialog from '../device-address/AddressFormDialog.vue'
 import { qualityBadText } from '@/utils/pointQuality'
+import { applyAddressTransformPipeline, parseAddressTransformPipeline } from '@/utils/addressTransform'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -594,6 +633,20 @@ const writeForm = reactive({ value: '', verify: true })
 const writeResult = ref(null)
 const writing = ref(false)
 
+// 采样值是采集侧换算后的工程值；配了变换时它在另一个值域，下发却只收原始值。
+const writeHasTransform = computed(
+  () => parseAddressTransformPipeline(writeTarget.value?.transformJson).length > 0,
+)
+
+// 正向换算预览：输入原始值 → 用与采集侧相同的流水线得到工程值。
+// 未配变换、输入为空或换算失败时不展示。
+const writePreview = computed(() => {
+  if (!writeHasTransform.value) return null
+  if (String(writeForm.value ?? '').trim() === '') return null
+  const converted = applyAddressTransformPipeline(writeTarget.value?.transformJson, writeForm.value)
+  return converted.ok ? converted.value : null
+})
+
 async function fetchCapability() {
   try {
     capability.value = await getControlCapability(deviceObjectId)
@@ -639,9 +692,54 @@ function writeDisabledReason(row) {
   return t('control.pointNotWritable')
 }
 
+// 权限胶囊：读写用品牌蓝（可操作但不告警），只写用琥珀，只读用中性灰。
+// 颜色只表达「能不能写」，不与在线 / 质量等状态色抢语义。
+function writePermissionClass(row) {
+  const perm = String(row?.rwPermission || '')
+  if (perm.includes('R') && perm.includes('W')) return 'is-blue'
+  if (perm.includes('W')) return 'is-amber'
+  return 'is-gray'
+}
+
+function writePermissionText(row) {
+  const perm = String(row?.rwPermission || '')
+  if (perm.includes('R') && perm.includes('W')) return t('control.permissionRW')
+  if (perm.includes('W')) return t('control.permissionW')
+  if (perm.includes('R')) return t('control.permissionR')
+  return '—'
+}
+
+// 网关常经 http 局域网访问，navigator.clipboard 在非安全上下文不可用，
+// 此时退回临时 textarea + execCommand。
+async function copyPointAddress(address) {
+  const text = String(address || '')
+  if (!text) return
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const el = document.createElement('textarea')
+      el.value = text
+      el.style.position = 'fixed'
+      el.style.opacity = '0'
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand('copy')
+      document.body.removeChild(el)
+    }
+    ElMessage.success(t('control.addressCopied'))
+  } catch {
+    ElMessage.warning(t('control.copyFailed'))
+  }
+}
+
 function openWrite(row) {
   writeTarget.value = row
-  writeForm.value = row.value ?? ''
+  // 当前采样值是工程值，而下发走原始值且没有逆变换。配了变换时不能拿它预填
+  // 目标值（scale=0.1 时 25.3 会被当成原始值写进寄存器），留空让操作工按
+  // 原始值填写，下方会给出对应的工程值预览。
+  const hasTransform = parseAddressTransformPipeline(row.transformJson).length > 0
+  writeForm.value = hasTransform ? '' : (row.value ?? '')
   writeForm.verify = true
   writeResult.value = null
   writeDialogVisible.value = true
@@ -796,38 +894,189 @@ onUnmounted(() => {
 
 /* 值变化时的高亮动画在 styles/console.css（.iot-value-flash），与点位配置页共用 */
 
-/* 控制下发弹窗 */
-.control-write-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--line-soft);
+/* 控制下发弹窗：点位身份卡 */
+.control-identity {
+  padding: 16px 18px 15px;
+  margin-bottom: 18px;
+  background:
+    radial-gradient(120% 150% at 100% 0%, rgba(37, 99, 235, 0.07), transparent 60%),
+    linear-gradient(180deg, #fcfdff 0%, #f8fafd 100%);
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
 }
 
-.control-write-name {
+.control-identity-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.control-identity-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border: 1px solid rgba(37, 99, 235, 0.12);
+  border-radius: 10px;
+}
+
+.control-identity-mark .el-icon {
+  font-size: 17px;
+}
+
+.control-identity-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-identity-perm {
+  flex: none;
+}
+
+/* 权限码做成胶囊内的嵌入式小标签：本地化文案给操作工，码值给对照文档的人 */
+.control-identity-perm-code {
+  padding: 0 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 15px;
+  letter-spacing: 0.05em;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 4px;
+}
+
+.control-identity-meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 14px 20px;
+  padding-top: 14px;
+  margin: 14px 0 0;
+  border-top: 1px dashed var(--line);
+}
+
+.control-identity-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
 }
 
-.control-write-label {
-  font-size: 15px;
+.control-identity-field dt {
+  font-size: 10.5px;
   font-weight: 600;
-  color: var(--ink);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-4);
 }
 
-.control-write-addr {
+.control-identity-field dd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+}
+
+.control-identity-addr {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 5px 9px;
+  font: inherit;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.control-identity-addr:hover {
+  border-color: #cfdcf3;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.control-identity-addr:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 1px;
+}
+
+.control-identity-addr .iot-mono {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-identity-addr .el-icon {
+  flex: none;
+  font-size: 13px;
+  color: var(--ink-4);
+  transition: color 0.15s ease;
+}
+
+.control-identity-addr:hover .el-icon {
+  color: var(--brand);
+}
+
+.control-identity-type {
   font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.control-identity-type-sub {
+  padding: 1px 6px;
+  font-size: 11px;
   color: var(--ink-3);
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+@media (max-width: 640px) {
+  .control-identity-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .control-inline-hint {
   margin-left: 10px;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+/* 目标值一栏是「输入框 + 值域说明 + 换算预览」，纵向排列避免挤在一行 */
+.control-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+}
+
+.control-field-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-4);
+}
+
+.control-field-preview {
+  color: var(--ink-3);
+}
+
+.control-result-hint {
+  margin: 0 0 8px;
   font-size: 12px;
   color: var(--ink-4);
 }

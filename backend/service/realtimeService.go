@@ -148,6 +148,7 @@ func (s *RealtimeService) GetDeviceSnapshot(ctx context.Context, req *dto.Realti
 			DataType:           a.DataType,
 			CommonDataType:     a.CommonDataType,
 			RwPermission:       a.RwPermission,
+			TransformJSON:      a.TransformJSON,
 			PropertyAccessMode: propertyModes[a.PropertyID],
 			GroupID:            a.GroupID,
 			ScanFrequency:      a.ScanFrequency,
