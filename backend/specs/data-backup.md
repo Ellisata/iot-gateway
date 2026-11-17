@@ -1,11 +1,12 @@
 # 数据备份与快速恢复
 
-> 状态：**设计稿，未实现**（本文只定义契约与实现方案，代码落地见 §12 的分期计划）
+> 状态：**P0 / P1 已实现**（2026-11-17，见 §15、§16）；P2/P3 按 §12 的分期继续。
 >
 > 适用版本：iot-gateway-premium v1.4+
 >
-> 关联代码：[database/sqlite](../database/sqlite/)、[configFile](../configFile/)、
-> [pluginhost](../pluginhost/)、[service/openApiConfigService.go](../service/openApiConfigService.go)
+> 关联代码：[backup/](../backup/)、[database/sqlite](../database/sqlite/)、
+> [configFile](../configFile/)、[pluginhost](../pluginhost/)、
+> [service/openApiConfigService.go](../service/openApiConfigService.go)
 
 ---
 
@@ -13,7 +14,7 @@
 
 - **备份单位是“整库一致性快照 + 外部配置 + 插件清单”的 `.igbak` 包**，不是直接复制 `iot-gateway.db`。
 - **在线备份用 `VACUUM INTO` 走独立数据库连接**，不阻塞采集/推送，也不会复制出撕裂的 WAL 副本。
-- **默认做 `config` 范围备份**（配置、用户、密钥、网关身份），`full` 范围（含报警历史/断网缓存）按周或手动执行。
+- **默认做 `full` 整库快照**（含报警历史/断网缓存），每 6 小时一次；`config` 范围（只含配置、用户、密钥、网关身份）由配置变更触发，60 秒防抖生成，恢复时只覆盖配置表。
 - **本机备份只解决“误删/升级回滚”**；整机故障必须依赖异机副本 + 预装同版本备机。恢复一律**停机执行**，不做热恢复。
 - 备份包含 MQTT 口令、开放接口密钥、用户口令哈希等敏感数据：目录 `0700`、文件 `0600`，上传异机前必须加密。
 
@@ -240,7 +241,7 @@ VACUUM INTO '/abs/path/data/backups/tmp/iot-gateway-<ts>.db';
 4. `DETACH`，关闭源连接；对结果库执行 `integrity_check` 与 `VACUUM` 收缩。
 5. 后续 zip/manifest 流程与 `full` 相同。
 
-> 为什么不用“先 `VACUUM INTO` 整库，再 `DELETE` 运行表”：在离线期 `push_outbox` 可能达到数百 MB，配置级备份会被运行数据拖慢。白名单拷贝是配置级备份的正解；P0 可先只做 `full`，P1 再补 `config`。
+> 为什么不用“先 `VACUUM INTO` 整库，再 `DELETE` 运行表”：在离线期 `push_outbox` 可能达到数百 MB，配置级备份会被运行数据拖慢。白名单拷贝是配置级备份的正解；P1 已按此实现（见 §16）。
 
 ### 5.4 原子落盘
 
@@ -435,7 +436,7 @@ SQLite 在 Windows 上被打开时 rename 会失败，但在 Linux 上 rename �
 
 `full` 恢复会带回老机器未补发的缓存。若老机器在崩溃前“已发出但未来得及删除 outbox 行”，备机接管后会再发一次：
 
-- 默认 `config` 备份不包含 `push_outbox`，规避该问题；
+- P1 的 `config` 范围备份不含 `push_outbox`，可规避该问题；P0 的 `full` 备份包含它；
 - 使用 `full` 恢复时，要求下游（MQTT 消费端 / 时序库）具备幂等键或去重能力；
 - 该取舍必须写进恢复操作手册，不能默认“恢复就完全等价”。
 
@@ -585,19 +586,20 @@ backend/backup/
 
 装配点：
 
-- `main.go`：CLI 子命令解析 → 配置/日志初始化 → `backup.ApplyPending()` → `InitializeApp()`；
-- `wire.go`：`NewBackupService`、`NewBackupScheduler` 注入；
-- `router/router.go`：挂 `/backup` 路由；
+- `main.go`：CLI 子命令解析 → 配置/日志初始化 → 数据目录排他锁 → `InitializeApp()` →
+  启动 `backup.Scheduler`（P0 不经过 Wire，调度器只依赖配置与独立连接）；
+- `backup/`：`lock.go` / `snapshot.go` / `bundle.go` / `restore.go` / `scheduler.go` / `cli.go`；
+- `database/sqlite`：`OpenStandalone`、`MigrationNames` / `LatestMigration`、维护标记；
 - `WALCheckpointer`：增加 maintenance 标记读取；
-- `database/sqlite`：导出 `Migrate(db)` 供 config 快照建空库；
-- `pluginhost`：导出已加载插件清单（文件名/版本/sha256）。
+- P1 再加 `wire.go` / `router/router.go` / 页面与 `/backup` 路由；
+- P1 的 config 快照再导出 `Migrate(db)` 供临时库建 schema。
 
 ### 12.2 分期
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| **P0** | `.igbak` full 包；`VACUUM INTO`；integrity_check；本机轮转；CLI `backup/restore`；服务锁；pre-restore 三件套 | 运行中备份不丢已提交数据；停服恢复后设备/点位/用户完整 |
-| **P1** | `config` 范围白名单快照；变更防抖；页面/API 列表、创建、下载、上传、暂存恢复；审计 | 改一台设备后 60s 内出现新包；客户端上传后重启生效 |
+| **P0 ✅** | `.igbak` full 包；`VACUUM INTO`；integrity_check；本机轮转；CLI `backup/restore`；服务锁；pre-restore 三件套（2026-11-17 已实现，见 §15） | 运行中备份不丢已提交数据；停服恢复后设备/点位/用户完整 |
+| **P1 ✅** | `config` 范围白名单快照；变更防抖；页面/API 列表、创建、下载、上传、暂存恢复；审计（2026-11-17 已实现，见 §16） | 改一台设备后 60s 内出现新包；客户端上传后重启生效 |
 | **P2** | 异机上传（HTTP / 共享目录）；AES-GCM 加密；插件清单对账；备机操作手册；同 ID 检测 | 模拟整机断电后，备机 10 分钟内接管 |
 | **P3（可选）** | WAL 增量投递（Litestream 式），把 RPO 压到秒级 | 仅当业务明确不能容忍分钟级丢失时再做 |
 
@@ -643,6 +645,179 @@ backend/backup/
 
 ---
 
+## 15. P0 实现说明（2026-11-17）
+
+### 15.1 已落地
+
+| 能力 | 实现位置 |
+|---|---|
+| `.igbak` 包（manifest + 快照 + 外部配置 + 插件清单） | [backup/bundle.go](../backup/bundle.go) |
+| `VACUUM INTO` 独立连接快照、integrity_check、sha256 | [backup/snapshot.go](../backup/snapshot.go) |
+| 恢复校验、三件套替换、pre-restore、接管/克隆身份 | [backup/restore.go](../backup/restore.go) |
+| 数据目录排他锁（Unix flock / Windows LockFileEx） | [backup/lock.go](../backup/lock.go) |
+| 定时备份与保留策略 | [backup/scheduler.go](../backup/scheduler.go) |
+| CLI `backup create/list/verify`、`restore` | [backup/cli.go](../backup/cli.go) |
+| 独立连接、迁移版本、备份维护标记 | [database/sqlite/database.go](../database/sqlite/database.go)、[migrator.go](../database/sqlite/migrator.go)、[maintenance.go](../database/sqlite/maintenance.go) |
+| WAL 维护器抑制备份期间的误告警 | [database/sqlite/walCheckpoint.go](../database/sqlite/walCheckpoint.go) |
+
+### 15.2 使用
+
+```bash
+# 在线备份（网关可继续运行）
+iot-gateway backup create
+iot-gateway backup list
+iot-gateway backup verify --bundle data/backups/xxx.igbak
+
+# 恢复：必须先停止网关服务；会保留旧库为 *.pre-restore-<时间戳>
+iot-gateway restore --bundle data/backups/xxx.igbak --yes
+
+# 克隆一套配置到新站点（重新生成网关 ID）
+iot-gateway restore --bundle data/backups/xxx.igbak --identity clone --yes
+
+# 一并恢复包内的 default.yaml / <APP_ENV>.yaml（默认不应用）
+iot-gateway restore --bundle data/backups/xxx.igbak --restore-config --yes
+```
+
+CLI 通过 `--db` / `--dir` 覆盖 `sqlite.path` / `backup.dir`；未给时使用
+`default.yaml`（配置文件损坏时回退到内置默认路径）。
+
+### 15.3 配置
+
+```yaml
+backup:
+  enabled: true             # 启动后台定时备份
+  dir: data/backups
+  defaultScope: full        # 手动/页面备份的默认范围：full | config
+  startupDelayMinutes: 5
+  intervalHours: 6
+  keep: 14
+  maxTotalMB: 512
+  snapshotTimeoutSeconds: 60
+```
+
+### 15.4 P1 已补齐（原 P0 缺口，见 §16）
+
+- `config` 范围白名单快照与配置变更触发的 60s 防抖备份；
+- 页面 / API 列表、创建、下载、上传、待恢复；
+- 其余仍待 P2：异机上传（HTTP / 共享目录）与 AES-GCM 加密；
+- 插件版本对账（P0 只记录文件名 + sha256，版本需 P2 从运行中的管理器补全）；
+- 磁盘空间预检（§5.6）：磁盘满时 `VACUUM INTO` / 压缩会返回错误并清理临时文件，
+  但不会在开始前主动拒绝；
+- 插件二进制不包含在包内；包内的外部 yaml 默认不应用，需 `--restore-config`；
+- 恢复完成不自动启动服务，由运维按 §7.7 自检。
+
+### 15.5 已知边界
+
+- `VACUUM INTO` 无法被 context 硬中断（SQLite 不响应 ctx 取消），
+  `snapshotTimeoutSeconds` 是尽力而为；失败由下一轮调度重试。
+- 服务运行中执行 **CLI 备份**时，服务侧的 WAL 维护器可能打一条
+  “pinned by an external reader” 的 WARN —— 维护标记只能在进程内共享，
+  跨进程无法抑制，属于预期现象。
+- `full` 恢复会带回 `push_outbox` 中未补发的批次，下游需具备幂等/去重能力（见 §7.6）。
+- 同一数据目录现在只允许一个网关实例（排他锁），这是 P0 带来的行为变化。
+- 排他锁只能证明**网关进程**已停止；执行恢复前请关闭任何直接打开该库的外部
+  SQLite 工具/备份软件，否则 Windows 上会因文件占用失败，Linux 上可能出现
+  “旧进程继续使用旧 inode”的假成功。
+
+---
+
+## 16. P1 实现说明（2026-11-17）
+
+### 16.1 已落地
+
+| 能力 | 实现位置 |
+|---|---|
+| `config` 白名单快照（临时库 `Migrate` + `ATTACH` + 单事务拷贝 + `VACUUM`） | [backup/configSnapshot.go](../backup/configSnapshot.go) |
+| 配置表/运行表分类与完整性测试 | [backup/tables.go](../backup/tables.go)、[backup/config_test.go](../backup/config_test.go) |
+| `config` 表级恢复（保留运行/历史表，事务回滚，pre-restore 完整副本） | [backup/configRestore.go](../backup/configRestore.go) |
+| 配置写回调（GORM Create/Update/Delete → 表名） | [database/sqlite/writehook.go](../database/sqlite/writehook.go) |
+| 60 秒防抖变更监听 + 启动基线 | [backup/watcher.go](../backup/watcher.go) |
+| 备份门面（列表/创建/下载/删除/暂存/状态） | [backup/manager.go](../backup/manager.go) |
+| 上传/暂存与启动前应用 | [backup/pending.go](../backup/pending.go) |
+| 审计（logger + `data/backups/audit.log`） | [backup/audit.go](../backup/audit.go) |
+| 管理端 API `/backup/*` | [router/backupRouter.go](../router/backupRouter.go)、[controller/backupController.go](../controller/backupController.go)、[service/backupService.go](../service/backupService.go) |
+| 页面「系统设置 → 备份与恢复」 | `frontend/src/views/settings/backup/IndexView.vue` |
+
+### 16.2 触发方式（最终行为）
+
+- **定时**：`intervalHours`（默认 6h）生成 `full`，始终整库；
+- **启动基线**：启动后 `startupDelayMinutes`（默认 5m）生成一份 `config`；
+- **配置变更**：配置白名单表写入后进入 60 秒静默窗口，窗口结束生成 `config`；
+  持续写入会不断顺延，批量导入合并为一份；
+- **手动**：页面 / CLI / API，范围可取 `full` 或 `config`；
+- **恢复前**：`config` 恢复前用 `VACUUM INTO` 留完整库副本；`full` 恢复保留三件套副本。
+
+运行表（`push_outbox` / `alarm` / `control_log` / `trigger_rule_record` /
+`point_threshold_record`）的写入**不会**触发配置备份。
+
+### 16.3 `config` 包恢复语义（P1 的关键决定）
+
+`config` 包**不做整库文件替换**，而是停服后在目标库上执行：
+
+```sql
+BEGIN;
+DELETE FROM main.<配置表>;
+INSERT OR REPLACE INTO main.<配置表> (...) SELECT ... FROM src.<配置表>;
+COMMIT;
+```
+
+- 只处理 §3.1 的配置白名单，运行/历史表原样保留；
+- 所有表的删除与写入在**同一事务**内，任一步失败整体回滚；
+- 目标库必须是已迁移的网关库（没有 `device` 表直接拒绝）；
+- 事务前生成 `<db>.pre-restore-<ts>` 完整副本，保留最近 2 组；
+- `schema_migrations` 不复制，保留目标库当前迁移版本；
+- `clone` 身份模式在事务内改写 `iot_gateway.id/name`。
+
+因此页面恢复 `config` 包不会清空当前报警历史、控制审计与断网缓存；
+`full` 包恢复仍按 §7.3 整库替换，并保留 §7.6 的 outbox 重复风险提示。
+
+### 16.4 API 与页面
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/backup/list` | 备份包列表 |
+| GET | `/backup/status` | 调度状态与待恢复任务 |
+| POST | `/backup/create` | `{ scope: full\|config }` |
+| GET | `/backup/download?name=` | 下载（写审计） |
+| DELETE | `/backup/delete?name=` | 删除（写审计） |
+| POST | `/backup/stage` | `{ name, identity }`：暂存已有包 |
+| POST | `/backup/upload` | multipart `file` + `identity`：校验后暂存 |
+| POST | `/backup/cancelPending` | 取消待恢复 |
+
+- 只走管理员 JWT；**不注册**到 `/openApi` 与 `/agentApi`（`agentApiRoutes_test.go`
+  把 `/backup/*` 加入“刻意不镜像”清单，防止以后误挂）。
+- 页面只做“校验 + 暂存 + 提示重启”，没有热恢复入口。
+- 恢复确认文案包含身份模式、outbox/历史数据取舍与插件版本一致性提示。
+
+### 16.5 待恢复流程
+
+```
+<data-dir>/restore-pending/
+├── bundle.igbak
+└── restore.json      # { state: pending|prepared, scope, identity, bundleSha256, uploadedBy, createdAt }
+```
+
+启动顺序：配置 → 日志 → 数据目录锁 → **应用待恢复** → Wire → `InitDB`。
+
+- 应用前先 `VerifyBundle`；失败时整个目录改名为
+  `restore-pending.failed-<ts>`，旧库继续启动，不阻塞现场；
+- 应用前把 `state` 写为 `prepared`；若进程在替换中崩溃，下次启动会重试同一份包
+  （整库替换与表级复制都是幂等的）；
+- 成功后删除 pending 目录并写审计。
+
+### 16.6 已知边界
+
+- 变更检测依赖 GORM 回调：`db.Exec` / `db.Raw(...).Exec` 等原生 SQL 写配置
+  不会被观察到。当前业务写配置全部走 GORM；新增原生写需手工 `sqlite.NotifyWrite`。
+- 防抖使用重置型定时器：配置最后一次写入后 **60 秒**（加一次快照耗时）生成包；
+  持续写入会不断顺延，不会每个周期都出包。
+- `config` 快照复制的是表数据，不复制 `sqlite_sequence` 等内部状态；自增主键
+  会按目标库当前序列继续增长，不影响业务。
+- `config` 恢复要求目标库存在；空数据目录必须使用 `full` 包。
+- 上传接口单请求上限 4 GiB；备份包仍建议先加密再离开本机（P2）。
+
+---
+
 ## 附录 A：参考代码
 
 - SQLite 初始化与 WAL pragma：[database/sqlite/database.go](../database/sqlite/database.go)
@@ -658,5 +833,5 @@ backend/backup/
 
 1. 异机落点优先做“HTTP 上传管理平台”还是“共享目录”？（影响 P2 的 `RemoteTarget` 首个实现）
 2. 备机是否已有固定硬件与预装流程？如果没有，P2 需同时提供备机制备脚本/手册。
-3. `config` 备份是否需要包含 `sys_user` 口令哈希？（包含则恢复后可直接登录；不包含则恢复后需重置管理员口令）
+3. ~~`config` 备份是否需要包含 `sys_user` 口令哈希？~~ **已确定：包含。** 恢复后可直接登录；克隆模式仍建议轮换开放接口密钥。
 4. 是否需要英文版本文档（`data-backup.en.md`）？

@@ -13,6 +13,7 @@ import (
 	"github.com/google/wire"
 
 	"iot-gateway/alarm"
+	"iot-gateway/backup"
 	"iot-gateway/collector"
 	"iot-gateway/configFile"
 	"iot-gateway/controller"
@@ -72,6 +73,9 @@ type AppDependencies struct {
 	// WALCheckpointer SQLite WAL 定期维护：合并已 checkpoint 的帧，空闲时把 -wal
 	// 截断到 0；外部读者钉住 WAL 时打 WARN。见 database/sqlite/walCheckpoint.go。
 	WALCheckpointer *sqlite.WALCheckpointer
+	// BackupManager 本机备份：定时 full、配置变更防抖 config、页面/API 门面。
+	// main 负责 Start/Stop；启动前的待恢复应用不经过它（那时依赖图还没构建）。
+	BackupManager *backup.Manager
 }
 
 // InitializeApp 构建完整的应用依赖图
@@ -174,6 +178,9 @@ func InitializeApp() (*AppDependencies, func()) {
 		// 绑定，不是同一个接口。接口形态的理由见 service.PointScanSource。
 		wire.Bind(new(service.PointScanSource), new(*pluginhost.Manager)),
 
+		// 本机备份管理器：构造时注册 sqlite 配置写回调（变更防抖的数据来源）。
+		backup.NewManager,
+
 		// 领域路由集中注册，新增模块仅改 ProvideRouteOptions
 		ProvideRouteOptions,
 
@@ -232,6 +239,7 @@ func ProvideRouteOptions(
 	scc *controller.SystemConfigController,
 	dbc *controller.DashboardController,
 	ctrl *controller.ControlController,
+	bkc *controller.BackupController,
 ) []router.RouteOption {
 	return []router.RouteOption{
 		router.WithUserRoutes(uc),
@@ -259,6 +267,7 @@ func ProvideRouteOptions(
 		router.WithSystemConfigRoutes(scc),
 		router.WithDashboardRoutes(dbc),
 		router.WithControlRoutes(ctrl),
+		router.WithBackupRoutes(bkc),
 		// dsh（AI Agent）调用面：把上述领域路由再挂一遍到 /agentApi（**无鉴权，
 		// 出厂关闭**，由运行期开关 agentApi.enabled 控制）。
 		// 刻意放在最后 —— 它复用同一批 controller，与前面各 With* 无顺序依赖。

@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"iot-gateway/backup"
 	"iot-gateway/configFile"
 	"iot-gateway/i18n"
 	"iot-gateway/logger"
@@ -31,12 +32,41 @@ import (
 )
 
 func main() {
+	// backup / restore 是独立 CLI 子命令：必须在 Windows 服务检测之前解析，
+	// 否则以服务方式安装的 exe 永远走不到 CLI 分支。
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "backup", "restore":
+			os.Exit(runBackupCLI(os.Args[1:]))
+		}
+	}
+
 	// Windows 服务模式：由服务控制管理器（SCM）启动时以服务方式运行并阻塞；
 	// 非服务环境（终端/调试）走前台模式。
 	if runAsWindowsService() {
 		return
 	}
 	runGatewayForeground()
+}
+
+// runBackupCLI 加载配置后执行备份/恢复子命令。
+//
+// 磁盘 default.yaml 损坏时 InitConfig 会 panic（这是网关启动期的既定行为）；
+// CLI 把它降级为 cfg=nil，让 `restore --bundle x --db y` 仍能在紧急情况下完成。
+func runBackupCLI(args []string) int {
+	configFile.SetBuildVersion(version)
+	var cfg *configFile.Config
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "警告: 加载配置失败，CLI 使用内置默认路径（可用 --db / --dir 指定）: %v\n", r)
+				cfg = nil
+			}
+		}()
+		configFile.SetDefaultConfig(defaultYAML)
+		cfg = configFile.InitConfig()
+	}()
+	return backup.RunCLI(args, cfg)
 }
 
 // runGatewayForeground 前台运行模式：监听 Ctrl+C / SIGTERM 触发优雅停机
@@ -69,6 +99,27 @@ func runGateway(stop <-chan struct{}) error {
 
 	// 2. 初始化日志
 	logger.InitLogger(cfg)
+
+	// 2.1 获取数据目录排他锁。
+	//
+	// 两个作用：阻止同一数据目录跑两个网关实例；让 CLI restore 能可靠判断
+	// “服务是否已停止”。锁在 InitDB 之前获取，目录不存在时由它创建。
+	gwLock, err := backup.AcquireLock(backup.DataDir(cfg, ""))
+	if err != nil {
+		return fmt.Errorf("acquire gateway data lock: %w", err)
+	}
+	defer gwLock.Release()
+	logger.Info("gateway data lock acquired: %s", gwLock.Path())
+
+	// 2.2 应用页面/API 上传后暂存的恢复任务。
+	//
+	// 必须在 InitializeApp（进而 InitDB）之前：此时数据库还没有被打开，可以
+	// 安全地替换文件或复制配置表。数据目录锁已在本进程手里，恢复函数不会再
+	// 尝试获取；失败只记日志并继续用旧库启动，避免现场变砖。
+	if err := backup.ApplyPendingRestore(context.Background(), cfg,
+		configFile.ResolveGatewayVersion(cfg)); err != nil {
+		logger.Error("pending restore failed, continuing with the existing database: %v", err)
+	}
 
 	// 3. 初始化国际化
 	i18n.InitI18n()
@@ -117,6 +168,13 @@ func runGateway(stop <-chan struct{}) error {
 	// 只是维护型 PRAGMA，不改变任何业务启动顺序；首次执行在一个间隔之后，
 	// 启动期的迁移写入由 SQLite 自己的 wal_autocheckpoint 兜底。
 	deps.WALCheckpointer.Start()
+
+	// 5.4 启动本机备份：定时 full 调度 + 配置变更防抖 config。
+	//
+	// 放在数据库初始化之后：首次备份会延迟 backup.startupDelayMinutes，
+	// 确保迁移与首轮配置已稳定。快照走独立连接，不占用主库唯一写连接。
+	// backup.enabled=false 时 Start/Stop 都是静默 no-op。
+	deps.BackupManager.Start()
 
 	// 6. 启动报警通知器（把报警推送到钉钉/企微/飞书等 Webhook）。
 	//
@@ -201,6 +259,10 @@ func runGateway(stop <-chan struct{}) error {
 	// checkpoint 去抢唯一的那条数据库连接，后续排空 outbox / 停采集的写入不会
 	// 撞上一次等待读者的 TRUNCATE（最长 busy_timeout=5s）。
 	defer deps.WALCheckpointer.Stop()
+	// 备份管理器注册在最后，因此**最先停止**：停机一开始就不再发起新的快照
+	// 或配置变更备份，避免与 outbox 排空、引擎停止争抢同一份数据文件（快照
+	// 本身是独立连接，但没必要在停机窗口里做无意义的重活）。
+	defer deps.BackupManager.Stop()
 
 	// 10. 启动 HTTP 服务器。使用 http.Server 而非 gin 的 Run，以便服务模式下优雅停机。
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

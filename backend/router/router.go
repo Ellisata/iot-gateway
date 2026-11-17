@@ -196,6 +196,13 @@ func WithSystemConfigRoutes(scc *controller.SystemConfigController) RouteOption 
 	}
 }
 
+// WithBackupRoutes 数据备份与恢复模块路由选项（仅管理端 JWT）
+func WithBackupRoutes(bc *controller.BackupController) RouteOption {
+	return func(r *gin.Engine) {
+		BackupRoutes(r, bc)
+	}
+}
+
 // WithDashboardRoutes 大盘聚合数据模块路由选项
 func WithDashboardRoutes(dbc *controller.DashboardController) RouteOption {
 	return func(r *gin.Engine) {

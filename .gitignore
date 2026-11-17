@@ -23,6 +23,11 @@ temp/
 
 data/
 *.db
+# SQLite WAL/SHM 伴生文件：包含最近提交的配置与明文凭据，绝不入库
+*.db-wal
+*.db-shm
+# 手工备份目录（正式备份在 data/backups/，已被上面的 data/ 忽略）
+data-backup/
 
 log/
 *.log

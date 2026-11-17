@@ -33,4 +33,5 @@ var ServiceProviderSet = wire.NewSet(
 	NewSystemConfigService,
 	NewDashboardService,
 	NewControlService,
+	NewBackupService,
 )

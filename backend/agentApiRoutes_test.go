@@ -70,6 +70,7 @@ func newTestEngineWithReader(cfg runtimecfg.Reader) *gin.Engine {
 		(*controller.SystemConfigController)(nil),
 		(*controller.DashboardController)(nil),
 		(*controller.ControlController)(nil),
+		(*controller.BackupController)(nil),
 	))
 }
 
@@ -87,13 +88,17 @@ func registeredRoutes(e *gin.Engine) map[string]bool {
 //   - /health、/admin/*：一个裸探活、一个前端静态资源，都不是领域 API；
 //   - /openApi/*：它自带 X-Api-Key 中间件，挂到 /agentApi 下会得到一条
 //     "既多一层前缀、又仍要密钥"的路径，对 dsh 没有意义（理由见 agentApiRouter.go）。
+//   - /backup/*：整组**刻意**不镜像。恢复是覆盖配置的高风险动作，而 /agentApi
+//     免鉴权；即使只镜像“列表/创建/下载”，也会把含明文凭据的包暴露给任何能
+//     访问网关端口的主机。备份只允许管理员 JWT 或本地 CLI。
 //
 // 注意 /openApiSecret/* 不在此列 —— 它以 /openApiSecret 开头，不是 /openApi/ 分段，
 // 属于内部接口，应当在 /agentApi 下有镜像。
 func isMirroredElsewhere(path string) bool {
 	return path == "/health" ||
 		path == "/admin" || strings.HasPrefix(path, "/admin/") ||
-		strings.HasPrefix(path, "/openApi/")
+		strings.HasPrefix(path, "/openApi/") ||
+		strings.HasPrefix(path, "/backup/")
 }
 
 // TestAgentApiMirrorsInternalRoutes 是 agentApiRouter.go 的**防漂移守卫**。

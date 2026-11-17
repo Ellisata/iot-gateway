@@ -194,6 +194,11 @@
           <el-icon><MenuIcon name="runtimeSwitch" /></el-icon>
           <template #title>{{ t('menu.runtimeConfig') }}</template>
         </el-menu-item>
+        <!-- 本机备份与停服恢复 -->
+        <el-menu-item index="/backup">
+          <el-icon><MenuIcon name="backup" /></el-icon>
+          <template #title>{{ t('menu.backup') }}</template>
+        </el-menu-item>
       </el-sub-menu>
 
       <!-- 开放接口文档（独立顶级入口，全员可见，新窗口打开） -->

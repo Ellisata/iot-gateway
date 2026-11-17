@@ -6,6 +6,32 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
+## [Unreleased]
+
+### 新增
+
+- **本机数据备份与恢复（P0）**：新增 `.igbak` 备份包（manifest + `VACUUM INTO` 一致性快照 + 外部 `default.yaml` / `<APP_ENV>.yaml` / 插件清单），在线备份不阻塞采集与推送；后台默认每 6 小时生成一次，保留 14 份 / 512MB，超限删最旧。恢复必须停服执行，校验 sha256、`integrity_check`、schema 兼容性与数据目录排他锁后，把 `db` / `-wal` / `-shm` 三件套一起替换，旧库保留为 `*.pre-restore-<时间戳>`；支持 `takeover`（保留网关 ID）与 `clone`（重新生成 ID）两种身份模式。CLI：`iot-gateway backup create|list|verify`、`iot-gateway restore --bundle ... [--identity clone] [--restore-config] [--yes]`。设计见 `backend/specs/data-backup.md`。
+- **备份配置段**：`default.yaml` 新增 `backup.*`（`enabled` / `dir` / `defaultScope` / `startupDelayMinutes` / `intervalHours` / `keep` / `maxTotalMB` / `snapshotTimeoutSeconds`）。备份目录与文件权限收紧为 `0700` / `0600`；包内含 MQTT 口令、开放接口密钥与用户口令哈希，上传异机前仍需另行加密（P2）。
+- **CLI 子命令入口**：`backup` / `restore` 在 `main()` 中先于 Windows 服务检测解析；磁盘 `default.yaml` 损坏时 CLI 回退到内置默认路径，仍可按 `--db` / `--dir` 完成紧急恢复。
+- **本机备份与恢复（P1）**：新增 `config` 范围白名单快照（用户、设备、点位、物模型、推送通道、订阅、触发规则、运行开关、开放接口密钥、网关身份），不含 `push_outbox` / `alarm` / `control_log` 等运行与历史表。配置白名单表写入后 60 秒防抖生成 config 包，启动 5 分钟后先备一份基线；定时任务仍每 6 小时生成 full。`config` 恢复采用**表级覆盖**而不是整库替换：停服后在一个事务里删除并复制白名单表，保留当前报警历史、控制审计与断网缓存，事务前另存完整库副本。管理端新增 `/backup/*`（列表、状态、创建、下载、删除、暂存、上传、取消待恢复），只走管理员 JWT，刻意不挂 `/openApi` 与 `/agentApi`。上传/暂存只做校验，重启时在 `InitDB` 之前应用；校验失败时目录改名为 `restore-pending.failed-<ts>`，旧库照常启动。备份、下载、删除、暂存与恢复均写入 `data/backups/audit.log`。新增页面「系统设置 → 备份与恢复」，CLI 支持 `backup create --scope config` 与 `restore --pending`。
+
+### 变更
+
+- **同一数据目录只允许一个网关实例**：启动时在数据目录获取 OS 级排他锁（Unix `flock` / Windows `LockFileEx`），锁被占用时拒绝启动。这同时让 `restore` 能可靠判断“服务是否已停止”。
+- **WAL 维护器不再把进程内备份快照误报为外部读者**：备份期间跳过 “pinned by an external reader” 的 WARN（降级为 Debug）。CLI 跨进程备份仍可能看到该 WARN，属预期。
+
+### Added
+
+- **Local backup and restore (P0)**: introduces the `.igbak` bundle (manifest + consistent `VACUUM INTO` snapshot + external `default.yaml` / `<APP_ENV>.yaml` / plugin manifest). Online backups do not block collection or pushing; the scheduler runs every 6 hours by default and keeps 14 bundles / 512 MB, deleting the oldest when over the limit. Restore requires the gateway to be stopped: it verifies sha256, `integrity_check`, schema compatibility and the data-directory lock, then replaces the `db` / `-wal` / `-shm` trio together and keeps the old database as `*.pre-restore-<timestamp>`. Both `takeover` (keep the gateway ID) and `clone` (regenerate the ID) identity modes are supported. CLI: `iot-gateway backup create|list|verify`, `iot-gateway restore --bundle ... [--identity clone] [--restore-config] [--yes]`. Design: `backend/specs/data-backup.md`.
+- **Backup configuration**: `default.yaml` gains `backup.*` (`enabled` / `dir` / `defaultScope` / `startupDelayMinutes` / `intervalHours` / `keep` / `maxTotalMB` / `snapshotTimeoutSeconds`). The backup directory and files are tightened to `0700` / `0600`; bundles contain MQTT credentials, OpenAPI keys and password hashes, so off-machine copies still require separate encryption (P2).
+- **CLI subcommands**: `backup` / `restore` are parsed in `main()` before Windows service detection. If the on-disk `default.yaml` is broken, the CLI falls back to the built-in defaults and can still perform an emergency restore via `--db` / `--dir`.
+- **Local backup and restore (P1)**: adds a `config` scope whitelist snapshot (users, devices, points, thing models, push channels, subscriptions, trigger rules, runtime switches, OpenAPI secrets, gateway identity) that excludes runtime and history tables such as `push_outbox` / `alarm` / `control_log`. Writes to config tables trigger a config bundle after a 60-second debounce, with a baseline bundle 5 minutes after startup; scheduled backups still produce a full snapshot every 6 hours. Restoring a `config` bundle performs **table-level replacement** instead of replacing the database file: after the service is stopped, whitelisted tables are deleted and copied in one transaction, preserving alarm history, control audit and offline buffering, with a full pre-restore copy saved first. Adds admin-only `/backup/*` endpoints (list, status, create, download, delete, stage, upload, cancel pending), deliberately not mounted under `/openApi` or `/agentApi`. Upload/stage only validates; the restore is applied on the next startup before `InitDB`. If validation fails the directory is renamed `restore-pending.failed-<ts>` and the old database starts normally. Backup, download, delete, stage and restore are recorded in `data/backups/audit.log`. New UI page under System Settings → Backup & Restore; CLI supports `backup create --scope config` and `restore --pending`.
+
+### Changed
+
+- **One gateway instance per data directory**: startup takes an OS-level exclusive lock on the data directory (Unix `flock` / Windows `LockFileEx`) and refuses to start when it is held. This also lets `restore` reliably decide whether the service is stopped.
+- **WAL maintainer no longer reports in-process backup snapshots as external readers**: the "pinned by an external reader" warning is suppressed (logged at Debug) while a snapshot is running. A cross-process CLI backup may still produce it, which is expected.
+
 ## [0.8.2] - 2026-11-17
 
 ### 新增

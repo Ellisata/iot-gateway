@@ -9,6 +9,7 @@ package main
 import (
 	"github.com/gin-gonic/gin"
 	"iot-gateway/alarm"
+	"iot-gateway/backup"
 	"iot-gateway/collector"
 	"iot-gateway/configFile"
 	"iot-gateway/controller"
@@ -111,7 +112,10 @@ func InitializeApp() (*AppDependencies, func()) {
 	dashboardService := service.NewDashboardService(recorder)
 	dashboardController := controller.NewDashboardController(dashboardService)
 	controlController := controller.NewControlController(controlService)
-	v := ProvideRouteOptions(manager, userController, deviceController, deviceAddressController, collectorGroupController, triggerRuleController, thingModelController, collectionController, realtimeController, protocolController, pushChannelController, pushChannelFormController, mqttSubscriptionController, pushController, alarmController, alarmWebhookController, alarmWebhookFormController, logFileController, openApiSecretController, openApiSecretService, openApiController, gatewayController, pluginController, deviceScanController, systemConfigController, dashboardController, controlController)
+	backupManager := backup.NewManager(config)
+	backupService := service.NewBackupService(backupManager)
+	backupController := controller.NewBackupController(backupService)
+	v := ProvideRouteOptions(manager, userController, deviceController, deviceAddressController, collectorGroupController, triggerRuleController, thingModelController, collectionController, realtimeController, protocolController, pushChannelController, pushChannelFormController, mqttSubscriptionController, pushController, alarmController, alarmWebhookController, alarmWebhookFormController, logFileController, openApiSecretController, openApiSecretService, openApiController, gatewayController, pluginController, deviceScanController, systemConfigController, dashboardController, controlController, backupController)
 	ginEngine := router.SetupRouter(v)
 	channelMonitor := alarm.NewChannelMonitor(db, engine, dispatcher)
 	announcer := discovery.NewAnnouncerWithPolicy(config, serviceGatewayService, openApiSecretService, manager)
@@ -131,6 +135,7 @@ func InitializeApp() (*AppDependencies, func()) {
 		TriggerEngine:    triggerruleEngine,
 		DashboardSampler: sampler,
 		WALCheckpointer:  walCheckpointer,
+		BackupManager:    backupManager,
 	}
 	return appDependencies, func() {
 	}
@@ -171,6 +176,9 @@ type AppDependencies struct {
 	// WALCheckpointer SQLite WAL 定期维护：合并已 checkpoint 的帧，空闲时把 -wal
 	// 截断到 0；外部读者钉住 WAL 时打 WARN。见 database/sqlite/walCheckpoint.go。
 	WALCheckpointer *sqlite.WALCheckpointer
+	// BackupManager 本机备份：定时 full、配置变更防抖 config、页面/API 门面。
+	// main 负责 Start/Stop；启动前的待恢复应用不经过它（那时依赖图还没构建）。
+	BackupManager *backup.Manager
 }
 
 // NewRecordSink 组装采集记录的扇出接收者。
@@ -220,6 +228,7 @@ func ProvideRouteOptions(
 	scc *controller.SystemConfigController,
 	dbc *controller.DashboardController,
 	ctrl *controller.ControlController,
+	bkc *controller.BackupController,
 ) []router.RouteOption {
-	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectorGroupRoutes(cgc), router.WithTriggerRuleRoutes(trc), router.WithThingModelRoutes(tmc), router.WithCollectionRoutes(cc), router.WithRealtimeRoutes(rc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithMqttSubscriptionRoutes(msc), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithAlarmWebhookRoutes(awc), router.WithAlarmWebhookFormRoutes(awfc), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac, dsc), router.WithGatewayRoutes(gc), router.WithPluginRoutes(plc), router.WithDeviceScanRoutes(dsc), router.WithSystemConfigRoutes(scc), router.WithDashboardRoutes(dbc), router.WithControlRoutes(ctrl), router.WithAgentApiRoutes(rcfg, uc, dc, ac, cgc, trc, tmc, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc, ctrl)}
+	return []router.RouteOption{router.WithUserRoutes(uc), router.WithDeviceRoutes(dc), router.WithDeviceAddressRoutes(ac), router.WithCollectorGroupRoutes(cgc), router.WithTriggerRuleRoutes(trc), router.WithThingModelRoutes(tmc), router.WithCollectionRoutes(cc), router.WithRealtimeRoutes(rc), router.WithProtocolRoutes(pc), router.WithPushChannelRoutes(pc2), router.WithPushChannelFormRoutes(pcf), router.WithMqttSubscriptionRoutes(msc), router.WithPushRoutes(pus), router.WithAlarmRoutes(ac2), router.WithAlarmWebhookRoutes(awc), router.WithAlarmWebhookFormRoutes(awfc), router.WithLogFileRoutes(lc), router.WithOpenApiSecretRoutes(oasc), router.WithOpenApiRoutes(oass, oac, dsc), router.WithGatewayRoutes(gc), router.WithPluginRoutes(plc), router.WithDeviceScanRoutes(dsc), router.WithSystemConfigRoutes(scc), router.WithDashboardRoutes(dbc), router.WithControlRoutes(ctrl), router.WithBackupRoutes(bkc), router.WithAgentApiRoutes(rcfg, uc, dc, ac, cgc, trc, tmc, cc, rc, pc, pc2, pcf, msc, pus, ac2, awc, awfc, lc, oasc, gc, plc, dsc, scc, dbc, ctrl)}
 }

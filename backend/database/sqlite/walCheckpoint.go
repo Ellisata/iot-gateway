@@ -128,6 +128,10 @@ func (w *WALCheckpointer) runOnce() {
 		// 此时 log/checkpointed 通常也是 -1，没有可报告的数字。
 		appLogger.Warn("sqlite wal checkpoint is busy: another process holds the checkpoint or writer lock, "+
 			"will retry in %s", w.interval)
+	case externalMaintenanceActive():
+		// 进程内的备份快照正在读库：WAL 暂时合并不完全是预期行为，不报 WARN。
+		appLogger.Debug("sqlite wal is pinned by an in-process backup snapshot: merged %d/%d frames",
+			r.Checkpointed, r.Log)
 	case r.Checkpointed < r.Log:
 		appLogger.Warn("sqlite wal is pinned by an external reader: merged %d/%d frames; "+
 			"the WAL will keep growing until that reader finishes (sqlite CLI, a second gateway "+

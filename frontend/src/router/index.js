@@ -215,6 +215,13 @@ const routes = [
         component: () => import('@/views/settings/runtime-config/IndexView.vue'),
         meta: { titleKey: 'menu.runtimeConfig', icon: 'Setting', roles: ['admin'] },
       },
+      // 备份包含明文凭据，恢复是覆盖配置的高风险动作：只给管理员。
+      {
+        path: 'backup',
+        name: 'Backup',
+        component: () => import('@/views/settings/backup/IndexView.vue'),
+        meta: { titleKey: 'menu.backup', icon: 'Setting', roles: ['admin'] },
+      },
     ],
   },
   // 开放接口文档：独立于主布局的全页阅读页，从侧边栏菜单新窗口打开

@@ -48,6 +48,30 @@ func dsnWithPragmas(path string) string {
 		path, walAutocheckpointPages)
 }
 
+// OpenStandalone 打开一个**不执行迁移、不播种**的独立连接。
+//
+// 供备份、快照校验、恢复时的临时库检查等旁路任务使用：这些任务既不应该
+// 改动库结构，也不应该占用主库那条 MaxOpenConns=1 的连接。连接参数与 InitDB
+// 保持一致（同一份 pragma DSN），因此对 WAL 的读写行为与主连接相同。
+//
+// 调用方负责关闭返回的 *gorm.DB。
+func OpenStandalone(path string) (*gorm.DB, error) {
+	conn, err := gorm.Open(sqlite.Open(dsnWithPragmas(path)), &gorm.Config{
+		SkipDefaultTransaction: true,
+		PrepareStmt:            false,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open standalone sqlite %s: %w", path, err)
+	}
+	sqlDB, err := conn.DB()
+	if err != nil {
+		return nil, fmt.Errorf("get standalone sql.DB: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	return conn, nil
+}
+
 // InitDB 初始化 SQLite 数据库连接
 func InitDB(cfg *configFile.Config) *gorm.DB {
 	path := cfg.SQLite.Path
@@ -161,6 +185,9 @@ func InitDB(cfg *configFile.Config) *gorm.DB {
 	if err := seedDefaultOpenApiSecret(conn); err != nil {
 		appLogger.Error("seed default open api secret failed: %v", err)
 	}
+
+	// 写回调必须在迁移与播种之后安装：它们不属于配置变更。
+	installWriteCallbacks(conn)
 
 	appLogger.Info("sqlite database connected successfully, path: %s", absPath)
 	return conn

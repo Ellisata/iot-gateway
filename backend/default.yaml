@@ -36,6 +36,25 @@ log:
 sqlite:
   path: data/iot-gateway.db              # SQLite 数据库文件路径
 
+# 本机备份与恢复（P0：整库快照 + 本机轮转 + CLI 恢复）。
+#
+# 备份包是 .igbak（zip，内含 manifest + 一致性快照 + 外部配置 + 插件清单）。
+# 快照走 VACUUM INTO，不阻塞采集/推送；恢复必须停服后用 CLI 执行：
+#   iot-gateway backup create
+#   iot-gateway restore --bundle data/backups/xxx.igbak --yes
+#
+# **备份包含 MQTT 口令、开放接口密钥、用户口令哈希**，目录与文件权限由本功能
+# 收紧到 0700/0600；上传异机前必须另行加密（P2 才实现，见 specs/data-backup.md）。
+backup:
+  enabled: true
+  dir: data/backups
+  defaultScope: full          # 手动/页面备份的默认范围：full | config（定时任务始终 full）
+  startupDelayMinutes: 5      # 启动后首次备份延迟
+  intervalHours: 6            # 定时备份间隔
+  keep: 14                    # 保留份数
+  maxTotalMB: 512             # 备份目录总大小上限
+  snapshotTimeoutSeconds: 60  # 单次快照超时
+
 gateway:
   # 网关自身身份，首次启动（iot_gateway 表为空）时建行。name 与 version 之后的行为不同：
   #

@@ -32,4 +32,5 @@ var ControllerProviderSet = wire.NewSet(
 	NewSystemConfigController,
 	NewDashboardController,
 	NewControlController,
+	NewBackupController,
 )

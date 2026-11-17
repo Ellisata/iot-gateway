@@ -30,6 +30,7 @@
 │   ├── po/              # 数据库映射(GORM)
 │   └── vo/              # 响应对象
 ├── database/sqlite/     # 数据库层 + migrations/*.sql(按文件名顺序执行)
+├── backup/              # 本机数据备份/停机恢复: .igbak、VACUUM INTO、CLI、服务锁
 ├── collector/           # 采集引擎(核心): 轮询任务 + 配置热加载 watcher
 ├── driveradapter/       # 宿主侧 po.DeviceAddress ↔ SDK driver.DeviceAddress 转换
 ├── pluginhost/          # 进程外插件宿主(**与插件种类无关**):目录扫描/进程监管/RPC/热升级/权限校验
@@ -417,6 +418,15 @@
 - 两篇 spec **必须成对修改**([specs/device-scan.md](specs/device-scan.md) ↔
   [specs/point-discovery.md](specs/point-discovery.md)):它们共同依赖三条道理
   (不建能力缓存表 / RPC 超时按插件声明推导 / 串口独占与会话复用),只改一篇必然漂移。
+
+### 本机备份与恢复([backup/](backup/))
+- `.igbak` = manifest + 一致性快照 + 外部 yaml + 插件清单;在线备份走独立连接,不占主库唯一写连接。定时任务每 6 小时一次 `full`;配置白名单表写入后 60s 防抖生成 `config`,启动 5 分钟后先备一份基线。保留 14 份 / 512MB。
+- `full` 用 `VACUUM INTO` 整库快照;`config` 在临时库建 schema 后按白名单表 `ATTACH` + 单事务拷贝,不含运行/历史表。
+- 启动时持有数据目录 `.gateway.lock` 排他锁(Unix flock / Windows LockFileEx):同一数据目录只允许一个网关实例,也是 `restore` 判断“服务是否已停止”的依据。
+- 恢复必须停服。`full`:校验 sha256 + `integrity_check` + schema 兼容性后,把 `db` / `-wal` / `-shm` 三件套一起替换,旧库保留为 `*.pre-restore-<时间戳>`;`config`:在同一事务里 DELETE + INSERT 白名单表,**保留** alarm / push_outbox / control_log 等运行数据,事务前留完整库副本。均支持 `takeover`(保留网关 ID)与 `clone`(重新生成)。
+- 页面/API `/backup/*` 只做“校验 + 暂存”,恢复在下次启动、`InitDB` 之前应用;上传校验失败时目录改名为 `restore-pending.failed-<ts>`,旧库照常启动。备份/下载/删除/暂存/恢复写 `audit.log`。
+- 变更检测靠 GORM 写回调([database/sqlite/writehook.go](database/sqlite/writehook.go)):`db.Exec` 等原生 SQL **不触发**,新增原生写需调用 `sqlite.NotifyWrite`。配置表/运行表分类在 [backup/tables.go](backup/tables.go),新增迁移表时完整性测试会失败。
+- CLI:`backup create|list|verify`、`restore --bundle ... [--identity clone] [--restore-config] [--yes]`、`restore --pending`。备份含明文凭据,目录/文件权限 0700/0600;异机上传与加密属 P2。`/backup/*` 刻意不挂 `/agentApi` 与 `/openApi`。完整契约见 [specs/data-backup.md](specs/data-backup.md)。
 
 ### 运行期配置开关([runtimecfg/](runtimecfg/))
 - `default.yaml` 是**默认值**的唯一真源;[runtimecfg/](runtimecfg/) 在它之上叠加

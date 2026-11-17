@@ -34,6 +34,7 @@ import {
   IconChartBar,
   IconCpu,
   IconCrosshair,
+  IconDatabase,
   IconDeviceDesktopExclamation,
   IconFileCode,
   IconFilePencil,
@@ -90,6 +91,7 @@ const ICONS = {
   apiKey: IconTag,
   gateway: IconServer,
   runtimeSwitch: IconToggleRight,
+  backup: IconDatabase,
   settings: IconSettings,
   apiDoc: IconBook,
 }

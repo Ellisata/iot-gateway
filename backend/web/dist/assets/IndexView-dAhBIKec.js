@@ -1,0 +1,1 @@
+import{an as e,gn as t}from"./vendor-BAnKO0bW.js";import{t as n}from"./AlarmTable-D-Yb2wo_.js";var r={__name:`IndexView`,setup(r){return(r,i)=>(t(),e(n,{"target-type":`channel`}))}};export{r as default};

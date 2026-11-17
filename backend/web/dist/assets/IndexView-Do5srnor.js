@@ -1,1 +1,0 @@
-import{mn as e,rn as t}from"./vendor-DtpgtsIr.js";import{t as n}from"./AlarmTable-BLIGrOc4.js";var r={__name:`IndexView`,setup(r){return(r,i)=>(e(),t(n,{"target-type":`point`}))}};export{r as default};

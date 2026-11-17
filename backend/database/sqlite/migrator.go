@@ -18,6 +18,47 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
+// MigrationNames 返回内嵌迁移文件名（已按执行顺序排序）。
+//
+// 备份恢复用它判断包内 schema 是否比当前二进制更新：迁移文件名是零填充的
+// 顺序编号，字典序即执行序。不要在别处再遍历 migrationsFS 各写一份排序。
+func MigrationNames() []string {
+	files, err := fs.ReadDir(migrationsFS, "migrations")
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(files))
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+		names = append(names, file.Name())
+	}
+	sort.Strings(names)
+	return names
+}
+
+// LatestMigration 返回当前二进制内嵌的最新迁移文件名；空列表返回空串。
+//
+// 注意它描述的是**二进制**而不是数据库：数据库已应用到哪里要看
+// schema_migrations 表（备份 manifest 里的 schemaVersion 就是它的最大值）。
+func LatestMigration() string {
+	names := MigrationNames()
+	if len(names) == 0 {
+		return ""
+	}
+	return names[len(names)-1]
+}
+
+// Migrate 在给定的连接上执行全部迁移（含 schema_migrations 引导表）。
+//
+// 与 InitDB 内部的启动迁移是同一个实现。备份模块的 config 快照需要在一张
+// 空临时库上建出与当前二进制一致的 schema，又不能走 InitDB（那会播种 admin、
+// 网关身份与开放接口密钥），因此单独导出。
+func Migrate(db *gorm.DB) error {
+	return runMigrations(db)
+}
+
 // runMigrations 按顺序执行所有待处理的迁移。
 // 首次调用时自动创建 schema_migrations 跟踪表。
 // 任一迁移失败则返回错误，由调用者决定是否 Fatal 退出。

@@ -21,6 +21,7 @@ var excludedBools = map[string]string{
 	"plugin.allowInsecureDir":               "插件目录权限校验，属安全敏感启动项，不提供页面开关",
 	"plugin.disableHotUpgrade":              "插件热升级开关，改动需重新扫描目录；v1 不纳入",
 	"deviceScan.prefilterEnabled":           "扫描性能旋钮，与 maxConcurrentProbes 同类，改动需重启；不作为运行期开关",
+	"backup.enabled":                        "备份调度属于启动期资源策略；P0 只提供配置文件与 CLI，不纳入页面动态开关",
 }
 
 func TestRegistryCoversEveryBoolConfig(t *testing.T) {

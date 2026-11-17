@@ -99,6 +99,40 @@ type Config struct {
 
 	// Control 控制下发（写 PLC 点位）配置
 	Control ControlConfig `mapstructure:"control"`
+
+	// Backup 本机备份与恢复配置（P0：整库快照 + 本机轮转 + CLI 恢复）
+	Backup BackupConfig `mapstructure:"backup"`
+}
+
+// BackupConfig 本机备份配置。
+//
+// P0 只做 `full` 范围（整库快照），`defaultScope` 预留给 P1 的 `config` 范围。
+// 备份目录与 SQLite 路径一样按工作目录解析；Windows 服务启动时会先切到
+// 可执行文件目录（见 service_windows.go）。
+type BackupConfig struct {
+	// Enabled 是否启动后台定时备份。关闭后 CLI 仍可手动备份/恢复。
+	Enabled bool `mapstructure:"enabled"`
+
+	// Dir 备份目录。默认 data/backups。
+	Dir string `mapstructure:"dir"`
+
+	// DefaultScope 默认备份范围：full | config。P0 只实现 full。
+	DefaultScope string `mapstructure:"defaultScope"`
+
+	// StartupDelayMinutes 启动后首次备份的延迟（分钟）。给迁移与首轮配置稳定留时间。
+	StartupDelayMinutes int `mapstructure:"startupDelayMinutes"`
+
+	// IntervalHours 定时备份间隔（小时）。
+	IntervalHours int `mapstructure:"intervalHours"`
+
+	// Keep 保留的备份份数（至少保留 1 份）。
+	Keep int `mapstructure:"keep"`
+
+	// MaxTotalMB 备份目录总大小上限（MB），超出时删除最旧的备份。
+	MaxTotalMB int `mapstructure:"maxTotalMB"`
+
+	// SnapshotTimeoutSeconds 单次快照超时（秒）。
+	SnapshotTimeoutSeconds int `mapstructure:"snapshotTimeoutSeconds"`
 }
 
 // ControlConfig 控制下发配置。
