@@ -6,7 +6,7 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
-## [Unreleased]
+## [0.8.2] - 2026-11-17
 
 ### 新增
 
@@ -26,6 +26,12 @@ each release, followed by English entries.
 - **开放接口控制能力查询**：`/openApi` 新增 `GET /control/capability`（文档 4.20），按 `deviceId` 或设备编码 `code` 返回 `control.enabled`、协议可写性 `writable` 与不可写原因 `reason`（`disabled` / `device_disabled` / `protocol_missing` / `protocol_not_writable`），供管理平台在展示写值入口前判断「现在能不能写、为什么不能写」。只读、不触达现场设备；真正写值仍走 4.8 `/control/write`。
 - **开放接口设备连接测试**：`/openApi` 新增 `POST /device/testConnection`（文档 4.21），用调用方传入的协议名与未保存的连接配置真实连接一次现场设备（与管理端 `POST /device/testDeviceConnection` 同一条驱动路径），供管理平台「新建设备对象」在保存前校验连接配置。只探测：不写网关配置、不改设备状态；失败返回 `40003` 并原样带回驱动错误（地址不可达、串口被占用、超时等），调用方应原样展示。
 - **OPC UA 验证工具**：新增 `backend/cmd/opcuaprobe`，用标准 OPC UA 客户端完成 connect / browse / read / subscribe，独立验证网关 OPC UA Server 通道有没有把点位供出去，不依赖 UaExpert，便于在服务器、CI 或录屏环境里重复执行。
+- **实时监控写值区分原始值与工程值**：设备实时快照透传点位 `transformJson`；控制下发弹窗的输入框始终按原始值填写，并按工程量变换只读预览对应的工程值（下发链路不做逆变换，避免把工程值当成原始值写入设备）；同一弹窗新增设备信息卡与「复制地址」。前端换算算子与后端 `mappingdsl` 对齐（`scale` 默认 ×1+0、`round` 定长小数），换算失败时不显示预览。
+
+### 变更
+
+- **控制台交互优化**：点位与触发规则编辑弹窗改为分栏卡片并补充内联帮助，点位弹窗加宽到 `min(900px, 94vw)`；设备扫描页重做统计卡、协议说明侧栏与结果区布局，扫描中的结果不再随轮询跳动。
+- **构建脚本目标校验**：`build.bat` 新增 `linux` / `native` 目标，未知目标直接报错退出；此前未知目标会静默回落到全量构建，`build.bat linux` 实际编译了四个平台。
 
 ### 修复
 
@@ -33,7 +39,6 @@ each release, followed by English entries.
 
 ### Added
 
-- **Pointless collection rebuild after boot**: the plugin manager's initial scan (`Manager.Start`) no longer schedules a collector refresh. That scan always runs before the collector starts, so the drivers it loads are picked up by the first collection task; previously it still queued a 2s-debounced refresh, which by then saw a running engine and rebuilt the entire collection task about 2 seconds after every boot (and made `TestCollectionContinuesAcrossPluginHotUpgrade` flaky under `go test -race`). Runtime plugin add/remove and hot-upgrade behavior is unchanged.
 - **Per-point engineering transform**: device points gain an "engineering transform" (`device_address.transform_json`, migration `036_device_address_transform.sql`) that runs a `scale / round / trim / default` pipeline once at collection. Live values, point threshold alarms, trigger rules, the offline spool and every push channel (MQTT / Kafka / HTTP / OPC UA / TDengine / InfluxDB) see the same engineering value, so TSDB channels no longer need their own conversion. `scale` (or `round` with decimal digits) promotes numeric points' `kind` to `float`, and integer OPC UA nodes become Double accordingly; on failure the raw value is kept and the error is logged with rate limiting. The outbound `mapping-json` transform remains a presentation layer — remove any duplicate `scale` from channel mappings after moving it to the point.
 - **Point list shows bindings and transforms**: the device point configuration list gains an "Engineering Transform" column with a readable summary (e.g. `Scale ×0.1 → Round 2 dp`, full pipeline on hover) and "Raw" when unset; the "Thing Model Property" column is no longer hidden on narrow screens, since both the binding and the conversion rule are needed to interpret a collected value.
 - **OpenAPI configuration sync**: adds a configuration-sync API group under `/openApi` (docs 4.16): capability negotiation via `GET /config/capabilities`, masked reads for thing models / devices & points / push channels / alarm webhooks / runtime switches (each with `contentHash`), and batch writes for push channels, alarm webhooks, runtime switches and device points. Writes only change gateway configuration — never field devices — and report per-item results; `"***"` keeps the existing secret, and hashes use `sha256-canonical-json-v1` (secrets count by presence only). Thing-model upsert gains `replaceProperties` to drop absent properties; new error codes `42001`–`42009`.
@@ -50,6 +55,16 @@ each release, followed by English entries.
 - **OpenAPI control capability query**: `/openApi` gains `GET /control/capability` (docs 4.20), returning by `deviceId` or device code `code` the `control.enabled` switch, protocol writability `writable` and a `reason` when not writable (`disabled` / `device_disabled` / `protocol_missing` / `protocol_not_writable`), so the management platform can decide whether to show a write entry. Read-only and never touching field devices; actual writes still go through 4.8 `/control/write`.
 - **OpenAPI device connection test**: `/openApi` gains `POST /device/testConnection` (docs 4.21), opening a real connection once to a field device with the caller's protocol name and unsaved connection config (the same driver path as the admin `POST /device/testDeviceConnection`), for the management platform to validate connection settings before saving a new device object. Probe only — no gateway config or device state changes; failures return `40003` with the raw driver error (unreachable address, serial port busy, timeout, …) that callers should surface verbatim.
 - **OPC UA verification tool**: adds `backend/cmd/opcuaprobe`, a standard OPC UA client with connect / browse / read / subscribe modes that independently checks whether the gateway's OPC UA Server channel exposes points, without UaExpert, so it can be re-run on a server, in CI or on a recording host.
+- **Raw vs. engineering values in realtime writes**: the realtime device snapshot now passes each point's `transformJson` through; the control-write dialog keeps the input in the raw value and shows a read-only preview of the corresponding engineering value (the write path has no inverse transform, so an engineering value is never sent as if it were raw). The same dialog gains a device identity card and "copy address". The frontend pipeline mirrors the backend `mappingdsl` operators (`scale` defaults to ×1+0, `round` to fixed decimals) and shows no preview when conversion fails.
+
+### Changed
+
+- **Console interaction polish**: point and trigger-rule edit dialogs are split into sectioned cards with inline help, and the point dialog widens to `min(900px, 94vw)`; the device scan page gains a stat card, a protocol-help aside and a stable results area, so in-flight results no longer jump between polls.
+- **Build script target validation**: `build.bat` gains `linux` / `native` targets and rejects unknown targets; previously an unknown target silently fell back to the full build, so `build.bat linux` compiled all four platforms.
+
+### Fixed
+
+- **Pointless collection rebuild after boot**: the plugin manager's initial scan (`Manager.Start`) no longer schedules a collector refresh. That scan always runs before the collector starts, so the drivers it loads are picked up by the first collection task; previously it still queued a 2s-debounced refresh, which by then saw a running engine and rebuilt the entire collection task about 2 seconds after every boot (and made `TestCollectionContinuesAcrossPluginHotUpgrade` flaky under `go test -race`). Runtime plugin add/remove and hot-upgrade behavior is unchanged.
 
 ## [0.8.1] - 2026-11-11
 
