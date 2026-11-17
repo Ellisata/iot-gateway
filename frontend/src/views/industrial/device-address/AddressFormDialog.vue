@@ -16,317 +16,416 @@
 <template>
   <el-dialog
     v-model="visible"
-    class="iot-dialog"
+    class="iot-dialog address-form-dialog"
     :title="isEdit ? t('deviceAddress.editTitle') : t('deviceAddress.addTitle')"
-    width="760px"
+    width="min(900px, 94vw)"
+    append-to-body
     :close-on-click-modal="false"
     @close="handleDialogClose"
   >
+    <!-- 页头：eyebrow → 标题 + 协议标签 → 一句说明，先交代"在改什么、改了会怎样" -->
+    <template #header>
+      <div class="dp-dialog-head">
+        <p class="dp-dialog-eyebrow">
+          <span class="dp-dialog-eyebrow-dot" aria-hidden="true" />
+          {{ isEdit ? t('deviceAddress.formEyebrowEdit') : t('deviceAddress.formEyebrowAdd') }}
+        </p>
+        <div class="dp-dialog-title-row">
+          <h2 class="dp-dialog-title">
+            {{ isEdit ? t('deviceAddress.editTitle') : t('deviceAddress.addTitle') }}
+          </h2>
+          <el-tag v-if="protocolName" class="dp-head-tag" size="small" effect="plain">
+            {{ protocolName }}
+          </el-tag>
+        </div>
+        <p class="dp-dialog-sub">
+          <template v-if="deviceName">{{ deviceName }} · </template>{{ t('deviceAddress.formLead') }}
+        </p>
+      </div>
+    </template>
+
     <el-form
       ref="formRef"
       v-loading="loadingAddress"
       :model="formData"
       :rules="formRules"
       label-width="110px"
-      label-position="right"
+      class="dp-form"
       status-icon
     >
-      <el-form-item :label="t('deviceAddress.addressName')" prop="name">
-        <div class="flex items-center gap-2 w-full">
-          <el-input
-            v-model="formData.name"
-            :placeholder="addressPlaceholder"
-            maxlength="100"
-            show-word-limit
-            class="flex-1 min-w-0"
-          />
-          <!-- 用气泡而不是抽屉：表单本身已经开在对话框里，气泡能让说明和输入框同时可见、
-               边看边改，抽屉会盖住半个表单 -->
-          <el-popover v-if="addressSpec" placement="bottom" :width="380" trigger="click">
-            <template #reference>
-              <el-button :icon="QuestionFilled" circle text class="shrink-0" />
-            </template>
-            <div class="text-xs leading-5">
-              <div class="font-semibold text-gray-700 mb-2">{{ t('deviceAddress.addressHelpTitle') }}</div>
-
-              <div class="text-gray-400 mb-1">{{ t('deviceAddress.addressHelpSyntax') }}</div>
-              <div class="font-mono text-gray-800 bg-gray-50 rounded px-2 py-1 mb-3 break-all">
-                {{ t(addressSpec.templateKey) }}
-              </div>
-
-              <div class="text-gray-400 mb-1">{{ t('deviceAddress.addressHelpExamples') }}</div>
-              <div class="font-mono text-gray-800 mb-3 space-y-0.5">
-                <div v-for="eg in addressSpec.examples" :key="eg">{{ eg }}</div>
-              </div>
-
-              <div class="text-gray-400 mb-1">{{ t('deviceAddress.addressHelpPitfalls') }}</div>
-              <ul class="list-disc pl-4 text-gray-600 space-y-1.5">
-                <li v-for="key in addressSpec.pitfallKeys" :key="key">{{ t(key) }}</li>
-              </ul>
-            </div>
-          </el-popover>
-        </div>
-        <!-- 常驻提示：占位符一输入就消失，而地址格式正是最需要一直看见的信息 -->
-        <div v-if="addressExample" class="iot-form-hint is-block">
-          {{ t('deviceAddress.addressHint', { protocol: protocolName, example: addressExample }) }}
-        </div>
-      </el-form-item>
-
-      <el-form-item :label="t('deviceAddress.tag')" prop="label">
-        <el-input
-          v-model="formData.label"
-          :placeholder="t('deviceAddress.tagPlaceholder')"
-          maxlength="100"
-          show-word-limit
-        />
-      </el-form-item>
-
-      <el-form-item prop="dataType">
-        <!-- 类型映射说明：物模型属性过滤与报警比较符都按「类别（Kind）」判定，
-             只给类型名字的话用户看不出 Boolean 与 Float 的区别，遇到"属性不见了"
-             只能猜。气泡放在标签旁，和地址帮助保持同一种交互。 -->
-        <template #label>
-          <span class="inline-flex items-center gap-1">
-            {{ t('deviceAddress.dataType') }}
-            <el-popover
-              v-if="dataTypeKindRows.length"
-              placement="bottom"
-              :width="320"
-              trigger="click"
-            >
-              <template #reference>
-                <el-button
-                  :icon="QuestionFilled"
-                  circle
-                  text
-                  size="small"
-                  :aria-label="t('deviceAddress.kindMapTitle')"
-                />
-              </template>
-              <div class="text-xs leading-5">
-                <div class="font-semibold text-gray-700 mb-2">{{ t('deviceAddress.kindMapTitle') }}</div>
-                <div class="max-h-64 overflow-y-auto space-y-0.5">
-                  <div
-                    v-for="row in dataTypeKindRows"
-                    :key="row.value"
-                    class="flex items-center justify-between gap-3"
-                  >
-                    <span class="font-mono text-gray-800 break-all">{{ row.label }}</span>
-                    <span class="shrink-0 text-gray-500">{{ row.kindLabel }}</span>
-                  </div>
-                </div>
-                <div class="mt-2 text-gray-400">{{ t('deviceAddress.kindMapHint') }}</div>
-              </div>
-            </el-popover>
+      <!-- 基础信息：启停开关收进卡片头，不与一组输入项抢同一条视觉线 -->
+      <section class="dp-card">
+        <header class="dp-card-head">
+          <span class="dp-card-icon" aria-hidden="true">
+            <el-icon><LayoutGrid /></el-icon>
           </span>
-        </template>
-        <el-select
-          v-model="formData.dataType"
-          :placeholder="t('deviceAddress.dataTypePlaceholder')"
-          style="width: 100%"
-          :loading="dataTypeLoading"
-          :loading-text="t('common.loading')"
-          @change="onDataTypeChange"
-        >
-          <el-option
-            v-for="item in dataTypeOptions"
-            :key="item.value"
-            :label="item.label"
-            :value="item.value"
-          />
-        </el-select>
-      </el-form-item>
+          <div class="dp-card-copy">
+            <h3 class="dp-card-title">{{ t('deviceAddress.sectionBasic') }}</h3>
+            <p class="dp-card-desc">{{ t('deviceAddress.sectionBasicDesc') }}</p>
+          </div>
+          <div class="dp-enable">
+            <span class="dp-enable-label">{{ t('common.status') }}</span>
+            <el-switch v-model="formData.status" :active-value="1" :inactive-value="0" />
+          </div>
+        </header>
+        <div class="dp-card-body">
+          <div class="dp-grid">
+            <el-form-item prop="name">
+              <!-- 帮助气泡收进标签行，和「数据类型」保持同一种交互；
+                   输入框因此占满整格，与其它下拉的长度一致 -->
+              <template #label>
+                <span class="inline-flex items-center gap-1">
+                  {{ t('deviceAddress.addressName') }}
+                  <el-popover v-if="addressSpec" placement="bottom" :width="380" trigger="click">
+                    <template #reference>
+                      <el-button
+                        :icon="QuestionFilled"
+                        circle
+                        text
+                        size="small"
+                        :aria-label="t('deviceAddress.addressHelpTitle')"
+                      />
+                    </template>
+                    <div class="text-xs leading-5">
+                      <div class="font-semibold text-gray-700 mb-2">{{ t('deviceAddress.addressHelpTitle') }}</div>
 
-      <el-form-item :label="t('deviceAddress.rwPermission')" prop="rwPermission">
-        <el-select v-model="formData.rwPermission" :placeholder="t('deviceAddress.rwPlaceholder')" style="width: 100%">
-          <el-option
-            v-for="item in rwPermissionOptions"
-            :key="item.value"
-            :label="item.label"
-            :value="item.value"
-          />
-        </el-select>
-      </el-form-item>
+                      <div class="text-gray-400 mb-1">{{ t('deviceAddress.addressHelpSyntax') }}</div>
+                      <div class="font-mono text-gray-800 bg-gray-50 rounded px-2 py-1 mb-3 break-all">
+                        {{ t(addressSpec.templateKey) }}
+                      </div>
 
-      <el-form-item :label="t('deviceAddress.property')" prop="propertyId">
-        <el-select
-          v-model="formData.propertyId"
-          :placeholder="t('deviceAddress.propertyPlaceholder')"
-          clearable
-          :disabled="!deviceModelId"
-          :loading="propertyLoading"
-          style="width: 100%"
-        >
-          <el-option
-            v-for="p in compatiblePropertyOptions"
-            :key="p.id"
-            :label="`${p.identifier} · ${p.name}`"
-            :value="p.id"
-            :disabled="p.status !== 1 && p.id !== formData.propertyId"
-          />
-        </el-select>
-        <div class="iot-form-hint is-block">
-          {{ deviceModelId ? t('deviceAddress.propertyHint') : t('deviceAddress.noModelBound') }}
+                      <div class="text-gray-400 mb-1">{{ t('deviceAddress.addressHelpExamples') }}</div>
+                      <div class="font-mono text-gray-800 mb-3 space-y-0.5">
+                        <div v-for="eg in addressSpec.examples" :key="eg">{{ eg }}</div>
+                      </div>
+
+                      <div class="text-gray-400 mb-1">{{ t('deviceAddress.addressHelpPitfalls') }}</div>
+                      <ul class="list-disc pl-4 text-gray-600 space-y-1.5">
+                        <li v-for="key in addressSpec.pitfallKeys" :key="key">{{ t(key) }}</li>
+                      </ul>
+                    </div>
+                  </el-popover>
+                </span>
+              </template>
+              <el-input
+                v-model="formData.name"
+                :placeholder="addressPlaceholder"
+                maxlength="100"
+                show-word-limit
+              />
+              <!-- 常驻提示：占位符一输入就消失，而地址格式正是最需要一直看见的信息 -->
+              <div v-if="addressExample" class="dp-field-hint is-block">
+                {{ t('deviceAddress.addressHint', { protocol: protocolName, example: addressExample }) }}
+              </div>
+            </el-form-item>
+
+            <el-form-item :label="t('deviceAddress.tag')" prop="label">
+              <el-input
+                v-model="formData.label"
+                :placeholder="t('deviceAddress.tagPlaceholder')"
+                maxlength="100"
+                show-word-limit
+              />
+            </el-form-item>
+
+            <el-form-item prop="dataType">
+              <!-- 类型映射说明：物模型属性过滤与报警比较符都按「类别（Kind）」判定，
+                   只给类型名字的话用户看不出 Boolean 与 Float 的区别，遇到"属性不见了"
+                   只能猜。气泡放在标签旁，和地址帮助保持同一种交互。 -->
+              <template #label>
+                <span class="inline-flex items-center gap-1">
+                  {{ t('deviceAddress.dataType') }}
+                  <el-popover
+                    v-if="dataTypeKindRows.length"
+                    placement="bottom"
+                    :width="320"
+                    trigger="click"
+                  >
+                    <template #reference>
+                      <el-button
+                        :icon="QuestionFilled"
+                        circle
+                        text
+                        size="small"
+                        :aria-label="t('deviceAddress.kindMapTitle')"
+                      />
+                    </template>
+                    <div class="text-xs leading-5">
+                      <div class="font-semibold text-gray-700 mb-2">{{ t('deviceAddress.kindMapTitle') }}</div>
+                      <div class="max-h-64 overflow-y-auto space-y-0.5">
+                        <div
+                          v-for="row in dataTypeKindRows"
+                          :key="row.value"
+                          class="flex items-center justify-between gap-3"
+                        >
+                          <span class="font-mono text-gray-800 break-all">{{ row.label }}</span>
+                          <span class="shrink-0 text-gray-500">{{ row.kindLabel }}</span>
+                        </div>
+                      </div>
+                      <div class="mt-2 text-gray-400">{{ t('deviceAddress.kindMapHint') }}</div>
+                    </div>
+                  </el-popover>
+                </span>
+              </template>
+              <el-select
+                v-model="formData.dataType"
+                :placeholder="t('deviceAddress.dataTypePlaceholder')"
+                style="width: 100%"
+                :loading="dataTypeLoading"
+                :loading-text="t('common.loading')"
+                @change="onDataTypeChange"
+              >
+                <el-option
+                  v-for="item in dataTypeOptions"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item :label="t('deviceAddress.rwPermission')" prop="rwPermission">
+              <el-select
+                v-model="formData.rwPermission"
+                :placeholder="t('deviceAddress.rwPlaceholder')"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in rwPermissionOptions"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item :label="t('common.description')" prop="description" class="dp-span-2">
+              <el-input
+                v-model="formData.description"
+                :placeholder="t('deviceAddress.descPlaceholder')"
+                type="textarea"
+                :rows="2"
+                maxlength="200"
+                show-word-limit
+              />
+            </el-form-item>
+          </div>
         </div>
-        <div v-if="selectedPropertyReadSuppressed" class="iot-form-hint is-block">
-          {{ t('deviceAddress.propertyWriteonlyHint') }}
+      </section>
+
+      <!-- 采集与绑定：物模型属性定义用途，采集组/扫描频率定义节奏 -->
+      <section class="dp-card">
+        <header class="dp-card-head">
+          <span class="dp-card-icon" aria-hidden="true">
+            <el-icon><Connection /></el-icon>
+          </span>
+          <div class="dp-card-copy">
+            <h3 class="dp-card-title">{{ t('deviceAddress.sectionCollect') }}</h3>
+            <p class="dp-card-desc">{{ t('deviceAddress.sectionCollectDesc') }}</p>
+          </div>
+        </header>
+        <div class="dp-card-body">
+          <div class="dp-grid">
+            <el-form-item :label="t('deviceAddress.property')" prop="propertyId">
+              <el-select
+                v-model="formData.propertyId"
+                :placeholder="t('deviceAddress.propertyPlaceholder')"
+                clearable
+                :disabled="!deviceModelId"
+                :loading="propertyLoading"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="p in compatiblePropertyOptions"
+                  :key="p.id"
+                  :label="`${p.identifier} · ${p.name}`"
+                  :value="p.id"
+                  :disabled="p.status !== 1 && p.id !== formData.propertyId"
+                />
+              </el-select>
+              <div class="dp-field-hint is-block">
+                {{ deviceModelId ? t('deviceAddress.propertyHint') : t('deviceAddress.noModelBound') }}
+              </div>
+              <div v-if="selectedPropertyReadSuppressed" class="dp-field-hint is-block is-warning">
+                {{ t('deviceAddress.propertyWriteonlyHint') }}
+              </div>
+            </el-form-item>
+
+            <el-form-item :label="t('deviceAddress.collectorGroup')" prop="groupId">
+              <el-select
+                v-model="formData.groupId"
+                :placeholder="t('deviceAddress.collectorGroupPlaceholder')"
+                clearable
+                :loading="groupLoading"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="g in groupOptions"
+                  :key="g.id"
+                  :label="g.status === 1 ? g.name : `${g.name} (${t('collectorGroup.disabledShort')})`"
+                  :value="g.id"
+                  :disabled="g.status !== 1 && g.id !== formData.groupId"
+                />
+              </el-select>
+              <div class="dp-field-hint is-block">
+                {{ formData.groupId ? t('deviceAddress.collectorGroupHint') : t('deviceAddress.collectorGroupEmptyHint') }}
+              </div>
+            </el-form-item>
+
+            <el-form-item :label="t('deviceAddress.scanFrequency')" prop="scanFrequency">
+              <el-select
+                v-model="formData.scanFrequency"
+                :placeholder="t('deviceAddress.scanPlaceholder')"
+                :disabled="!!formData.groupId"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in scanFrequencyOptions"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
+              <div class="dp-field-hint is-block">{{ t('deviceAddress.scanFrequencyInlineHint') }}</div>
+            </el-form-item>
+          </div>
         </div>
-      </el-form-item>
+      </section>
 
-      <el-form-item :label="t('deviceAddress.collectorGroup')" prop="groupId">
-        <el-select
-          v-model="formData.groupId"
-          :placeholder="t('deviceAddress.collectorGroupPlaceholder')"
-          clearable
-          :loading="groupLoading"
-          style="width: 100%"
-        >
-          <el-option
-            v-for="g in groupOptions"
-            :key="g.id"
-            :label="g.status === 1 ? g.name : `${g.name} (${t('collectorGroup.disabledShort')})`"
-            :value="g.id"
-            :disabled="g.status !== 1 && g.id !== formData.groupId"
-          />
-        </el-select>
-        <div class="iot-form-hint is-block">
-          {{ formData.groupId ? t('deviceAddress.collectorGroupHint') : t('deviceAddress.collectorGroupEmptyHint') }}
-        </div>
-      </el-form-item>
-
-      <el-form-item :label="t('deviceAddress.scanFrequency')" prop="scanFrequency">
-        <el-select
-          v-model="formData.scanFrequency"
-          :placeholder="t('deviceAddress.scanPlaceholder')"
-          :disabled="!!formData.groupId"
-          style="width: 100%"
-        >
-          <el-option
-            v-for="item in scanFrequencyOptions"
-            :key="item.value"
-            :label="item.label"
-            :value="item.value"
-          />
-        </el-select>
-      </el-form-item>
-
-      <!-- 工程量变换：采集侧执行一次，实时值、报警、触发规则与所有推送（含时序库）共用 -->
-      <el-form-item :label="t('deviceAddress.engineeringTransform')">
-        <MappingTransformEditor
-          :transforms="formData.transformRows"
-          :ops="ADDRESS_TRANSFORM_OPS"
-          :show-title="false"
-          label-prefix="deviceAddress.transformEditor"
-        />
-        <div class="iot-form-hint is-block">
-          {{ t('deviceAddress.transformHint') }}
-        </div>
-      </el-form-item>
-
-      <!-- 报警条件：开关 + 比较符 + 操作数。比较符与操作数控件都按数据类型的类别切换 -->
-      <el-form-item :label="t('deviceAddress.thresholdAlarm')" prop="thresholdEnabled">
-        <el-switch
-          v-model="formData.thresholdEnabled"
-          :active-value="1"
-          :inactive-value="0"
-          :disabled="conditionUnsupported"
-          :active-text="t('common.enabled')"
-          :inactive-text="t('common.enableDisable.off')"
-        />
-        <div class="iot-form-hint is-block">
-          {{ conditionUnsupported ? t('deviceAddress.opUnsupportedKind') : t('deviceAddress.thresholdHint') }}
-        </div>
-      </el-form-item>
-
-      <template v-if="formData.thresholdEnabled === 1 && !conditionUnsupported">
-        <el-form-item :label="t('deviceAddress.thresholdOp')" prop="thresholdOp">
-          <el-select v-model="formData.thresholdOp" :placeholder="t('deviceAddress.opPlaceholder')" style="width: 100%">
-            <el-option v-for="op in availableOperators" :key="op" :label="operatorLabel(op)" :value="op" />
-          </el-select>
-        </el-form-item>
-
-        <!-- 区间：两个数值槽位（下限、上限），位置固定，不检查的那侧留空 -->
-        <template v-if="formData.thresholdOp === 'range'">
-          <el-form-item :label="t('deviceAddress.opRangeLow')" prop="thresholdValues">
-            <el-input-number
-              v-model="formData.thresholdValues[0]"
-              :controls="false"
-              :placeholder="t('deviceAddress.boundUnchecked')"
-              style="width: 100%"
+      <!-- 报警条件：开关进卡片头，启用时才展开比较符与操作数 -->
+      <section class="dp-card">
+        <header class="dp-card-head">
+          <span class="dp-card-icon" aria-hidden="true">
+            <el-icon><Bell /></el-icon>
+          </span>
+          <div class="dp-card-copy">
+            <h3 class="dp-card-title">{{ t('deviceAddress.thresholdAlarm') }}</h3>
+            <p class="dp-card-desc">{{ t('deviceAddress.thresholdHint') }}</p>
+          </div>
+          <div class="dp-enable">
+            <span class="dp-enable-label">{{ t('common.enabled') }}</span>
+            <el-switch
+              v-model="formData.thresholdEnabled"
+              :active-value="1"
+              :inactive-value="0"
+              :disabled="conditionUnsupported"
             />
-          </el-form-item>
-          <el-form-item :label="t('deviceAddress.opRangeHigh')">
-            <el-input-number
-              v-model="formData.thresholdValues[1]"
-              :controls="false"
-              :placeholder="t('deviceAddress.boundUnchecked')"
-              style="width: 100%"
-            />
-          </el-form-item>
-        </template>
+          </div>
+        </header>
+        <div class="dp-card-body">
+          <p v-if="!currentKind" class="dp-card-empty">
+            {{ t('deviceAddress.alarmPickType') }}
+          </p>
+          <p v-else-if="conditionUnsupported" class="dp-card-empty">
+            {{ t('deviceAddress.opUnsupportedKind') }}
+          </p>
+          <div v-else-if="formData.thresholdEnabled === 1" class="dp-grid">
+            <el-form-item :label="t('deviceAddress.thresholdOp')" prop="thresholdOp">
+              <el-select
+                v-model="formData.thresholdOp"
+                :placeholder="t('deviceAddress.opPlaceholder')"
+                style="width: 100%"
+              >
+                <el-option v-for="op in availableOperators" :key="op" :label="operatorLabel(op)" :value="op" />
+              </el-select>
+            </el-form-item>
 
-        <!-- 布尔：值就是真/假，用下拉而不是输入框，避免运维手敲 "on" 这类认不出的字面量 -->
-        <el-form-item v-else-if="currentKind === 'bool'" :label="t('deviceAddress.boolValue')">
-          <el-select v-model="formData.thresholdValues[0]" style="width: 100%">
-            <el-option :label="t('deviceAddress.boolTrue')" value="1" />
-            <el-option :label="t('deviceAddress.boolFalse')" value="0" />
-          </el-select>
-        </el-form-item>
+            <el-form-item v-if="formData.thresholdOp" :label="t('deviceAddress.thresholdValue')" prop="thresholdValues">
+              <div class="dp-operand">
+                <!-- 区间：两个固定槽位（下限、上限），不检查的那侧留空 -->
+                <template v-if="formData.thresholdOp === 'range'">
+                  <el-input-number
+                    v-model="formData.thresholdValues[0]"
+                    class="dp-operand-input"
+                    :controls="false"
+                    :placeholder="t('deviceAddress.opRangeLow')"
+                  />
+                  <span class="dp-range-sep" aria-hidden="true">~</span>
+                  <el-input-number
+                    v-model="formData.thresholdValues[1]"
+                    class="dp-operand-input"
+                    :controls="false"
+                    :placeholder="t('deviceAddress.opRangeHigh')"
+                  />
+                </template>
 
-        <!-- 文本集合：多值输入 -->
-        <el-form-item v-else-if="formData.thresholdOp === 'in'" :label="t('deviceAddress.textSet')">
-          <el-select
-            v-model="formData.thresholdValues"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            :reserve-keyword="false"
-            :placeholder="t('deviceAddress.textSetPlaceholder')"
-            style="width: 100%"
+                <!-- 文本集合：多值输入 -->
+                <el-select
+                  v-else-if="formData.thresholdOp === 'in'"
+                  v-model="formData.thresholdValues"
+                  class="dp-operand-wide"
+                  multiple
+                  filterable
+                  allow-create
+                  default-first-option
+                  :reserve-keyword="false"
+                  :placeholder="t('deviceAddress.textSetPlaceholder')"
+                />
+
+                <!-- 布尔：值就是真/假，用下拉避免手敲 "on" 这类认不出的字面量 -->
+                <el-select
+                  v-else-if="currentKind === 'bool'"
+                  v-model="formData.thresholdValues[0]"
+                  class="dp-operand-input"
+                >
+                  <el-option :label="t('deviceAddress.boolTrue')" value="1" />
+                  <el-option :label="t('deviceAddress.boolFalse')" value="0" />
+                </el-select>
+
+                <!-- 数值单比较 / 文本等于不等于 -->
+                <el-input-number
+                  v-else-if="currentKind !== 'string'"
+                  v-model="formData.thresholdValues[0]"
+                  class="dp-operand-input"
+                  :controls="false"
+                />
+                <el-input
+                  v-else
+                  v-model="formData.thresholdValues[0]"
+                  class="dp-operand-input"
+                  :placeholder="t('deviceAddress.textValuePlaceholder')"
+                />
+              </div>
+            </el-form-item>
+          </div>
+          <p v-else class="dp-card-empty">
+            {{ t('deviceAddress.thresholdOffBody') }}
+          </p>
+        </div>
+      </section>
+
+      <!-- 工程量变换：采集侧执行一次，实时值/报警/触发规则/推送共用 -->
+      <section class="dp-card">
+        <header class="dp-card-head">
+          <span class="dp-card-icon" aria-hidden="true">
+            <el-icon><Operation /></el-icon>
+          </span>
+          <div class="dp-card-copy">
+            <h3 class="dp-card-title">{{ t('deviceAddress.engineeringTransform') }}</h3>
+            <p class="dp-card-desc">{{ t('deviceAddress.sectionTransformDesc') }}</p>
+          </div>
+        </header>
+        <div class="dp-card-body">
+          <MappingTransformEditor
+            :transforms="formData.transformRows"
+            :ops="ADDRESS_TRANSFORM_OPS"
+            :show-title="false"
+            label-prefix="deviceAddress.transformEditor"
           />
-        </el-form-item>
-
-        <!-- 数值单比较 / 文本等于不等于：一个操作数，控件随类别切换 -->
-        <el-form-item v-else :label="t('deviceAddress.thresholdValue')">
-          <el-input-number
-            v-if="currentKind !== 'string'"
-            v-model="formData.thresholdValues[0]"
-            :controls="false"
-            style="width: 100%"
-          />
-          <el-input v-else v-model="formData.thresholdValues[0]" :placeholder="t('deviceAddress.textValuePlaceholder')" />
-        </el-form-item>
-      </template>
-
-      <el-form-item :label="t('common.description')" prop="description">
-        <el-input
-          v-model="formData.description"
-          :placeholder="t('deviceAddress.descPlaceholder')"
-          type="textarea"
-          :rows="3"
-          maxlength="200"
-          show-word-limit
-        />
-      </el-form-item>
-
-      <el-form-item :label="t('common.status')" prop="status">
-        <el-switch
-          v-model="formData.status"
-          :active-value="1"
-          :inactive-value="0"
-          :active-text="t('common.enabled')"
-          :inactive-text="t('common.enableDisable.off')"
-        />
-      </el-form-item>
+          <p class="dp-field-hint dp-transform-hint">{{ t('deviceAddress.transformHint') }}</p>
+        </div>
+      </section>
     </el-form>
 
     <template #footer>
-      <div class="flex items-center justify-end gap-2">
-        <el-button @click="visible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="submitting" @click="handleSubmit">
-          {{ isEdit ? t('common.save') : t('common.submit') }}
-        </el-button>
+      <div class="dp-dialog-footer">
+        <p class="dp-footer-hint">{{ t('deviceAddress.formFooterHint') }}</p>
+        <div class="dp-footer-actions">
+          <el-button @click="visible = false">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" :loading="submitting" @click="handleSubmit">
+            {{ isEdit ? t('common.save') : t('common.submit') }}
+          </el-button>
+        </div>
       </div>
     </template>
   </el-dialog>
@@ -335,7 +434,13 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { IconHelpCircleFilled as QuestionFilled } from '@tabler/icons-vue'
+import {
+  IconBell as Bell,
+  IconHelpCircleFilled as QuestionFilled,
+  IconLayoutGrid as LayoutGrid,
+  IconMathFunction as Operation,
+  IconPlugConnected as Connection,
+} from '@tabler/icons-vue'
 import {
   addDeviceAddress,
   updateDeviceAddress,
@@ -362,6 +467,8 @@ const props = defineProps({
   deviceId: { type: String, required: true },
   // 地址写法、数据类型随协议不同，必须由调用页带进来（实时页取快照里的协议名）
   protocolName: { type: String, default: '' },
+  // 页头副标题里显示「设备 名 · 说明」；取不到时只显示说明
+  deviceName: { type: String, default: '' },
   // 空串 = 新增；非空 = 编辑该点位
   addressId: { type: String, default: '' },
 })
@@ -858,3 +965,241 @@ async function handleSubmit() {
   }
 }
 </script>
+
+<style scoped>
+/* ---------- 弹窗头：eyebrow → 标题 → 说明，三级递进 ---------- */
+.dp-dialog-head {
+  padding-right: 28px;
+}
+
+.dp-dialog-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.dp-dialog-eyebrow-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+}
+
+.dp-dialog-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dp-dialog-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.dp-head-tag {
+  font-weight: 500;
+}
+
+.dp-dialog-sub {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+.dp-form {
+  padding-top: 2px;
+}
+
+/* ---------- 分区卡片：白面浮在浅色画布上，用发丝线收边 ---------- */
+.dp-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.dp-card + .dp-card {
+  margin-top: 16px;
+}
+
+.dp-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.dp-card-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  font-size: 16px;
+  color: var(--brand);
+  background: linear-gradient(180deg, var(--brand-tint) 0%, var(--brand-soft) 100%);
+  border: 1px solid var(--brand-line);
+  border-radius: 10px;
+}
+
+.dp-card-copy {
+  flex: 1;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.dp-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.dp-card-desc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+/* 开关是整张卡的开关，与标题同排靠右，不再独自占一行 */
+.dp-enable {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.dp-enable-label {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.dp-card-body {
+  padding: 20px 22px;
+}
+
+.dp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 20px;
+  margin-bottom: -16px;
+}
+
+.dp-grid :deep(.el-form-item) {
+  margin-bottom: 16px;
+}
+
+/* 一侧字段带说明文字时，内容区会被网格拉高；两侧都钉到顶部才能齐平 */
+.dp-grid :deep(.el-form-item__content) {
+  align-items: flex-start;
+  align-content: flex-start;
+}
+
+.dp-grid .dp-span-2 {
+  grid-column: span 2;
+}
+
+.dp-field-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+.dp-field-hint.is-block {
+  flex: 0 0 100%;
+}
+
+.dp-field-hint.is-warning {
+  color: var(--warning);
+}
+
+/* 未配置任何内容时的安静占位，与可编辑区区分开 */
+.dp-card-empty {
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--ink-4);
+  background: #f8fafc;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+}
+
+/* 阈值操作数：同一行内并排，窄屏自然折行 */
+.dp-operand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.dp-operand-input {
+  width: 120px;
+}
+
+.dp-operand-wide {
+  flex: 1;
+  min-width: 0;
+}
+
+.dp-range-sep {
+  color: var(--ink-4);
+}
+
+.dp-transform-hint {
+  margin-top: 12px;
+}
+
+.dp-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dp-footer-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+.dp-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 820px) {
+  .dp-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dp-grid .dp-span-2 {
+    grid-column: auto;
+  }
+
+  .dp-dialog-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+</style>

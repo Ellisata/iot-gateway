@@ -382,6 +382,7 @@
     <AddressFormDialog
       v-model="formDialogVisible"
       :device-id="deviceObjectId"
+      :device-name="deviceObjectName"
       :protocol-name="protocolName"
       :address-id="editingAddressId"
       @saved="handleDialogSaved"

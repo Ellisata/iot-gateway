@@ -7,9 +7,14 @@
 ::  iot-gateway one-shot production build
 ::  Frontend build -> sync to backend/web/dist -> compile Go
 ::  Usage: build.bat          build Linux amd64 + arm64 + arm32 + Windows amd64 (default)
+::         build.bat all      same as the default (explicit)
+::         build.bat linux    Linux amd64 only
 ::         build.bat windows  Windows amd64 only (native, fastest)
+::         build.bat native   current platform only (on Windows: same as windows)
 ::         build.bat arm64    Linux arm64 only (ARM64 IPC / Raspberry Pi)
 ::         build.bat arm32    Linux arm 32-bit only (ARMv7 board, GOARM=7 pinned)
+::  Unknown targets are rejected. They used to fall through to the full build
+::  silently, which looked like "linux only" but compiled all four platforms.
 ::  Output: the default mode delegates to backend\package.bat; artifacts land in
 ::          the repo root:
 ::          iot-gateway / iot-gateway-linux-arm64 / iot-gateway-linux-arm / iot-gateway.exe
@@ -38,41 +43,90 @@ for /f "usebackq delims=" %%v in (`git -C "%ROOT%." describe --tags --abbrev^=0 
 :build_version_ready
 if "%BUILD_VERSION%"=="" set "BUILD_VERSION=dev"
 
-:: all (default, everything) / windows / arm64 / arm32
+:: all (default, everything) / linux / windows / arm64 / arm32
 set BUILD_ALL=1
+set BUILD_LINUX=0
 set BUILD_ARM=0
 set BUILD_ARM32=0
-if /i "%1"=="windows" (
-    set BUILD_ALL=0
+set "BUILD_TARGET=%1"
+set "BUILD_TARGET_OK=1"
+if "%BUILD_TARGET%"=="" goto :target_ready
+set "BUILD_TARGET_OK=0"
+if /i "%BUILD_TARGET%"=="all" (
+    set BUILD_TARGET_OK=1
+    set BUILD_ALL=1
+    set BUILD_LINUX=0
     set BUILD_ARM=0
     set BUILD_ARM32=0
 )
-if /i "%1"=="win" (
+if /i "%BUILD_TARGET%"=="linux" (
+    set BUILD_TARGET_OK=1
     set BUILD_ALL=0
+    set BUILD_LINUX=1
     set BUILD_ARM=0
     set BUILD_ARM32=0
 )
-if /i "%1"=="arm64" (
+if /i "%BUILD_TARGET%"=="windows" (
+    set BUILD_TARGET_OK=1
     set BUILD_ALL=0
+    set BUILD_LINUX=0
+    set BUILD_ARM=0
+    set BUILD_ARM32=0
+)
+if /i "%BUILD_TARGET%"=="win" (
+    set BUILD_TARGET_OK=1
+    set BUILD_ALL=0
+    set BUILD_LINUX=0
+    set BUILD_ARM=0
+    set BUILD_ARM32=0
+)
+rem "native" exists in build.sh as "current platform"; this script only runs on
+rem Windows, so it maps to the Windows amd64 build.
+if /i "%BUILD_TARGET%"=="native" (
+    set BUILD_TARGET_OK=1
+    set BUILD_ALL=0
+    set BUILD_LINUX=0
+    set BUILD_ARM=0
+    set BUILD_ARM32=0
+)
+if /i "%BUILD_TARGET%"=="arm64" (
+    set BUILD_TARGET_OK=1
+    set BUILD_ALL=0
+    set BUILD_LINUX=0
     set BUILD_ARM=1
     set BUILD_ARM32=0
 )
-if /i "%1"=="arm32" (
+if /i "%BUILD_TARGET%"=="arm32" (
+    set BUILD_TARGET_OK=1
     set BUILD_ALL=0
+    set BUILD_LINUX=0
     set BUILD_ARM=0
     set BUILD_ARM32=1
 )
-if /i "%1"=="arm7" (
+if /i "%BUILD_TARGET%"=="arm7" (
+    set BUILD_TARGET_OK=1
     set BUILD_ALL=0
+    set BUILD_LINUX=0
     set BUILD_ARM=0
     set BUILD_ARM32=1
 )
 rem "arm" means 32-bit by Go convention (GOARCH=arm); 64-bit is arm64.
-if /i "%1"=="arm" (
+if /i "%BUILD_TARGET%"=="arm" (
+    set BUILD_TARGET_OK=1
     set BUILD_ALL=0
+    set BUILD_LINUX=0
     set BUILD_ARM=0
     set BUILD_ARM32=1
 )
+:: Unknown target must fail loudly: silently falling back to the full build
+:: means "build.bat linux" compiles four platforms instead of one.
+if "%BUILD_TARGET_OK%"=="0" (
+    echo [FAIL] Unknown target: %BUILD_TARGET%
+    echo        usage: build.bat [all ^| linux ^| windows ^| win ^| native ^| arm64 ^| arm32 ^| arm7 ^| arm]
+    endlocal
+    exit /b 1
+)
+:target_ready
 
 echo.
 echo [1/3] Building frontend (npm run build) ...
@@ -92,7 +146,9 @@ echo [3/3] Compiling Go backend ...
 pushd "%ROOT%backend"
 
 if "%BUILD_ALL%"=="0" (
-    if "%BUILD_ARM%"=="1" (
+    if "%BUILD_LINUX%"=="1" (
+        call :build_linux
+    ) else if "%BUILD_ARM%"=="1" (
         call :build_arm64
     ) else if "%BUILD_ARM32%"=="1" (
         call :build_arm32
@@ -110,7 +166,11 @@ if "%BUILD_ALL%"=="0" (
 echo.
 echo ============================================
 if "%BUILD_ALL%"=="0" (
-  if "%BUILD_ARM%"=="1" (
+  if "%BUILD_LINUX%"=="1" (
+    echo   Build complete:
+    echo   - Linux amd64 : %ROOT%backend\iot-gateway
+    echo   - Plugins     : %ROOT%backend\plugins-linux
+  ) else if "%BUILD_ARM%"=="1" (
     echo   Build complete:
     echo   - Linux arm64 : %ROOT%backend\iot-gateway-linux-arm64
     echo   - Plugins     : %ROOT%backend\plugins-linux-arm64
@@ -148,6 +208,25 @@ echo [FAIL] Build failed, see the log above.
 pause
 endlocal
 exit /b 1
+
+:build_linux
+echo.
+echo   Compiling Linux amd64...
+set CGO_ENABLED=0
+set GOOS=linux
+set GOARCH=amd64
+set GOARM=
+go build -ldflags="-s -w -X main.version=%BUILD_VERSION%" -o iot-gateway .
+if errorlevel 1 (
+    echo [FAIL] Linux amd64 build failed!
+    exit /b 1
+)
+for /f %%i in ('powershell -Command "Get-ChildItem iot-gateway ^| ForEach-Object { [math]::Round($_.Length/1MB, 2) }"') do (
+    echo [OK] Linux amd64 build successful! Size: %%i MB
+)
+call :build_plugins linux amd64 "%ROOT%backend\plugins-linux"
+if errorlevel 1 exit /b 1
+exit /b 0
 
 :build_windows
 echo.

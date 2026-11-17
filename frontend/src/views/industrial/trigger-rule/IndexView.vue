@@ -492,7 +492,7 @@ fetchList()
   gap: 2px;
 }
 .live-rule-name {
-  color: var(--ink-1);
+  color: var(--ink);
 }
 .live-rule-code {
   font-family: var(--font-mono);

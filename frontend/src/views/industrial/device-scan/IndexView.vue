@@ -16,9 +16,18 @@
         <h1 class="page-title">{{ t('menu.deviceScan') }}</h1>
         <p class="page-sub">{{ t('deviceScan.intro') }}</p>
       </div>
-      <div class="page-stat">
-        <span class="page-stat-num">{{ displayFound }}</span>
-        <span class="page-stat-label">{{ t('deviceScan.foundUnit') }}</span>
+      <div class="page-stat" :class="{ 'is-idle': !job }">
+        <span class="page-stat-mark" aria-hidden="true">
+          <el-icon><ScanRadar /></el-icon>
+        </span>
+        <div class="page-stat-body">
+          <span class="page-stat-label">{{ t('deviceScan.statLabel') }}</span>
+          <span v-if="job" class="page-stat-value">
+            <span class="page-stat-num">{{ displayFound }}</span>
+            <span class="page-stat-unit">{{ t('deviceScan.foundUnitShort') }}</span>
+          </span>
+          <span v-else class="page-stat-idle">{{ t('deviceScan.notStarted') }}</span>
+        </div>
       </div>
     </header>
 
@@ -97,7 +106,7 @@
         </div>
       </div>
 
-      <div class="config-body">
+      <div class="config-body" :class="{ 'has-aside': currentProtocol?.description }">
         <el-form :label-width="formLabelWidth" label-position="right">
           <el-form-item :label="t('deviceScan.protocol')" required>
             <el-select
@@ -119,12 +128,6 @@
             <span v-if="currentProtocol && !currentProtocol.protocolId" class="field-warn">
               {{ t('deviceScan.protocolRowMissing') }}
             </span>
-            <!-- 协议说明是**协议级**的（"这个协议的扫描是怎么做的"），不是扫描参数
-                 的一部分，所以挂在这一行、与网段/端口的提示同款；放在参数块里会
-                 变成一堵横跨整张卡片的通栏文字，粘在最后一个字段下面。 -->
-            <div v-if="currentProtocol?.description" class="field-desc">
-              {{ currentProtocol.description }}
-            </div>
           </el-form-item>
 
           <el-form-item :label="t('deviceScan.subnet')">
@@ -179,6 +182,19 @@
             />
           </div>
         </el-form>
+
+        <!-- 协议说明是**协议级**的（"这个协议的扫描是怎么做的"），不是扫描参数
+             的一部分。挂在协议行下会让一堵长文横跨整张卡片、把字段列推到左边；
+             收进右侧说明栏后，表单与解释各占一列，宽屏下不再出现大片留白。 -->
+        <aside v-if="currentProtocol?.description" class="protocol-aside">
+          <div class="aside-head">
+            <span class="aside-mark" aria-hidden="true">
+              <el-icon><InfoCircle /></el-icon>
+            </span>
+            <p class="aside-title">{{ t('deviceScan.protocolHelp') }}</p>
+          </div>
+          <p class="aside-text">{{ currentProtocol.description }}</p>
+        </aside>
       </div>
     </section>
 
@@ -263,8 +279,10 @@
       </div>
     </section>
 
-    <!-- ========== 扫描结果 ========== -->
-    <section v-if="job" class="panel results-panel enter" style="animation-delay: 180ms">
+    <!-- ========== 扫描结果 ==========
+         从进页面起就占住这块空间：配置卡下面直接是结果区，页面的层次是
+         「页头 → 配置 → 结果」，而不是扫之前只剩一张孤零零的配置卡。 -->
+    <section v-if="available" class="panel results-panel enter" style="animation-delay: 180ms">
       <div class="toolbar">
         <div class="toolbar-lead">
           <span class="toolbar-mark" aria-hidden="true">
@@ -276,7 +294,10 @@
           </div>
         </div>
         <div class="toolbar-actions">
+          <!-- 还没有扫描任务时，这里只有一个永远禁用的「添加为设备（0）」，
+               不如先不出现：动作跟着结果一起出现在工具条上。 -->
           <el-button
+            v-if="job"
             type="primary"
             :icon="Plus"
             :disabled="selectedRows.length === 0"
@@ -373,7 +394,7 @@
             <span class="empty-mark" aria-hidden="true">
               <el-icon><ScanRadar /></el-icon>
             </span>
-            <p class="empty-title">{{ t('deviceScan.noResult') }}</p>
+            <p class="empty-title">{{ job ? t('deviceScan.noResult') : t('deviceScan.idleTitle') }}</p>
             <p class="empty-hint">
               {{ scanning ? t('deviceScan.scanningHint') : t('deviceScan.emptyHint') }}
             </p>
@@ -594,6 +615,11 @@ const protocols = computed(() =>
   })),
 )
 const subnets = computed(() => caps.value?.subnets ?? [])
+// 能扫描（功能开、有协议、有网段）时才摆出结果区：否则那里只会是一块
+// 永远不会有内容的空表，与上方"为什么不能扫"的通知条重复。
+const available = computed(
+  () => !!caps.value?.enabled && protocols.value.length > 0 && subnets.value.length > 0,
+)
 const devices = computed(() => job.value?.devices ?? [])
 const scanErrors = computed(() => job.value?.errors ?? [])
 const currentProtocol = computed(
@@ -1220,7 +1246,7 @@ async function copyJson(text) {
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 20px;
+  margin-bottom: 22px;
 }
 
 .eyebrow {
@@ -1258,25 +1284,82 @@ async function copyJson(text) {
   color: var(--ink-3);
 }
 
+/* 右侧发现计数：不再是一个飘在页头基线上的数字，而是一枚与面板同族的
+   小卡片 —— 图标底座 + 标签 + 数值，页头因此有了第二个视觉锚点。 */
 .page-stat {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding-bottom: 4px;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px 10px 12px;
   white-space: nowrap;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.page-stat-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
+.page-stat-mark .el-icon {
+  font-size: 19px;
+}
+
+/* 还没扫过时把图标底座压成中性灰：计数卡不抢「开始扫描」的注意力 */
+.page-stat.is-idle .page-stat-mark {
+  color: var(--ink-4);
+  background: #f4f6fa;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.page-stat-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.page-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.06em;
+  color: var(--ink-4);
+}
+
+.page-stat-value {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
 }
 
 .page-stat-num {
-  font-size: 22px;
+  font-size: 21px;
   font-weight: 650;
-  line-height: 1;
+  line-height: 1.15;
   letter-spacing: -0.02em;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
 
-.page-stat-label {
-  font-size: 12px;
+.page-stat-unit {
+  font-size: 11.5px;
+  color: var(--ink-4);
+}
+
+.page-stat-idle {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
   color: var(--ink-4);
 }
 
@@ -1328,12 +1411,14 @@ async function copyJson(text) {
 
 /* ---------- 面板 / 工具条 ---------- */
 .panel {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   overflow: hidden;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 18px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 12px 32px -28px rgba(15, 23, 42, 0.28);
 }
 
 .panel:last-of-type {
@@ -1346,7 +1431,7 @@ async function copyJson(text) {
   align-items: center;
   justify-content: space-between;
   gap: 12px 16px;
-  padding: 14px 20px;
+  padding: 16px 20px;
   background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
   border-bottom: 1px solid var(--line-soft);
 }
@@ -1362,16 +1447,16 @@ async function copyJson(text) {
   display: grid;
   flex: none;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   color: var(--brand);
   background: var(--brand-soft);
-  border-radius: 9px;
+  border-radius: 10px;
   box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
 }
 
 .toolbar-mark .el-icon {
-  font-size: 17px;
+  font-size: 18px;
 }
 
 .toolbar-copy {
@@ -1380,7 +1465,7 @@ async function copyJson(text) {
 
 .toolbar-title {
   margin: 0;
-  font-size: 13.5px;
+  font-size: 14.5px;
   font-weight: 650;
   letter-spacing: -0.01em;
   color: var(--ink);
@@ -1416,9 +1501,23 @@ async function copyJson(text) {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------- 扫描配置 ---------- */
+/* ---------- 扫描配置 ----------
+   表单与协议说明分两列：宽屏下右侧说明栏填掉原先的大片留白，
+   窄屏回到单列，说明栏落在表单下方。 */
 .config-body {
-  padding: 20px 20px 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 28px;
+  padding: 20px 20px 6px;
+}
+
+.config-body.has-aside {
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+
+.config-body > .el-form {
+  min-width: 0;
 }
 
 .config-body :deep(.el-form-item__label) {
@@ -1469,12 +1568,47 @@ async function copyJson(text) {
   color: #c2410c;
 }
 
-.field-desc {
-  flex: 0 0 100%;
-  margin-top: 6px;
-  font-size: 12px;
-  line-height: 1.7;
-  color: var(--ink-4);
+/* 协议说明栏：与通知条同一族浅蓝，但用竖向留白而不是左边线，
+   读起来是一段注解而不是一条警告。 */
+.protocol-aside {
+  padding: 16px;
+  background: linear-gradient(180deg, #fbfdff 0%, var(--brand-tint) 100%);
+  border: 1px solid var(--brand-line);
+  border-radius: 14px;
+}
+
+.aside-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.aside-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--brand);
+}
+
+.aside-mark .el-icon {
+  font-size: 17px;
+}
+
+.aside-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--ink-2);
+}
+
+.aside-text {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--ink-3);
 }
 
 .field-hint {
@@ -1500,6 +1634,8 @@ async function copyJson(text) {
 
 .subnet-group :deep(.el-checkbox) {
   height: auto;
+  max-width: 100%;
+  min-width: 0;
   margin-right: 0;
   padding: 7px 11px;
   background: #fff;
@@ -1520,10 +1656,14 @@ async function copyJson(text) {
 }
 
 .subnet-group :deep(.el-checkbox__label) {
+  min-width: 0;
   padding-left: 8px;
   font-size: 12.5px;
   font-weight: 500;
+  line-height: 1.5;
   color: var(--ink-2);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .subnet-group :deep(.el-checkbox.is-checked .el-checkbox__label) {
@@ -1536,6 +1676,8 @@ async function copyJson(text) {
   font-weight: 400;
   color: var(--ink-4);
   font-variant-numeric: tabular-nums;
+  /* 网卡名与地址数是同一个读数：宁可整体换行，也不在 "·" 前断开 */
+  white-space: nowrap;
 }
 
 .subnet-group :deep(.el-checkbox.is-disabled) {
@@ -2011,15 +2153,18 @@ async function copyJson(text) {
 }
 
 /* ---------- 窄屏 ---------- */
+@media (max-width: 1200px) {
+  .config-body.has-aside {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+}
+
 @media (max-width: 900px) {
   .page-head {
     flex-direction: column;
     align-items: flex-start;
-    gap: 12px;
-  }
-
-  .page-stat {
-    padding-bottom: 0;
+    gap: 14px;
   }
 
   .progress-meta {

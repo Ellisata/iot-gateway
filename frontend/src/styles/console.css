@@ -809,6 +809,50 @@
   overflow-y: auto;
 }
 
+/* 点位表单弹窗：页头带说明、正文按卡片分组，背景用画布色把白卡托起来。
+   teleport 之后 scoped 样式够不着弹窗外壳，这三段统一放在全局。 */
+/* 页头是白到 #fbfcfe 的渐变；正文与卡片同色（--surface），
+   分区靠卡片的发丝边线与间距表达，不再用画布灰把卡片"托"起来 */
+.address-form-dialog .el-dialog__header {
+  padding: 22px 26px 18px;
+  background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
+}
+
+.address-form-dialog .el-dialog__body {
+  max-height: calc(100vh - 240px);
+  padding: 20px 24px 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+}
+
+.address-form-dialog .el-dialog__footer {
+  padding: 14px 24px;
+  background: var(--surface);
+}
+
+/* 触发规则弹窗与点位表单同一套版式：页头渐变、正文卡片分组、内容长时 body 自滚 */
+.trigger-rule-dialog .el-dialog__header {
+  padding: 22px 26px 18px;
+  background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
+}
+
+/* el-dialog 自身还有 15vh 的顶部留白，只按 100vh 算高度会把页脚顶出视口；
+   body 又设了 overscroll-behavior: contain，滚到底也不会带着遮罩继续滚，
+   确认/取消按钮就再也够不着了。按 85vh 留出上下两份余量。 */
+.trigger-rule-dialog .el-dialog__body {
+  max-height: calc(85vh - 280px);
+  padding: 20px 24px 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+}
+
+.trigger-rule-dialog .el-dialog__footer {
+  padding: 14px 24px;
+  background: var(--surface);
+}
+
 .iot-dialog .el-dialog__footer {
   padding: 14px 24px 18px;
   border-top: 1px solid var(--line-soft);

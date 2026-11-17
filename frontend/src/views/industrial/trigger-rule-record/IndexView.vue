@@ -272,7 +272,7 @@ fetchList()
   overflow: auto;
   padding: 10px 12px;
   border-radius: 8px;
-  background: var(--surface-2);
+  background: #f8fafc;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;

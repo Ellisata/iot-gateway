@@ -24,9 +24,11 @@
   --ink-3: #64748b;
   --ink-4: #94a3b8;
 
-  /* 品牌色：全站唯一的强调色 */
+  /* 品牌色：全站唯一的强调色；tint/line 用于图标底座这类浅色衬底 */
   --brand: #2563eb;
   --brand-soft: #eff5ff;
+  --brand-tint: #f3f8ff;
+  --brand-line: #e3edff;
 
   /* 语义色：只用于状态，不做装饰 */
   --success: #059669;

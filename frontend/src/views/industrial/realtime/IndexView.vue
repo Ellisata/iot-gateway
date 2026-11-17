@@ -395,6 +395,7 @@
     <AddressFormDialog
       v-model="editDialogVisible"
       :device-id="deviceObjectId"
+      :device-name="snapshot?.deviceName || deviceObjectName"
       :protocol-name="snapshot?.protocolName || route.query.protocolName || ''"
       :address-id="editingAddressId"
       @saved="handleAddressSaved"
