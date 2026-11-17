@@ -15,6 +15,9 @@ type CreateThingModelDTO struct {
 	Category    string `json:"category" binding:"omitempty,oneof=sensor meter actuator robot plc other"`
 	Version     string `json:"version" binding:"omitempty,max=32"`
 	Description string `json:"description" binding:"omitempty,max=500"`
+	// DeviceIDs 创建时一并绑定的设备（写 device.model_id）。空 = 不绑定。
+	// 不要加 dive,required：agentApi 参数表会把 required 当成"必填"。
+	DeviceIDs []string `json:"deviceIds" binding:"omitempty,max=200"`
 }
 
 // UpdateThingModelDTO 更新物模型请求。
@@ -33,6 +36,9 @@ type UpdateThingModelDTO struct {
 	Version     string `json:"version" binding:"omitempty,max=32"`
 	Description string `json:"description" binding:"omitempty,max=500"`
 	Status      *int   `json:"status" binding:"omitempty,oneof=0 1"`
+	// DeviceIDs 绑定设备的三态同步：省略 = 不改；空数组 = 全部解绑；
+	// 非空 = 以该列表为准（新增的绑定、不在列表里的解绑）。
+	DeviceIDs *[]string `json:"deviceIds" binding:"omitempty,max=200"`
 }
 
 // PageThingModelDTO 物模型分页查询。
@@ -69,6 +75,9 @@ type CreateThingModelPropertyDTO struct {
 	Unit        string `json:"unit" binding:"omitempty,max=32"`
 	Description string `json:"description" binding:"omitempty,max=500"`
 	SortOrder   int    `json:"sortOrder" binding:"omitempty,min=0,max=99999"`
+	// AddressIDs 创建时一并绑定的设备点位（写 device_address.property_id）。
+	// 只接受已绑定本模型的设备下的点位。
+	AddressIDs []string `json:"addressIds" binding:"omitempty,max=200"`
 }
 
 // UpdateThingModelPropertyDTO 更新物模型属性请求。
@@ -84,4 +93,7 @@ type UpdateThingModelPropertyDTO struct {
 	Description string `json:"description" binding:"omitempty,max=500"`
 	SortOrder   int    `json:"sortOrder" binding:"omitempty,min=0,max=99999"`
 	Status      *int   `json:"status" binding:"omitempty,oneof=0 1"`
+	// AddressIDs 点位绑定的三态同步：省略 = 不改；空数组 = 全部解绑；
+	// 非空 = 以该列表为准。解绑只清 property_id，不删除点位行。
+	AddressIDs *[]string `json:"addressIds" binding:"omitempty,max=200"`
 }

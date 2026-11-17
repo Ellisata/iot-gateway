@@ -37,6 +37,13 @@ func newThingModelTestDB(t *testing.T) *gorm.DB {
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	// AutoMigrate 只认 PO 上的普通索引，认不出迁移 027 里的部分唯一索引。
+	// 这里手工补上，否则测试库允许“同一设备同一属性绑多个点位”，
+	// 而真实库会报 UNIQUE constraint —— 测试就失去了回归价值。
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_device_address_device_property
+		ON device_address(device_id, property_id) WHERE property_id <> ''`).Error; err != nil {
+		t.Fatalf("create partial unique index: %v", err)
+	}
 	return db
 }
 

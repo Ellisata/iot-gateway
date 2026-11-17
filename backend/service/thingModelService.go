@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"iot-gateway/appError"
 	"iot-gateway/constants"
@@ -69,6 +70,219 @@ func nowString() string {
 	return time.Now().Format("2006-01-02 15:04:05")
 }
 
+// thingModelBindingLimit 单次请求允许绑定的设备/点位数上限。
+// DTO 上的 max=200 已经挡了 HTTP 入口，这里再判一次是为了服务层被直接调用
+// （开放接口、测试）时也守住同一口径。
+const thingModelBindingLimit = 200
+
+// normalizeThingModelBindingIDs 去空白、去空串、保序去重，并检查上限。
+// 空项不报错而是丢弃：前端多选清空后可能残留空串，把它当成错误只会让人困惑。
+func normalizeThingModelBindingIDs(ids []string) ([]string, error) {
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, raw := range ids {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	if len(out) > thingModelBindingLimit {
+		return nil, thingModelErr(enums.ThingModelBindingLimitEnum)
+	}
+	return out, nil
+}
+
+// syncModelDevices 以 desired 为准同步 device.model_id（事务内调用）。
+//
+// 新增设备必须存在且模型可绑定；任何被新增或解绑的设备只要还有一个点位绑着
+// 属性，就整单拒绝（41013）—— 换绑会让那些属性归属到别的模型，语义悬空。
+func syncModelDevices(tx *gorm.DB, modelID string, desiredIDs []string) error {
+	desired, err := normalizeThingModelBindingIDs(desiredIDs)
+	if err != nil {
+		return err
+	}
+	desiredSet := make(map[string]struct{}, len(desired))
+	for _, id := range desired {
+		desiredSet[id] = struct{}{}
+	}
+
+	var currentIDs []string
+	if err := tx.Model(&po.Device{}).Where("model_id = ?", modelID).Pluck("id", &currentIDs).Error; err != nil {
+		return err
+	}
+	currentSet := make(map[string]struct{}, len(currentIDs))
+	for _, id := range currentIDs {
+		currentSet[id] = struct{}{}
+	}
+
+	var added, removed []string
+	for _, id := range desired {
+		if _, ok := currentSet[id]; !ok {
+			added = append(added, id)
+		}
+	}
+	for _, id := range currentIDs {
+		if _, ok := desiredSet[id]; !ok {
+			removed = append(removed, id)
+		}
+	}
+	if len(added) == 0 && len(removed) == 0 {
+		return nil
+	}
+
+	if len(added) > 0 {
+		// 与单独改设备的规则一致：模型必须存在且启用。调用方已先落 status，
+		// 所以「同一次保存里启用模型 + 加设备」能通过。
+		if err := ensureThingModelBindable(tx, modelID); err != nil {
+			return err
+		}
+		var found []string
+		if err := tx.Model(&po.Device{}).Where("id IN ?", added).Pluck("id", &found).Error; err != nil {
+			return err
+		}
+		if len(found) != len(added) {
+			return thingModelErr(enums.DeviceNotExistsEnum)
+		}
+	}
+
+	changed := make([]string, 0, len(added)+len(removed))
+	changed = append(changed, added...)
+	changed = append(changed, removed...)
+	var lockedIDs []string
+	if err := tx.Model(&po.DeviceAddress{}).
+		Distinct("device_id").
+		Where("device_id IN ? AND property_id <> ''", changed).
+		Pluck("device_id", &lockedIDs).Error; err != nil {
+		return err
+	}
+	if len(lockedIDs) > 0 {
+		return thingModelErr(enums.ThingModelBindingLockedEnum)
+	}
+
+	now := nowString()
+	if len(added) > 0 {
+		if err := tx.Model(&po.Device{}).Where("id IN ?", added).
+			Updates(map[string]any{"model_id": modelID, "updated_at": now}).Error; err != nil {
+			return err
+		}
+	}
+	if len(removed) > 0 {
+		if err := tx.Model(&po.Device{}).Where("id IN ?", removed).
+			Updates(map[string]any{"model_id": "", "updated_at": now}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// bindAddressesToProperty 把一批点位绑定到属性（事务内调用）。
+//
+// 先复用地址侧的唯一绑定校验（validatePropertyBindingDB），再改 property_id；
+// 已绑其他属性的点位直接拒绝，绝不静默抢绑。
+func bindAddressesToProperty(ctx context.Context, tx *gorm.DB, propertyID string, addressIDs []string) error {
+	ids, err := normalizeThingModelBindingIDs(addressIDs)
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	var addrs []po.DeviceAddress
+	if err := tx.WithContext(ctx).Where("id IN ?", ids).Find(&addrs).Error; err != nil {
+		return err
+	}
+	if len(addrs) != len(ids) {
+		return thingModelErr(enums.DeviceAddressNotExistsEnum)
+	}
+
+	deviceIDs := make([]string, 0, len(addrs))
+	seenDevice := make(map[string]struct{}, len(addrs))
+	for _, a := range addrs {
+		if _, ok := seenDevice[a.DeviceID]; ok {
+			continue
+		}
+		seenDevice[a.DeviceID] = struct{}{}
+		deviceIDs = append(deviceIDs, a.DeviceID)
+	}
+	var devices []po.Device
+	if err := tx.WithContext(ctx).Where("id IN ?", deviceIDs).Find(&devices).Error; err != nil {
+		return err
+	}
+	if len(devices) != len(deviceIDs) {
+		return thingModelErr(enums.DeviceNotExistsEnum)
+	}
+	deviceByID := make(map[string]po.Device, len(devices))
+	for _, d := range devices {
+		deviceByID[d.ID] = d
+	}
+
+	for _, a := range addrs {
+		if a.PropertyID != "" && a.PropertyID != propertyID {
+			return thingModelErr(enums.ThingModelPointBoundElsewhereEnum)
+		}
+	}
+
+	// 同一设备对同一属性只能绑一个点位。027 迁移里的部分唯一索引
+	// idx_device_address_device_property 是硬约束；这里先给出可读业务错误，
+	// 免得 SQLite 的 UNIQUE constraint 文案直接冒到界面上。
+	batchDevice := make(map[string]struct{}, len(addrs))
+	for _, a := range addrs {
+		if _, ok := batchDevice[a.DeviceID]; ok {
+			return thingModelErr(enums.ThingModelDevicePointDupEnum)
+		}
+		batchDevice[a.DeviceID] = struct{}{}
+	}
+	// 更新场景：批内只包含新增点位，同设备上“保留不动”的旧绑定也要算冲突。
+	var existing []po.DeviceAddress
+	if err := tx.WithContext(ctx).
+		Where("property_id = ? AND device_id IN ?", propertyID, deviceIDs).
+		Find(&existing).Error; err != nil {
+		return err
+	}
+	inBatch := make(map[string]struct{}, len(addrs))
+	for _, a := range addrs {
+		inBatch[a.ID] = struct{}{}
+	}
+	for _, e := range existing {
+		if _, ok := inBatch[e.ID]; !ok {
+			return thingModelErr(enums.ThingModelDevicePointDupEnum)
+		}
+	}
+
+	for _, a := range addrs {
+		device := deviceByID[a.DeviceID]
+		protocolName, err := protocolNameByID(tx.WithContext(ctx), device.ProtocolID)
+		if err != nil {
+			return err
+		}
+		if err := validatePropertyBindingDB(ctx, tx.WithContext(ctx), device, propertyID,
+			protocolName, a.DataType, a.RwPermission, false); err != nil {
+			return err
+		}
+	}
+
+	now := nowString()
+	for _, a := range addrs {
+		res := tx.WithContext(ctx).Model(&po.DeviceAddress{}).
+			Where("id = ? AND (property_id = '' OR property_id = ?)", a.ID, propertyID).
+			Updates(map[string]any{"property_id": propertyID, "updated_at": now})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			// 读与写之间被别的请求绑走了：与显式抢绑同一套错误，不静默成功。
+			return thingModelErr(enums.ThingModelPointBoundElsewhereEnum)
+		}
+	}
+	return nil
+}
+
 // ==================== 物模型 ====================
 
 // CreateThingModel 创建物模型
@@ -102,7 +316,7 @@ func (s *ThingModelService) CreateThingModel(ctx context.Context, req *dto.Creat
 		}
 
 		now := nowString()
-		return tx.Create(&po.ThingModel{
+		model := &po.ThingModel{
 			Code:        code,
 			Name:        name,
 			Category:    category,
@@ -111,7 +325,14 @@ func (s *ThingModelService) CreateThingModel(ctx context.Context, req *dto.Creat
 			Status:      1,
 			CreatedAt:   now,
 			UpdatedAt:   now,
-		}).Error
+		}
+		if err := tx.Create(model).Error; err != nil {
+			return err
+		}
+		if len(req.DeviceIDs) > 0 {
+			return syncModelDevices(tx, model.ID, req.DeviceIDs)
+		}
+		return nil
 	})
 }
 
@@ -168,7 +389,15 @@ func (s *ThingModelService) UpdateThingModel(ctx context.Context, req *dto.Updat
 		if req.Status != nil {
 			updates["status"] = *req.Status
 		}
-		return tx.Model(&po.ThingModel{}).Where("id = ?", req.ID).Updates(updates).Error
+		// 先落模型行（含 status），再同步设备：这样同一次保存里「启用模型 + 加设备」
+		// 能看到新状态，「停用 + 加设备」会被 ensureThingModelBindable 拦下。
+		if err := tx.Model(&po.ThingModel{}).Where("id = ?", req.ID).Updates(updates).Error; err != nil {
+			return err
+		}
+		if req.DeviceIDs != nil {
+			return syncModelDevices(tx, req.ID, *req.DeviceIDs)
+		}
+		return nil
 	})
 }
 
@@ -507,7 +736,42 @@ func (s *ThingModelService) ListThingModelProperties(ctx context.Context, modelI
 	for i, p := range rows {
 		out[i] = toThingModelPropertyVO(p)
 	}
+	if err := s.fillPropertyPointCounts(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// fillPropertyPointCounts 一次性补齐属性的点位绑定数。
+// 分页后一页最多 100 个属性，按 property_id IN (...) 分组计数，避免逐行查询。
+func (s *ThingModelService) fillPropertyPointCounts(ctx context.Context, rows []vo.ThingModelPropertyVO) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	ids := make([]string, len(rows))
+	for i := range rows {
+		ids[i] = rows[i].ID
+	}
+	type countRow struct {
+		PropertyID string `gorm:"column:property_id"`
+		Count      int64  `gorm:"column:count"`
+	}
+	var counts []countRow
+	if err := s.sqliteDB.WithContext(ctx).Model(&po.DeviceAddress{}).
+		Select("property_id, COUNT(*) AS count").
+		Where("property_id IN ?", ids).
+		Group("property_id").
+		Scan(&counts).Error; err != nil {
+		return err
+	}
+	byID := make(map[string]int64, len(counts))
+	for _, c := range counts {
+		byID[c.PropertyID] = c.Count
+	}
+	for i := range rows {
+		rows[i].PointCount = byID[rows[i].ID]
+	}
+	return nil
 }
 
 // PageThingModelProperties 分页列出某模型下的属性（排序与全量接口一致）。
@@ -552,6 +816,9 @@ func (s *ThingModelService) PageThingModelProperties(ctx context.Context, req *d
 	for i, p := range rows {
 		records[i] = toThingModelPropertyVO(p)
 	}
+	if err := s.fillPropertyPointCounts(ctx, records); err != nil {
+		return nil, err
+	}
 	return &vo.ThingModelPropertyPageVO{
 		Page:         req.Page,
 		Size:         req.Size,
@@ -559,6 +826,324 @@ func (s *ThingModelService) PageThingModelProperties(ctx context.Context, req *d
 		Records:      records,
 		MaxSortOrder: maxSortOrder,
 	}, nil
+}
+
+// ListThingModelPropertyPoints 列出绑定到某属性的设备点位（属性列表「点位数」抽屉）。
+//
+// 只回答“这个属性被哪些设备的哪些点位用着”；不做兼容性判断——能绑上就说明
+// 创建/编辑时已经校验过，这里再算一遍只会让停用后的历史绑定看起来像错误。
+func (s *ThingModelService) ListThingModelPropertyPoints(ctx context.Context, propertyID string) ([]vo.ThingModelPropertyPointVO, error) {
+	propertyID = strings.TrimSpace(propertyID)
+	if propertyID == "" {
+		return nil, thingModelErr(enums.ParamValidEnum)
+	}
+	var property po.ThingModelProperty
+	if err := s.sqliteDB.WithContext(ctx).Where("id = ?", propertyID).First(&property).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, thingModelErr(enums.ThingModelPropertyNotExistsEnum)
+		}
+		return nil, err
+	}
+
+	var rows []pointOptionRow
+	if err := s.sqliteDB.WithContext(ctx).
+		Table("device_address AS a").
+		Select("a.id, a.device_id, a.property_id, a.name, a.label, a.common_data_type, a.data_type, "+
+			"a.rw_permission, a.status, d.code AS device_code, d.name AS device_name, d.protocol_id").
+		Joins("JOIN device AS d ON d.id = a.device_id").
+		Where("a.property_id = ?", propertyID).
+		Order("d.name ASC, a.id ASC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	out := make([]vo.ThingModelPropertyPointVO, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, vo.ThingModelPropertyPointVO{
+			AddressID:      r.ID,
+			DeviceID:       r.DeviceID,
+			DeviceCode:     r.DeviceCode,
+			DeviceName:     r.DeviceName,
+			Name:           r.Name,
+			Label:          r.Label,
+			CommonDataType: r.CommonDataType,
+			DataType:       r.DataType,
+			RwPermission:   r.RwPermission,
+			Status:         r.Status,
+		})
+	}
+	return out, nil
+}
+
+// thingModelDeviceOptionLimit 设备候选单次返回上限。
+// 与绑定上限分开：这是“下拉候选”的显示上限，不是一次能绑多少个。
+const thingModelDeviceOptionLimit = 200
+
+// ListThingModelDeviceOptions 物模型表单的设备候选（远程搜索）。
+//
+// modelId 可选：传了就先校验模型存在，编辑一个已被删除的模型时能尽早失败；
+// 同时把绑定到该模型的设备排在前面，保证编辑态打开时已选设备在首批结果里。
+// keyword 模糊匹配设备名称与编码。返回全部“可绑定 + 已绑定其他模型 + 已锁”
+// 的设备，是为了让前端把不可选的原因说明白，而不是让人疑惑“设备去哪了”。
+func (s *ThingModelService) ListThingModelDeviceOptions(ctx context.Context, modelID, keyword string) (*vo.ThingModelDeviceOptionPageVO, error) {
+	modelID = strings.TrimSpace(modelID)
+	keyword = strings.TrimSpace(keyword)
+	if modelID != "" {
+		var model po.ThingModel
+		if err := s.sqliteDB.WithContext(ctx).Where("id = ?", modelID).First(&model).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, thingModelErr(enums.ThingModelNotExistsEnum)
+			}
+			return nil, err
+		}
+	}
+
+	db := s.sqliteDB.WithContext(ctx).Model(&po.Device{})
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		db = db.Where("name LIKE ? OR code LIKE ?", like, like)
+	}
+	// 绑定当前模型的设备排在最前：编辑态打开弹窗时，已选设备必须在首批结果里，
+	// 否则标签只剩 id（远程搜索不会把整张设备表都发给前端）。
+	//
+	// 排序必须合成一条 Expression：GORM 的 OrderBy.MergeClause 在“表达式 + 列”
+	// 混用时会把前一条 Expression 丢掉，分两次 Order 会静默退化成只按名称排。
+	if modelID != "" {
+		db = db.Order(clause.OrderBy{Expression: clause.Expr{
+			SQL:  "CASE WHEN model_id = ? THEN 0 ELSE 1 END, name ASC, code ASC",
+			Vars: []interface{}{modelID},
+		}})
+	} else {
+		db = db.Order("name ASC, code ASC")
+	}
+	var devices []po.Device
+	if err := db.Limit(thingModelDeviceOptionLimit + 1).Find(&devices).Error; err != nil {
+		return nil, err
+	}
+	truncated := len(devices) > thingModelDeviceOptionLimit
+	if truncated {
+		devices = devices[:thingModelDeviceOptionLimit]
+	}
+
+	modelIDs := make([]string, 0)
+	seenModel := make(map[string]struct{})
+	for _, d := range devices {
+		if d.ModelID == "" {
+			continue
+		}
+		if _, ok := seenModel[d.ModelID]; ok {
+			continue
+		}
+		seenModel[d.ModelID] = struct{}{}
+		modelIDs = append(modelIDs, d.ModelID)
+	}
+	modelNames := make(map[string]string, len(modelIDs))
+	if len(modelIDs) > 0 {
+		var models []po.ThingModel
+		if err := s.sqliteDB.WithContext(ctx).Select("id", "name").
+			Where("id IN ?", modelIDs).Find(&models).Error; err != nil {
+			return nil, err
+		}
+		for _, m := range models {
+			modelNames[m.ID] = m.Name
+		}
+	}
+
+	var lockedIDs []string
+	if err := s.sqliteDB.WithContext(ctx).Model(&po.DeviceAddress{}).
+		Where("property_id <> ''").Distinct("device_id").
+		Pluck("device_id", &lockedIDs).Error; err != nil {
+		return nil, err
+	}
+	locked := make(map[string]struct{}, len(lockedIDs))
+	for _, id := range lockedIDs {
+		locked[id] = struct{}{}
+	}
+
+	out := make([]vo.ThingModelDeviceOptionVO, 0, len(devices))
+	for _, d := range devices {
+		_, isLocked := locked[d.ID]
+		out = append(out, vo.ThingModelDeviceOptionVO{
+			ID:        d.ID,
+			Code:      d.Code,
+			Name:      d.Name,
+			ModelID:   d.ModelID,
+			ModelName: modelNames[d.ModelID],
+			Locked:    isLocked,
+			Status:    d.Status,
+		})
+	}
+	return &vo.ThingModelDeviceOptionPageVO{Records: out, Truncated: truncated}, nil
+}
+
+// ListThingModelDevices 列出绑定到某模型的设备（列表页「设备数」抽屉用）。
+//
+// 不分页：这里回答的是“这个模型被哪些设备用着”，数量通常有限；真到几百台
+// 时表格自身可滚动，比再加一套分页更直接。
+func (s *ThingModelService) ListThingModelDevices(ctx context.Context, modelID string) ([]vo.ThingModelBoundDeviceVO, error) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return nil, thingModelErr(enums.ParamValidEnum)
+	}
+	var model po.ThingModel
+	if err := s.sqliteDB.WithContext(ctx).Where("id = ?", modelID).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, thingModelErr(enums.ThingModelNotExistsEnum)
+		}
+		return nil, err
+	}
+
+	var devices []po.Device
+	if err := s.sqliteDB.WithContext(ctx).
+		Where("model_id = ?", modelID).
+		Order("name ASC, code ASC").
+		Find(&devices).Error; err != nil {
+		return nil, err
+	}
+	if len(devices) == 0 {
+		return []vo.ThingModelBoundDeviceVO{}, nil
+	}
+
+	protocolIDs := make([]string, 0)
+	seenProtocol := make(map[string]struct{}, len(devices))
+	for _, d := range devices {
+		if d.ProtocolID == "" {
+			continue
+		}
+		if _, ok := seenProtocol[d.ProtocolID]; ok {
+			continue
+		}
+		seenProtocol[d.ProtocolID] = struct{}{}
+		protocolIDs = append(protocolIDs, d.ProtocolID)
+	}
+	protocolNames := make(map[string]string, len(protocolIDs))
+	if len(protocolIDs) > 0 {
+		var protocols []po.IotProtocol
+		if err := s.sqliteDB.WithContext(ctx).Select("id", "name").
+			Where("id IN ?", protocolIDs).Find(&protocols).Error; err != nil {
+			return nil, err
+		}
+		for _, p := range protocols {
+			protocolNames[p.ID] = p.Name
+		}
+	}
+
+	out := make([]vo.ThingModelBoundDeviceVO, 0, len(devices))
+	for _, d := range devices {
+		out = append(out, vo.ThingModelBoundDeviceVO{
+			ID:           d.ID,
+			Code:         d.Code,
+			Name:         d.Name,
+			ProtocolID:   d.ProtocolID,
+			ProtocolName: protocolNames[d.ProtocolID],
+			Status:       d.Status,
+		})
+	}
+	return out, nil
+}
+
+// pointOptionRow 是点位候选的联表查询行：点位自身字段 + 所属设备的展示字段。
+type pointOptionRow struct {
+	ID             string `gorm:"column:id"`
+	DeviceID       string `gorm:"column:device_id"`
+	PropertyID     string `gorm:"column:property_id"`
+	Name           string `gorm:"column:name"`
+	Label          string `gorm:"column:label"`
+	CommonDataType string `gorm:"column:common_data_type"`
+	DataType       string `gorm:"column:data_type"`
+	RwPermission   string `gorm:"column:rw_permission"`
+	Status         int    `gorm:"column:status"`
+	DeviceCode     string `gorm:"column:device_code"`
+	DeviceName     string `gorm:"column:device_name"`
+	ProtocolID     string `gorm:"column:protocol_id"`
+}
+
+// ListThingModelPointOptions 属性表单的点位候选：只返回已绑定该模型的设备下的点位。
+//
+// 用 join 一次取完，不先查 device_id 再拼大 IN —— 设备多时后者会撞 SQLite
+// 参数上限。不要求模型启用：停用的模型也必须能打开表单解绑。
+func (s *ThingModelService) ListThingModelPointOptions(ctx context.Context, modelID string) ([]vo.ThingModelPointOptionVO, error) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return nil, thingModelErr(enums.ParamValidEnum)
+	}
+	var model po.ThingModel
+	if err := s.sqliteDB.WithContext(ctx).Where("id = ?", modelID).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, thingModelErr(enums.ThingModelNotExistsEnum)
+		}
+		return nil, err
+	}
+
+	var rows []pointOptionRow
+	if err := s.sqliteDB.WithContext(ctx).
+		Table("device_address AS a").
+		Select("a.id, a.device_id, a.property_id, a.name, a.label, a.common_data_type, a.data_type, "+
+			"a.rw_permission, a.status, d.code AS device_code, d.name AS device_name, d.protocol_id").
+		Joins("JOIN device AS d ON d.id = a.device_id").
+		Where("d.model_id = ?", modelID).
+		Order("d.name ASC, a.id ASC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return []vo.ThingModelPointOptionVO{}, nil
+	}
+
+	protocolIDs := make([]string, 0)
+	seenProtocol := make(map[string]struct{})
+	for _, r := range rows {
+		if r.ProtocolID == "" {
+			continue
+		}
+		if _, ok := seenProtocol[r.ProtocolID]; ok {
+			continue
+		}
+		seenProtocol[r.ProtocolID] = struct{}{}
+		protocolIDs = append(protocolIDs, r.ProtocolID)
+	}
+	protocolNames := make(map[string]string, len(protocolIDs))
+	if len(protocolIDs) > 0 {
+		var protocols []po.IotProtocol
+		if err := s.sqliteDB.WithContext(ctx).Select("id", "name").
+			Where("id IN ?", protocolIDs).Find(&protocols).Error; err != nil {
+			return nil, err
+		}
+		for _, p := range protocols {
+			protocolNames[p.ID] = p.Name
+		}
+	}
+
+	var props []po.ThingModelProperty
+	if err := s.sqliteDB.WithContext(ctx).Where("model_id = ?", modelID).Find(&props).Error; err != nil {
+		return nil, err
+	}
+	propByID := make(map[string]po.ThingModelProperty, len(props))
+	for _, p := range props {
+		propByID[p.ID] = p
+	}
+
+	out := make([]vo.ThingModelPointOptionVO, 0, len(rows))
+	for _, r := range rows {
+		prop := propByID[r.PropertyID]
+		out = append(out, vo.ThingModelPointOptionVO{
+			AddressID:          r.ID,
+			DeviceID:           r.DeviceID,
+			DeviceCode:         r.DeviceCode,
+			DeviceName:         r.DeviceName,
+			Name:               r.Name,
+			Label:              r.Label,
+			CommonDataType:     r.CommonDataType,
+			DataType:           r.DataType,
+			Kind:               kindOfAddressType(protocolNames[r.ProtocolID], r.DataType),
+			RwPermission:       r.RwPermission,
+			PropertyID:         r.PropertyID,
+			PropertyIdentifier: prop.Identifier,
+			PropertyName:       prop.Name,
+			Status:             r.Status,
+		})
+	}
+	return out, nil
 }
 
 // CreateThingModelProperty 创建物模型属性
@@ -592,7 +1177,7 @@ func (s *ThingModelService) CreateThingModelProperty(ctx context.Context, req *d
 		}
 
 		now := nowString()
-		return tx.Create(&po.ThingModelProperty{
+		prop := &po.ThingModelProperty{
 			ModelID:     req.ModelID,
 			Identifier:  identifier,
 			Name:        name,
@@ -604,7 +1189,14 @@ func (s *ThingModelService) CreateThingModelProperty(ctx context.Context, req *d
 			Status:      1,
 			CreatedAt:   now,
 			UpdatedAt:   now,
-		}).Error
+		}
+		if err := tx.Create(prop).Error; err != nil {
+			return err
+		}
+		if len(req.AddressIDs) > 0 {
+			return bindAddressesToProperty(ctx, tx, prop.ID, req.AddressIDs)
+		}
+		return nil
 	})
 }
 
@@ -632,6 +1224,48 @@ func (s *ThingModelService) UpdateThingModelProperty(ctx context.Context, req *d
 		if identifier != "" && identifier != existing.Identifier {
 			return thingModelErr(enums.ThingModelIdentifierImmutableEnum)
 		}
+
+		// 点位同步：先按表单解绑被移除的点位，再做 kind/access 的 41018 判定。
+		// 顺序很重要 —— 这样「改类型 + 同时清空全部绑定」可以一次保存完成，
+		// 而只要还留着任何绑定，改类型仍然被拒绝（事务回滚后绑定原样恢复）。
+		var added []string
+		if req.AddressIDs != nil {
+			desired, err := normalizeThingModelBindingIDs(*req.AddressIDs)
+			if err != nil {
+				return err
+			}
+			desiredSet := make(map[string]struct{}, len(desired))
+			for _, id := range desired {
+				desiredSet[id] = struct{}{}
+			}
+			var currentIDs []string
+			if err := tx.Model(&po.DeviceAddress{}).Where("property_id = ?", req.ID).
+				Pluck("id", &currentIDs).Error; err != nil {
+				return err
+			}
+			currentSet := make(map[string]struct{}, len(currentIDs))
+			for _, id := range currentIDs {
+				currentSet[id] = struct{}{}
+			}
+			var removed []string
+			for _, id := range currentIDs {
+				if _, ok := desiredSet[id]; !ok {
+					removed = append(removed, id)
+				}
+			}
+			for _, id := range desired {
+				if _, ok := currentSet[id]; !ok {
+					added = append(added, id)
+				}
+			}
+			if len(removed) > 0 {
+				if err := tx.Model(&po.DeviceAddress{}).Where("id IN ?", removed).
+					Updates(map[string]any{"property_id": "", "updated_at": nowString()}).Error; err != nil {
+					return err
+				}
+			}
+		}
+
 		// 已被点位绑定后，kind/access 是绑定的兼容性前提：改了会让已有绑定
 		// 悄悄失效（采集本身照常，只是语义不对）。要求先解绑再改。
 		if req.Kind != existing.Kind || req.AccessMode != existing.AccessMode {
@@ -657,7 +1291,15 @@ func (s *ThingModelService) UpdateThingModelProperty(ctx context.Context, req *d
 		if req.Status != nil {
 			updates["status"] = *req.Status
 		}
-		return tx.Model(&po.ThingModelProperty{}).Where("id = ?", req.ID).Updates(updates).Error
+		// 先落属性行，新增点位才能按新的 kind/access/status 校验；
+		// 保留下来的旧绑定不重复校验（模型/属性事后停用不应阻止改名保存）。
+		if err := tx.Model(&po.ThingModelProperty{}).Where("id = ?", req.ID).Updates(updates).Error; err != nil {
+			return err
+		}
+		if len(added) > 0 {
+			return bindAddressesToProperty(ctx, tx, req.ID, added)
+		}
+		return nil
 	})
 }
 

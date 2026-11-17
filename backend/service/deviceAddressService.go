@@ -85,6 +85,9 @@ func (s *DeviceAddressService) CreateDeviceAddress(ctx context.Context, req *dto
 	if err := s.validatePropertyBinding(ctx, device, req.PropertyID, protocolName, internal, req.RwPermission, false); err != nil {
 		return err
 	}
+	if err := ensureDevicePropertyUnique(ctx, db, req.DeviceID, req.PropertyID, ""); err != nil {
+		return err
+	}
 
 	// 采集组绑定：非空时必须属于同一设备。
 	groupID := strings.TrimSpace(req.GroupID)
@@ -155,6 +158,33 @@ func thresholdFields(t *dto.DeviceAddressThresholdDTO) (bool, string, []string) 
 // 协议/类型查不到时返回空串：判不了就不放行，避免配出一个永不生效的报警条件。
 func kindOfAddressType(protocolName, internalType string) string {
 	return driver.GetTypeRegistry().ForProtocol(driver.ScopeOf(protocolName)).KindOf(internalType)
+}
+
+// ensureDevicePropertyUnique 同一设备对同一属性只能绑一个点位。
+//
+// 迁移 027 的部分唯一索引 idx_device_address_device_property 是最终硬约束；
+// 这里先给出可读业务错误，避免用户从 SQLite 的 UNIQUE constraint 文案里
+// 反推是哪条业务规则。excludeAddressID 用于更新时排除当前点位自身。
+func ensureDevicePropertyUnique(ctx context.Context, db *gorm.DB, deviceID, propertyID, excludeAddressID string) error {
+	propertyID = strings.TrimSpace(propertyID)
+	if propertyID == "" {
+		return nil
+	}
+	q := db.WithContext(ctx).Model(&po.DeviceAddress{}).
+		Where("device_id = ? AND property_id = ?", deviceID, propertyID)
+	if excludeAddressID != "" {
+		q = q.Where("id <> ?", excludeAddressID)
+	}
+	var count int64
+	if err := q.Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return appError.NewAppErrorCtx(enums.ThingModelDevicePointDupEnum.GetCode(),
+			enums.ThingModelDevicePointDupEnum.GetMessage(),
+			enums.ThingModelDevicePointDupEnum.GetMsgKey())
+	}
+	return nil
 }
 
 // validatePropertyBinding 校验点位绑定物模型属性的四项前提：
@@ -517,6 +547,9 @@ func (s *DeviceAddressService) UpdateDeviceAddress(ctx context.Context, req *dto
 			if err := s.validatePropertyBinding(ctx, device, newPropertyID,
 				s.getProtocolName(ctx, device.ProtocolID), effectiveInternal, effectiveRW,
 				newPropertyID == existing.PropertyID); err != nil {
+				return err
+			}
+			if err := ensureDevicePropertyUnique(ctx, db, existing.DeviceID, newPropertyID, existing.ID); err != nil {
 				return err
 			}
 		}

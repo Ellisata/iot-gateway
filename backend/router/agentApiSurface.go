@@ -337,6 +337,24 @@ var agentApiSurface = map[string]SurfaceEntry{
 	},
 	"GET /thingModel/getThingModelById/:id": {Access: AccessRead, Params: argNone()},
 	"GET /thingModel/listThingModels":       {Access: AccessRead, Params: argNone()},
+	"GET /thingModel/listThingModelDeviceOptions": {
+		Access: AccessRead,
+		Params: args(
+			argQueryStr("modelId", false, "可选；传了会校验模型存在，并把绑定该模型的设备排在结果最前"),
+			argQueryStr("keyword", false, "可选；模糊匹配设备名称与编码，用于远程搜索"),
+		),
+		Note: "locked=true 表示该设备已有点位绑定属性，改绑/解绑模型会被 41013 拒绝；单次最多返回 200 条，truncated=true 时提示继续输入关键字",
+	},
+	"GET /thingModel/listThingModelDevices": {
+		Access: AccessRead,
+		Params: args(argQueryStr("modelId", true, "物模型 id")),
+		Note:   "不分页；返回绑定到该模型的设备（编码/名称/协议/状态），供列表页「设备数」抽屉展示",
+	},
+	"GET /thingModel/listThingModelPointOptions": {
+		Access: AccessRead,
+		Params: args(argQueryStr("modelId", true, "物模型 id")),
+		Note:   "只返回已绑定该模型的设备下的点位；kind 由协议类型推导，无法解析时为空串；propertyId 非空表示已绑其他属性，不能抢绑",
+	},
 	"GET /thingModel/importThingModelTemplate": {
 		Access: AccessRead,
 		Params: argNone(),
@@ -350,16 +368,18 @@ var agentApiSurface = map[string]SurfaceEntry{
 	"POST /thingModel/createThingModel": {
 		Access: AccessWrite,
 		Params: argBody(dto.CreateThingModelDTO{}, map[string]string{
-			"code":     "模型标识：字母开头，仅字母数字下划线短横线；创建后不可改",
-			"category": "固定枚举 sensor/meter/actuator/robot/plc/other；空串 = 未分类",
+			"code":      "模型标识：字母开头，仅字母数字下划线短横线；创建后不可改",
+			"category":  "固定枚举 sensor/meter/actuator/robot/plc/other；空串 = 未分类",
+			"deviceIds": "可选；创建时一并绑定这些设备（写 device.model_id），最多 200 个",
 		}),
 		Note: "成功时 data 为 null，不回新模型 id —— 要 id 须按 code/name 回查分页接口",
 	},
 	"POST /thingModel/updateThingModel": {
 		Access: AccessWrite,
 		Params: argBody(dto.UpdateThingModelDTO{}, map[string]string{
-			"code":   "不传 = 不改；传了必须与原值一致（不可修改）",
-			"status": "1 启用 0 停用；省略/null = 不改",
+			"code":      "不传 = 不改；传了必须与原值一致（不可修改）",
+			"status":    "1 启用 0 停用；省略/null = 不改",
+			"deviceIds": "省略 = 不改绑定；空数组 = 全部解绑；非空 = 以该列表为准（最多 200 个）",
 		}),
 	},
 	"GET /thingModel/deleteThingModel/:id": {
@@ -371,6 +391,11 @@ var agentApiSurface = map[string]SurfaceEntry{
 		Access: AccessRead,
 		Params: args(argQueryStr("modelId", true, "物模型 id")),
 		Note:   "全量返回，不分页；翻页请用 pageThingModelProperties",
+	},
+	"GET /thingModel/listThingModelPropertyPoints": {
+		Access: AccessRead,
+		Params: args(argQueryStr("propertyId", true, "物模型属性 id")),
+		Note:   "不分页；返回绑定到该属性的设备点位（设备编码/名称、地址、说明、类型、读写、状态），供属性列表「点位数」抽屉展示",
 	},
 	"GET /thingModel/pageThingModelProperties": {
 		Access: AccessRead,
@@ -385,6 +410,7 @@ var agentApiSurface = map[string]SurfaceEntry{
 			"identifier": "属性标识符：字母开头，仅字母数字下划线；模型内唯一，创建后不可改",
 			"kind":       "六类之一：bool/int/uint/float/string/time",
 			"accessMode": "R / W / RW",
+			"addressIds": "可选；创建时一并绑定这些点位（写 device_address.property_id），最多 200 个",
 		}),
 	},
 	"POST /thingModel/updateThingModelProperty": {
@@ -392,6 +418,7 @@ var agentApiSurface = map[string]SurfaceEntry{
 		Params: argBody(dto.UpdateThingModelPropertyDTO{}, map[string]string{
 			"identifier": "不传 = 不改；传了必须与原值一致（不可修改）",
 			"status":     "1 启用 0 停用；省略/null = 不改",
+			"addressIds": "省略 = 不改绑定；空数组 = 全部解绑（只清 property_id）；非空 = 以该列表为准（最多 200 个）",
 		}),
 	},
 	"GET /thingModel/deleteThingModelProperty/:id": {

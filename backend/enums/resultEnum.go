@@ -186,6 +186,9 @@ var (
 	ThingModelKindMismatchEnum           = NewBusinessEnum("41016", "点位数据类型与属性类型不一致", "err.thing_model_kind_mismatch")
 	ThingModelAccessMismatchEnum         = NewBusinessEnum("41017", "点位读写权限不覆盖属性读写模式", "err.thing_model_access_mismatch")
 	ThingModelPropertyBoundImmutableEnum = NewBusinessEnum("41018", "属性已被点位绑定，不能修改数据类型或读写模式", "err.thing_model_property_bound_immutable")
+	ThingModelPointBoundElsewhereEnum    = NewBusinessEnum("41019", "点位已绑定其他属性，请先解除该绑定", "err.thing_model_point_bound_elsewhere")
+	ThingModelBindingLimitEnum           = NewBusinessEnum("41020", "一次最多绑定 200 个对象", "err.thing_model_binding_limit")
+	ThingModelDevicePointDupEnum         = NewBusinessEnum("41021", "同一设备对同一属性只能绑定一个点位", "err.thing_model_device_point_duplicate")
 
 	// 配置同步相关错误码（开放接口 /openApi/config/*）
 	CfgTypeUnsupportedEnum             = NewBusinessEnum("42001", "不支持的配置类型", "err.cfg_type_unsupported")

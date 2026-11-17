@@ -532,6 +532,9 @@ func (s *OpenApiConfigService) upsertDevicePoints(ctx context.Context, tx *gorm.
 			if err := validatePropertyBindingDB(ctx, tx, *device, propertyID, protocolName, internal, rw, false); err != nil {
 				return err
 			}
+			if err := ensureDevicePropertyUnique(ctx, tx, device.ID, propertyID, ""); err != nil {
+				return err
+			}
 			now := nowString()
 			row := po.DeviceAddress{
 				DeviceID:         device.ID,
@@ -559,6 +562,9 @@ func (s *OpenApiConfigService) upsertDevicePoints(ctx context.Context, tx *gorm.
 			return err
 		default:
 			if err := validatePropertyBindingDB(ctx, tx, *device, propertyID, protocolName, internal, rw, existing.PropertyID == propertyID); err != nil {
+				return err
+			}
+			if err := ensureDevicePropertyUnique(ctx, tx, device.ID, propertyID, existing.ID); err != nil {
 				return err
 			}
 			if err := tx.Model(&po.DeviceAddress{}).Where("id = ?", existing.ID).Updates(map[string]any{
