@@ -995,8 +995,10 @@ export default {
   },
 
   // ---------- Protocols ----------
-  // Protocols are supplied by plugins only: no "add" and no "delete";
-  // instead there is "restore default form" (take the plugin's current one).
+  // Protocols are supplied by plugins only: no "add" and no per-row "delete".
+  // "Restore default form" takes the plugin's current form;
+  // "Uninstall plugin" removes the plugin file and every protocol row it supplies
+  // (the unit is the plugin file, not a single row).
   protocol: {
     subtitle: 'Protocol rows come from plugins; manage display metadata here and edit form templates in Protocol Form Designer.',
     totalUnit: 'protocols',
@@ -1029,6 +1031,16 @@ export default {
     fetchListFailed: 'Failed to load list',
     editSuccess: 'Updated successfully',
     editFailed: 'Update failed',
+
+    // ---------- Uninstall plugin ----------
+    uninstallPlugin: 'Uninstall Plugin',
+    uninstallPluginTitle: 'Uninstall Confirmation',
+    uninstallPluginConfirm:
+      'Uninstall plugin "{file}" and delete the protocols it supplies from this gateway: {protocols}. '
+      + 'The uninstall is rejected if any device still uses them; the plugin file cannot be recovered.',
+    uninstallPluginConfirmBtn: 'Uninstall',
+    uninstallPluginSuccess: 'Plugin "{file}" uninstalled',
+    uninstallPluginNotLoaded: 'No loaded plugin supplies this protocol',
 
     // ---------- Add plugin (batch upload) ----------
     addPlugin: 'Add Plugin',

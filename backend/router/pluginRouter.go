@@ -14,6 +14,8 @@ func PluginRoutes(r gin.IRouter, pc *controller.PluginController) {
 	plugin := r.Group("/plugin")
 	{
 		plugin.GET("/info", pc.PluginInfo)
+		plugin.GET("/list", pc.ListPlugins)
 		plugin.POST("/importPlugin", pc.ImportPlugin)
+		plugin.POST("/uninstallPlugin", pc.UninstallPlugin)
 	}
 }

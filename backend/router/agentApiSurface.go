@@ -911,12 +911,19 @@ var agentApiSurface = map[string]SurfaceEntry{
 		Params: argNone(),
 		Note:   "**用 GET 实现**。删密钥会让持有它的外部系统立即失去访问",
 	},
-	"GET /plugin/info": {Access: AccessRead, Params: argNone(), Note: "插件目录 / 命名规则 / 总开关"},
+	"GET /plugin/info":  {Access: AccessRead, Params: argNone(), Note: "插件目录 / 命名规则 / 总开关"},
+	"GET /plugin/list":  {Access: AccessRead, Params: argNone(), Note: "已加载插件及其供给的协议名，供协议行映射到插件文件"},
 	"POST /plugin/importPlugin": {
 		Access: AccessWrite,
 		Params: args(argFile("files", "插件可执行文件；**字段名是复数 files**，可多个同名部件重复出现，总上限 512MiB")),
 		Note: "⚠️ 上传并加载**可执行文件**，等价于远程代码执行。本分组里风险最高的一条。" +
 			"multipart 上传，**没有 JSON 请求体**",
+	},
+	"POST /plugin/uninstallPlugin": {
+		Access: AccessWrite,
+		Params: argBody(dto.UninstallPluginDTO{}, nil),
+		Note: "⚠️ 删除可执行插件文件并清理其协议行；有设备引用时拒绝。" +
+			"**只接受插件目录内的文件名**，不接受路径",
 	},
 
 	// ==================== 局域网设备扫描 ====================

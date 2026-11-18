@@ -603,7 +603,9 @@ func (m *Manager) scanOnceLocked() bool {
 		}
 	}
 
-	// 消失的插件：注销并停进程，但**不动 iot_protocol 行**（见 unload 注释）。
+	// 消失的插件（文件被人工删除、换盘、备份回滚）：注销并停进程，但**不动
+	// iot_protocol 行** —— 这是意外消失，保留行才能在插件恢复后让设备继续采集。
+	// 管理端的显式卸载走 Uninstall，由服务层确认无设备引用后删除协议行。
 	m.mu.Lock()
 	var gone []*loadedPlugin
 	for path, lp := range m.plugins {

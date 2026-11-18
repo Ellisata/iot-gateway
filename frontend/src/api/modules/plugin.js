@@ -15,6 +15,41 @@ export function getPluginInfo() {
 }
 
 /**
+ * 查询已加载插件清单
+ *
+ * 协议页用它把协议行映射到供给它的插件文件：一个插件可以供给多个协议，
+ * 卸载的粒度是文件而不是单行。
+ *
+ * @returns {Promise<Array<{name:string, protocols:string[], scope:string,
+ *   version:string, sha256:string, up:boolean, epoch:number}>>}
+ */
+export function listPlugins() {
+  return request({
+    url: '/plugin/list',
+    method: 'get',
+  })
+}
+
+/**
+ * 卸载插件：停进程、删除插件文件，并清理它供给的协议行
+ *
+ * 若仍有设备使用该插件的协议，后端会拒绝（90009）并给出设备清单。
+ *
+ * @param {string} file - 插件文件名（basename，如 iot-driver-modbus.exe）
+ * @returns {Promise}
+ */
+export function uninstallPlugin(file) {
+  return request({
+    url: '/plugin/uninstallPlugin',
+    method: 'post',
+    data: { file },
+    // 后端要先退役插件进程（优雅停机宽限 + 强杀回收，最坏约 2×2s）再删文件；
+    // 全局 15s 在慢速机器上偏紧，按上传路径的先例放宽。
+    timeout: 60000,
+  })
+}
+
+/**
  * 批量上传协议插件文件
  *
  * @param {File[]} files - 待上传的插件文件（单次上限见后端 MaxPluginBatch）

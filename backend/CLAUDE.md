@@ -92,7 +92,7 @@
 - 全部协议是进程外插件:独立可执行文件 `iot-driver-*`,由 `pluginhost.Manager` 扫描 `plugin.dir`(相对 `os.Executable()` 解析)、校验插件的 `driversdk.Meta.APIVersion` 并握手、把驱动工厂与类型/scope 注册进 `sdk/driver` 的运行时注册表,并在 `iot_protocol` 表里自动维护协议行(只插入、只补空,绝不覆盖运维改过的非空表单)。
 - **宿主分成通用核心与适配层**:扫描/进程监管/帧 RPC/热升级/目录权限校验([process.go](pluginhost/process.go) · [upgrade.go](pluginhost/upgrade.go) · [client.go](pluginhost/client.go))不认识任何插件种类,只依赖 [sdk/pluginwire/](sdk/pluginwire/);认识「驱动」的只有 [adapter_driver.go](pluginhost/adapter_driver.go) · [provision.go](pluginhost/provision.go) · [remote.go](pluginhost/remote.go)。将来推送通道进程外化时,加 `adapter_push.go` 而不复制通用核心。
 - `plugin.enabled` **出厂为 `true`**([default.yaml](default.yaml)):协议驱动全部来自插件,关掉它等于网关不支持任何协议。
-- 替换已加载插件的二进制即**热升级**(见 [pluginhost/upgrade.go](pluginhost/upgrade.go));插件文件消失 = 协议消失,但**刻意保留 `iot_protocol` 行**(前端下拉还在,设备却被跳过)。
+- 替换已加载插件的二进制即**热升级**(见 [pluginhost/upgrade.go](pluginhost/upgrade.go));插件文件**意外消失** = 协议消失,但**刻意保留 `iot_protocol` 行**(前端下拉还在,设备却被跳过)。管理端的**显式卸载**是另一条路径([pluginhost/uninstall.go](pluginhost/uninstall.go) → `PluginService.Uninstall`):先确认没有设备通过 `device.protocol_id` 引用,再停进程、删文件,最后删协议行;按行删协议不存在(插件文件还在时会被 provision 插回来)。
 
 ### 采集引擎([collector/engine.go](collector/engine.go))
 - 从 SQLite 加载活跃设备与地址(`status=1`),经 WorkerPool 并发调度 `driver.Driver` 轮询。

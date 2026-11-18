@@ -987,8 +987,9 @@ export default {
   },
 
   // ---------- 协议管理 ----------
-  // 协议只能由插件供给：没有「新增协议」「删除协议」，
-  // 对应地有「恢复默认表单」（把表单换回插件当前声明的那一份）。
+  // 协议只能由插件供给：没有「新增协议」「删除协议」。
+  // 「恢复默认表单」把表单换回插件当前声明的那一份；
+  // 「卸载插件」删除插件文件及其供给的全部协议行（粒度是插件文件，不是单行）。
   protocol: {
     subtitle: '协议行由插件供给；这里维护显示信息，表单模板在「协议表单配置」中编辑。',
     totalUnit: '个协议',
@@ -1019,6 +1020,15 @@ export default {
     fetchListFailed: '获取列表失败',
     editSuccess: '编辑成功',
     editFailed: '编辑失败',
+
+    // ---------- 卸载插件 ----------
+    uninstallPlugin: '卸载插件',
+    uninstallPluginTitle: '卸载确认',
+    uninstallPluginConfirm: '将卸载插件「{file}」，并从网关删除它提供的协议：{protocols}。'
+      + '若仍有设备使用这些协议，卸载会被拒绝；卸载后插件文件不可恢复。',
+    uninstallPluginConfirmBtn: '确认卸载',
+    uninstallPluginSuccess: '已卸载插件「{file}」',
+    uninstallPluginNotLoaded: '未找到该协议对应的已加载插件',
 
     // ---------- 新增插件（批量上传） ----------
     addPlugin: '新增插件',

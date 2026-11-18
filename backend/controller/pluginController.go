@@ -17,6 +17,7 @@ import (
 
 	"iot-gateway/appError"
 	"iot-gateway/enums"
+	"iot-gateway/model/dto"
 	"iot-gateway/pluginhost"
 	"iot-gateway/response"
 	"iot-gateway/service"
@@ -65,6 +66,27 @@ func (ctr *PluginController) PluginInfo(c *gin.Context) {
 		return
 	}
 	c.JSON(200, response.Success(data))
+}
+
+// ListPlugins 查询已加载插件清单（供协议页把协议行映射到插件文件）
+func (ctr *PluginController) ListPlugins(c *gin.Context) {
+	ctx := c.Request.Context()
+	c.JSON(200, response.Success(ctr.pluginService.List(ctx)))
+}
+
+// UninstallPlugin 卸载插件：停进程、删文件，并清理它供给的协议行
+func (ctr *PluginController) UninstallPlugin(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.UninstallPluginDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	if err := ctr.pluginService.Uninstall(ctx, req.File); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(nil))
 }
 
 // ImportPlugin 批量上传协议插件

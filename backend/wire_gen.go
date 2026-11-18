@@ -100,7 +100,7 @@ func InitializeApp() (*AppDependencies, func()) {
 	systemConfigService := service.NewSystemConfigService(manager)
 	serviceGatewayService := service.NewGatewayService(db)
 	openApiConfigService := service.NewOpenApiConfigService(db, thingModelService, pushChannelService, pushChannelFormService, alarmWebhookService, alarmWebhookFormService, systemConfigService, protocolService, serviceGatewayService, deviceService, deviceAddressService, collectorGroupService)
-	pluginService := service.NewPluginService(pluginhostManager)
+	pluginService := service.NewPluginService(db, pluginhostManager)
 	openApiRealtimeService := service.NewOpenApiRealtimeService(db, realtimeService)
 	openApiController := controller.NewOpenApiController(openApiService, controlService, thingModelService, openApiConfigService, pluginService, openApiRealtimeService, deviceService, engine)
 	gatewayController := controller.NewGatewayController(serviceGatewayService)

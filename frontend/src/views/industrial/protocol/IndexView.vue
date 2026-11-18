@@ -98,7 +98,7 @@
           width="160"
           class-name="iot-col-time"
         />
-        <el-table-column :label="t('common.action')" width="140" align="center" fixed="right">
+        <el-table-column :label="t('common.action')" width="180" align="center" fixed="right">
           <template #default="{ row }">
             <div class="iot-row-actions">
               <el-tooltip :content="t('protocol.viewForm')" placement="top">
@@ -133,6 +133,23 @@
                   :icon="RefreshLeft"
                   :aria-label="t('protocol.resetForm')"
                   @click="handleResetForm(row)"
+                />
+              </el-tooltip>
+              <!-- 卸载的粒度是插件文件：一个插件可能供给多个协议，弹窗里会列全 -->
+              <el-tooltip
+                v-if="userStore.isAdmin && pluginOf(row)"
+                :content="t('protocol.uninstallPlugin')"
+                placement="top"
+              >
+                <el-button
+                  class="iot-row-btn"
+                  type="danger"
+                  link
+                  size="small"
+                  :icon="Trash"
+                  :disabled="!!uninstallingFile"
+                  :aria-label="t('protocol.uninstallPlugin')"
+                  @click="handleUninstallPlugin(row)"
                 />
               </el-tooltip>
             </div>
@@ -394,6 +411,7 @@ import {
   IconPlus as Plus,
   IconRotate as RefreshLeft,
   IconSearch as Search,
+  IconTrash as Trash,
 } from '@tabler/icons-vue'
 import { useUserStore } from '@/store'
 import { useI18n } from 'vue-i18n'
@@ -404,7 +422,12 @@ import {
   updateProtocol,
   resetProtocolForm,
 } from '@/api/modules/protocol'
-import { getPluginInfo, importPlugins } from '@/api/modules/plugin'
+import {
+  getPluginInfo,
+  importPlugins,
+  listPlugins,
+  uninstallPlugin,
+} from '@/api/modules/plugin'
 
 const userStore = useUserStore()
 
@@ -466,6 +489,76 @@ async function fetchList({ silent = false } = {}) {
  */
 function listSignature() {
   return `${total.value}|${tableData.value.map((row) => row.id).join(',')}`
+}
+
+// ---------- 已加载插件（卸载入口） ----------
+//
+// 协议行没有「所属插件」字段：它由插件供给，但供给关系只在网关内存里。
+// 这里拉一次插件清单，按协议名反查，才能把行上的删除按钮落到具体文件。
+const pluginList = ref([])
+
+/** 协议名 → 供给它的插件。一个插件可供给多个协议。 */
+const pluginByProtocol = computed(() => {
+  const map = new Map()
+  for (const plugin of pluginList.value) {
+    for (const name of plugin.protocols || []) {
+      map.set(name, plugin)
+    }
+  }
+  return map
+})
+
+function pluginOf(row) {
+  return pluginByProtocol.value.get(row.name) || null
+}
+
+async function fetchPlugins() {
+  try {
+    pluginList.value = (await listPlugins()) || []
+  } catch (err) {
+    // 拉不到插件清单只会让删除按钮不出现，不影响协议页本身；
+    // 失败原因由 axios 拦截器提示过一次，这里不再弹。
+    console.error('获取插件清单失败', err)
+    pluginList.value = []
+  }
+}
+
+const uninstallingFile = ref('')
+
+async function handleUninstallPlugin(row) {
+  const plugin = pluginOf(row)
+  if (!plugin) {
+    ElMessage.warning(t('protocol.uninstallPluginNotLoaded'))
+    return
+  }
+
+  const protocols = (plugin.protocols || []).join('、')
+  try {
+    await ElMessageBox.confirm(
+      t('protocol.uninstallPluginConfirm', { file: plugin.name, protocols }),
+      t('protocol.uninstallPluginTitle'),
+      {
+        type: 'warning',
+        confirmButtonText: t('protocol.uninstallPluginConfirmBtn'),
+        cancelButtonText: t('common.cancel'),
+        confirmButtonClass: 'el-button--danger',
+      },
+    )
+  } catch {
+    return // 用户取消
+  }
+
+  uninstallingFile.value = plugin.name
+  try {
+    await uninstallPlugin(plugin.name)
+    ElMessage.success(t('protocol.uninstallPluginSuccess', { file: plugin.name }))
+    // 协议行与插件清单同时变化：前者被删、后者少一项。
+    await Promise.all([fetchList(), fetchPlugins()])
+  } catch {
+    // 失败原因（含「仍被设备使用」的设备清单）由拦截器统一提示
+  } finally {
+    uninstallingFile.value = ''
+  }
 }
 
 // ---------- 搜索 / 重置 ----------
@@ -739,7 +832,12 @@ async function pollListAfterPluginUpload(baseline) {
       await sleep(pluginPollInterval)
       if (token !== pluginPollToken) return
       await fetchList({ silent: true })
-      if (listSignature() !== baseline) return
+      if (listSignature() !== baseline) {
+        // 新协议行出现即意味着插件已被加载，同步刷新插件清单，
+        // 让新行的卸载按钮立刻可点。
+        fetchPlugins()
+        return
+      }
     }
   } finally {
     // 令牌已被后来者接管时不动刷新态，那是新轮询的。
@@ -774,6 +872,8 @@ async function handlePluginSubmit() {
       // 插件要等下一轮目录扫描（约 10s）才会被加载并供给 iot_protocol 行，
       // 此刻刷新多半还是旧列表 —— 改为轮询，新协议一出现就自动刷新并停下。
       pollListAfterPluginUpload(baseline)
+      // 热升级不会产生新协议行，轮询会等到超时；插件清单本身趁早刷新。
+      fetchPlugins()
     }
     // 清空待传队列：成功的已落盘，失败的已在下方的结果表里逐条给出原因，
     // 用户据此换文件重传比对着残留列表猜更直接。
@@ -795,6 +895,8 @@ function handlePluginDialogClose() {
 // ---------- 初始化 ----------
 onMounted(() => {
   fetchList()
+  // 只有管理员有卸载入口；非管理员不必拉。
+  if (userStore.isAdmin) fetchPlugins()
 })
 
 onUnmounted(() => {

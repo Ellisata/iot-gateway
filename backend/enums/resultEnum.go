@@ -241,7 +241,7 @@ var (
 	SystemConfigPersistFailEnum  = NewBusinessEnum("80005", "配置保存失败", "err.system_config_persist_fail")
 	SystemConfigClosedEnum       = NewBusinessEnum("80006", "网关正在停机，配置修改已关闭", "err.system_config_closed")
 
-	// 协议插件上传相关错误码
+	// 协议插件上传/卸载相关错误码
 	PluginDisabledEnum    = NewBusinessEnum("90001", "插件功能未启用，上传的插件不会被加载", "err.plugin_disabled")
 	PluginNoFileEnum      = NewBusinessEnum("90002", "未接收到上传的插件文件", "err.plugin_no_file")
 	PluginTooManyEnum     = NewBusinessEnum("90003", "单次上传的插件文件数量超限", "err.plugin_too_many")
@@ -250,6 +250,9 @@ var (
 	PluginInstallFailEnum = NewBusinessEnum("90006", "插件安装失败", "err.plugin_install_fail")
 	// PluginChecksumMismatchEnum 上传内容与 X-Content-SHA256 声明不一致。
 	PluginChecksumMismatchEnum = NewBusinessEnum("90007", "插件内容校验和不一致", "err.plugin_checksum_mismatch")
+	PluginNotFoundEnum         = NewBusinessEnum("90008", "插件不存在或未加载", "err.plugin_not_found")
+	PluginInUseEnum            = NewBusinessEnum("90009", "插件仍被设备使用，不能卸载", "err.plugin_in_use")
+	PluginUninstallFailEnum    = NewBusinessEnum("90010", "插件卸载失败", "err.plugin_uninstall_fail")
 
 	// 报警通知 Webhook 相关错误码（钉钉 / 企微 / 飞书 / 自定义）
 	AlarmWebhookExistsEnum        = NewBusinessEnum("95001", "报警通知名称已存在", "err.alarm_webhook_exists")

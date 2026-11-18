@@ -13,9 +13,12 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	"iot-gateway/appError"
 	"iot-gateway/enums"
 	"iot-gateway/logger"
+	"iot-gateway/model/po"
 	"iot-gateway/model/vo"
 	"iot-gateway/pluginhost"
 )
@@ -44,16 +47,21 @@ type PluginUpload struct {
 
 // PluginService 协议插件安装服务。
 //
-// 不碰数据库：插件的真源是文件系统（plugins/ 目录），
+// 安装路径不碰数据库：插件的真源是文件系统（plugins/ 目录），
 // 而 iot_protocol 行由 pluginhost 的扫描器在加载插件后自动供给
-// （见 pluginhost/provision.go），不需要这一层代劳。
+// （见 pluginhost/provision.go）。
+//
+// 卸载路径需要数据库，且只有这一处需要：删协议行前必须先确认没有设备
+// 通过 device.protocol_id 引用它们。pluginhost 刻意不认识设备表（它只管
+// 进程与注册表），这个跨领域判断放在服务层。
 type PluginService struct {
-	manager *pluginhost.Manager
+	sqliteDB *gorm.DB
+	manager  *pluginhost.Manager
 }
 
 // NewPluginService 创建插件安装服务
-func NewPluginService(manager *pluginhost.Manager) *PluginService {
-	return &PluginService{manager: manager}
+func NewPluginService(sqliteDB *gorm.DB, manager *pluginhost.Manager) *PluginService {
+	return &PluginService{sqliteDB: sqliteDB, manager: manager}
 }
 
 // Info 返回网关侧的插件环境信息（平台 / 目录 / 命名规则）。
@@ -118,6 +126,155 @@ func (s *PluginService) OpenApiStatus() []vo.OpenApiPluginStatusVO {
 		})
 	}
 	return out
+}
+
+// List 返回管理端使用的已加载插件清单。
+//
+// 前端用它把「协议行」映射到「插件文件」：一个插件可以供给多个协议，
+// 卸载的粒度是文件而不是行（见 Uninstall）。
+func (s *PluginService) List(ctx context.Context) []vo.PluginStatusVO {
+	statuses := s.manager.Status()
+	out := make([]vo.PluginStatusVO, 0, len(statuses))
+	for _, st := range statuses {
+		out = append(out, vo.PluginStatusVO{
+			Name:             filepath.Base(st.Path),
+			Protocols:        st.Protocols,
+			Scope:            st.Scope,
+			Version:          st.Version,
+			SHA256:           st.SHA256,
+			Up:               st.Up,
+			Epoch:            st.Epoch,
+			Upgrades:         st.Upgrades,
+			UpgradedAt:       st.UpgradedAt,
+			PreviousSHA256:   st.PreviousSHA256,
+			LastUpgradeError: st.LastUpgradeError,
+		})
+	}
+	return out
+}
+
+// pluginUsage 一台仍在使用待卸载插件协议的设备。
+type pluginUsage struct {
+	DeviceName   string `gorm:"column:device_name"`
+	ProtocolName string `gorm:"column:protocol_name"`
+}
+
+// maxUsageShown 拒绝信息里最多列出的设备数。
+//
+// 设备多时只列前几台：错误文案是给人看的第一落点，不是清单页；
+// 总数仍然完整给出。
+const maxUsageShown = 10
+
+// Uninstall 卸载一个插件，并删除它供给的协议行。
+//
+// 顺序是刻意的：
+//  1. 先查设备引用 —— 被引用的插件不能卸载，否则 device.protocol_id 会悬空，
+//     设备在采集时被静默跳过，前端看不出任何原因；
+//  2. 卸载插件文件与进程（pluginhost.Uninstall）；
+//  3. 最后删协议行 —— 文件已经不在，provision 不会再把行插回来。
+//
+// 反过来先删行再删文件是不行的：文件删失败时下一轮扫描会重新供给，
+// 协议行会以**新的 ID** 重建，期间引用旧 ID 的设备就成了孤儿。
+//
+// 只接受已加载插件的文件名：未加载的文件无法知道它供给哪些协议，
+// 也就无法判断设备引用。这类残留文件目前仍需在网关上人工处理。
+func (s *PluginService) Uninstall(ctx context.Context, file string) error {
+	if !s.manager.Enabled() {
+		return appError.NewAppErrorCtx(
+			enums.PluginDisabledEnum.GetCode(),
+			enums.PluginDisabledEnum.GetMessage(),
+			enums.PluginDisabledEnum.GetMsgKey())
+	}
+
+	name := filepath.Base(strings.TrimSpace(file))
+	var protocols []string
+	found := false
+	for _, st := range s.manager.Status() {
+		if filepath.Base(st.Path) == name {
+			protocols = append([]string(nil), st.Protocols...)
+			found = true
+			break
+		}
+	}
+	if !found {
+		return appError.NewAppErrorCtx(
+			enums.PluginNotFoundEnum.GetCode(),
+			enums.PluginNotFoundEnum.GetMessage(),
+			enums.PluginNotFoundEnum.GetMsgKey())
+	}
+
+	var usages []pluginUsage
+	if len(protocols) > 0 {
+		if err := s.sqliteDB.WithContext(ctx).Table(po.Device{}.TableName()).
+			Select("device.name AS device_name, iot_protocol.name AS protocol_name").
+			Joins("JOIN iot_protocol ON iot_protocol.id = device.protocol_id").
+			Where("iot_protocol.name IN ?", protocols).
+			Order("device.name").
+			Find(&usages).Error; err != nil {
+			return err
+		}
+		if len(usages) > 0 {
+			return appError.NewAppError(
+				enums.PluginInUseEnum.GetCode(),
+				formatPluginUsage(name, usages))
+		}
+	}
+
+	if err := s.manager.Uninstall(name); err != nil {
+		switch {
+		case errors.Is(err, pluginhost.ErrPluginNotFound):
+			return appError.NewAppErrorCtx(
+				enums.PluginNotFoundEnum.GetCode(),
+				enums.PluginNotFoundEnum.GetMessage(),
+				enums.PluginNotFoundEnum.GetMsgKey())
+		case errors.Is(err, pluginhost.ErrPluginDisabled):
+			return appError.NewAppErrorCtx(
+				enums.PluginDisabledEnum.GetCode(),
+				enums.PluginDisabledEnum.GetMessage(),
+				enums.PluginDisabledEnum.GetMsgKey())
+		default:
+			logger.Error("plugin: 卸载 %s 失败: %v", name, err)
+			return appError.NewAppError(
+				enums.PluginUninstallFailEnum.GetCode(),
+				fmt.Sprintf("%s：%v", enums.PluginUninstallFailEnum.GetMessage(), err))
+		}
+	}
+
+	if len(protocols) > 0 {
+		res := s.sqliteDB.WithContext(ctx).
+			Where("name IN ?", protocols).
+			Delete(&po.IotProtocol{})
+		if res.Error != nil {
+			// 插件文件已经删掉，协议行留在库里只会显示成「有行无驱动」的
+			// 僵尸协议。把真实状态写进错误里，避免用户以为整单失败。
+			logger.Error("plugin: 插件 %s 已卸载，但清理协议行失败: %v", name, res.Error)
+			return appError.NewAppError(
+				enums.PluginUninstallFailEnum.GetCode(),
+				fmt.Sprintf("%s：插件已卸载，但协议行清理失败：%v",
+					enums.PluginUninstallFailEnum.GetMessage(), res.Error))
+		}
+	}
+
+	logger.Info("plugin: 已卸载插件 %s，删除协议行 %s", name, strings.Join(protocols, ", "))
+	return nil
+}
+
+// formatPluginUsage 把设备引用整理成一条可照做的拒绝文案。
+func formatPluginUsage(name string, usages []pluginUsage) string {
+	shown := usages
+	if len(shown) > maxUsageShown {
+		shown = shown[:maxUsageShown]
+	}
+	parts := make([]string, 0, len(shown))
+	for _, u := range shown {
+		parts = append(parts, fmt.Sprintf("%s（%s）", u.DeviceName, u.ProtocolName))
+	}
+	tail := ""
+	if len(usages) > len(shown) {
+		tail = fmt.Sprintf(" 等共 %d 台", len(usages))
+	}
+	return fmt.Sprintf("%s：插件 %s 仍被设备使用：%s%s。请先删除这些设备或改用其它协议。",
+		enums.PluginInUseEnum.GetMessage(), name, strings.Join(parts, "、"), tail)
 }
 
 // ImportPlugins 批量安装插件，返回逐文件成败明细。

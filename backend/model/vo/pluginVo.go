@@ -68,6 +68,25 @@ type OpenApiPluginStatusVO struct {
 	LastUpgradeError string `json:"lastUpgradeError"`
 }
 
+// PluginStatusVO 管理端看到的已加载插件快照。
+//
+// 字段与 OpenApiPluginStatusVO 相同，但**独立命名**：管理端与开放接口是两份
+// 契约，前者要跟着页面需求走，后者有兼容性承诺，字段增减不应互相牵动。
+type PluginStatusVO struct {
+	Name      string   `json:"name"`
+	Protocols []string `json:"protocols"`
+	Scope     string   `json:"scope"`
+	Version   string   `json:"version"`
+	SHA256    string   `json:"sha256"`
+	Up        bool     `json:"up"`
+	Epoch     uint64   `json:"epoch"`
+
+	Upgrades         int    `json:"upgrades"`
+	UpgradedAt       string `json:"upgradedAt"`
+	PreviousSHA256   string `json:"previousSha256"`
+	LastUpgradeError string `json:"lastUpgradeError"`
+}
+
 // PluginImportErrorVO 单个插件文件的导入失败明细。
 type PluginImportErrorVO struct {
 	Name string `json:"name"`

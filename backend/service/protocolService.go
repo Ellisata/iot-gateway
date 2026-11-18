@@ -35,9 +35,11 @@ type ProtocolFormSource interface {
 //
 // 协议**只能由插件供给**（driver 注册表里已无任何内置协议，见 CLAUDE.md），
 // 因此这里没有「新建协议」：手工建的行没有任何驱动能与之对应，
-// 设备选了它只会在采集时被静默跳过。同理也没有「删除协议」——
-// 删掉的行会在插件下次加载时被 provision 重新插回，按钮看着成功实则无效；
-// 取而代之的是 ResetProtocolForm（把表单恢复成插件当前声明的那一份）。
+// 设备选了它只会在采集时被静默跳过。也没有按行的「删除协议」——
+// 插件文件还在时，删掉的行会在下一轮 provision 中被重新插回。
+// 协议行的删除只有一条路径：PluginService.Uninstall 先卸载插件文件
+// （此后 provision 不会再跑），再删除它供给的行；且有设备引用时直接拒绝。
+// 表单侧则有 ResetProtocolForm（把表单恢复成插件当前声明的那一份）。
 type ProtocolService struct {
 	sqliteDB *gorm.DB
 	forms    ProtocolFormSource
