@@ -50,7 +50,7 @@ go run ./cmd/loadtest -protocol modbus -devices 10,50,100 -points 500,2000,5000 
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `-protocol` | `modbus` | `modbus` / `mc` / `fins` / `s7` / `cip` / `rockwell` / `opcua` / `dlt645` |
+| `-protocol` | `modbus` | `modbus` / `mc` / `fins` / `s7` / `cip` / `rockwell` / `fanuc` / `opcua` / `dlt645` |
 | `-plugins-dir` | `plugins` | 插件目录；相对路径**先按可执行文件所在目录、再按调用时的工作目录**解析（不是只看 cwd），见上节 |
 | `-devices` | `10,50,100` | 设备数矩阵（逗号分隔） |
 | `-points` | `500,2000,5000` | 单设备点位矩阵 |
@@ -58,9 +58,10 @@ go run ./cmd/loadtest -protocol modbus -devices 10,50,100 -points 500,2000,5000 
 | `-run` / `-warmup` | `5` / `2` | 测量窗口 / 预热秒数 |
 | `-servers` | `4` | 假 PLC 服务器池大小（设备轮询分配） |
 | `-sparse` | `false` | 稀疏地址布局（间隙 > 合并窗口，**1 帧/点**，帧数最坏情况） |
-| `-latency` | `0` | 每事务注入固定延迟毫秒（模拟真实 RTT，**8 个协议全部支持**） |
+| `-latency` | `0` | 每事务注入固定延迟毫秒（模拟真实 RTT，**9 个协议全部支持**） |
 | `-serial-baud` | `0` | **模拟串口链路**：按该波特率与协议帧字节数折算线路时间，**叠加到** `-latency` 上（详见下方「串口链路怎么压测」）。`0` = 关闭；只对帧布局已知的协议有效，其余**直接报错退出** |
 | `-cip-batch` | `0` | CIP 0x0A 多服务批量读的标签数：`1` = 逐标签单读，`>1` = 批量；`0` = 不带该字段、用驱动默认（**注意驱动默认是 64**） |
+| `-fanuc-block` | `0` | FANUC `maxRegistersPerRead`：单次块读寄存器数；`0` = 不带该字段、用驱动默认 100；`1` = 关闭块读；上限 124 |
 | `-opcua-batch` | `0` | OPC UA maxBatch（单 ReadRequest 节点数，0 = 驱动默认 100） |
 | `-dlt645-dis` | `0` | DL/T 645 `maxDIsPerRead`（单请求打包的数据标识数，1~12；0 = 不带该字段、用驱动默认 **12 = 协议上限**；传 `1` 可复现「一帧一个点」的保守配置） |
 | `-dlt645-interframe` | `-1` | DL/T 645 `interFrameDelayMs`（发送后等多久开始读应答；**`-1` = 用驱动默认：TCP `0` / 串口 `30ms`**，`0` = 关闭） |
@@ -94,6 +95,8 @@ testutil/fake/           假 PLC 服务器（真实 TCP 监听，逐帧解析请
                          数据值由数据标识导出；带 RTT 的 NewDLT645WithLatency）
 cmd/loadtest/
   harness.go             造数 seeder（真实迁移建库）+ 计数 sink + 测量采样器 + 协议适配器
+  fanucfake.go           FANUC EtherNet/IP 假设备（TCP 显式消息 + 同端口 UDP ListIdentity；
+                         0x6B/0x6C 单读与 Get_Attribute_All 块读均为公式化应答）
   pluginLoader.go        插件目录解析 + pluginhost.Manager 启停 + 协议注册校验
   main.go                参数解析 + 假服务器池 + 扫描矩阵
 ```
@@ -161,6 +164,7 @@ tick 对齐：周期不是采集频率的整数倍时，轮询顺延到下一个
 | Siemens.S7 | 0.0 | 0.0 | 0.0 |
 | Omron.CIP | 0.0 | 0.0 | 0.0 |
 | Rockwell.CIP | 0.0 | 0.0 | 0.0 |
+| FANUC.CIP | 40.0 | 81.6 | 90.8 |
 | OPC.UA | 0.0 | 0.0 | 16.8 |
 
 **RTT=10ms**
@@ -173,6 +177,7 @@ tick 对齐：周期不是采集频率的整数倍时，轮询顺延到下一个
 | Siemens.S7 | 0.0 | 48.0 | 65.6 |
 | Omron.CIP | 0.0 | 76.0 | 88.0 |
 | Rockwell.CIP | 0.0 | 64.0 | 82.0 |
+| FANUC.CIP | 40.0 | 81.6 | — |
 | OPC.UA | 40.0 | 83.4 | 91.0 |
 
 **RTT=20ms**
@@ -185,10 +190,13 @@ tick 对齐：周期不是采集频率的整数倍时，轮询顺延到下一个
 | Siemens.S7 | 0.0 | 56.0 | 74.4 |
 | Omron.CIP | 40.0 | 88.0 | 92.0 |
 | Rockwell.CIP | 0.0 | 79.2 | 89.6 |
+| FANUC.CIP | 40.0 | 81.6 | — |
 | OPC.UA | 63.2 | 88.6 | 94.3 |
 
 （表内为 drop%，越小越好；0.0 = 该组合可支撑。**注意**：贴近边界（帧数 × RTT ≈ 采集频率）
 的格子读数会在 0 与更高档之间双稳，见上方「贴近边界的单元读数会跳变」。）
+
+FANUC.CIP 的 5000 点档使用默认 100 个/块；把 `-fanuc-block` 调到 124 时 RTT=0、scan=1000ms 可降到 0%（约 6 万记录/秒），见下方专节。
 
 **三条结论：**
 
@@ -329,6 +337,92 @@ RTT=20ms 下 scan=1000ms 仍 0% 掉点，scan=200ms 时是唯一还能撑住 200
 数组规整布局下与 Modbus 同级（40 帧）。**本表只覆盖数组布局**；独立标签
 （`Tag_i`）布局每点 1 帧，属最坏情况，与上表 CIP 单读同量级，生产配置应尽量
 把连续采集点规划为 `Base[N..N+k]` 数组标签。
+
+#### FANUC.CIP（数值寄存器块读，2026-11 实测）
+
+`cmd/loadtest` 已接入 `fanuc`：假设备在 [fanucfake.go](fanucfake.go)，同一端口同时监听 TCP（显式消息）与 UDP（ListIdentity），下表是**完整采集链路**（采集引擎 + 进程外插件 + 假设备）的实测值。`deviceJSON` 固定 `maxRequestsPerSecond=50`（驱动上限）以测链路能力；驱动出厂默认是 10。
+
+环境：Windows / i5-1340P（16 逻辑核）/ loopback / 4 个假设备 / worker 32。
+绝对数随机器负载与核数变化，**相对差异**才是结论。
+
+**帧数模型**：
+
+- 数值寄存器按 `maxRegistersPerRead` 合并（默认 **100**，上限 **124**，设为 **1** 关闭）；
+- 连续（或间隙 ≤16）的寄存器合并成一次 `Get_Attribute_All`：帧数 = `ceil(N/100)`；
+- 关闭块读或间隙 >16：每点 1 帧；
+- 块内每个寄存器 4 字节。
+
+**1000 点/台，块读开启**：
+
+| 设备 | 扫描 | RTT 0 | RTT 5 | RTT 20 | 实际记录/秒（RTT=0） |
+|---|---|---|---|---|---|
+| 1 | 1000ms | 0.0 | 0.1 | 0.0 | 1000 |
+| 1 | 200ms | 0.0 | 4.0 | 48.0 | 5200 |
+| 10 | 1000ms | 0.0 | 0.0 | 0.0 | 11994 |
+| 10 | 200ms | 5.2 | 20.8 | 48.0 | 47388 |
+
+- scan=1000ms：10 帧 × 20ms = 200ms，远低于采集周期，RTT 0/5/20 全部 0% 掉点；
+- scan=200ms：10 帧 × 20ms = 200ms 正好贴边，掉点 48% —— **不要按等号规划**，按「帧数 × RTT ≤ 采集周期 × 0.7」留余量（20ms RTT 时 1s 周期才是安全区）。
+
+**5000 点/台（与上方主表同口径）**：
+
+| RTT | scan=1000ms | scan=200ms | scan=100ms |
+|---|---|---|---|
+| 0 | 40.0 | 81.6 | 90.8 |
+| 10 | 40.0 | 81.6 | — |
+| 20 | 40.0 | 81.6 | — |
+
+默认块读 100 时 5000 点/台是 50 帧；`maxRequestsPerSecond=50` 的限流间隔是 20ms，**50 × 20ms = 1s，正好贴边**，所以 scan=1000ms、RTT=0 也掉 40%（周期跳到 2s）。把 `-fanuc-block` 调到 124 后帧数降到 41：RTT=0 时 0% 掉点、约 6 万记录/秒；RTT=20ms 时 820ms 只剩 18% 余量，仍掉 40% —— 与「留 30% 余量」的规则一致。
+
+**块读开关对照**（scan=1000ms，RTT=0）：
+
+| 设备 | 点/台 | 块读开启 drop% | 块读开启 记录/秒 | 关闭块读 drop% | 关闭块读 记录/秒 |
+|---|---|---|---|---|---|
+| 1 | 100 | 0.0 | 120 | 40.0 | 60 |
+| 1 | 500 | 0.0 | 600 | 80.0 | 100 |
+| 1 | 1000 | 0.0 | 1000 | 80.0 | 200 |
+| 10 | 100 | 0.0 | 1200 | 40.0 | 600 |
+| 10 | 500 | 0.0 | 5000 | 80.0 | 1000 |
+| 10 | 1000 | 0.0 | 12000 | 80.0 | 2000 |
+
+关闭块读时每点 1 帧，被 `maxRequestsPerSecond=50` 硬限流：100 点要 2s/轮、500/1000 点要 10/20s/轮，1s 周期只能完成一小部分 —— 这就是 40%/80% 掉点的来源。**块读是 FANUC 点位容量可用的前提，不是优化项。**
+
+**稀疏布局**（`-sparse`，地址 `R[i*18+1]`，间隙 17 > 合并间隙 16）：
+
+- 1 设备 × 1000 点、scan=1000ms、RTT=0 → **80% 掉点**、200 记录/秒；
+- 帧数回到「每点一帧」，与关闭块读同量级；生产配置应尽量连续。
+
+**聚合档**：
+
+| 设备 × 点/台 | 扫描 | 预期记录/秒 | 实际记录/秒 | drop% | 说明 |
+|---|---|---|---|---|---|
+| 50 × 1000 | 1000ms | 50k | 59975 | 0.0 | 5 万点，0 掉点 |
+| 50 × 1000 | 200ms | 250k | 177581 | 29.0 | CPU / 插件 RPC 成为瓶颈 |
+| 10 × 1000 | 100ms | 100k | 51997 | 48.0 | 100ms 周期已超出本机能力 |
+
+**结论**：
+
+1. 默认 100 个/块的连续 R[]，1000 点/台是 10 帧；scan=1s、RTT≤20ms 时 10 台 **0% 掉点**。
+2. 容量公式不变：`帧数 = ceil(点数 / maxRegistersPerRead)`，判据仍是 `帧数 × RTT < 采集周期 × 0.7`。
+3. 50 台 × 1000 点 @1s 本机 0% 掉点、约 6 万记录/秒；@200ms 掉 29%，此时瓶颈已从协议帧数转到 CPU/插件 RPC。
+4. 关闭块读或稀疏布局时，单设备容量回落到约 `maxRequestsPerSecond` 点/秒（本压测为 50），500 点以上在 1s 周期必然大幅掉点。
+5. 块读编码仍**未真机验证**：首次块读会用单点读交叉校验首末点位，失败自动回退单读并暂停 5 分钟；真机先对 `R[6]–R[15]` 做单读/块读比对。
+
+**复现**：
+
+```bash
+# 插件（在 iot-gateway-drivers 检出目录）
+go build -o ../iot-gateway-premium/backend/plugins/iot-driver-fanuc.exe ./fanuc
+
+# 端到端矩阵（在 backend/ 下）
+go run ./cmd/loadtest -protocol fanuc -devices 1,10 -points 1000 -scan 1000 -latency 0 -run 5 -warmup 2
+go run ./cmd/loadtest -protocol fanuc -devices 1,10 -points 1000 -scan 200 -latency 20 -run 5 -warmup 2
+go run ./cmd/loadtest -protocol fanuc -devices 10 -points 1000 -scan 1000 -fanuc-block 1 -run 5 -warmup 2
+go run ./cmd/loadtest -protocol fanuc -devices 1 -points 1000 -scan 1000 -sparse -run 5 -warmup 2
+go run ./cmd/loadtest -protocol fanuc -devices 50 -points 1000 -scan 1000 -run 5 -warmup 2
+```
+
+> `-fanuc-block 1` 关闭块读；`0` 或不传使用驱动默认 100。`cycleMs` 列是秒级精度，scan<1000ms 时忽略它，看 drop% 与记录/秒。
 
 #### OPC.UA（`maxBatch` 100 节点/ReadRequest）
 
@@ -508,7 +602,8 @@ serial modeled: 2400bps 8E1 (11 bits/byte) × 168 bytes/frame = 770ms line time 
 ### 优化方向
 1. **帧数决定点位容量**：Modbus 125 寄存器/帧、MC 100 字/帧（可调 960）、FINS 100 字/帧、
    S7 462 字节/PDU、CIP 64 标签/帧（批量，可调）、Rockwell 125 元素/帧（数组）、
-   OPC UA 100 节点/帧。同点数下帧数差 1~2 个数量级，容量随帧数线性走。
+   FANUC.CIP 100 寄存器/帧（块读，可调 1..124）、OPC UA 100 节点/帧。
+   同点数下帧数差 1~2 个数量级，容量随帧数线性走。
    CIP 批量读的收益本次已量化：5000 点从 5000 帧降到 80 帧，RTT=10ms 时掉点从
    80% 降到 0%（见上方「单读对照」表）——**批量读是 CIP 可用的前提**。
    **DL/T 645 是同一条规律最极端的例子**：帧数只由 `maxDIsPerRead` 决定，出厂即

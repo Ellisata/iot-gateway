@@ -7,3 +7,4 @@ omroncip
 opcua
 rockwellcip
 s7
+fanuc

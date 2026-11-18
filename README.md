@@ -22,7 +22,7 @@
 ## 为什么是它
 
 - **单二进制，零外部依赖** —— 前端 `go:embed` 内嵌、SQLite 纯 Go 实现（免 CGO）；主程序 + `plugins/` 即完整系统，拷到工控机就能跑。
-- **协议驱动进程隔离** —— 15 种协议全部是 `plugins/` 下的独立进程：驱动崩溃自动退避重启、卡死自动回收、替换二进制即热升级，主程序不受影响。
+- **协议驱动进程隔离** —— 16 种协议全部是 `plugins/` 下的独立进程：驱动崩溃自动退避重启、卡死自动回收、替换二进制即热升级，主程序不受影响。
 - **按现场设计** —— 断网数据落本地 outbox 并自动补发、变化才推送、配置零中断热加载、设备/点位自动扫描、MQTT 订阅反向入时序库。
 
 ## 5 分钟试用
@@ -50,15 +50,15 @@
 |---|---|
 | 中小产线、单机部署、Windows 工控机 | IEC 60870-5-104 / IEC 61850 / BACnet / CAN |
 | 西门子、三菱、欧姆龙、罗克韦尔、OPC UA | Kafka / RabbitMQ / MySQL / PostgreSQL 等下游 |
-| DL/T 645 电表、ABB 机器人 | 集群 HA、规则引擎、集中式 fleet 管理 |
+| DL/T 645 电表、ABB / FANUC 机器人 | 集群 HA、规则引擎、集中式 fleet 管理 |
 
 **许可**：网关核心与官方驱动为 AGPL-3.0；驱动 SDK 以 Apache-2.0 独立发布。公司内部部署、通过 Open API / MQTT 对接自有系统无需开源；OEM / 对外交付需商业授权，详见[许可证与 FAQ](#许可证与-faq) 与 [LICENSING.md](LICENSING.md)。
 
 ## 功能特性
 
-- **多协议采集**：Modbus、西门子 S7、三菱 MC、欧姆龙 FINS/CIP、罗克韦尔 CIP、OPC UA、ABB 机器人 RWS、DL/T 645 电能表等 15 种协议/传输驱动，支持寄存器批量读取、字节序/字序配置。
+- **多协议采集**：Modbus、西门子 S7、三菱 MC、欧姆龙 FINS/CIP、罗克韦尔 CIP、OPC UA、ABB 机器人 RWS、FANUC 机器人 CIP、DL/T 645 电能表等 16 种协议/传输驱动，支持寄存器批量读取、字节序/字序配置。
 - **动态表单驱动**：协议参数以 JSON Schema 动态表单存储于数据库，新增协议无需改前端代码。
-- **进程外协议插件**：**上述 15 种协议驱动全部是插件**——主二进制不含任何协议实现，每个驱动是一个 `iot-driver-<名字>` 独立可执行文件，放进可执行文件同级的 `plugins/` 目录**即自动加载，无需停机重编网关**；插件进程崩溃自动退避重启、卡死自动检测，替换二进制即可热升级，见[驱动插件指南](docs/driver-plugins.md)。
+- **进程外协议插件**：**上述 16 种协议驱动全部是插件**——主二进制不含任何协议实现，每个驱动是一个 `iot-driver-<名字>` 独立可执行文件，放进可执行文件同级的 `plugins/` 目录**即自动加载，无需停机重编网关**；插件进程崩溃自动退避重启、卡死自动检测，替换二进制即可热升级，见[驱动插件指南](docs/driver-plugins.md)。
 - **采集引擎**：Worker 并发池调度轮询任务；后台 watcher 检测配置变更，**零中断热加载**。
 - **推送引擎**：设备级分组批量分发；通道配置热加载；断网时数据写入 **本地 outbox 持久缓存**，恢复后自动补发，不丢数据。
 - **MQTT 订阅入时序库**：订阅外部 MQTT broker 上的 JSON 报文，按映射规则转换为采集记录后写入已启用的 TDengine / InfluxDB 通道；支持通配符 Topic、英文逗号分隔的多 Topic、QoS、鉴权、样例报文预览与连通性测试，解析器可选内置映射 DSL 或 goja JS 脚本，配置增删改自动热加载。
@@ -97,7 +97,7 @@
 
 ## 支持协议
 
-共 15 个协议名，**全部由 `plugins/` 下的进程外插件提供**（协议名与 scope 沿用历史值，**既有设备配置、`iot_protocol` 行与前端表单无需迁移**）：
+共 16 个协议名，**全部由 `plugins/` 下的进程外插件提供**（协议名与 scope 沿用历史值，**既有设备配置、`iot_protocol` 行与前端表单无需迁移**）：
 
 | 协议 | 传输方式 | 典型设备 | 提供插件 |
 |---|---|---|---|
@@ -107,6 +107,7 @@
 | `Omron.FINS.UDP` / `.TCP` / `.Serial` / `.HostLinkTCP` | UDP / TCP / 串口 | 欧姆龙 FINS 协议 PLC | `iot-driver-fins` |
 | `Omron.CIP` | EtherNet/IP | 欧姆龙 CIP 设备 | `iot-driver-omroncip` |
 | `Rockwell.CIP` | EtherNet/IP | 罗克韦尔（AB）ControlLogix / CompactLogix | `iot-driver-rockwellcip` |
+| `FANUC.CIP` | EtherNet/IP | 发那科（FANUC）R-30iA / R-30iB / R-30iB Plus 机器人 | `iot-driver-fanuc` |
 | `OPC.UA` | 以太网 | 支持 OPC UA 的设备与网关 | `iot-driver-opcua` |
 | `ABB.RWS` | 以太网 (HTTP/HTTPS) | ABB 机器人控制器（IRC5 / OmniCore） | `iot-driver-abb` |
 | `DLT645.Serial` / `DLT645.TCP` | 串口 (RS-485/RS-232) / 以太网 | DL/T 645 多功能电能表 | `iot-driver-dlt645` |
@@ -114,6 +115,8 @@
 > `ABB.RWS` 通过 ABB 的 **Robot Web Services** REST 接口采集，可读 IO 信号、RAPID 变量、控制器面板状态、关节/笛卡尔位姿与系统信息；自动识别 RWS 1.0（IRC5/RW6，Digest 认证）与 RWS 2.0（OmniCore/RW7，Basic 认证）。地址写法见插件源码的地址语法说明，例如 `signal:Local/DRV_1/DI1`、`rapid:T_ROB1/Mod1/nTest`、`panel:ctrlstate`、`motion:ROB_1/joint/rax_1`、`system:rwversion`。
 
 > `DLT645.Serial` / `DLT645.TCP` 采集 DL/T 645-2007 与 1997 两个方言的多功能电能表（电压/电流/功率/功率因数/电能/电表状态字），支持 RS-485 直连与串口服务器/DTU 透传两种链路。点位地址即**数据标识**：内置字典收录 A相电压 `02010100`、组合有功总电能 `00000000` 等常用项，厂商私有标识按 `DI:字节数:小数位[:标志]` 显式声明（如 `12345678:2:0:s`）。数据的字节数、小数位与符号由数据标识本身决定（不由类型下拉决定），下拉类型只决定输出形态。TCP 的 `host` 填串口服务器地址、`port` 填其透传端口（非 8899 时按现场填写）。
+
+> `FANUC.CIP` 通过 EtherNet/IP（CIP 显式消息）采集发那科机器人的数值寄存器 R[]——整型走对象 0x6B、实型走 0x6C，**读写均支持**；连接前用 ListIdentity 校验厂商号 591。同一 class 下连续（间隙 ≤16）的点位自动合并为块读（`Get_Attribute_All`），默认 100 个/请求、上限 124，设为 1 关闭；设备拒绝或数据错位时自动退回单读并暂停块读 5 分钟。位置寄存器 PR/CURPOS、DI/DO/GI/GO 与字符串寄存器 SR 暂不支持。
 
 ### 插件目录与加载方式
 

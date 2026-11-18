@@ -24,7 +24,7 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 ## Why iot-gateway
 
 - **Single binary, zero external dependencies** — the frontend is embedded via `go:embed` and SQLite is pure Go (CGO-free); the binary plus `plugins/` is the whole system.
-- **Process-isolated protocol drivers** — all 15 protocols run as separate `plugins/` processes: crashes restart with backoff, wedged processes are recycled, and replacing a binary hot-upgrades the driver without touching the gateway.
+- **Process-isolated protocol drivers** — all 16 protocols run as separate `plugins/` processes: crashes restart with backoff, wedged processes are recycled, and replacing a binary hot-upgrades the driver without touching the gateway.
 - **Built for the field** — a persistent local outbox with automatic replay, change-only push, zero-downtime config reload, device/point scanning, and reverse MQTT ingestion into time-series databases.
 
 ## Try it in 5 minutes
@@ -52,15 +52,15 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 |---|---|
 | Small/medium production lines, single-node installs, Windows industrial PCs | IEC 60870-5-104 / IEC 61850 / BACnet / CAN |
 | Siemens, Mitsubishi, Omron, Rockwell, OPC UA | Kafka / RabbitMQ / MySQL / PostgreSQL downstreams |
-| DL/T 645 meters, ABB robots | Clustering / HA, rule engine, central fleet management |
+| DL/T 645 meters, ABB / FANUC robots | Clustering / HA, rule engine, central fleet management |
 
 **License**: the gateway core and official drivers are AGPL-3.0; the driver SDK is published separately under Apache-2.0. Internal deployment and integration with your own systems via Open API / MQTT require no source disclosure; OEM or redistribution needs a commercial license — see [License & FAQ](#license--faq) and [LICENSING.md](LICENSING.md).
 
 ## Features
 
-- **Multi-protocol acquisition**: 15 protocol/transport drivers covering Modbus, Siemens S7, Mitsubishi MC, Omron FINS/CIP, Rockwell CIP, OPC UA, ABB robot RWS and DL/T 645 electricity meters — with batch register reads and configurable byte/word order.
+- **Multi-protocol acquisition**: 16 protocol/transport drivers covering Modbus, Siemens S7, Mitsubishi MC, Omron FINS/CIP, Rockwell CIP, OPC UA, ABB robot RWS, FANUC robot CIP and DL/T 645 electricity meters — with batch register reads and configurable byte/word order.
 - **Dynamic form driven**: protocol parameters are stored in the database as dynamic form schemas (JSON), so new protocols require no frontend changes.
-- **Out-of-process protocol plugins**: **all 15 protocol drivers are plugins** — the gateway binary contains no protocol implementation at all. Each driver is an `iot-driver-<name>` standalone executable dropped into the `plugins/` directory next to the binary to be **loaded automatically — no gateway rebuild, no downtime**; crashed plugin processes restart with backoff, wedged ones are detected and recycled, and replacing a binary hot-upgrades the plugin. See the [driver plugin guide](docs/driver-plugins.md) (中文).
+- **Out-of-process protocol plugins**: **all 16 protocol drivers are plugins** — the gateway binary contains no protocol implementation at all. Each driver is an `iot-driver-<name>` standalone executable dropped into the `plugins/` directory next to the binary to be **loaded automatically — no gateway rebuild, no downtime**; crashed plugin processes restart with backoff, wedged ones are detected and recycled, and replacing a binary hot-upgrades the plugin. See the [driver plugin guide](docs/driver-plugins.md) (中文).
 - **Acquisition engine**: worker-pool scheduled polling tasks; a background watcher detects configuration changes and applies **zero-downtime hot reload**.
 - **Push engine**: device-grouped batch dispatch; channel configs hot-reload; on network outage data lands in a **persistent local outbox** and is automatically re-sent once the connection recovers — no data loss.
 - **MQTT subscription into time-series databases**: subscribes to JSON messages on an external MQTT broker, maps them to collection records and writes them to enabled TDengine / InfluxDB channels — with wildcard and comma-separated multi-topics, QoS, authentication, sample-message preview, connectivity testing, a choice of built-in mapping DSL or a goja JS parser, and hot reload of subscription config.
@@ -100,7 +100,7 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 
 ## Supported Protocols
 
-15 protocol names in total, **all provided by out-of-process plugins under `plugins/`** (protocol names and type scopes are unchanged from previous releases, so **existing device configs, `iot_protocol` rows and frontend forms need no migration**):
+16 protocol names in total, **all provided by out-of-process plugins under `plugins/`** (protocol names and type scopes are unchanged from previous releases, so **existing device configs, `iot_protocol` rows and frontend forms need no migration**):
 
 | Protocol | Transport | Typical devices | Providing plugin |
 |---|---|---|---|
@@ -110,6 +110,7 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 | `Omron.FINS.UDP` / `.TCP` / `.Serial` / `.HostLinkTCP` | UDP / TCP / Serial | Omron FINS-protocol PLCs | `iot-driver-fins` |
 | `Omron.CIP` | EtherNet/IP | Omron CIP devices | `iot-driver-omroncip` |
 | `Rockwell.CIP` | EtherNet/IP | Rockwell (Allen-Bradley) ControlLogix / CompactLogix | `iot-driver-rockwellcip` |
+| `FANUC.CIP` | EtherNet/IP | FANUC R-30iA / R-30iB / R-30iB Plus robots | `iot-driver-fanuc` |
 | `OPC.UA` | Ethernet | OPC UA capable devices and gateways | `iot-driver-opcua` |
 | `ABB.RWS` | Ethernet (HTTP/HTTPS) | ABB robot controllers (IRC5 / OmniCore) | `iot-driver-abb` |
 | `DLT645.Serial` / `DLT645.TCP` | Serial (RS-485/RS-232) / Ethernet | DL/T 645 multifunction electricity meters | `iot-driver-dlt645` |
@@ -117,6 +118,8 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 > `ABB.RWS` polls ABB's **Robot Web Services** REST API for IO signals, RAPID variables, controller panel state, joint/cartesian pose and system information. It auto-detects RWS 1.0 (IRC5/RW6, Digest auth) and RWS 2.0 (OmniCore/RW7, Basic auth). Address syntax lives in the plugin source, e.g. `signal:Local/DRV_1/DI1`, `rapid:T_ROB1/Mod1/nTest`, `panel:ctrlstate`, `motion:ROB_1/joint/rax_1`, `system:rwversion`.
 
 > `DLT645.Serial` / `DLT645.TCP` collect DL/T 645-2007 and 1997 multifunction electricity meters (voltage, current, power, power factor, energy, meter status words) over RS-485 or through a serial server / DTU. A point address *is* the **data identifier**: the built-in dictionary covers common items such as A-phase voltage `02010100` and total combined active energy `00000000`, while vendor-private identifiers are declared explicitly as `DI:bytes:decimals[:flags]` (e.g. `12345678:2:0:s`). Byte length, decimal places and sign come from the data identifier itself rather than from the type dropdown — the dropdown only selects the output form. For TCP, `host` is the serial server's address and `port` its transparent port.
+
+> `FANUC.CIP` polls FANUC robots' numeric registers R[] over EtherNet/IP (CIP explicit messaging) — integer object 0x6B, real object 0x6C — with **read and write** support. The vendor ID 591 is verified via ListIdentity before connecting. Contiguous points of the same class (gap ≤16) are merged into block reads (`Get_Attribute_All`, 100 registers per request by default, max 124; set 1 to disable); on rejection or shifted data the driver falls back to single reads and pauses block reads for 5 minutes. Position registers (PR/CURPOS), DI/DO/GI/GO and string registers (SR) are not supported yet.
 
 ### Plugin directory and loading
 

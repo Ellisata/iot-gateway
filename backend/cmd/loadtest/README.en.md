@@ -46,7 +46,7 @@ If neither exists, loadtest exits with an error listing every absolute path it t
 
 | Flag | Default | Description |
 |---|---|---|
-| `-protocol` | `modbus` | `modbus` / `mc` / `fins` / `s7` / `cip` / `rockwell` / `opcua` / `dlt645` |
+| `-protocol` | `modbus` | `modbus` / `mc` / `fins` / `s7` / `cip` / `rockwell` / `fanuc` / `opcua` / `dlt645` |
 | `-plugins-dir` | `plugins` | Plugin directory; a relative path resolves against **the executable's directory first, then the invocation working directory** (not cwd only) — see above |
 | `-devices` | `10,50,100` | Device count matrix (comma-separated) |
 | `-points` | `500,2000,5000` | Points-per-device matrix |
@@ -54,9 +54,10 @@ If neither exists, loadtest exits with an error listing every absolute path it t
 | `-run` / `-warmup` | `5` / `2` | Measurement window / warm-up seconds |
 | `-servers` | `4` | Fake PLC server pool size (devices round-robin across it) |
 | `-sparse` | `false` | Sparse address layout (gaps > merge window, **1 frame/point**, worst-case frame count) |
-| `-latency` | `0` | Fixed per-transaction latency in ms (simulates real RTT; **supported by all 8 protocols**) |
+| `-latency` | `0` | Fixed per-transaction latency in ms (simulates real RTT; **supported by all 9 protocols**) |
 | `-serial-baud` | `0` | **Model a serial link**: derive the line time from this baud rate and the protocol frame size, and **add** it to `-latency` (see "Load-testing a serial link" below). `0` = off; only protocols with a known frame layout are supported — others **fail loudly** |
 | `-cip-batch` | `0` | Tags per CIP 0x0A multi-service read: `1` = one tag per round-trip, `>1` = batch; `0` = omit the field and use the driver default (**note: the driver default is 64**) |
+| `-fanuc-block` | `0` | FANUC `maxRegistersPerRead`: registers per block read; `0` = omit the field and use the driver default 100; `1` = disable block reads; max 124 |
 | `-opcua-batch` | `0` | OPC UA maxBatch (nodes per ReadRequest; 0 = driver default 100) |
 | `-dlt645-dis` | `0` | DL/T 645 `maxDIsPerRead` (data identifiers packed per request, 1..12; 0 = omit the field, driver default **12 = protocol ceiling**; pass `1` to reproduce the old one-frame-per-point configuration) |
 | `-dlt645-interframe` | `-1` | DL/T 645 `interFrameDelayMs` (wait after sending before reading the response; **`-1` = driver default: TCP `0` / serial `30ms`**, `0` = disabled) |
@@ -88,6 +89,8 @@ testutil/fake/           fake PLC servers (real TCP listeners, frame-by-frame pa
                          address space ns=1;i=≥1001 fully formulaic; RTT-enabled NewOpcUaWithLatency)
 cmd/loadtest/
   harness.go             data seeder (real migrations) + counting sink + measurement sampler + protocol adapters
+  fanucfake.go           FANUC EtherNet/IP fake (TCP explicit messaging + same-port UDP ListIdentity;
+                         0x6B/0x6C single reads and Get_Attribute_All block reads use formulaic responses)
   pluginLoader.go        plugin dir resolution + pluginhost.Manager lifecycle + protocol registration check
   main.go                flag parsing + fake server pool + matrix sweep
 ```
@@ -161,6 +164,7 @@ scan interval, polling defers to the next tick.
 | Siemens.S7 | 0.0 | 0.0 | 0.0 |
 | Omron.CIP | 0.0 | 0.0 | 0.0 |
 | Rockwell.CIP | 0.0 | 0.0 | 0.0 |
+| FANUC.CIP | 40.0 | 81.6 | 90.8 |
 | OPC.UA | 0.0 | 0.0 | 16.8 |
 
 **RTT=10ms**
@@ -173,6 +177,7 @@ scan interval, polling defers to the next tick.
 | Siemens.S7 | 0.0 | 48.0 | 65.6 |
 | Omron.CIP | 0.0 | 76.0 | 88.0 |
 | Rockwell.CIP | 0.0 | 64.0 | 82.0 |
+| FANUC.CIP | 40.0 | 81.6 | — |
 | OPC.UA | 40.0 | 83.4 | 91.0 |
 
 **RTT=20ms**
@@ -185,11 +190,14 @@ scan interval, polling defers to the next tick.
 | Siemens.S7 | 0.0 | 56.0 | 74.4 |
 | Omron.CIP | 40.0 | 88.0 | 92.0 |
 | Rockwell.CIP | 0.0 | 79.2 | 89.6 |
+| FANUC.CIP | 40.0 | 81.6 | — |
 | OPC.UA | 63.2 | 88.6 | 94.3 |
 
 (Cells are drop%, lower is better; 0.0 = the combination is supported. **Note**: cells on the
 boundary (frames × RTT ≈ scan interval) are bimodal between 0 and a higher level — see "Cells sitting
 on the boundary are bimodal" above.)
+
+FANUC.CIP uses the default block of 100 in the 5000-point tier; raising `-fanuc-block` to 124 gives 0% at RTT=0 and scan=1000ms (about 60k records/s), see the dedicated section below.
 
 **Three conclusions:**
 
@@ -335,6 +343,92 @@ With a regular array layout it is on par with Modbus (40 frames). **This table c
 layout only**; the standalone-tag layout (`Tag_i`) costs one frame per point — the worst case, on the
 order of the CIP single-read table above. Production configs should plan contiguous points as
 `Base[N..N+k]` array tags.
+
+#### FANUC.CIP (numeric-register block reads, measured 2026-11)
+
+`cmd/loadtest` now supports `fanuc`: the fake lives in [fanucfake.go](fanucfake.go) and listens on the same port over TCP (explicit messaging) and UDP (ListIdentity). The tables below are **full collection-chain** measurements (collector engine + out-of-process plugin + fake device). `deviceJSON` forces `maxRequestsPerSecond=50` (the driver ceiling) to measure link capacity; the factory default is 10.
+
+Environment: Windows / i5-1340P (16 logical cores) / loopback / 4 fake servers / 32 workers.
+Absolute numbers vary with machine load and core count; the **relative differences** are the point.
+
+**Frame-count model**:
+
+- registers are merged by `maxRegistersPerRead` (default **100**, max **124**, set **1** to disable);
+- contiguous registers (or gaps ≤16) become one `Get_Attribute_All`: frames = `ceil(N/100)`;
+- with block reads disabled or gaps >16: one frame per point;
+- each register is 4 bytes.
+
+**1000 points/device, block reads on**:
+
+| Devices | Scan | RTT 0 | RTT 5 | RTT 20 | Actual rec/s (RTT=0) |
+|---|---|---|---|---|---|
+| 1 | 1000ms | 0.0 | 0.1 | 0.0 | 1000 |
+| 1 | 200ms | 0.0 | 4.0 | 48.0 | 5200 |
+| 10 | 1000ms | 0.0 | 0.0 | 0.0 | 11994 |
+| 10 | 200ms | 5.2 | 20.8 | 48.0 | 47388 |
+
+- scan=1000ms: 10 frames × 20ms = 200ms, far below the period — 0% drop at RTT 0/5/20;
+- scan=200ms: 10 frames × 20ms = 200ms sits exactly on the boundary, 48% drop — **do not plan on the equality**; keep `frames × RTT ≤ scan period × 0.7` (with 20ms RTT a 1s period is the safe zone).
+
+**5000 points/device (same scale as the overview tables above)**:
+
+| RTT | scan=1000ms | scan=200ms | scan=100ms |
+|---|---|---|---|
+| 0 | 40.0 | 81.6 | 90.8 |
+| 10 | 40.0 | 81.6 | — |
+| 20 | 40.0 | 81.6 | — |
+
+With the default block of 100, 5000 points/device is 50 frames; `maxRequestsPerSecond=50` means one request every 20ms, so **50 × 20ms = 1s — exactly on the boundary**, which is why scan=1000ms at RTT=0 still drops 40% (the cycle jumps to 2s). Raising `-fanuc-block` to 124 cuts it to 41 frames: 0% drop and about 60k records/s at RTT=0; at RTT=20ms, 820ms leaves only 18% margin and still drops 40%, consistent with the "keep 30% margin" rule.
+
+**Block-read on/off** (scan=1000ms, RTT=0):
+
+| Devices | Points/dev | Block on drop% | Block on rec/s | Block off drop% | Block off rec/s |
+|---|---|---|---|---|---|
+| 1 | 100 | 0.0 | 120 | 40.0 | 60 |
+| 1 | 500 | 0.0 | 600 | 80.0 | 100 |
+| 1 | 1000 | 0.0 | 1000 | 80.0 | 200 |
+| 10 | 100 | 0.0 | 1200 | 40.0 | 600 |
+| 10 | 500 | 0.0 | 5000 | 80.0 | 1000 |
+| 10 | 1000 | 0.0 | 12000 | 80.0 | 2000 |
+
+With block reads off every point is one frame, hard-limited by `maxRequestsPerSecond=50`: 100 points take 2s/round and 500/1000 points take 10/20s/round, so a 1s period completes only a fraction — that is where the 40%/80% drop comes from. **Block reads are a prerequisite for usable FANUC point capacity, not an optimization.**
+
+**Sparse layout** (`-sparse`, addresses `R[i*18+1]`, gap 17 > merge gap 16):
+
+- 1 device × 1000 points, scan=1000ms, RTT=0 → **80% drop**, 200 rec/s;
+- frames fall back to one per point, the same order as block reads disabled; production layouts should stay contiguous.
+
+**Aggregate tier**:
+
+| Devices × points/dev | Scan | Expected rec/s | Actual rec/s | drop% | Note |
+|---|---|---|---|---|---|
+| 50 × 1000 | 1000ms | 50k | 59975 | 0.0 | 50k points, 0 drop |
+| 50 × 1000 | 200ms | 250k | 177581 | 29.0 | CPU / plugin RPC becomes the bottleneck |
+| 10 × 1000 | 100ms | 100k | 51997 | 48.0 | a 100ms period exceeds this machine's capacity |
+
+**Conclusions**:
+
+1. With the default 100-register blocks, 1000 contiguous points/device is 10 frames; at scan=1s and RTT≤20ms, 10 devices show **0% drop**.
+2. The capacity formula is unchanged: `frames = ceil(points / maxRegistersPerRead)`, judged by `frames × RTT < scan period × 0.7`.
+3. 50 devices × 1000 points @1s is 0% drop and about 60k records/s on this machine; @200ms it drops 29%, at which point the bottleneck has moved from frames to CPU/plugin RPC.
+4. With block reads disabled or a sparse layout, per-device capacity falls back to roughly `maxRequestsPerSecond` points/s (50 here); beyond 500 points a 1s period will drop heavily.
+5. The block-read encoding is still **not verified on hardware**: the first block read is cross-checked against single reads of its first and last points, and falls back to single reads with a 5-minute pause on failure. On a real controller, compare single reads and a block read of `R[6]–R[15]` first.
+
+**Reproducing**:
+
+```bash
+# Plugin (from the iot-gateway-drivers checkout)
+go build -o ../iot-gateway-premium/backend/plugins/iot-driver-fanuc.exe ./fanuc
+
+# End-to-end matrices (from backend/)
+go run ./cmd/loadtest -protocol fanuc -devices 1,10 -points 1000 -scan 1000 -latency 0 -run 5 -warmup 2
+go run ./cmd/loadtest -protocol fanuc -devices 1,10 -points 1000 -scan 200 -latency 20 -run 5 -warmup 2
+go run ./cmd/loadtest -protocol fanuc -devices 10 -points 1000 -scan 1000 -fanuc-block 1 -run 5 -warmup 2
+go run ./cmd/loadtest -protocol fanuc -devices 1 -points 1000 -scan 1000 -sparse -run 5 -warmup 2
+go run ./cmd/loadtest -protocol fanuc -devices 50 -points 1000 -scan 1000 -run 5 -warmup 2
+```
+
+> `-fanuc-block 1` disables block reads; `0` or omitted uses the driver default of 100. `cycleMs` has second-level resolution — ignore it for scan<1000ms and use drop% and records/s instead.
 
 #### OPC.UA (`maxBatch` 100 nodes per ReadRequest)
 
@@ -529,7 +623,8 @@ encode/decode per device per cycle". Plan field capacity from this table, not fr
 
 ### Optimization directions
 1. **Frame count decides point capacity**: Modbus 125 registers/frame, MC 100 words/frame (tunable to 960), FINS 100 words/frame,
-   S7 462 bytes/PDU, CIP 64 tags/frame (batched, tunable), Rockwell 125 elements/frame (arrays), OPC UA 100 nodes/frame.
+   S7 462 bytes/PDU, CIP 64 tags/frame (batched, tunable), Rockwell 125 elements/frame (arrays),
+   FANUC.CIP 100 registers/frame (block read, tunable 1..124), OPC UA 100 nodes/frame.
    At equal point counts frame counts differ by 1–2 orders of magnitude and capacity scales linearly with frames.
    The payoff of CIP batching is now quantified: 5000 points go from 5000 frames to 80, and drop at RTT=10ms goes from
    80% to 0% (see the single-read table above) — **batching is a prerequisite for CIP, not an optimization**.

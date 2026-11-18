@@ -24,16 +24,35 @@ import (
 	"iot-gateway/workerPool"
 )
 
+// fakeServer loadtest 对假设备的唯一要求。
+//
+// 用接口而不是 *fake.Server，是为了让需要「TCP + 同端口 UDP」的协议（FANUC 的
+// ListIdentity）把假设备留在 loadtest 包内，不必为了一个协议去改 SDK testkit
+// 的发布版本。其它协议仍直接用 testkit/fake 的 *fake.Server，由下面的包装器适配。
+type fakeServer interface {
+	Addr() string
+	Port() int
+	Close()
+}
+
+func fakeServerFactory(f func() (*fake.Server, error)) func() (fakeServer, error) {
+	return func() (fakeServer, error) { return f() }
+}
+
+func fakeServerLatencyFactory(f func(time.Duration) (*fake.Server, error)) func(time.Duration) (fakeServer, error) {
+	return func(d time.Duration) (fakeServer, error) { return f(d) }
+}
+
 // protocolAdapter 描述一种协议在压测中的表现方式：
 // 假服务器工厂 + 设备连接配置生成 + 点位地址名生成 + 数据类型。
 // 采集引擎通过 iot_protocol.name（驱动注册名）匹配驱动，name 必须与 driver.Register 完全一致。
 type protocolAdapter struct {
 	name       string // iot_protocol.name（驱动注册名）
 	driverName string // 驱动名（= iot-gateway-drivers 仓库的顶层目录名）；产物名与报错提示都靠它
-	newServer  func() (*fake.Server, error)
-	// newServerWithLatency 带 RTT 模拟的假服务器工厂。全部 8 个协议都支持 -latency；
+	newServer  func() (fakeServer, error)
+	// newServerWithLatency 带 RTT 模拟的假服务器工厂。全部 9 个协议都支持 -latency；
 	// nil 时 main 会直接报错退出（保留该分支是为了让新加协议忘了实现时立刻暴露）。
-	newServerWithLatency func(time.Duration) (*fake.Server, error)
+	newServerWithLatency func(time.Duration) (fakeServer, error)
 	deviceJSON           func(port int, opts Options) string // 生成指向某假服务器端口的 protocol_json
 	addrName             func(i int) string                  // 连续布局：第 i 个点位的地址名
 	sparseName           func(i int) string                  // 稀疏布局：第 i 个点位的地址名（间隙 > 合并窗口）
@@ -88,8 +107,8 @@ var adapters = map[string]protocolAdapter{
 	"modbus": {
 		name:                 "ModBus.TCP",
 		driverName:           "modbus",
-		newServer:            fake.NewModbusTCP,
-		newServerWithLatency: fake.NewModbusTCPWithLatency,
+		newServer:            fakeServerFactory(fake.NewModbusTCP),
+		newServerWithLatency: fakeServerLatencyFactory(fake.NewModbusTCPWithLatency),
 		deviceJSON:           func(port int, opts Options) string { return fmt.Sprintf(`{"host":"127.0.0.1","port":%d}`, port) },
 		// 传统 Modicon 保持寄存器：4%05d → FC3, 0-based addr = i（连续可合并）
 		addrName: func(i int) string { return fmt.Sprintf("4%05d", i+1) },
@@ -101,8 +120,8 @@ var adapters = map[string]protocolAdapter{
 	"mc": {
 		name:                 "Mitsubishi.MC.TCP",
 		driverName:           "mitsubishi",
-		newServer:            fake.NewMC3E,
-		newServerWithLatency: fake.NewMC3EWithLatency,
+		newServer:            fakeServerFactory(fake.NewMC3E),
+		newServerWithLatency: fakeServerLatencyFactory(fake.NewMC3EWithLatency),
 		deviceJSON:           func(port int, opts Options) string { return fmt.Sprintf(`{"host":"127.0.0.1","port":%d}`, port) },
 		// 字设备 D：连续（默认 maxReadWords=100，逐 100 字一帧）
 		addrName: func(i int) string { return fmt.Sprintf("D%d", i) },
@@ -114,8 +133,8 @@ var adapters = map[string]protocolAdapter{
 	"fins": {
 		name:                 "Omron.FINS.TCP",
 		driverName:           "fins",
-		newServer:            fake.NewFINSTCP,
-		newServerWithLatency: fake.NewFINSTCPWithLatency,
+		newServer:            fakeServerFactory(fake.NewFINSTCP),
+		newServerWithLatency: fakeServerLatencyFactory(fake.NewFINSTCPWithLatency),
 		deviceJSON: func(port int, opts Options) string {
 			return fmt.Sprintf(`{"host":"127.0.0.1","port":%d,"transport":"TCP"}`, port)
 		},
@@ -129,8 +148,8 @@ var adapters = map[string]protocolAdapter{
 	"s7": {
 		name:                 "Siemens.S7",
 		driverName:           "s7",
-		newServer:            fake.NewS7,
-		newServerWithLatency: fake.NewS7WithLatency,
+		newServer:            fakeServerFactory(fake.NewS7),
+		newServerWithLatency: fakeServerLatencyFactory(fake.NewS7WithLatency),
 		deviceJSON: func(port int, opts Options) string {
 			return fmt.Sprintf(`{"host":"127.0.0.1","port":%d,"rack":"0","slot":"1"}`, port)
 		},
@@ -144,8 +163,8 @@ var adapters = map[string]protocolAdapter{
 	"cip": {
 		name:                 "Omron.CIP",
 		driverName:           "omroncip",
-		newServer:            fake.NewCIP,
-		newServerWithLatency: fake.NewCIPWithLatency,
+		newServer:            fakeServerFactory(fake.NewCIP),
+		newServerWithLatency: fakeServerLatencyFactory(fake.NewCIPWithLatency),
 		deviceJSON: func(port int, opts Options) string {
 			// CIP 批量读：-cip-batch N>0 时注入 maxTagsPerRequest（0x0A 多服务报文），
 			// N=1 即逐标签单读（驱动 config.go 判的是 >0，注 1 就落回单读）。
@@ -162,11 +181,37 @@ var adapters = map[string]protocolAdapter{
 		maxSparse:  0,
 		dataType:   "int16",
 	},
+	"fanuc": {
+		name:                 "FANUC.CIP",
+		driverName:           "fanuc",
+		newServer:            func() (fakeServer, error) { return newFANUC(0) },
+		newServerWithLatency: func(d time.Duration) (fakeServer, error) { return newFANUC(d) },
+		deviceJSON: func(port int, opts Options) string {
+			// 压测测的是链路能力，不是驱动出厂限流：默认 10 次/秒会先把容量
+			// 卡在 10 点/秒，所以这里固定用上限 50。块大小可用 -fanuc-block 覆盖。
+			parts := []string{
+				`"host":"127.0.0.1"`,
+				fmt.Sprintf(`"port":%d`, port),
+				`"maxRequestsPerSecond":50`,
+			}
+			if opts.FANUCBlock > 0 {
+				parts = append(parts, fmt.Sprintf(`"maxRegistersPerRead":%d`, opts.FANUCBlock))
+			}
+			return "{" + strings.Join(parts, ",") + "}"
+		},
+		// 连续布局：R[1..N]，默认 100 个/块 → 帧数 = ceil(N/100)。
+		addrName: func(i int) string { return fmt.Sprintf("R[%d]", i+1) },
+		// 稀疏布局：步长 18（间隙 17 > blockMergeGap 16），每点自成一块 → 1 帧/点。
+		sparseName: func(i int) string { return fmt.Sprintf("R[%d]", i*18+1) },
+		// 3600 × 18 + 1 = 64783，仍在 16 位寄存器号上限内。
+		maxSparse: 3600,
+		dataType:  "int32",
+	},
 	"rockwell": {
 		name:                 "Rockwell.CIP",
 		driverName:           "rockwellcip",
-		newServer:            fake.NewCIPAB,
-		newServerWithLatency: fake.NewCIPABWithLatency,
+		newServer:            fakeServerFactory(fake.NewCIPAB),
+		newServerWithLatency: fakeServerLatencyFactory(fake.NewCIPABWithLatency),
 		deviceJSON: func(port int, opts Options) string {
 			return fmt.Sprintf(`{"host":"127.0.0.1","port":%d}`, port)
 		},
@@ -180,8 +225,8 @@ var adapters = map[string]protocolAdapter{
 	"opcua": {
 		name:                 "OPC.UA",
 		driverName:           "opcua",
-		newServer:            fake.NewOpcUa,
-		newServerWithLatency: fake.NewOpcUaWithLatency,
+		newServer:            fakeServerFactory(fake.NewOpcUa),
+		newServerWithLatency: fakeServerLatencyFactory(fake.NewOpcUaWithLatency),
 		deviceJSON: func(port int, opts Options) string {
 			// -opcua-batch N>1 时注入 maxBatch（单 ReadRequest 节点数，驱动默认 100）
 			if opts.OpcUaBatch > 0 {
@@ -201,8 +246,8 @@ var adapters = map[string]protocolAdapter{
 	"dlt645": {
 		name:                 "DLT645.TCP",
 		driverName:           "dlt645",
-		newServer:            fake.NewDLT645,
-		newServerWithLatency: fake.NewDLT645WithLatency,
+		newServer:            fakeServerFactory(fake.NewDLT645),
+		newServerWithLatency: fakeServerLatencyFactory(fake.NewDLT645WithLatency),
 		deviceJSON: func(port int, opts Options) string {
 			// 只注入显式传了的键：字段缺席时驱动用自己的默认值，这与现场
 			// 「表单没填就走默认」的行为一致，压测才不会测出一个不存在的配置。
@@ -306,6 +351,9 @@ type Options struct {
 	Sparse     bool
 	CIPBatch   int // CIP 0x0A 多服务批量读：每个报文携带标签数（>1 启用，0/1=单读）
 	OpcUaBatch int // OPC UA 单 ReadRequest 节点数（0=驱动默认 100）
+	// FANUCBlock FANUC 单次 Get_Attribute_All 块读的寄存器数（0=不注入，用驱动默认 100；
+	// 1 = 关闭块读，逐点单读；上限 124）。
+	FANUCBlock int
 	// DLT645DIs DL/T 645 单请求打包的数据标识个数（0=不注入，用驱动默认 1，上限 12）。
 	DLT645DIs int
 	// DLT645InterFrameMs DL/T 645 收发间延时毫秒数。
@@ -317,7 +365,7 @@ type Options struct {
 
 // seedDB 用真实迁移建库并造数：1 个协议 + devices 台设备 + devices×points 个点位。
 // 设备轮询分配到服务器池（round-robin）。返回 DB 与临时文件路径（调用方负责关闭与清理）。
-func seedDB(pa protocolAdapter, opts Options, servers []*fake.Server, devices, points int) (db *gorm.DB, dbPath string, err error) {
+func seedDB(pa protocolAdapter, opts Options, servers []fakeServer, devices, points int) (db *gorm.DB, dbPath string, err error) {
 	dbPath = filepath.Join(os.TempDir(), fmt.Sprintf("iotgw-loadtest-%d-%d.db", os.Getpid(), time.Now().UnixNano()))
 	db = dbsqlite.InitDB(&configFile.Config{
 		SQLite: configFile.SQLiteConfig{Path: dbPath},
@@ -384,7 +432,10 @@ func seedDB(pa protocolAdapter, opts Options, servers []*fake.Server, devices, p
 	if err := db.Create(&devs).Error; err != nil {
 		return nil, "", fmt.Errorf("seed devices: %w", err)
 	}
-	if err := db.CreateInBatches(&addrs, 2000).Error; err != nil {
+	// 批大小按 SQLite 变量上限反推：DeviceAddress 有 18 列，2000 行 = 36000 个
+	// 绑定变量，超过默认的 32766；1000 行 = 18000，安全。多设备矩阵（10×1000）
+	// 会走到这个上限，表现为 seed 阶段 "too many SQL variables"。
+	if err := db.CreateInBatches(&addrs, 1000).Error; err != nil {
 		return nil, "", fmt.Errorf("seed addresses: %w", err)
 	}
 	return db, dbPath, nil
@@ -406,7 +457,7 @@ type caseResult struct {
 }
 
 // runCase 跑一组 (devices, points)：建库造数 → 起采集引擎 → 预热 → 测量窗口采样 → 停止。
-func runCase(pa protocolAdapter, opts Options, servers []*fake.Server, devices, points int) (*caseResult, error) {
+func runCase(pa protocolAdapter, opts Options, servers []fakeServer, devices, points int) (*caseResult, error) {
 	db, dbPath, err := seedDB(pa, opts, servers, devices, points)
 	if err != nil {
 		return nil, err
@@ -525,7 +576,7 @@ func runCase(pa protocolAdapter, opts Options, servers []*fake.Server, devices, 
 }
 
 // sweep 按 (设备数 × 点数) 矩阵逐组压测并打印结果表。
-func sweep(pa protocolAdapter, opts Options, servers []*fake.Server) error {
+func sweep(pa protocolAdapter, opts Options, servers []fakeServer) error {
 	fmt.Printf("%-7s %-9s %-9s %-12s %-12s %-7s %-8s %-9s %-7s %-7s %-6s\n",
 		"devices", "points", "total", "expected/s", "actual/s", "drop%", "heapMB", "goroutines", "errors", "cycleMs", "good%")
 	for _, devs := range opts.Devices {

@@ -40,7 +40,6 @@ import (
 	"time"
 
 	"github.com/Ellisata/iot-gateway-sdk/driver"
-	"github.com/Ellisata/iot-gateway-sdk/testkit/fake"
 	"iot-gateway/configFile"
 	"iot-gateway/logger"
 )
@@ -54,7 +53,7 @@ log:
 `
 
 func main() {
-	protocol := flag.String("protocol", "modbus", "protocol: modbus | mc | fins | s7 | cip | rockwell | opcua | dlt645")
+	protocol := flag.String("protocol", "modbus", "protocol: modbus | mc | fins | s7 | cip | rockwell | fanuc | opcua | dlt645")
 	devices := flag.String("devices", "10,50,100", "comma-separated device counts")
 	points := flag.String("points", "500,2000,5000", "comma-separated points per device")
 	scan := flag.Int("scan", 1000, "scan frequency in ms")
@@ -63,6 +62,7 @@ func main() {
 	servers := flag.Int("servers", 4, "fake PLC server count")
 	sparse := flag.Bool("sparse", false, "sparse address layout (breaks range merging)")
 	cipBatch := flag.Int("cip-batch", 0, "CIP 0x0A multi-service read: tags per request (1 = single read, N>1 = batch; 0 = omit field, driver default 64)")
+	fanucBlock := flag.Int("fanuc-block", 0, "FANUC maxRegistersPerRead: registers per Get_Attribute_All block read (0 = omit field, driver default 100; 1 = disable block reads; max 124)")
 	opcuaBatch := flag.Int("opcua-batch", 0, "OPC UA maxBatch: nodes per ReadRequest (0 = driver default 100)")
 	dlt645DIs := flag.Int("dlt645-dis", 0, "DL/T 645 maxDIsPerRead: data identifiers packed per request (1..12; 0 = omit field, driver default 12 = protocol ceiling; 1 = one frame per point)")
 	dlt645InterFrame := flag.Int("dlt645-interframe", -1, "DL/T 645 interFrameDelayMs: post-send wait before reading the response, ms (-1 = omit field, driver default 0 for TCP / 30 for serial; 0 = disable)")
@@ -152,6 +152,7 @@ func main() {
 		Warmup:             time.Duration(*warmup * float64(time.Second)),
 		Sparse:             *sparse,
 		CIPBatch:           *cipBatch,
+		FANUCBlock:         *fanucBlock,
 		OpcUaBatch:         *opcuaBatch,
 		DLT645DIs:          *dlt645DIs,
 		DLT645InterFrameMs: *dlt645InterFrame,
@@ -188,9 +189,9 @@ func main() {
 	}
 
 	// 启动假 PLC 服务器池。latencyDur>0 时换用带延迟构造模拟真实 RTT。
-	srvs := make([]*fake.Server, 0, srvCount)
+	srvs := make([]fakeServer, 0, srvCount)
 	for i := 0; i < srvCount; i++ {
-		var s *fake.Server
+		var s fakeServer
 		var err error
 		if latencyDur > 0 {
 			s, err = pa.newServerWithLatency(latencyDur)
@@ -215,6 +216,9 @@ func main() {
 	}
 	if *cipBatch > 0 {
 		layout = fmt.Sprintf("%s+cip-batch-%d", layout, *cipBatch)
+	}
+	if *fanucBlock > 0 {
+		layout = fmt.Sprintf("%s+fanuc-block-%d", layout, *fanucBlock)
 	}
 	if *opcuaBatch > 0 && *opcuaBatch != 100 {
 		layout = fmt.Sprintf("%s+maxBatch-%d", layout, *opcuaBatch)
