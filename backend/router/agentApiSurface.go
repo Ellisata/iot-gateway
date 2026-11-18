@@ -911,8 +911,8 @@ var agentApiSurface = map[string]SurfaceEntry{
 		Params: argNone(),
 		Note:   "**用 GET 实现**。删密钥会让持有它的外部系统立即失去访问",
 	},
-	"GET /plugin/info":  {Access: AccessRead, Params: argNone(), Note: "插件目录 / 命名规则 / 总开关"},
-	"GET /plugin/list":  {Access: AccessRead, Params: argNone(), Note: "已加载插件及其供给的协议名，供协议行映射到插件文件"},
+	"GET /plugin/info": {Access: AccessRead, Params: argNone(), Note: "插件目录 / 命名规则 / 总开关"},
+	"GET /plugin/list": {Access: AccessRead, Params: argNone(), Note: "已加载插件及其供给的协议名，供协议行映射到插件文件"},
 	"POST /plugin/importPlugin": {
 		Access: AccessWrite,
 		Params: args(argFile("files", "插件可执行文件；**字段名是复数 files**，可多个同名部件重复出现，总上限 512MiB")),
