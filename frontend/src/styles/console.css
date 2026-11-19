@@ -385,6 +385,31 @@
   }
 }
 
+/* 长值（十六进制串、字符串等不可断行的内容）单行省略：
+   折行会把行高顶开、把同一行的质量码挤出去；直接溢出又会被单元格裁掉。
+   完整值由调用方包 tooltip 展示，两页共用这一份。 */
+.iot-value-clip {
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  /* 实时页的值列右对齐：省略号必须由值自身产生，否则对齐会把开头裁掉 */
+  text-align: left;
+  vertical-align: bottom;
+}
+
+/* 长值 tooltip 的内容容器：按字符换行，超长时自身滚动，避免浮层撑出屏幕 */
+.iot-value-tooltip-content {
+  max-width: 420px;
+  max-height: 320px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
 /* ID：等宽字体压低存在感，复制按钮常驻但低对比，悬停整行才完全显形 */
 .iot-id-cell {
   display: flex;

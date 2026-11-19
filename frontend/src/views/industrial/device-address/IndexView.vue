@@ -222,9 +222,21 @@
               </span>
             </div>
             <div v-else class="live-cell">
-              <span :key="`${row.id}|${liveOf(row).value}`" class="iot-value-flash live-value">
-                {{ liveOf(row).value === '' ? '—' : liveOf(row).value }}
-              </span>
+              <!-- 长值单行省略、质量码不被挤走；完整值悬停可见 -->
+              <el-tooltip
+                placement="top"
+                :disabled="String(liveOf(row).value ?? '').length <= 10"
+              >
+                <template #content>
+                  <div class="iot-value-tooltip-content">{{ liveOf(row).value }}</div>
+                </template>
+                <span
+                  :key="`${row.id}|${liveOf(row).value}`"
+                  class="iot-value-flash live-value iot-value-clip"
+                >
+                  {{ liveOf(row).value === '' ? '—' : liveOf(row).value }}
+                </span>
+              </el-tooltip>
               <span class="iot-pill" :class="livePillClass(liveOf(row))">
                 {{ livePillText(liveOf(row)) }}
               </span>
@@ -959,8 +971,15 @@ onBeforeUnmount(() => {
 }
 
 .live-value {
+  flex: 1 1 auto;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+}
+
+/* 质量码不参与收缩：值再长也只挤省略号，不把胶囊挤出单元格 */
+.live-cell .iot-pill {
+  flex: none;
 }
 </style>

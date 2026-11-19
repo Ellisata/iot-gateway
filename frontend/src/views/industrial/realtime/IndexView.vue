@@ -160,13 +160,22 @@
         />
         <el-table-column :label="t('realtime.value')" min-width="160" align="right">
           <template #default="{ row }">
-            <!-- :key 带值：值一变即换新节点，令高亮动画重新播放，
+            <!-- 长值（十六进制串、字符串等）单行省略，完整值悬停可见；
+                 :key 带值：值一变即换新节点，令高亮动画重新播放，
                  无需额外的定时器或脏值集合来跟踪「刚才变过」 -->
-            <span
+            <el-tooltip
               v-if="row.collected"
-              :key="`${row.addressId}|${row.value}`"
-              class="iot-value-flash"
-            >{{ row.value }}</span>
+              placement="top"
+              :disabled="String(row.value ?? '').length <= 16"
+            >
+              <template #content>
+                <div class="iot-value-tooltip-content">{{ row.value }}</div>
+              </template>
+              <span
+                :key="`${row.addressId}|${row.value}`"
+                class="iot-value-flash iot-value-clip"
+              >{{ row.value }}</span>
+            </el-tooltip>
             <!-- 只写点位 / 只写属性永远不会被采集：不能和「尚未采到」共用同一个 —，否则会被当成采集故障 -->
             <el-tooltip
               v-else-if="isReadSuppressed(row)"
