@@ -3,6 +3,7 @@ module iot-gateway
 go 1.26.0
 
 require (
+	github.com/apache/iotdb-client-go v1.3.7
 	github.com/dop251/goja v0.0.0-20261022125820-07c4b9d6265b
 	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/gin-gonic/gin v1.12.0
@@ -24,6 +25,7 @@ require (
 )
 
 require (
+	github.com/apache/thrift v0.15.0 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/dlclark/regexp2/v2 v2.8.1 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect

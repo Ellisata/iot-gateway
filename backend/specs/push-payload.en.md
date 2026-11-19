@@ -148,7 +148,7 @@ subscription filtering are covered in [push-channels.md §2.1](../docs/push-chan
 when missing; the names, relative order and values of existing fields are unchanged.
 Records produced by external MQTT subscriptions have no local binding, so these fields are
 empty there too.
-The TSDB channels (TDengine / InfluxDB) write both as tags (`thing_model_code` / `property_code`).
+TDengine / InfluxDB write both as tags (`thing_model_code` / `property_code`); IoTDB Tree writes them as TEXT measurements.
 
 ## 3. Parsing `value`: dispatch by `kind`
 

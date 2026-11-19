@@ -1837,7 +1837,7 @@ GET /openApi/pushChannel/status
 | ---- | ---- | ---- |
 | `id` | string | 通道主键 |
 | `name` | string | 通道名 |
-| `type` | string | 通道类型（mqtt / http / kafka / tdengine-v3 / influxdb-v3 / opcua …） |
+| `type` | string | 通道类型（mqtt / http / kafka / tdengine-v3 / influxdb-v3 / iotdb-tree / opcua …） |
 | `running` | bool | 引擎中的运行实例是否已启动 |
 | `connected` | bool | 下游连接是否正常（语义随通道实现：MQTT 表示已连上 broker） |
 | `broker` | string | 连接目标（MQTT broker 地址等） |

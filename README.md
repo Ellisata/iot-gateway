@@ -7,7 +7,7 @@
 [![Release](https://img.shields.io/github/v/tag/Ellisata/iot-gateway?label=release&sort=semver&color=green)](https://github.com/Ellisata/iot-gateway/releases)
 ![Go](https://img.shields.io/badge/go-1.26-00ADD8)
 
-**一个 exe + 一个 `plugins/` 目录，就能在工控机上采集 PLC 数据并推送到 MQTT / TDengine / InfluxDB —— 不用装数据库，不用装运行时。**
+**一个 exe + 一个 `plugins/` 目录，就能在工控机上采集 PLC 数据并推送到 MQTT / TDengine / InfluxDB / Apache IoTDB —— 不用装采集运行时。**
 
 定时轮询 PLC / 工业设备，内嵌 Web 管理控制台；支持 Windows 服务 / Linux systemd / Docker 部署。
 
@@ -38,7 +38,7 @@
    ```
 
 4. **打开控制台**：`http://<主机IP>:9082/admin`，默认账号 `admin / hand@123` —— **首次登录后请立即修改**。
-5. **接入第一台设备**：在「设备对象」新增设备与点位，保存后首页大盘即可看到采集数据；在「通道管理」添加 MQTT / TDengine / InfluxDB 即可外发。
+5. **接入第一台设备**：在「设备对象」新增设备与点位，保存后首页大盘即可看到采集数据；在「通道管理」添加 MQTT / TDengine / InfluxDB / Apache IoTDB 即可外发。
 
 > ⚠️ `plugins/` 缺失或为空时，网关能启动、能登录，但**一台设备也采不到**。发行包已自带插件，请勿只拷主程序。
 >
@@ -61,7 +61,7 @@
 - **进程外协议插件**：**上述 16 种协议驱动全部是插件**——主二进制不含任何协议实现，每个驱动是一个 `iot-driver-<名字>` 独立可执行文件，放进可执行文件同级的 `plugins/` 目录**即自动加载，无需停机重编网关**；插件进程崩溃自动退避重启、卡死自动检测，替换二进制即可热升级，见[驱动插件指南](docs/driver-plugins.md)。
 - **采集引擎**：Worker 并发池调度轮询任务；后台 watcher 检测配置变更，**零中断热加载**。
 - **推送引擎**：设备级分组批量分发；通道配置热加载；断网时数据写入 **本地 outbox 持久缓存**，恢复后自动补发，不丢数据。
-- **MQTT 订阅入时序库**：订阅外部 MQTT broker 上的 JSON 报文，按映射规则转换为采集记录后写入已启用的 TDengine / InfluxDB 通道；支持通配符 Topic、英文逗号分隔的多 Topic、QoS、鉴权、样例报文预览与连通性测试，解析器可选内置映射 DSL 或 goja JS 脚本，配置增删改自动热加载。
+- **MQTT 订阅入时序库**：订阅外部 MQTT broker 上的 JSON 报文，按映射规则转换为采集记录后写入已启用的 TDengine / InfluxDB / IoTDB 通道；支持通配符 Topic、英文逗号分隔的多 Topic、QoS、鉴权、样例报文预览与连通性测试，解析器可选内置映射 DSL 或 goja JS 脚本，配置增删改自动热加载。
 - **断联报警**：设备采集失败与推送通道断连自动检测（去抖 + 状态机），离线/恢复边沿落库，统一报警中心查询。
 - **Web 管理控制台**：首页大盘、设备对象、地址标签、协议管理、通道管理、报警管理、日志查看、密钥管理，中英双语界面。
 - **开放接口**：`/openApi/*` 设备/点位查询、控制下发、物模型批量 upsert/删除与报警查询，`X-Api-Key` 密钥鉴权，供 MES / ERP 等外部系统对接。
@@ -155,13 +155,13 @@
 
 ## MQTT 订阅入时序库
 
-除了「采集 → 推送」，网关还可以**反向接入**：订阅外部 MQTT broker 上主题的 JSON 报文，按映射规则转换为与本地采集一致的记录，写入已启用的 **TDengine / InfluxDB** 通道。设备或第三方平台已经通过 MQTT 上报数据时，可用这种方式把数据统一汇入同一套时序库。
+除了「采集 → 推送」，网关还可以**反向接入**：订阅外部 MQTT broker 上主题的 JSON 报文，按映射规则转换为与本地采集一致的记录，写入已启用的 **TDengine / InfluxDB / Apache IoTDB** 通道。设备或第三方平台已经通过 MQTT 上报数据时，可用这种方式把数据统一汇入同一套时序库。
 
 ```
-外部设备 / 平台 ──MQTT──▶ Broker ──订阅──▶ 订阅引擎（JSON → 采集记录）──▶ 推送引擎 ──▶ TDengine / InfluxDB
+外部设备 / 平台 ──MQTT──▶ Broker ──订阅──▶ 订阅引擎（JSON → 采集记录）──▶ 推送引擎 ──▶ TDengine / InfluxDB / IoTDB
 ```
 
-- **只写时序库通道**：记录只投递给 `tdengine-v3` / `influxdb-v3`，**不投 MQTT 等普通通道**——订阅主题与发布主题相同时会形成自激。转换结果复用推送通道的攒批、断网缓存（outbox）与补发。
+- **只写时序库通道**：记录只投递给 `tdengine-v3` / `influxdb-v3` / `iotdb-tree`，**不投 MQTT 等普通通道**——订阅主题与发布主题相同时会形成自激。转换结果复用推送通道的攒批、断网缓存（outbox）与补发。
 - **每条订阅独立连接**：Broker / 端口 / Client ID / 用户名密码 / Topic（支持 `+`、`#` 通配符，多个 Topic 用英文逗号分隔并共用同一套映射与 QoS）/ QoS `0`~`2` 分别配置；保存前可「测试连接」，并用样例报文「预览」转换结果（均不落库）。
 - **解析器**：每个订阅可选「内置映射」或「脚本」。内置映射即下一条的声明式 DSL；脚本在 goja 中运行 `function parse(msg, ctx)`，用于 DSL 表达不了的报文（逐报文 1–500ms 超时，超时后重建 VM；不提供文件、网络与 `require`），控制台内置解析器编辑器。仅修改解析器时**原地热替换**，不重连 MQTT。契约见[解析器规范](backend/specs/parser-plugins.md)，脚本写法见[脚本指南](backend/docs/parser-scripts.md)。
 - **映射规则**：`root` 指定取值根（默认 `$`，整篇报文为数组时自动逐条拆条，也可显式写 `$.data[*]`）；目标字段是采集记录的白名单（设备 ID / 设备名称 / 点位 ID / 点位说明 / 采集值 / 类型类别 / 质量码等，未知字段保存即拒）；每个字段支持 `path`（JSON 路径）、`const`（固定值）、`template`（模板拼接）、`map`（值映射，用于外部类型与质量码翻译）四种取值方式，并可附加 `transform` 算子链（`scale` / `round` / `trim` / `default` / `hexDecode` / `base64Decode` / `bitfield` / `regex`）；`topicPattern` 可按主题路径段取名（配合 `source: "topic"`），`fanout` 可把一条报文扇出成多条测点记录；`filter` 为隐式 AND 的过滤条件（`eq` / `neq` / `gt` / `gte` / `lt` / `lte` / `contains` / `in` / `notin` / `exists` / `notexists`）。
@@ -343,7 +343,7 @@ push:
 │   ├── testutil/       # 测试基建（parity 黄金基线 / drivertest 合成协议）
 │   ├── plugins/        # 插件运行时目录（构建产物，发行包自带）
 │   ├── mappingdsl/     # 入站解析 / 出站映射共用的映射原语（JSON 路径 / 模板 / 变换）
-│   ├── push/           # 推送引擎（mqtt/http/kafka/tdengine-v3/influxdb-v3 + outbox + codec/messagechannel）
+│   ├── push/           # 推送引擎（mqtt/http/kafka/tdengine-v3/influxdb-v3/iotdb-tree + outbox + codec/messagechannel）
 │   ├── parser/         # 订阅报文解析器（内置映射 DSL / goja 脚本，输出采集记录）
 │   ├── subscribe/      # MQTT 订阅引擎（连接 / 队列 / 热加载，解析与投递编排）
 │   ├── controller/ service/ model/  # HTTP 分层（Controller → Service → Database）
