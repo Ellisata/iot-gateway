@@ -755,8 +755,9 @@ raw, err := dt.Encode(val, parseByteOrder(cfg.ByteOrder))
 | Omron.FINS.* | 0x0102 | CIO / WR / HR / DM，支持位写入 |
 | Omron.CIP | 0x4D | Write Service for Variables |
 | Rockwell.CIP | 0x4D | Write Tag；STRING 暂不支持 |
+| OPC.UA | Write（Value 属性） | 只写 Variable 的 Value；按点位内部类型编码为对应 Variant；只读/无权限返回 NotWritable；Method 调用与数组暂不支持 |
 
-OPC UA、ABB RWS、DL/T 645 目前只读。各插件对 STRING 等动态长度类型的写支持
+ABB RWS、DL/T 645 目前只读。各插件对 STRING 等动态长度类型的写支持
 以该插件 CHANGELOG 为准（多数尚未实现编码）。
 
 网关侧还有独立的三层开关：`control.enabled`（出厂 false）、协议 `Writable`、
