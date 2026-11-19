@@ -1891,7 +1891,7 @@ No request parameters. `data` is an array (`[]` when there are no channels); eac
 | ----- | ---- | ----------- |
 | `id` | string | Channel primary key |
 | `name` | string | Channel name |
-| `type` | string | Channel type (mqtt / http / kafka / tdengine-v3 / influxdb-v3 / opcua …) |
+| `type` | string | Channel type (mqtt / http / kafka / tdengine-v3 / influxdb-v3 / iotdb-tree / opcua …) |
 | `running` | bool | Whether the runtime instance is started in the engine |
 | `connected` | bool | Whether the downstream connection is healthy (semantics vary by channel; for MQTT it means connected to the broker) |
 | `broker` | string | Connection target (e.g. MQTT broker address) |

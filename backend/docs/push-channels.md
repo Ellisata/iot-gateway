@@ -2,7 +2,7 @@
 
 本文档描述消息类推送通道（`mqtt` / `http` / `kafka`）的**载荷格式**与连接配置，
 以及状态型通道 **OPC UA Server** 的地址空间约定。
-`tdengine-v3` / `influxdb-v3` 的写入语义不变，见各自的表结构说明。
+`tdengine-v3` / `influxdb-v3` / `iotdb-tree` 是非消息类时序通道，配置与表结构见下文。
 
 > 点位级的**工程量变换**（`device_address.transform_json`，如 ×0.1）在采集侧执行一次，
 > 与本文 §3 的出站映射变换是两层不同的东西，见 §8。
@@ -11,7 +11,7 @@
 
 `push_channel` 现在有两列：
 
-- `type`：通道类型（`mqtt` / `http` / `kafka` / `tdengine-v3` / `influxdb-v3`），决定用哪个实现；
+- `type`：通道类型（`mqtt` / `http` / `kafka` / `tdengine-v3` / `influxdb-v3` / `iotdb-tree`），决定用哪个实现；
 - `name`：实例名，同一类型下唯一。
 
 因此同一类型可以建多条。例如两条 HTTP 通道分别接 MES 与 ERP，或两条 MQTT
@@ -36,7 +36,7 @@
 | `mapping-json` | 按下面的映射规则生成客户自定义 JSON。必须配置 `mapping`。 |
 | `script` | 用 goja 脚本生成任意文本载荷，适合声明式映射表达不了的结构。必须配置 `mapping` 里的脚本。 |
 
-非消息类通道（TDengine / InfluxDB）不接受 `format` / `mapping`。
+非消息类通道（TDengine / InfluxDB / IoTDB）不接受 `format` / `mapping`。
 
 ### 2.1 采集组与 group-json
 
@@ -137,12 +137,44 @@ iot/+/+/fast     # 某个组（跨设备）
 > 组编码、设备编码创建后不可修改；物模型编码创建后也不可变。
 > 主题里不要使用组名或 ID，组名只是展示字段。
 
-时序库通道把**设备的物模型编码与点位的属性编码**也作为 tag 写入：
+TDengine / InfluxDB 把**设备的物模型编码与点位的属性编码**作为 tag 写入；IoTDB Tree 把它们作为 TEXT 测点写入：
 
 | 通道 | tag |
 |---|---|
 | `influxdb-v3` | `device_id`、`device_address_id`、`thing_model_code`、`property_code`（后两个未绑定时**省略**） |
 | `tdengine-v3` | 同上四个 tag（超级表 `TAGS`，未绑定时写空串） |
+| `iotdb-tree` | `root.<database>.device_<id>_<hash>.point_<id>_<hash>` 路径包含设备与点位 ID；`thing_model_code` 和 `property_code` 是 TEXT 测点 |
+
+### IoTDB Tree
+
+IoTDB 使用 Apache 官方 Go Session RPC 客户端。`host`、`port`（默认 6667）、`username`、
+`password`、`database`（默认 `root.dbeco`）与 `timeZone` 配置连接；数据库不存在时通道会
+幂等创建。`database` 可填写 `dbeco` 或 `root.dbeco`。通道按设备与点位 ID 生成稳定的 Tree path，
+对路径节点做字符清理并附加原始 ID 哈希，避免非法字符和清理碰撞。
+
+每个点位在首次写入时创建固定 schema。布尔、整数、浮点和文本值分别写入
+`value_bool` / `value_int` / `value_float` / `value_str`，并同步写入 `value_kind`、`quality`、
+`protocol`、`thing_model_code` 和 `property_code`。写入以 RPC `InsertRecords` 批量下发，连接失败的
+批次进入本地 SQLite outbox，恢复后自动补发。`batchWorkers` 默认 1，以保持同一时序的写入顺序；
+`batchRows` 默认 1000，`batchIntervalMs` 默认 200 ms。
+
+配置示例：
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": 6667,
+  "username": "root",
+  "password": "root",
+  "database": "root.dbeco",
+  "timeZone": "Asia/Shanghai",
+  "batchWorkers": 1,
+  "batchRows": 1000,
+  "batchIntervalMs": 200
+}
+```
+
+数据库账号需要创建 database 与 timeseries 的权限。此通道走 RPC 端口，不使用 REST 端口。
 
 TDengine 的超级表用 `CREATE STABLE IF NOT EXISTS` 建表：**已部署实例不会自动加 tag**，
 升级后需手动执行 `ALTER STABLE ... ADD TAG thing_model_code NCHAR(64)` 与
@@ -180,7 +212,7 @@ TDengine 的超级表用 `CREATE STABLE IF NOT EXISTS` 建表：**已部署实�
 | `mapping-json` | 输入文档新增 `trigger` 对象，用 `{"source":"path","value":"trigger.ruleId"}` 取用；正常记录的 `trigger.*` 为空串 |
 | `script` | `batch.trigger.*` 与 `batch.records[i].trigger.*`；正常批次不新增键 |
 
-时序库通道（TDengine / InfluxDB）与 OPC UA Server 通道不使用该对象，不会改变表结构或地址空间。
+时序库通道（TDengine / InfluxDB / IoTDB）与 OPC UA Server 通道不使用该对象，不会改变表结构或地址空间。
 
 ## 3. 出站映射（mapping-json）
 
@@ -564,7 +596,7 @@ Objects (ns=0;i=85)
 
 | 层 | 配置位置 | 执行位置 | 影响范围 |
 |---|---|---|---|
-| **工程量变换** | `device_address.transform_json`（点位编辑框「工程量变换」） | 采集侧 `toRecords`，**只执行一次** | 实时值、阈值报警、触发规则、断网缓存、所有推送通道（MQTT/Kafka/HTTP/OPC UA/TDengine/InfluxDB） |
+| **工程量变换** | `device_address.transform_json`（点位编辑框「工程量变换」） | 采集侧 `toRecords`，**只执行一次** | 实时值、阈值报警、触发规则、断网缓存、所有推送通道（MQTT/Kafka/HTTP/OPC UA/TDengine/InfluxDB/IoTDB） |
 | **出站映射变换** | 各通道 `config_json.mapping.fields.*.transform` | 每条通道编码时 | 只影响该通道的 `mapping-json` 载荷 |
 
 规律：

@@ -56,6 +56,7 @@ const fallback = [
   { type: 'kafka', label: 'Kafka' },
   { type: 'tdengine-v3', label: 'TDengine v3' },
   { type: 'influxdb-v3', label: 'InfluxDB v3' },
+  { type: 'iotdb-tree', label: 'Apache IoTDB Tree' },
 ]
 
 const options = computed(() => (types.value.length ? types.value : fallback))

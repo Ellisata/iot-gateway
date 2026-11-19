@@ -16,7 +16,7 @@ import { isLanguageToken } from '@/i18n/dynamicFormText'
  * 这份词典是为了让被定制的存量表单/插件表单也能一键接入。
  */
 const legacyTextTranslations = {
-  // ---------- 推送通道表单（mqtt / tdengine-v3 / influxdb-v3 / http / opcua） ----------
+  // ---------- 推送通道表单（mqtt / tdengine-v3 / influxdb-v3 / iotdb-tree / http / opcua） ----------
   'broker地址': 'Broker address',
   端口: 'Port',
   主题: 'Topic',

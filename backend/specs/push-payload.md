@@ -145,7 +145,7 @@
 JSON 末尾）。三者都始终存在，缺失时为空串；既有字段的名称、相对顺序与取值不变。
 外部 MQTT 订阅产生的记录没有本地绑定，
 这三个字段同样为空串。
-时序库通道（TDengine / InfluxDB）把两者作为 tag 写入（`thing_model_code` / `property_code`）。
+TDengine / InfluxDB 把两者作为 tag 写入（`thing_model_code` / `property_code`）；IoTDB Tree 把它们作为 TEXT 测点写入。
 
 ### 2.1 trigger：事件触发元数据
 

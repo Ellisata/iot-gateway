@@ -7,7 +7,7 @@ English | [简体中文](README.md)
 [![Release](https://img.shields.io/github/v/tag/Ellisata/iot-gateway?label=release&sort=semver&color=green)](https://github.com/Ellisata/iot-gateway/releases)
 ![Go](https://img.shields.io/badge/go-1.26-00ADD8)
 
-**One executable + a `plugins/` directory is all it takes to poll PLCs on an industrial PC and push data to MQTT / TDengine / InfluxDB — no database, no runtime to install.**
+**One executable + a `plugins/` directory is all it takes to poll PLCs on an industrial PC and push data to MQTT / TDengine / InfluxDB / Apache IoTDB — no collection runtime to install.**
 
 Polls PLCs and industrial devices on a schedule, ships with an embedded web admin console, and deploys as a Windows service, a Linux systemd unit or a Docker container.
 
@@ -40,7 +40,7 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
    ```
 
 4. **Open the console** at `http://<host-ip>:9082/admin` — default account `admin / hand@123`; **change it immediately after the first login**.
-5. **Add your first device** under Device Objects and save; data appears on the dashboard. Add an MQTT / TDengine / InfluxDB channel under Channel Management to push it downstream.
+5. **Add your first device** under Device Objects and save; data appears on the dashboard. Add an MQTT / TDengine / InfluxDB / Apache IoTDB channel under Channel Management to push it downstream.
 
 > ⚠️ With `plugins/` missing or empty the gateway still starts and lets you log in, but **it cannot collect a single point**. Release bundles ship with the plugins — do not copy the binary alone.
 >
@@ -63,7 +63,7 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 - **Out-of-process protocol plugins**: **all 16 protocol drivers are plugins** — the gateway binary contains no protocol implementation at all. Each driver is an `iot-driver-<name>` standalone executable dropped into the `plugins/` directory next to the binary to be **loaded automatically — no gateway rebuild, no downtime**; crashed plugin processes restart with backoff, wedged ones are detected and recycled, and replacing a binary hot-upgrades the plugin. See the [driver plugin guide](docs/driver-plugins.md) (中文).
 - **Acquisition engine**: worker-pool scheduled polling tasks; a background watcher detects configuration changes and applies **zero-downtime hot reload**.
 - **Push engine**: device-grouped batch dispatch; channel configs hot-reload; on network outage data lands in a **persistent local outbox** and is automatically re-sent once the connection recovers — no data loss.
-- **MQTT subscription into time-series databases**: subscribes to JSON messages on an external MQTT broker, maps them to collection records and writes them to enabled TDengine / InfluxDB channels — with wildcard and comma-separated multi-topics, QoS, authentication, sample-message preview, connectivity testing, a choice of built-in mapping DSL or a goja JS parser, and hot reload of subscription config.
+- **MQTT subscription into time-series databases**: subscribes to JSON messages on an external MQTT broker, maps them to collection records and writes them to enabled TDengine / InfluxDB / IoTDB channels — with wildcard and comma-separated multi-topics, QoS, authentication, sample-message preview, connectivity testing, a choice of built-in mapping DSL or a goja JS parser, and hot reload of subscription config.
 - **Disconnection alarms**: automatic detection of device poll failures and channel disconnections (debounce + state machine), recorded on offline/recovery edges, queryable in a unified alarm center.
 - **Web admin console**: dashboard, device objects, address tags, protocol management, channel management, alarms, log viewer and API key management — bilingual (EN/中文) UI.
 - **Open API**: `/openApi/*` endpoints for device/point queries, control writes, thing-model batch upserts/deletes and alarm queries, authenticated by an `X-Api-Key` header, for MES / ERP and other external systems.
@@ -148,13 +148,13 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 
 ## MQTT Subscription into Time-Series Databases
 
-Besides "collect → push", the gateway can also **ingest in the opposite direction**: subscribe to JSON messages on an external MQTT broker, map them into records identical to locally collected ones, and write them to enabled **TDengine / InfluxDB** channels. When devices or third-party platforms already publish data over MQTT, this funnels that data into the same time-series database.
+Besides "collect → push", the gateway can also **ingest in the opposite direction**: subscribe to JSON messages on an external MQTT broker, map them into records identical to locally collected ones, and write them to enabled **TDengine / InfluxDB / Apache IoTDB** channels. When devices or third-party platforms already publish data over MQTT, this funnels that data into the same time-series database.
 
 ```
-External device / platform ──MQTT──▶ Broker ──subscribe──▶ subscription engine (JSON → record) ──▶ push engine ──▶ TDengine / InfluxDB
+External device / platform ──MQTT──▶ Broker ──subscribe──▶ subscription engine (JSON → record) ──▶ push engine ──▶ TDengine / InfluxDB / IoTDB
 ```
 
-- **Time-series channels only**: records are delivered only to `tdengine-v3` / `influxdb-v3`, **never to plain channels such as MQTT** — delivering back to MQTT would self-excite when the subscribed topic is also a publish topic. Converted records reuse the push channels' batching, offline outbox cache and replay.
+- **Time-series channels only**: records are delivered only to `tdengine-v3` / `influxdb-v3` / `iotdb-tree`, **never to plain channels such as MQTT** — delivering back to MQTT would self-excite when the subscribed topic is also a publish topic. Converted records reuse the push channels' batching, offline outbox cache and replay.
 - **Each subscription has its own connection**: broker / port / client ID / username & password / topic (`+` and `#` wildcards supported; multiple topics separated by commas share the mapping and QoS) / QoS `0`–`2` are configured per subscription. Before saving you can **test the connection** and **preview** the mapping against a sample message (neither is persisted).
 - **Parsers**: each subscription uses either the built-in mapping DSL or a JS script. The script runs `function parse(msg, ctx)` under goja for payloads the DSL cannot express (per-message 1–500 ms timeout with VM rebuild; no file, network or `require` access) and is edited in the console's parser editor. Saving parser-only changes **swaps the parser in place without reconnecting MQTT**. Contract: [parser-plugins.md](backend/specs/parser-plugins.md) (中文), authoring guide: [parser-scripts.md](backend/docs/parser-scripts.md) (中文).
 - **Mapping rules**: `root` selects the value root (default `$`; a top-level array is split into one record per element automatically, or write `$.data[*]` explicitly); target fields are a whitelist of collection-record fields (device ID / device name / point ID / point description / value / kind / quality, etc. — unknown fields are rejected on save); each field supports `path` (JSON path), `const` (fixed value), `template` (string interpolation) and `map` (value translation for external type and quality codes), plus an optional `transform` operator chain (`scale` / `round` / `trim` / `default` / `hexDecode` / `base64Decode` / `bitfield` / `regex`); `topicPattern` extracts named segments from the topic (with `source: "topic"`), `fanout` expands one message into multiple point records, and `filter` holds implicit-AND conditions (`eq` / `neq` / `gt` / `gte` / `lt` / `lte` / `contains` / `in` / `notin` / `exists` / `notexists`).
@@ -346,7 +346,7 @@ push:
 │   ├── testutil/       # Test infrastructure (parity goldens / drivertest synthetic protocol)
 │   ├── plugins/        # Plugin runtime directory (build output; shipped in the release archive)
 │   ├── mappingdsl/     # Mapping primitives shared by inbound parsing and outbound mapping (paths / templates / transforms)
-│   ├── push/           # Push engine (mqtt/http/kafka/tdengine-v3/influxdb-v3 + outbox + codec/messagechannel)
+│   ├── push/           # Push engine (mqtt/http/kafka/tdengine-v3/influxdb-v3/iotdb-tree + outbox + codec/messagechannel)
 │   ├── parser/         # Subscription payload parsers (built-in mapping DSL / goja scripts, emit collection records)
 │   ├── subscribe/      # MQTT subscription engine (connection / queue / hot reload, parse & delivery orchestration)
 │   ├── controller/ service/ model/  # HTTP layers (Controller → Service → Database)
