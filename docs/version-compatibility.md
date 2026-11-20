@@ -22,8 +22,8 @@
 
 | 版本 | 真源 | 当前值 | 参与兼容判定 |
 |---|---|---|---|
-| 网关发行版本 | git tag；构建脚本以 `-X main.version` 注入，写入 `iot_gateway.firmware_version` 并随局域网发现广播 | `v0.8.3` | 否 |
-| 官方驱动发行版本 | 仓库根的 `drivers.version`；构建时经 `-X main.version` 写入每个插件的 `Meta.Version` | `v0.4.1` | 否 |
+| 网关发行版本 | git tag；构建脚本以 `-X main.version` 注入，写入 `iot_gateway.firmware_version` 并随局域网发现广播 | `v0.8.4` | 否 |
+| 官方驱动发行版本 | 仓库根的 `drivers.version`；构建时经 `-X main.version` 写入每个插件的 `Meta.Version` | `v0.5.0` | 否 |
 | 驱动 SDK 版本 | 网关 `backend/go.mod`、驱动仓库 `go.mod` | `v0.5.0` | 否 |
 | 线协议版本 | `driversdk.APIVersion`（[SDK 源码](https://github.com/Ellisata/iot-gateway-sdk/blob/main/driversdk/meta.go)） | `4` | **是，必须相等** |
 | 帧魔数 | `pluginwire.FrameMagic`（[SDK 源码](https://github.com/Ellisata/iot-gateway-sdk/blob/main/pluginwire/wire.go)） | `IGP2` | 是，流层第二道保护 |
@@ -53,6 +53,7 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 | v0.8.1 | v0.4.0 | v0.4.0 | 4 | 9 / 15 | Kafka 推送通道、开放接口报警明细 / 订阅设备点位同步 / 物模型批量 upsert 与删除、按协议生成设备导入模板与扫描结果导出、采集组与设备/点位被引用时拒绝删除 |
 | v0.8.2 | v0.4.0 | v0.4.0 | 4 | 9 / 15 | 点位级工程量变换、开放接口配置同步 / 推送通道连通性测试与运行状态 / 实时快照 / 控制能力 / 连接测试 / 设备扫描 / 插件二进制下发、实时写值区分原始值与工程值 |
 | v0.8.3 | v0.4.1 | v0.4.0 | 4 | 10 / 16 | 本机数据备份与恢复、物模型绑定管理、协议插件卸载、FANUC.CIP 驱动（含扫描与块读）与 OPC UA 控制下发、数据目录独占锁 |
+| v0.8.4 | v0.5.0 | v0.5.0 | 4 | 10 / 16 | 同一物理串口跨设备共享总线锁、跨协议插件共用物理口（串口代理，纯增量、`APIVersion` 保持 4 不进位） |
 
 维护规则：
 
