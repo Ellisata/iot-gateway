@@ -137,11 +137,11 @@ jobs:
             exit 1
           fi
 
-  # race 检测只在 master push / 手动触发时跑，不阻塞 PR 反馈。
-  # 想彻底关掉：删除本 job 即可（其余 job 不依赖它）。
+  # race 检测在 PR 上也跑，且是 master 分支保护里的 required check（合并门禁）；
+  # 与 backend 同口径用 -short，master push / 手动触发跑全量。要调整门禁请同步
+  # 修改 GitHub 仓库的 branch protection 设置，不要只删掉这里的 PR 步骤。
   backend-race:
     name: Backend (Linux, race)
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -152,7 +152,13 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
+      - name: go test -race (PR)
+        if: github.event_name == 'pull_request'
+        working-directory: backend
+        run: go test -race -short -count=1 -timeout 30m ./...
+
       - name: go test -race
+        if: github.event_name != 'pull_request'
         working-directory: backend
         run: go test -race -count=1 -timeout 30m ./...
 
