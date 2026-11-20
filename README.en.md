@@ -401,7 +401,10 @@ Bug reports, documentation, new protocol drivers and push channels are all welco
 ## Community
 
 - **Issues / Discussions**: file bugs and feature suggestions on [GitHub Issues](https://github.com/Ellisata/iot-gateway/issues) or [Gitee Issues](https://gitee.com/wang4856304/iot-gateway/issues) — either is fine, both are monitored.
-- **WeChat group**: email `15289288565@163.com` to be added.
+- **WeChat**: scan the QR code to add the author, or email `15289288565@163.com`.
+
+<img src="docs/images/wechat.png" width="240" alt="Author WeChat QR code" />
+
 - **Email**: open-source inquiries and commercial licensing at `15289288565@163.com`.
 
 ## License & FAQ
