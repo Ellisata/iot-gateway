@@ -6,7 +6,7 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
-## [Unreleased]
+## [0.8.3] - 2026-11-20
 
 ### 新增
 
@@ -26,6 +26,10 @@ each release, followed by English entries.
 - **WAL 维护器不再把进程内备份快照误报为外部读者**：备份期间跳过 “pinned by an external reader” 的 WARN（降级为 Debug）。CLI 跨进程备份仍可能看到该 WARN，属预期。
 - **点位属性绑定唯一性**：设备点位创建/修改（含 `/openApi` 配置同步 upsert）新增「同一设备同一属性只能绑一个点位」校验，先返回 `41021` 而不是 SQLite 唯一约束原文。属性改类型/读写模式前可同时清空绑定，一次保存完成。
 
+### 修复
+
+- **实时值长文本撑破单元格**：实时监控与设备点位列表里的长十六进制 / 字符串值改为单行省略号截断，悬停显示完整值，质量标签不再被挤出单元格。
+
 ### Added
 
 - **Local backup and restore (P0)**: introduces the `.igbak` bundle (manifest + consistent `VACUUM INTO` snapshot + external `default.yaml` / `<APP_ENV>.yaml` / plugin manifest). Online backups do not block collection or pushing; the scheduler runs every 6 hours by default and keeps 14 bundles / 512 MB, deleting the oldest when over the limit. Restore requires the gateway to be stopped: it verifies sha256, `integrity_check`, schema compatibility and the data-directory lock, then replaces the `db` / `-wal` / `-shm` trio together and keeps the old database as `*.pre-restore-<timestamp>`. Both `takeover` (keep the gateway ID) and `clone` (regenerate the ID) identity modes are supported. CLI: `iot-gateway backup create|list|verify`, `iot-gateway restore --bundle ... [--identity clone] [--restore-config] [--yes]`. Design: `backend/specs/data-backup.md`.
@@ -43,6 +47,10 @@ each release, followed by English entries.
 - **One gateway instance per data directory**: startup takes an OS-level exclusive lock on the data directory (Unix `flock` / Windows `LockFileEx`) and refuses to start when it is held. This also lets `restore` reliably decide whether the service is stopped.
 - **WAL maintainer no longer reports in-process backup snapshots as external readers**: the "pinned by an external reader" warning is suppressed (logged at Debug) while a snapshot is running. A cross-process CLI backup may still produce it, which is expected.
 - **One point per device per property**: creating/updating a device point (including the `/openApi` config-sync upsert) now enforces a single point per device/property pair, returning `41021` instead of the raw SQLite unique-constraint message. Changing a property's type or access mode can clear its bindings in the same save.
+
+### Fixed
+
+- **Long live values no longer break the cell**: long hex/string values in realtime monitoring and the device-point list are clipped to one line with an ellipsis and shown in full on hover, so the quality pill is no longer pushed out of the cell.
 
 ## [0.8.2] - 2026-11-17
 
