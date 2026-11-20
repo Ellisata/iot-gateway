@@ -182,10 +182,12 @@ func NewManagerWithPolicy(db *gorm.DB, cfg *configFile.Config, reload Reloader,
 		RestartMin:  msOrDefault(dc.RestartMinDelayMs, time.Second),
 		RestartMax:  msOrDefault(dc.RestartMaxDelayMs, 30*time.Second),
 		MaxRestarts: maxRestartsOrDefault(dc.MaxRestarts),
-		StableAfter: defaultStableAfter,
-		KillGrace:   pluginShutdownTimeout,
-		Infof:       logger.Info,
-		Warnf:       logger.Warn,
+		StableAfter:   defaultStableAfter,
+		KillGrace:     pluginShutdownTimeout,
+		Infof:         logger.Info,
+		Warnf:         logger.Warn,
+		OnRequest:     driverSerialHost.handleRequest,
+		OnClientClose: driverSerialHost.closeOwner,
 	}
 
 	return m

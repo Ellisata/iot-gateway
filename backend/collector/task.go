@@ -114,12 +114,19 @@ type gatewayTask struct {
 	pointValueSink PointValueSink
 	pool           *workerPool.WorkerPool
 
-	// devMuMap: deviceID -> 设备级互斥门。串行化对同一设备驱动的重连与读取。
-	// 独占串行总线驱动（RTU）整轮持锁；线程安全驱动（TCP/S7）仅对重连+单次 Read 加锁，
-	// 避免不同频率分组的并发轮询在驱动上互相干扰（见 pollDevice）。
+	// devMuMap: 互斥键 -> 互斥门。串行化对同一驱动连接的连接/读取。
+	// 键通常是设备 ID；串口独占驱动的设备按**物理端口**聚合（见 serialbus.go），
+	// 同一条 RS-485 总线上的设备共用一把门。独占串行总线驱动（RTU）整轮持锁；
+	// 线程安全驱动（TCP/S7）仅对重连+单次 Read 加锁，避免不同频率分组的并发轮询
+	// 在驱动上互相干扰（见 pollDevice）。
 	// 用 deviceGate 而不是 sync.Mutex：触发规则/控制下发可按超时放弃等待慢采集。
 	devMuMapMu sync.Mutex
 	devMuMap   map[string]*deviceGate
+
+	// lockKeys: deviceID -> 互斥键（devMuMap 的键）。构建期写定、之后只读，
+	// deviceLock 读取它不需要加锁。缺席的设备（测试手工构造的任务、无驱动设备）
+	// 回退为设备 ID，行为与改动前一致。
+	lockKeys map[string]string
 
 	// wg 统计在途轮询任务，Stop 时先排空再关闭驱动，保证无轮询访问已关闭连接。
 	wg sync.WaitGroup
@@ -254,17 +261,27 @@ func (t *gatewayTask) shouldLogReconnect(deviceID string, now time.Time) (n int,
 	return n, true
 }
 
-// deviceLock 返回指定设备的互斥门（懒初始化，供手工构造的 task 直接使用）。
+// deviceLock 返回设备所对应互斥键的门（懒初始化，供手工构造的 task 直接使用）。
+//
+// 键由 lockKeys 决定：串口独占设备按物理端口聚合，同一条总线上的多台设备在这里
+// 拿到**同一把门**（见 serialbus.go）。这对控制下发同样生效 —— 写一台表也要等
+// 同一总线上的其它设备整轮采集结束，否则帧会在半双工线上交错。
 func (t *gatewayTask) deviceLock(deviceID string) *deviceGate {
+	// lockKeys 构建期写定、之后只读（与 drivers/protocols 同一约定），无需加锁。
+	key := t.lockKeys[deviceID]
+	if key == "" {
+		key = deviceID
+	}
+
 	t.devMuMapMu.Lock()
 	defer t.devMuMapMu.Unlock()
 	if t.devMuMap == nil {
 		t.devMuMap = make(map[string]*deviceGate)
 	}
-	g, ok := t.devMuMap[deviceID]
+	g, ok := t.devMuMap[key]
 	if !ok {
 		g = newDeviceGate()
-		t.devMuMap[deviceID] = g
+		t.devMuMap[key] = g
 	}
 	return g
 }
@@ -368,6 +385,10 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 	if len(drvMap) == 0 {
 		logger.Warn("collector: no devices with supported protocol driver, collector will idle until a supported device is enabled")
 	}
+
+	// 互斥键：串口独占驱动按物理端口聚合，总线上多台设备共用一把门（见 serialbus.go）。
+	// 构建期算一次，运行时只查表 —— deviceLock 在轮询热路径上，每次都解析 JSON 不可接受。
+	lockKeys := buildLockKeys(devices, drvMap)
 
 	// 物模型编码/属性编码随记录下发（见 CollectedRecord.ThingModelCode）。
 	// 绑定关系（device.model_id / device_address.property_id）已在 checksum 里，
@@ -481,6 +502,7 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 	task := &gatewayTask{
 		devices:        devices,
 		drivers:        drvMap,
+		lockKeys:       lockKeys,
 		addrNameMap:    addrNameMap,
 		addrLabelMap:   addrLabelMap,
 		modelCodes:     modelCodes,
@@ -517,6 +539,11 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 		}
 		task.groups = append(task.groups, group)
 	}
+
+	// 串口分组诊断与代理启用：多台设备共用一个口是合法用法，但"这个口其实在共用"
+	// 必须在采集开始前讲清楚；跨协议共用时，能力允许就切换为网关代理
+	// （见 serialbus.go 的 configureSerialBusSharing）。
+	task.configureSerialBusSharing()
 
 	return task, nil
 }
@@ -806,10 +833,12 @@ func (g *frequencyGroup) clearInflight(deviceID string) {
 }
 
 // pollDevice 单台设备轮询入口（在 workerPool 协程中执行）。
-// 用设备级互斥锁串行化对同一设备驱动的重连与读取，避免不同频率分组的并发轮询互相干扰。
+// 用互斥门串行化对同一驱动连接的连接与读取，避免不同频率分组的并发轮询互相干扰。
+// 门按 deviceLock 解析出的键获取：独占串行总线驱动按**物理端口**聚合，
+// 同一条总线上的多台设备共用一把门（见 serialbus.go）。
 // 锁粒度按驱动底层连接区分：
-//   - 独占串行总线驱动（Modbus RTU）：整轮持锁（重连 + 全部批次读取 + 转换 + 推送），
-//     保证串口上的帧不被交错；
+//   - 独占串行总线驱动（Modbus RTU / DLT645.Serial）：整轮持锁
+//     （重连 + 全部批次读取 + 转换 + 推送），保证总线上的帧不被交错；
 //   - 内部线程安全驱动（Modbus TCP / S7）：仅对「重连 + 单次 Read」加锁，
 //     批量间的转换与推送不持锁——同一设备慢频率分组的大批量轮询不会长时间占用设备锁，
 //     避免拖住快频率分组的实际采集周期。

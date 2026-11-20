@@ -6,6 +6,48 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
+## [0.8.4] - 2026-11-20
+
+### 修复
+
+- **同一串口上的多台设备交替超时**：串口独占驱动（`SerialExclusive`）的采集互斥从
+  「设备」提升到「物理端口」，同一端口上的所有设备（含控制下发）共用一把总线锁，
+  整条总线串行收发。端口名按 `driver.CanonicalSerialPort` 归一（Windows 大小写与
+  `\\.\`、Linux `/dev/serial/by-id` 软链），与插件共享句柄的判据一致。
+- **跨插件共用物理口**（issue #2 的终局修复）：同一端口上分属**不同协议**的设备，
+  若所用插件都声明了 `SerialProxy`，采集任务会打开网关串口代理 —— 物理句柄只由
+  网关主进程持有，插件经 `serial.open/lock/read/write/unlock/close` 反向 RPC 收发
+  字节，并共用网关的跨进程总线锁（`pluginhost/serialhost.go`）。混有不支持代理的
+  插件时保持各自直连并 WARN（需分口或 DTU）；同协议共用为 INFO（插件进程内
+  `driversdk/serialbus` 已共享句柄）。设计见 `backend/specs/serial-proxy.md`。
+- 依赖 SDK **v0.5.0**（`driver.CanonicalSerialPort`、`driversdk/serialbus`、
+  `driversdk/serialproxy`）。网关新增直接依赖 `github.com/goburrow/serial`（BSD-3），
+  仅用于代理持有物理端口。
+
+### Fixed
+
+- **Multiple devices on one serial port timed out alternately**: the collection
+  mutex for serial-exclusive drivers (`SerialExclusive`) is now keyed by
+  **physical port** instead of device. Every device on the same port (including
+  control writes) shares one bus lock, so the whole bus is serialized. Port names
+  are canonicalized with `driver.CanonicalSerialPort` (Windows case / `\\.\`,
+  Linux `/dev/serial/by-id` symlinks), matching the rule plugins use to share
+  handles.
+- **Cross-plugin sharing of one physical port** (the end-game fix for issue #2):
+  when devices on one port belong to **different protocols** and every plugin
+  involved declares `SerialProxy`, task construction enables the gateway serial
+  proxy — the gateway process owns the only physical handle and plugins exchange
+  bytes over the `serial.open/lock/read/write/unlock/close` reverse RPC, sharing
+  the gateway's cross-process bus lock (`pluginhost/serialhost.go`). A port that
+  mixes in a plugin without proxy support stays direct with a WARN (split it or
+  use a DTU); a bus shared by one protocol is INFO (the in-process
+  `driversdk/serialbus` already shares the handle). Design:
+  `backend/specs/serial-proxy.md`.
+- Depends on SDK **v0.5.0** (`driver.CanonicalSerialPort`,
+  `driversdk/serialbus`, `driversdk/serialproxy`). The gateway gains a direct
+  dependency on `github.com/goburrow/serial` (BSD-3), used only by the proxy to
+  own the physical port.
+
 ## [0.8.3] - 2026-11-20
 
 ### 新增

@@ -911,6 +911,43 @@ func (d *yourDriver) MatchConnection(protocolJSON string) bool
 `ExtractSerialPort` 取不到值只会返回空串。因此它由 `driver.SerialPortField`
 与各插件的表单契约测试（见 §2.1 的 `FormJSON` 一行）共同钉住。
 
+#### 同一进程内多台设备必须共享一个串口句柄
+
+网关给每台设备各 `Connect` 一次，插件为每个会话构造一个驱动实例。同一条 RS-485 上
+挂多台从站（Modbus 的常见用法）或多块电表时，这些会话在**同一个插件进程**里各开一个
+句柄会同时踩三个坑：
+
+- 同一个 tty 出现两个读端，内核把每个字节只交给其中一个 fd：A 的应答被 B 读走，
+  A 超时或收到残缺帧（日志里的「已收 7/9 字节」）；
+- 非阻塞 fd + select 让两个读端同时被唤醒，竞争失败的一方拿到 EAGAIN
+  （`resource temporarily unavailable`），被判为链路断开；
+- Linux 的 termios 是 tty 级状态，任一方 `Close` 恢复打开前的备份会改写另一个句柄
+  所在端口的工作模式，双方交替"连接已关闭 / 已连接"。
+
+正确做法是使用 SDK 的 **`driversdk/serialbus`**：按 `driver.CanonicalSerialPort`
+归一后的端口名与串口参数 `Acquire` 一个共享句柄，`Handle.Lock` 就是总线锁（一次
+「发送 → 读应答」全程持有），最后一个 `Release` 才真正关闭端口。同端口参数不同会
+明确报配置错误，而不是再开一个句柄。参考实现：`modbus/modbusdrv/clientRtu.go`
+（共享 `RTUClientHandler`，事务内按会话切 `SlaveId`）、`dlt645` / `fins` /
+`mitsubishi`（共享裸串口）。
+
+三条纪律：
+
+- **超时不判死句柄**。读超时只说明这次没有应答（设备离线、站号写错），真正的
+  链路 I/O 错误才 `MarkBroken`；否则一台设备掉线会把整条总线拖进反复重连。
+- **不要用 `serial.Port` 自己建全局 map**。引用计数、关闭顺序（先关旧 fd 再 open，
+  否则新句柄备份到的是会被旧 `Close` 覆盖的 termios）、参数冲突判定都在
+  `serialbus` 里，自己抄一份必然分叉。
+- **跨插件进程共用端口走网关代理，不走 `serialbus`**。注册表是进程级的：
+  `DLT645.Serial` 与 `Modbus.RTU` 配到同一个物理口是两个进程，句柄无法在进程间
+  共享。终局方案是**网关串口代理**：插件在 `Meta` 里声明 `SerialProxy: true`，
+  驱动实现 `driver.SerialTransportProvider`（`SetSerialTransport` 收到一个
+  `driver.SerialTransportOpener`，返回 `io.ReadWriteCloser`）；网关判定同端口上的
+  协议全部可代理后，自己持有唯一 fd，插件经 `serial.*` 反向 RPC 收发字节，Lock/Unlock
+  由 `serialproxy.Conn` 转发到网关的跨进程总线锁。**没声明能力的插件不会被拉进代理**：
+  只要端口上有一个协议不支持，网关保持全部直连并 WARN（此时仍会互相干扰，应分口或
+  用 DTU）。协议声明了 `SerialProxy` 却没有实现 provider 时，插件启动即失败。
+
 ---
 
 ### 3.7 以太网协议应当使用 `host` / `port` 字段名

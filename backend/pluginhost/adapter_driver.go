@@ -81,11 +81,15 @@ func (m *Manager) register(meta driversdk.Meta, link processLink) error {
 		// 不能给所有 remoteDriver 都实现 driver.Writer：那样网关的
 		// `drv.(driver.Writer)` 永远成立，能力声明就形同虚设。
 		writable := p.Writable
+		// 串口代理能力同样按协议声明（见 driversdk.Protocol.SerialProxy）。
+		proxyCapable := p.SerialProxy
 		if err := driver.RegisterExternal(protocol, func() driver.Driver {
+			base := newRemoteDriver(link, protocol, serial, m.opts.Timeouts)
+			base.serialProxyCap = proxyCapable
 			if writable {
-				return newRemoteWritableDriver(link, protocol, serial, m.opts.Timeouts)
+				return &remoteWritableDriver{remoteDriver: base}
 			}
-			return newRemoteDriver(link, protocol, serial, m.opts.Timeouts)
+			return base
 		}); err != nil {
 			for _, done := range names {
 				if done == protocol {

@@ -34,7 +34,14 @@ type remoteDriver struct {
 	proc     processLink
 	protocol string
 	serial   bool
-	to       Timeouts
+	// serialProxyCap 插件在 describe 里声明了 SerialProxy（协议支持网关代理）。
+	// 只读；与"本次是否启用代理"（serialProxy）是两件事。
+	serialProxyCap bool
+	to             Timeouts
+
+	// serialProxy 由采集任务在 Connect 前设置：本设备必须经由网关代理的串口
+	// 字节流，而不是插件自己打开端口。仅当同端口上全部协议都可代理时才置位。
+	serialProxy atomic.Bool
 
 	mu      sync.Mutex
 	session uint64 // 0 = 未分配
@@ -54,12 +61,26 @@ var (
 	_ driver.SerialExclusive = (*remoteDriver)(nil)
 )
 
+// newRemoteDriver 构造代理驱动。serialProxyCap 由适配层在注册时补写
+// （协议声明的可代理能力），这里保留零值 false —— 不支持代理的协议与
+// 旧插件都走这条默认路径。
 func newRemoteDriver(proc processLink, protocol string, serial bool, to Timeouts) *remoteDriver {
 	return &remoteDriver{proc: proc, protocol: protocol, serial: serial, to: to}
 }
 
 // SerialExclusive 由插件 describe 声明，语义见 driver.SerialExclusive。
 func (d *remoteDriver) SerialExclusive() bool { return d.serial }
+
+// SupportsSerialProxy 见 driver.SerialProxyCapable。
+func (d *remoteDriver) SupportsSerialProxy() bool { return d.serialProxyCap }
+
+// SetSerialProxy 见 driver.SerialProxySetter。必须在 Connect 之前调用。
+func (d *remoteDriver) SetSerialProxy(enabled bool) { d.serialProxy.Store(enabled) }
+
+var (
+	_ driver.SerialProxyCapable = (*remoteDriver)(nil)
+	_ driver.SerialProxySetter  = (*remoteDriver)(nil)
+)
 
 // stale 报告当前会话是否属于已退役的插件进程实例。
 //
@@ -105,6 +126,7 @@ func (d *remoteDriver) Connect(protocolJSON string) error {
 	if err := cl.call(ctx, pluginwire.MethodConnect, driversdk.ConnectParams{
 		Protocol:     d.protocol,
 		ProtocolJSON: protocolJSON,
+		SerialProxy:  d.serialProxy.Load(),
 	}, &res); err != nil {
 		d.connected.Store(false)
 		return fmt.Errorf("pluginhost: connect %s: %w", d.protocol, err)
@@ -227,6 +249,7 @@ func (d *remoteDriver) Ping(protocolJSON string) error {
 	return cl.call(ctx, pluginwire.MethodPing, driversdk.PingParams{
 		Protocol:     d.protocol,
 		ProtocolJSON: protocolJSON,
+		SerialProxy:  d.serialProxy.Load(),
 	}, nil)
 }
 

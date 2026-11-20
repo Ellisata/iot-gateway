@@ -24,7 +24,7 @@
 |---|---|---|---|
 | 网关发行版本 | git tag；构建脚本以 `-X main.version` 注入，写入 `iot_gateway.firmware_version` 并随局域网发现广播 | `v0.8.3` | 否 |
 | 官方驱动发行版本 | 仓库根的 `drivers.version`；构建时经 `-X main.version` 写入每个插件的 `Meta.Version` | `v0.4.1` | 否 |
-| 驱动 SDK 版本 | 网关 `backend/go.mod`、驱动仓库 `go.mod` | `v0.4.0` | 否 |
+| 驱动 SDK 版本 | 网关 `backend/go.mod`、驱动仓库 `go.mod` | `v0.5.0` | 否 |
 | 线协议版本 | `driversdk.APIVersion`（[SDK 源码](https://github.com/Ellisata/iot-gateway-sdk/blob/main/driversdk/meta.go)） | `4` | **是，必须相等** |
 | 帧魔数 | `pluginwire.FrameMagic`（[SDK 源码](https://github.com/Ellisata/iot-gateway-sdk/blob/main/pluginwire/wire.go)） | `IGP2` | 是，流层第二道保护 |
 
@@ -67,14 +67,21 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 
 | 构建所用 SDK | `APIVersion` | 可加载于 | 不可加载于 |
 |---|---|---|---|
-| v0.1.x – v0.4.x | 4 | 任意 `APIVersion = 4` 的网关（当前即 v0.3.0 及以后） | `APIVersion ≠ 4` 的网关 |
+| v0.1.x – v0.5.x | 4 | 任意 `APIVersion = 4` 的网关（当前即 v0.3.0 及以后） | `APIVersion ≠ 4` 的网关 |
 
 补充：
 
-- 官方驱动 v0.1.0 / v0.2.0 / v0.3.0 / v0.4.0 分别用 SDK
-  v0.1.0 / v0.2.0 / v0.3.0 / v0.4.0 构建，`APIVersion` 均为 4，因此都落在第一行。
+- 官方驱动 v0.1.0 / v0.2.0 / v0.3.0 / v0.4.0 / v0.4.1 / v0.5.0 分别用 SDK
+  v0.1.0 / v0.2.0 / v0.3.0 / v0.4.0 / v0.4.0 / v0.5.0 构建，`APIVersion` 均为 4，
+  因此都落在第一行。
 - SDK v0.4.0 新增的 `DiscoverySpec.Transport` 是**可选字段**，不递增 `APIVersion`：
   旧插件不带该字段时网关跳过 TCP 预筛，行为与 v0.3.x 一致。
+- SDK v0.5.0 新增的 `driver.CanonicalSerialPort`、`driversdk/serialbus`、
+  `driversdk/serialproxy` 与 `driver.SerialTransportProvider` 是**纯增量**：
+  不改变任何已有接口与线协议。代理能力通过 `serialProxy` 标志协商，旧网关从不置位、
+  旧插件不声明 `SerialProxy`，双方都走原直连路径。把多台设备配在同一条串口上的插件
+  **应当**用 `serialbus` 共享句柄；跨插件共用时声明 `SerialProxy`，否则网关只能保持
+  直连并告警。
 - 插件作者必须在 `driversdk.Meta` 里填 `APIVersion: driversdk.APIVersion`，不要手写数字。
 - `Meta.Version` 只用于日志与诊断。手工 `go build` 且未传 `-X main.version` 时它是
   `"dev"`，不代表任何官方版本。

@@ -65,6 +65,13 @@ type processOptions struct {
 	// logger 里 runtime.Caller(2) 取到的 file:line 会全部塌到绑定的那一行。
 	Infof func(format string, args ...any)
 	Warnf func(format string, args ...any)
+
+	// OnRequest 处理插件发起的反向请求（目前只有驱动侧的 serial.* 代理）。
+	// nil = 不支持反向请求。
+	OnRequest func(*client, pluginwire.Frame)
+
+	// OnClientClose 在插件连接终止时清理它持有的宿主资源（代理串口句柄）。
+	OnClientClose func(*client)
 }
 
 // defaultProcessOptions 给出各项的兜底默认值，供未显式配置的项使用。
@@ -439,6 +446,7 @@ func (p *pluginProcess) spawn() (*exec.Cmd, *client, error) {
 
 	cl := newClient(&stdioPipe{stdin: stdin, stdout: stdout})
 	cl.setStuckThreshold(p.opts.StuckStreak, p.opts.StuckAfter)
+	cl.setHooks(p.opts.OnRequest, p.opts.OnClientClose)
 
 	// 以 stopCtx 为父：停机时立即中止握手，不必等满超时。
 	ctx, cancel := context.WithTimeout(p.stopCtx, p.opts.Timeouts.Handshake)

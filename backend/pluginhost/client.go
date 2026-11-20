@@ -77,6 +77,12 @@ type client struct {
 	closed    chan struct{} // 关闭即置位，所有等待者立即返回
 	wg        sync.WaitGroup
 
+	// onRequest 处理插件发起的反向请求（串口代理的 serial.*）。nil = 不支持。
+	// 由驱动侧适配层在进程拉起后注入；本文件不认识任何具体方法。
+	onRequest func(*client, pluginwire.Frame)
+	// onClose 在连接终止时清理本连接持有的宿主资源（代理串口句柄）。
+	onClose func(*client)
+
 	// epoch 本客户端所属的**插件进程世代号**，由 pluginProcess 在 markUp 时写入、
 	// 之后不再变（本客户端只属于那一个进程实例）。
 	//
@@ -133,12 +139,27 @@ func (c *client) readLoop() {
 	}
 }
 
-// dispatch 投递应答。
+// setHooks 注入反向请求与断连清理钩子。
+func (c *client) setHooks(onRequest func(*client, pluginwire.Frame), onClose func(*client)) {
+	c.onRequest = onRequest
+	c.onClose = onClose
+}
+
+// dispatch 投递应答，或分派插件发起的反向请求。
 //
 // 投递**绝不能阻塞**读协程：通道缓冲为 1，因此即使调用方已超时放弃、
 // 无人接收，这里也能立即返回。未知 id 的应答静默丢弃（调用方超时后
 // 迟到的应答属正常情况）。
+//
+// 反向请求（带 Method 的帧）单独起 goroutine：一次 5 秒的串口读不能挡住
+// 同一插件进程上其它设备的正常应答。
 func (c *client) dispatch(f pluginwire.Frame) {
+	if f.Method != "" {
+		if c.onRequest != nil {
+			go c.onRequest(c, f)
+		}
+		return
+	}
 	if f.ID == 0 {
 		return
 	}
@@ -168,6 +189,11 @@ func (c *client) fail(err error) {
 		close(c.closed)
 		_ = c.rw.Close()
 	})
+	// 连接已死：插件进程持有的代理串口句柄必须立刻归还，否则总线锁会被
+	// 一个不存在的会话永久占用。钩子必须幂等（closeOwner 重复调用无害）。
+	if c.onClose != nil {
+		c.onClose(c)
+	}
 }
 
 // err 返回连接失效的原因。
