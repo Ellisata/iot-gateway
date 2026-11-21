@@ -53,6 +53,44 @@ jobs:
         working-directory: backend
         run: go test -count=1 -timeout 20m ./...
 
+  # 时序入库组件是独立 Go 模块（backend 的本地 replace 目标），
+  # backend 的 ./... 不会包含它，必须单独 gofmt / vet / test / race。
+  tsdb:
+    name: TSDB component
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # CI 不跑真实 Postgres：tsdb/spool/postgres 的用例在未设置 TSDB_POSTGRES_DSN
+    # 时自动跳过；需要覆盖时本地设 DSN 跑 go test ./spool/postgres。
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tsdb/go.mod
+          cache-dependency-path: tsdb/go.sum
+
+      - name: gofmt
+        working-directory: tsdb
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt required for:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        working-directory: tsdb
+        run: go vet ./...
+
+      - name: go test
+        working-directory: tsdb
+        run: go test -count=1 -timeout 10m ./...
+
+      - name: go test -race
+        working-directory: tsdb
+        run: go test -race -count=1 -timeout 15m ./...
+
   # SDK 已有自己的仓库与 CI（含许可证边界守卫），这里不再重复跑。
   #
   # PR 上的插件覆盖只有这一个冒烟 job：编译「已发布驱动 + 宿主」跑 Modbus

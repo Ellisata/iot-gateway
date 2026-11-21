@@ -14,7 +14,6 @@ require (
 	github.com/google/wire v0.7.0
 	github.com/gopcua/opcua v0.9.1
 	github.com/spf13/viper v1.19.0
-	github.com/taosdata/driver-go/v3 v3.8.2
 	github.com/twmb/franz-go v1.22.3
 	github.com/twmb/franz-go/pkg/kfake v0.0.0-20261109062748-d6ea02a174bc
 	github.com/xuri/excelize/v2 v2.11.0
@@ -25,6 +24,8 @@ require (
 )
 
 require (
+	github.com/apache/iotdb-client-go/v2 v2.0.10 // indirect
+	github.com/apache/thrift v0.24.0 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/dlclark/regexp2/v2 v2.8.1 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
@@ -37,6 +38,7 @@ require (
 	github.com/quic-go/quic-go v0.59.0 // indirect
 	github.com/richardlehane/mscfb v1.0.7 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect
+	github.com/taosdata/driver-go/v3 v3.8.2 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.15.1 // indirect
 	github.com/xuri/efp v0.0.1 // indirect
@@ -48,6 +50,7 @@ require (
 require (
 	github.com/Ellisata/iot-gateway-sdk v0.5.0
 	github.com/Ellisata/iot-gateway-sdk/testkit v0.2.0
+	github.com/Ellisata/iot-gateway/tsdb v0.0.0
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
@@ -97,3 +100,5 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.49.1 // indirect
 )
+
+replace github.com/Ellisata/iot-gateway/tsdb => ../tsdb

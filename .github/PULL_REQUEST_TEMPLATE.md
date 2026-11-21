@@ -15,7 +15,7 @@
 
 ## 自查清单 / Checklist
 
-- [ ] `go test ./...` 通过（backend 目录）
+- [ ] `go test ./...` 通过（`backend/` 与 `tsdb/` 两个模块）
 - [ ] 新增协议/通道已在 `init()` 注册，并在 main.go 空导入（如适用）
 - [ ] 涉及数据库结构变更有新增 migration 脚本
 - [ ] 界面文案已同步中英双语（frontend i18n）

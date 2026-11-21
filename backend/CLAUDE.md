@@ -62,7 +62,7 @@
 │   ├── webhook/         # HTTP/Webhook 通道(注册类型 "http")
 │   ├── kafka/           # Kafka 通道(注册类型 "kafka"):franz-go + 设备编码分区
 │   ├── opcuaserver/     # OPC UA Server 通道(注册类型 "opcua"):状态型,地址空间 + 最新值 + 订阅通知
-│   └── mqtt/ tdengine/v3/ influxdb/v3/   # 各通道只实现「负载构造 + 下发 + 连接维护」
+│   └── mqtt/ tdengine/v3/ influxdb/v3/ iotdb/v2/   # MQTT 自备循环；TDengine/InfluxDB/IoTDB 只是 tsdb 组件的注册适配器
 ├── discovery/           # 局域网自动发现: 以 UDP 广播发布网关身份,供管理平台自动发现
 │   ├── message.go       # **对外契约**:报文常量/Message/encode/decode(见 specs/discovery.md)
 │   ├── netif.go         # 本机 IPv4 网卡枚举 + 子网广播地址计算(纯函数);also LocalSubnets
@@ -129,9 +129,19 @@
   Kafka 用可选的 `messagechannel.KeyedTransport` 传设备编码作为 record key,同设备固定分区;
   可选的 `io.Closer` 让 `Stop`/临时通道释放 kgo 客户端(`push.ReleaseChannel`)。
 
-### 推送通道的共享骨架([push/outbox.go](push/outbox.go), [push/drain.go](push/drain.go), [push/writer.go](push/writer.go))
-每个通道 = **`push.Outbox`(队列/断网缓存/状态)+ 通用循环(攒批下发 / 补发 / 重连)+
-通道自己的负载构造与传输**。mqtt / tdengine / influxdb 的这段逻辑此前各复制了一份,现只有一处实现:
+### 推送通道的共享骨架(独立组件 [../tsdb/delivery](../tsdb/delivery), 网关侧 [push/tsdb_compat.go](push/tsdb_compat.go))
+每个通道 = **`Outbox`(队列/断网缓存/状态)+ 通用循环(攒批下发 / 补发 / 重连)+
+通道自己的负载构造与传输**。这段逻辑只有一份实现,在仓库根目录的独立 Go 模块
+`../tsdb` 的 `delivery` 子包(`github.com/Ellisata/iot-gateway/tsdb/delivery`)里;
+`push/tsdb_compat.go` 用类型别名把它暴露为 `push.Outbox` / `push.AggregateWriter` /
+`push.GroupedDrainer` 等,mqtt / webhook / kafka / opcua 等通道无需感知组件拆分。
+`collector.CollectedRecord` 与 `push.PushBatch` 也都是 tsdb 中性模型(`tsdb/model`)
+的别名,跨包传递零转换。
+
+`tsdb` 根包只保留契约(模型 / `Sink` / `Writer` / `Status` / `SpoolStore`)；
+时序后端各自暴露 **`Writer`(同步写入，无队列无重试)** 与 **`Sink`(Writer +
+delivery，带断网缓存/补发)**。只需要同步写入的项目直接用 `Writer`，不需要引入
+`delivery` 的队列概念。
 
 - **入队路由**(`Outbox.Enqueue`,绝不阻塞采集线程):断连且启用缓存 → 直接落盘;否则内存队列快路径;
   队列满 → 启用缓存则溢写,未启用则丢弃最旧。
@@ -151,8 +161,8 @@
 - **生命周期有硬顺序**:`Start` → 通道跑自己的 worker 组 → `Close`(关 quit)→ 等 worker 组退出 →
   `Wait`(等落盘协程排空)。**worker 停服前还会把 outbox 中写失败的批次转投缓存**,提前收尾会丢数据。
 
-### 通道监控([push/status.go](push/status.go), [push/recent.go](push/recent.go))
-- `ChannelStatusVO` 是**所有通道共用**的状态字段;类型特有指标放 `Extra map[string]any`
+### 通道监控(组件 [../tsdb/status.go](../tsdb/status.go), [../tsdb/recent.go](../tsdb/recent.go))
+- `ChannelStatusVO` 是 `tsdb.Status` 的别名,**所有通道共用**;类型特有指标放 `Extra map[string]any`
   (键稳定、文案由前端翻译,没有特有指标的通道留空)。前端监控抽屉每 3 秒轮询 `/push/status`,
   因此 `Snapshot` 只做原子读与短暂锁,不遍历数据库、不做 I/O。
 - `RecentMessagesProvider` 是可选观测接口(不扩 `Channel`):MQTT/HTTP 记「发送报文」,
@@ -172,7 +182,7 @@
 ### MQTT 订阅([subscribe/](subscribe/))
 - 管理外部 broker 上的多条订阅:每行 `mqtt_subscription` = 一个独立 paho 客户端 +
   一个解析器实例。收包后解析成 `collector.CollectedRecord`,再经
-  `push.Engine.PushRecordsToTimeSeries` **只投递到时序数据库类通道**(TDengine / InfluxDB)。
+  `push.Engine.PushRecordsToTimeSeries` **只投递到时序数据库类通道**(TDengine / InfluxDB / IoTDB)。
 - `topic` 列支持**英文逗号分隔多个过滤器**(与推送通道 `buildTopics` 同口径:逐段 trim、
   丢弃空段、去重保序),一次 `SubscribeMultiple` 全部订阅,共用该行的 QoS 与解析器;
   单个 topic 的原配置行为不变。通配符 `+` / `#` 照常可用,`topicPattern` 匹配的是
@@ -567,8 +577,8 @@
 > ① 现有线协议是**纯请求/应答**,而 `Outbox` 靠 `Connectivity.Connected()` 决定入队路由,
 > 该状态由通道的连接回调产生,**需要新增一条反向通知帧**(插件→网关);
 > ② 需要错误分类字段区分「下游明确拒绝(可判毒批次)」与「纯超时(不判毒)」,
-> 否则 [push/drain.go](push/drain.go) 的毒批次语义跨进程即丢失。
-> 另外要决定 [push/writer.go](push/writer.go) 的 `Aggregator` 留网关侧(每批一次 RPC)
+> 否则 [../tsdb/drain.go](../tsdb/drain.go) 的毒批次语义跨进程即丢失。
+> 另外要决定 [../tsdb/writer.go](../tsdb/writer.go) 的 `Aggregator` 留网关侧(每批一次 RPC)
 > 还是随插件走(网关侧攒批/补发骨架作废)。
 
 **消息类通道(发 JSON 到某个下游)优先走通用骨架**,不要复制 Outbox 循环:
@@ -585,16 +595,18 @@
 4. 在 [main.go](main.go) 顶部**空导入**该子包(与 `_ "iot-gateway/push/mqtt"` 并列)。
 5. 控制台类型下拉来自 `GET /pushChannel/listTypes`,不要在前端硬编码类型列表。
 
-**聚合写入类通道(时序库/关系库)**仍各自实现 `push.Channel`:
+**聚合写入类通道(时序库/关系库)**:入库骨架在独立组件 [../tsdb](../tsdb) 中。
 
-1. 负载构造器实现 `push.Aggregator`(Append/Rows/Empty/Payload),
-   `run()` 里起 N 个 `push.AggregateWriter{New, Write, MaxRows, Interval}.Run(ob)`,
-   并用 `push.GroupedDrainer{...}.Drain` 作为 `DrainFunc` 交给 `ob.DrainLoop`。
-2. 构造时用 `push.NewOutbox(...)`,`Start()` 里 `ob.Start()` 后 `go run()`;
-   `Stop()` 里按 `ob.Close()` → 等 worker 组退出 → `ob.Wait()` 收尾。
-3. `run()` 里挂 `ob.ReconnectLoop(interval, ch.tryConnect)`;`tryConnect` 建连成功时
-   置位连通状态并 `ob.Notify()` 唤醒补发。
-4. 同样用 `push.RegisterType` 注册(或 `Register` 表示非消息类),并在 main 空导入。
+1. 在 `tsdb/<backend>/vX/` 实现同步 `Writer`(连接 + 负载构造 + 单次写入)与
+   `delivery.Aggregator`(Append/Rows/Empty/Payload)，再用 `delivery` 的
+   `Outbox` / `AggregateWriter` / `GroupedDrainer` 组合出 `tsdb.Sink`
+   (ID/Start/Stop/Enqueue/Status/TestConnectivity)。不要复制这些循环
+   (参考 [../tsdb/tdengine/v3/channel.go](../tsdb/tdengine/v3/channel.go))。
+2. 在 `push/<backend>/vX/` 写薄适配器:解析 `config_json`、构造 `SpoolStore`
+   (`push.NewSqliteSpool`)与 Logger(`push.ComponentLogger()`),调用
+   `push.NewTimeSeriesChannel(sink, id, type, sig)` 包成 `push.Channel`
+   (参考 [push/tdengine/v3/tdengineChannel.go](push/tdengine/v3/tdengineChannel.go))。
+3. 适配器里 `push.RegisterType` 注册(或 `Register` 表示非消息类),并在 main 空导入。
 
 ### 新增业务领域模块
 1. 建 `model/po|dto|vo/xxx.go` → `service/xxxService.go` → `controller/xxxController.go` → `router/xxxRouter.go`。

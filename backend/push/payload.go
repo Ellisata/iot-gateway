@@ -3,24 +3,10 @@
 
 package push
 
-import "iot-gateway/collector"
+import "github.com/Ellisata/iot-gateway/tsdb"
 
 // PushBatch 一批推送数据（按 (设备, 采集组) 分组）。
-// 携带结构化采集记录与统一采集时间，由各通道按自身线上格式序列化。
-// 字段导出：作为 Channel.Enqueue 的入参跨包传递。
 //
-// 组身份是批次级冗余（同一批次内的记录共享同一个组），供通道做 topic 选择、
-// group-json 帧头与断网补发；未分组批次 GroupID/GroupName 为空、Interval 为 0。
-type PushBatch struct {
-	DeviceID string
-	// DeviceCode / ThingModelCode / GroupCode 供主题模板的编码占位符使用；
-	// 空值由通道按约定回落（_unencoded / _unmodeled / legacy）。
-	DeviceCode      string
-	ThingModelCode  string
-	GroupID         string
-	GroupCode       string
-	GroupName       string
-	GroupIntervalMs int
-	CollectedAt     string
-	Records         []collector.CollectedRecord
-}
+// 类型定义在时序入库组件中（tsdb.Batch）：推送通道与时序入库共用同一份
+// 批次模型，Enqueue 跨包传递零转换。字段语义见 tsdb.Batch。
+type PushBatch = tsdb.Batch

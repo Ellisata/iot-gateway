@@ -33,6 +33,7 @@ import (
 import (
 	_ "embed"
 	_ "iot-gateway/push/influxdb/v3"
+	_ "iot-gateway/push/iotdb/v2"
 	_ "iot-gateway/push/kafka"
 	_ "iot-gateway/push/mqtt"
 	_ "iot-gateway/push/opcuaserver"

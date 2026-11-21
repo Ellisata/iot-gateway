@@ -46,6 +46,11 @@ COPY drivers.version drivers.txt ./
 # 先复制模块清单,利用层缓存。SDK 与 testkit 都是已发布的 Go module，
 # 由 GOPROXY 按 go.mod 的版本拉取。
 COPY backend/go.mod backend/go.sum ./
+
+# 时序入库组件是 backend 的本地 replace 目标（../tsdb）。
+# 必须放在 /src 的父目录 /tsdb，go mod download 才能解析 replace。
+COPY tsdb/ /tsdb/
+
 RUN go mod download
 
 COPY backend/ ./

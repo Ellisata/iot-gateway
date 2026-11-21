@@ -4,6 +4,10 @@ github.com/Ellisata/iot-gateway-sdk/testkit v0.2.0 h1:D56DcKAinBP8PVwFAmzk0EgA82
 github.com/Ellisata/iot-gateway-sdk/testkit v0.2.0/go.mod h1:HgzLIBoT5ciCjaWfCcaS6o3jMXG71kGpBmYbyMOoEOk=
 github.com/Masterminds/semver/v3 v3.5.0 h1:kQceYJfbupGfZOKZQg0kou0DgAKhzDg2NZPAwZ/2OOE=
 github.com/Masterminds/semver/v3 v3.5.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
+github.com/apache/iotdb-client-go/v2 v2.0.10 h1:SC3ZFENEGfcbXl5hGBfLizk/s8Ba4r3/mNb0o4IH5PY=
+github.com/apache/iotdb-client-go/v2 v2.0.10/go.mod h1:Ef61z8w2tRnuAcQKESFfiH03kDvfQniVPUgOXCxWnNw=
+github.com/apache/thrift v0.24.0 h1:zy31L1a49QTNB2bG1BBfMXol3yJrTH975G3pPubQVLQ=
+github.com/apache/thrift v0.24.0/go.mod h1:zPt6WxgvTOM6hF92y8C+MkEM5LMxZuk4JcQOiU4Esvs=
 github.com/bytedance/gopkg v0.1.3 h1:TPBSwH8RsouGCBcMBktLt1AymVo2TVsBVCY4b6TnZ/M=
 github.com/bytedance/gopkg v0.1.3/go.mod h1:576VvJ+eJgyCzdjS+c4+77QF3p7ubbtiKARP3TxducM=
 github.com/bytedance/sonic v1.15.0 h1:/PXeWFaR5ElNcVE84U0dOHjiMHQOwNIx3K4ymzh/uSE=

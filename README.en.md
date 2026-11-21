@@ -140,6 +140,7 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 | `kafka` | Apache Kafka via franz-go (pure Go) — SASL/PLAIN, TLS, configurable acks, per-device keyed partitions, offline spool and replay |
 | `tdengine-v3` | TDEngine 3.x via the official driver-go WebSocket driver (CGO-free, connects through taosAdapter) |
 | `influxdb-v3` | InfluxDB 3.x via a self-built Line-Protocol-over-HTTP client (no heavy official SDK) |
+| `iotdb-v2` | Apache IoTDB 2.x (tree model) via the official Go native client (Thrift RPC, pure Go, CGO-free, port 6667). Devices/points map to device paths, values land in typed `value_*` measurements |
 
 > Channels are now **type + instance name**: multiple instances of the same type can coexist (e.g. two HTTP channels for MES and ERP).
 >
@@ -148,13 +149,13 @@ Polls PLCs and industrial devices on a schedule, ships with an embedded web admi
 
 ## MQTT Subscription into Time-Series Databases
 
-Besides "collect → push", the gateway can also **ingest in the opposite direction**: subscribe to JSON messages on an external MQTT broker, map them into records identical to locally collected ones, and write them to enabled **TDengine / InfluxDB** channels. When devices or third-party platforms already publish data over MQTT, this funnels that data into the same time-series database.
+Besides "collect → push", the gateway can also **ingest in the opposite direction**: subscribe to JSON messages on an external MQTT broker, map them into records identical to locally collected ones, and write them to enabled **TDengine / InfluxDB / IoTDB** channels. When devices or third-party platforms already publish data over MQTT, this funnels that data into the same time-series database.
 
 ```
 External device / platform ──MQTT──▶ Broker ──subscribe──▶ subscription engine (JSON → record) ──▶ push engine ──▶ TDengine / InfluxDB
 ```
 
-- **Time-series channels only**: records are delivered only to `tdengine-v3` / `influxdb-v3`, **never to plain channels such as MQTT** — delivering back to MQTT would self-excite when the subscribed topic is also a publish topic. Converted records reuse the push channels' batching, offline outbox cache and replay.
+- **Time-series channels only**: records are delivered only to `tdengine-v3` / `influxdb-v3` / `iotdb-v2`, **never to plain channels such as MQTT** — delivering back to MQTT would self-excite when the subscribed topic is also a publish topic. Converted records reuse the push channels' batching, offline outbox cache and replay.
 - **Each subscription has its own connection**: broker / port / client ID / username & password / topic (`+` and `#` wildcards supported; multiple topics separated by commas share the mapping and QoS) / QoS `0`–`2` are configured per subscription. Before saving you can **test the connection** and **preview** the mapping against a sample message (neither is persisted).
 - **Parsers**: each subscription uses either the built-in mapping DSL or a JS script. The script runs `function parse(msg, ctx)` under goja for payloads the DSL cannot express (per-message 1–500 ms timeout with VM rebuild; no file, network or `require` access) and is edited in the console's parser editor. Saving parser-only changes **swaps the parser in place without reconnecting MQTT**. Contract: [parser-plugins.md](backend/specs/parser-plugins.md) (中文), authoring guide: [parser-scripts.md](backend/docs/parser-scripts.md) (中文).
 - **Mapping rules**: `root` selects the value root (default `$`; a top-level array is split into one record per element automatically, or write `$.data[*]` explicitly); target fields are a whitelist of collection-record fields (device ID / device name / point ID / point description / value / kind / quality, etc. — unknown fields are rejected on save); each field supports `path` (JSON path), `const` (fixed value), `template` (string interpolation) and `map` (value translation for external type and quality codes), plus an optional `transform` operator chain (`scale` / `round` / `trim` / `default` / `hexDecode` / `base64Decode` / `bitfield` / `regex`); `topicPattern` extracts named segments from the topic (with `source: "topic"`), `fanout` expands one message into multiple point records, and `filter` holds implicit-AND conditions (`eq` / `neq` / `gt` / `gte` / `lt` / `lte` / `contains` / `in` / `notin` / `exists` / `notexists`).

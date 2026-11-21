@@ -2,7 +2,7 @@
 
 本文档描述消息类推送通道（`mqtt` / `http` / `kafka`）的**载荷格式**与连接配置，
 以及状态型通道 **OPC UA Server** 的地址空间约定。
-`tdengine-v3` / `influxdb-v3` 的写入语义不变，见各自的表结构说明。
+`tdengine-v3` / `influxdb-v3` / `iotdb-v2` 的写入语义不变，见各自的表结构说明。
 
 > 点位级的**工程量变换**（`device_address.transform_json`，如 ×0.1）在采集侧执行一次，
 > 与本文 §3 的出站映射变换是两层不同的东西，见 §8。
@@ -11,7 +11,7 @@
 
 `push_channel` 现在有两列：
 
-- `type`：通道类型（`mqtt` / `http` / `kafka` / `tdengine-v3` / `influxdb-v3`），决定用哪个实现；
+- `type`：通道类型（`mqtt` / `http` / `kafka` / `tdengine-v3` / `influxdb-v3` / `iotdb-v2`），决定用哪个实现；
 - `name`：实例名，同一类型下唯一。
 
 因此同一类型可以建多条。例如两条 HTTP 通道分别接 MES 与 ERP，或两条 MQTT
@@ -36,7 +36,7 @@
 | `mapping-json` | 按下面的映射规则生成客户自定义 JSON。必须配置 `mapping`。 |
 | `script` | 用 goja 脚本生成任意文本载荷，适合声明式映射表达不了的结构。必须配置 `mapping` 里的脚本。 |
 
-非消息类通道（TDengine / InfluxDB）不接受 `format` / `mapping`。
+非消息类通道（TDengine / InfluxDB / IoTDB）不接受 `format` / `mapping`。
 
 ### 2.1 采集组与 group-json
 
@@ -143,6 +143,7 @@ iot/+/+/fast     # 某个组（跨设备）
 |---|---|
 | `influxdb-v3` | `device_id`、`device_address_id`、`thing_model_code`、`property_code`（后两个未绑定时**省略**） |
 | `tdengine-v3` | 同上四个 tag（超级表 `TAGS`，未绑定时写空串） |
+| `iotdb-v2` | 树模型无 tag：`device_id` / `device_address_id` 编码进设备路径 `{database}.{device}_{address}_{hash}`；物模型/属性编码作为逐行 TEXT 测量 `thing_model_code` / `property_code`（未绑定时省略） |
 
 TDengine 的超级表用 `CREATE STABLE IF NOT EXISTS` 建表：**已部署实例不会自动加 tag**，
 升级后需手动执行 `ALTER STABLE ... ADD TAG thing_model_code NCHAR(64)` 与

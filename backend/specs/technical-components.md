@@ -272,6 +272,7 @@ func BulkUpsert(db *gorm.DB, entities []interface{}, conflictColumns []string, u
 - 统一的时序数据操作接口，屏蔽底层引擎差异
 - 支持 TDEngine（通过 WebSocket + STMT 协议）
 - 支持 InfluxDB v3（通过 InfluxDB v3 Go SDK）
+- 支持 Apache IoTDB 2.x（原生 Thrift RPC，树模型；见下方「时序数据库入库组件」）
 - 工厂模式自动检测引擎（基于配置或环境）
 - 统一的数据模型（`TimeSeriesPoint`、`QueryRequest`、`QueryResult`）
 
@@ -644,3 +645,144 @@ func InitializeApp() (*gin.Engine, func()) {
 3. 所有注入类型提供 `New` 前缀构造函数
 4. 在 `main.go` 中调用 `InitializeApp()` 替换手动组装
 5. 运行 `go generate` 生成 `wire_gen.go`
+---
+
+## 时序数据库入库组件（tsdb）
+
+**模块路径**：`github.com/Ellisata/iot-gateway/tsdb`（仓库根目录 `tsdb/`，独立 `go.mod`）
+**核心文件**：`tsdb/sink.go` · `tsdb/spoolstore.go` · `tsdb/delivery/*.go` · `tsdb/spool/sqlite/spool.go` · `tsdb/spool/postgres/spool.go` · `tsdb/tdengine/v3/channel.go`
+
+### 分层
+
+- **`tsdb` 根包**：中性模型（`Record`/`Batch`）、`Sink`/`Writer`/`SpoolStore` 契约、状态与观测数据结构。只有标准库依赖。
+- **`tsdb/tdengine/v3`、`tsdb/influxdb/v3`、`tsdb/iotdb/v2`**：时序库后端（连接、建库建表、SQL / Line Protocol /
+  `insertRecords` 与同步 `Writer`）。路径里的版本指**上游服务端 API 版本**（TDengine 3.x / InfluxDB 3.x /
+  IoTDB 2.x），不是 Go 模块大版本；将来接 InfluxDB 1.x/2.x 时新增 `tsdb/influxdb/v1`、`/v2` 即可并存，
+  包名仍是 `influxdb`。`tsdb/iotdb/v2` 使用官方 2.x Go 客户端，**只支持 IoTDB 2.x 服务端**；
+  1.3.x 走官方另一条客户端线（`iotdb-client-go@v1.3.x`，建库用 `SET STORAGE GROUP`），
+  官方不支持 2.x 客户端连 1.x 服务端，需要时应新增 `tsdb/iotdb/v1` 并复用负载映射。
+  IoTDB 走官方 Go 原生客户端（Thrift RPC，树模型）：每个
+  `(deviceID, deviceAddressID)` 映射为一个设备路径，value 按 Kind 落到 `value_bool`/`value_int`/
+  `value_float`/`value_str` 测量列，`quality` 与物模型/属性编码作为逐行测量写入；序列依赖服务端
+  `enable_auto_create_schema=true`（2.x 默认）自动创建。
+- **`tsdb/delivery`**（可选）：非阻塞队列、断网缓存、攒批写入、补发与最近写入观测。
+- **`tsdb/spool/sqlite`、`tsdb/spool/postgres`**（可选）：断网缓存的 `SpoolStore` 实现（纯 Go 驱动）。
+  `spool/` 是**缓存存储层，不是时序库后端**——与 `tdengine`/`influxdb` 分目录，避免把 SQLite/Postgres
+  误认成时序库。Postgres 版 API 与 SQLite 版一致（`Open` / `NewSpool` / `Migrate` / `WithTable`），
+  表结构同名同列，便于积压数据平移。
+- `Sink` 不是独立实现，而是后端 `Writer` + `delivery` 的组合。只需要同步写入的项目直接用 `Writer`，不需要引入 `delivery`。
+
+### 功能特性
+
+- 同步 `Writer`：连接复用、幂等建库建表、攒批构造负载后单次写入
+- 可选可靠投递：非阻塞入队、断网本地缓存、按入队序补发、毒批次窄化
+- 断网缓存通过 `SpoolStore` 接口解耦，自带 SQLite 与 Postgres 实现，也可换 MySQL/Redis/文件
+- 最近写入环形缓冲（内存观测，不落库）
+- 可插拔后端：`tsdb/tdengine/v3`、`tsdb/influxdb/v3`、`tsdb/iotdb/v2`，其他项目可按同接口新增
+
+### 关键接口
+
+```go
+// 同步写入：只写时序库，不排队、不重试、不起后台协程。
+type Writer interface {
+    Write(ctx context.Context, batches []Batch) error
+    TestConnectivity() error
+    Close() error
+}
+
+// 可靠投递：Writer + delivery（断网缓存/补发）。
+type Sink interface {
+    ID() string
+    Start()
+    Stop()
+    Enqueue(Batch)          // 非阻塞
+    Status() Status
+    TestConnectivity() error
+}
+
+type SpoolStore interface {
+    Insert(Batch) error
+    InsertMany([]Batch) error
+    FetchOldest(limit int) ([]StoredBatch, error)
+    Delete(id int64) error
+    DeleteBatch(ids []int64) error
+    DeleteOldest(n int) error
+    Count() (int64, error)
+}
+
+type Logger interface { Debugf/Infof/Warnf/Errorf(format string, args ...any) }
+
+type Options struct {
+    ID, Name string
+    Store    SpoolStore // nil = 关闭断网缓存
+    Logger   Logger     // nil = 静默
+}
+```
+
+### 其他项目接入示例
+
+**模式一：项目已有自己的队列/断网缓存，只用同步写入**
+
+```go
+import (
+    "context"
+
+    "github.com/Ellisata/iot-gateway/tsdb"
+    tdengine "github.com/Ellisata/iot-gateway/tsdb/tdengine/v3"
+)
+
+w := tdengine.NewWriter(tdengine.Config{Host: "127.0.0.1", Database: "iot"}, tsdb.Options{})
+defer w.Close()
+
+err := w.Write(ctx, []tsdb.Batch{{
+    DeviceID: "dev-1",
+    Records:  []tsdb.Record{{DeviceAddressID: "temp", Value: "23.5", Kind: "float", Quality: 192}},
+}})
+```
+
+**模式二：需要断网不丢，用 Sink（Writer + delivery）**
+
+```go
+import (
+    "log/slog"
+
+    "github.com/Ellisata/iot-gateway/tsdb"
+    "github.com/Ellisata/iot-gateway/tsdb/spool/sqlite"
+    tdengine "github.com/Ellisata/iot-gateway/tsdb/tdengine/v3"
+)
+
+db, _ := sqlite.Open("data/spool.db")
+spool := sqlite.NewSpool(db, "proj-a")
+_ = spool.Migrate()
+
+sink := tdengine.New(tdengine.Config{Host: "127.0.0.1", Database: "iot"}, tsdb.Options{
+    ID: "proj-a", Store: spool, Logger: tsdb.SlogLogger(slog.Default()),
+})
+sink.Start()
+defer sink.Stop()
+
+sink.Enqueue(tsdb.Batch{
+    DeviceID: "dev-1",
+    Records: []tsdb.Record{{DeviceAddressID: "temp", Value: "23.5", Kind: "float", Quality: 192}},
+})
+```
+
+**换 Postgres 做断网缓存**只改 SpoolStore 两行（`tsdb/spool/postgres` 已内含 pgx 驱动）：
+
+```go
+db, _ := postgres.Open("postgres://user:pass@127.0.0.1:5432/iot?sslmode=disable")
+spool := postgres.NewSpool(db, "proj-a") // 表结构同 push_outbox，可按需 WithTable
+_ = spool.Migrate()
+// 其余不变：sink := tdengine.New(cfg, tsdb.Options{ID: "proj-a", Store: spool, ...})
+```
+
+测试需要真实库：设置 `TSDB_POSTGRES_DSN` 后 `go test ./spool/postgres` 才会执行用例，未设置时整组跳过（CI 不跑 Postgres）。
+
+### 与网关的关系
+
+- 网关 `collector.CollectedRecord` 与 `push.PushBatch` 是 `tsdb/model` 类型的别名，
+  跨包零转换；MQTT/Webhook/Kafka/OPC UA 通过 `push/tsdb_compat.go` 继续使用原有 API
+  （别名指向 `tsdb/delivery`）。
+- 网关的 TDengine/InfluxDB 通道只剩薄适配器：解析 `push_channel.config_json`、
+  构造 SQLite `SpoolStore`、把 `tsdb.Sink` 包成 `push.Channel`。
+- 组件**不得反向 import** `iot-gateway/...`；依赖方向永远是网关 → 组件。
