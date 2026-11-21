@@ -42,6 +42,8 @@ const (
 	FieldKind               = parser.FieldKind
 	FieldProtocol           = parser.FieldProtocol
 	FieldQuality            = parser.FieldQuality
+	FieldThingModelCode     = parser.FieldThingModelCode
+	FieldPropertyCode       = parser.FieldPropertyCode
 )
 
 // legacyFieldAliases 历史配置里的目标字段名 → 当前字段名。
@@ -467,6 +469,9 @@ func (r *Rule) applyFields(doc any, fields map[string]ValueSource, topicVars map
 	rec.DataType = optionalField(fields, doc, topicVars, FieldDataType)
 	rec.Kind = normalizeKind(optionalField(fields, doc, topicVars, FieldKind))
 	rec.Protocol = optionalField(fields, doc, topicVars, FieldProtocol)
+	// 物模型编码/属性编码可选：报文自带时透传，缺省留空（下游按未绑定处理）。
+	rec.ThingModelCode = optionalField(fields, doc, topicVars, FieldThingModelCode)
+	rec.PropertyCode = optionalField(fields, doc, topicVars, FieldPropertyCode)
 	rec.Quality = qualityOf(fields, doc, topicVars)
 
 	if rec.Kind == "" {

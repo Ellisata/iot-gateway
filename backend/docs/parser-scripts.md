@@ -62,11 +62,13 @@ function parse(msg, ctx) {
 
 `deviceId`、`deviceName`、`deviceAddressId`、`deviceAddressName`、
 `deviceAddressLabel`、`value`、`collectedAt`、`dataType`、`kind`、
-`protocol`、`quality`。
+`protocol`、`quality`、`thingModelCode`、`propertyCode`。
 
 - `deviceId` / `deviceAddressId` / `value` 必填且非空。
 - `kind` 留空时按 `value` 的 Go 类型推断（bool/int/float/string）。
 - `quality` 缺省为 192（正常）；质量码可参考内置映射的受控枚举。
+- `thingModelCode` / `propertyCode` 是点位绑定的物模型编码与属性编码，可留空；
+  报文自带时透传到时序通道（TDengine tag / InfluxDB tag / IoTDB 测量项）。
 - `value` 最多 4096 字节；单报文产出默认最多 200 条（可配置，硬顶 1000）。
 
 ---

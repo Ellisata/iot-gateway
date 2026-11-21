@@ -56,6 +56,48 @@ func TestConvertSingleObject(t *testing.T) {
 	}
 }
 
+// TestConvertThingModelFields 物模型编码 / 属性编码是可选目标字段：
+// 配置了就从报文透传，未配置时留空。
+func TestConvertThingModelFields(t *testing.T) {
+	rule := mustParse(t, `{
+		"fields": {
+			"deviceId":        {"source": "path", "value": "deviceId"},
+			"deviceAddressId": {"source": "path", "value": "tagId"},
+			"value":           {"source": "path", "value": "value"},
+			"thingModelCode":  {"source": "path", "value": "model"},
+			"propertyCode":    {"source": "const", "value": "temperature"}
+		}
+	}`)
+
+	res, err := rule.Convert([]byte(`{"deviceId":"d1","tagId":"a1","value":1,"model":"th_sensor"}`))
+	if err != nil {
+		t.Fatalf("Convert() error = %v", err)
+	}
+	if len(res.Records) != 1 {
+		t.Fatalf("records = %d, want 1", len(res.Records))
+	}
+	if res.Records[0].ThingModelCode != "th_sensor" || res.Records[0].PropertyCode != "temperature" {
+		t.Errorf("thingModelCode/propertyCode = %q/%q, want th_sensor/temperature",
+			res.Records[0].ThingModelCode, res.Records[0].PropertyCode)
+	}
+
+	unmapped := mustParse(t, `{
+		"fields": {
+			"deviceId":        {"source": "path", "value": "deviceId"},
+			"deviceAddressId": {"source": "path", "value": "tagId"},
+			"value":           {"source": "path", "value": "value"}
+		}
+	}`)
+	res, err = unmapped.Convert([]byte(`{"deviceId":"d1","tagId":"a1","value":1}`))
+	if err != nil {
+		t.Fatalf("Convert() error = %v", err)
+	}
+	if res.Records[0].ThingModelCode != "" || res.Records[0].PropertyCode != "" {
+		t.Errorf("unmapped thingModelCode/propertyCode = %q/%q, want empty",
+			res.Records[0].ThingModelCode, res.Records[0].PropertyCode)
+	}
+}
+
 func TestConvertArrayRootAndFilter(t *testing.T) {
 	rule := mustParse(t, `{
 		"root": "$.data[*]",

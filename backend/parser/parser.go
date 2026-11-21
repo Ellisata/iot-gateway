@@ -46,6 +46,10 @@ const (
 	FieldKind        = "kind"
 	FieldProtocol    = "protocol"
 	FieldQuality     = "quality"
+	// FieldThingModelCode / FieldPropertyCode 点位绑定的物模型编码与属性编码（可选）。
+	// 外部订阅报文可自带，供下游时序通道按物模型/TDengine tag 区分数据。
+	FieldThingModelCode = "thingModelCode"
+	FieldPropertyCode   = "propertyCode"
 )
 
 // FieldNames 全部合法的目标字段，顺序即前端映射表格的展示顺序。
@@ -61,6 +65,8 @@ var FieldNames = []string{
 	FieldKind,
 	FieldProtocol,
 	FieldQuality,
+	FieldThingModelCode,
+	FieldPropertyCode,
 }
 
 const (
@@ -235,6 +241,10 @@ func RecordFromMap(in map[string]any) (collector.CollectedRecord, error) {
 		case FieldQuality:
 			hasQuality = true
 			rec.Quality, err = qualityField(v)
+		case FieldThingModelCode:
+			rec.ThingModelCode, err = scalarField(k, v)
+		case FieldPropertyCode:
+			rec.PropertyCode, err = scalarField(k, v)
 		default:
 			return rec, fmt.Errorf("未知的目标字段 %q", k)
 		}

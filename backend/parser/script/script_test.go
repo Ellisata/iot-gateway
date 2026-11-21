@@ -75,6 +75,40 @@ function parse(msg, ctx) {
 	}
 }
 
+// TestScriptEmitThingModelFields 物模型编码 / 属性编码在脚本白名单内，可随记录产出。
+func TestScriptEmitThingModelFields(t *testing.T) {
+	p := newParser(t, `
+function parse(msg, ctx) {
+  var d = ctx.json();
+  ctx.emit({
+    deviceId: d.id,
+    deviceAddressId: d.tag,
+    value: d.v,
+    kind: "float",
+    thingModelCode: "th_sensor",
+    propertyCode: d.prop
+  });
+}`, 50, 10)
+
+	res, err := p.Parse(context.Background(), []parser.Message{
+		msg(`{"id":"d1","tag":"a1","v":1.5,"prop":"temperature"}`),
+	})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("unexpected errors: %+v", res.Errors)
+	}
+	if len(res.Records) != 1 {
+		t.Fatalf("records = %d, want 1", len(res.Records))
+	}
+	rec := res.Records[0]
+	if rec.ThingModelCode != "th_sensor" || rec.PropertyCode != "temperature" {
+		t.Errorf("thingModelCode/propertyCode = %q/%q, want th_sensor/temperature",
+			rec.ThingModelCode, rec.PropertyCode)
+	}
+}
+
 func TestScriptStateAcrossMessages(t *testing.T) {
 	p := newParser(t, `
 function parse(msg, ctx) {

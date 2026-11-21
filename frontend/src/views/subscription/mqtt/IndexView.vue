@@ -900,6 +900,8 @@
                   <el-table-column prop="deviceAddressName" label="deviceAddressName" min-width="115" show-overflow-tooltip />
                   <el-table-column prop="dataType" label="dataType" width="90" show-overflow-tooltip />
                   <el-table-column prop="protocol" label="protocol" width="90" show-overflow-tooltip />
+                  <el-table-column prop="thingModelCode" label="thingModelCode" min-width="115" show-overflow-tooltip />
+                  <el-table-column prop="propertyCode" label="propertyCode" min-width="105" show-overflow-tooltip />
                 </template>
               </el-table>
               <p v-else class="sub-empty">{{ t('subscription.previewEmpty') }}</p>
@@ -1029,6 +1031,8 @@ const FIELD_DEFS = [
   { key: 'kind', labelKey: 'subscription.fieldKind', required: true, placeholder: 'kind / const' },
   { key: 'protocol', labelKey: 'subscription.fieldProtocol', placeholder: 'protocol / const' },
   { key: 'quality', labelKey: 'subscription.fieldQuality', required: true, placeholder: 'quality / const 192' },
+  { key: 'thingModelCode', labelKey: 'subscription.fieldThingModelCode', placeholder: 'thingModelCode / const' },
+  { key: 'propertyCode', labelKey: 'subscription.fieldPropertyCode', placeholder: 'propertyCode / const' },
 ]
 
 // 历史 mapping_json 里的目标字段名：编辑旧订阅时仍要能读回已配置的取值路径，
@@ -1123,6 +1127,8 @@ const ADVANCED_SAMPLE = JSON.stringify(
     tagLabel: '电流',
     dataType: 'Float',
     protocol: 'MQTT',
+    thingModelCode: 'th_meter',
+    propertyCode: 'current',
     value: 10.2,
     ts: '2026-10-19 17:05:30.123',
     kind: 'float',
@@ -1153,7 +1159,9 @@ const previewShowsAdvanced = computed(
   () =>
     (parserType.value === 'builtin' && showAdvancedFields.value) ||
     (previewResult.value?.records || []).some((r) =>
-      ['deviceAddressName', 'dataType', 'protocol'].some((key) => String(r[key] ?? '') !== '')
+      ['deviceAddressName', 'dataType', 'protocol', 'thingModelCode', 'propertyCode'].some(
+        (key) => String(r[key] ?? '') !== ''
+      )
     )
 )
 
@@ -1182,6 +1190,8 @@ function useSample(kind) {
       deviceAddressName: 'tagName',
       dataType: 'dataType',
       protocol: 'protocol',
+      thingModelCode: 'thingModelCode',
+      propertyCode: 'propertyCode',
     }
     for (const [key, path] of Object.entries(paths)) {
       const m = fieldMap[key]
@@ -1467,6 +1477,8 @@ const SCRIPT_TARGET_FIELDS = [
   { key: 'kind', labelKey: 'subscription.fieldKind', required: false, hintKey: 'subscription.scriptFieldKind' },
   { key: 'protocol', labelKey: 'subscription.fieldProtocol', required: false, hintKey: 'subscription.scriptFieldProtocol' },
   { key: 'quality', labelKey: 'subscription.fieldQuality', required: false, hintKey: 'subscription.scriptFieldQuality' },
+  { key: 'thingModelCode', labelKey: 'subscription.fieldThingModelCode', required: false, hintKey: 'subscription.scriptFieldThingModelCode' },
+  { key: 'propertyCode', labelKey: 'subscription.fieldPropertyCode', required: false, hintKey: 'subscription.scriptFieldPropertyCode' },
 ]
 
 // 与 SCRIPT_SAMPLE 的取值路径一一对应：deviceId + data.temp + 主题里的设备段。
@@ -1542,6 +1554,8 @@ function resetFieldMap() {
     deviceAddressName: { source: 'path', value: '' },
     dataType: { source: 'path', value: '' },
     protocol: { source: 'const', value: '' },
+    thingModelCode: { source: 'path', value: '' },
+    propertyCode: { source: 'path', value: '' },
   }
   FIELD_DEFS.forEach((def) => {
     const entry = { mappingRows: [], default: '', path: '', transforms: [], ...defaults[def.key] }
