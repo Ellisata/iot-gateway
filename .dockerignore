@@ -1,6 +1,5 @@
 # 构建上下文为仓库根目录(多阶段全流程构建)
-# 需要 frontend/、backend/ 与 tsdb/(时序入库组件,backend 的本地 replace 目标),
-# 其余一律排除
+# 只保留 frontend/ 与 backend/ 源码,其余一律排除
 # SDK 与驱动都是已发布的 Go module：backend/go.mod 声明版本，驱动插件由
 # drivers.version + drivers.txt 在构建期用 go install 拉取（需要网络/GOPROXY）。
 # 这两个文件在仓库根目录，不能被排除。

@@ -50,7 +50,7 @@ require (
 require (
 	github.com/Ellisata/iot-gateway-sdk v0.5.0
 	github.com/Ellisata/iot-gateway-sdk/testkit v0.2.0
-	github.com/Ellisata/iot-gateway/tsdb v0.0.0
+	github.com/Ellisata/iot-gateway/tsdb v0.1.0
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
@@ -100,5 +100,3 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.49.1 // indirect
 )
-
-replace github.com/Ellisata/iot-gateway/tsdb => ../tsdb
