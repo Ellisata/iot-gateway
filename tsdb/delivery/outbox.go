@@ -1,0 +1,482 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
+package delivery
+
+import (
+	"github.com/Ellisata/iot-gateway/tsdb"
+
+	"fmt"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+// 出站队列与断网缓存的容量/节奏参数。
+const (
+	// outboxSize 每通道有界出站缓冲大小，满时丢弃最旧，保证采集永不阻塞
+	outboxSize = 1024
+	// spoolChSize 本地缓存写入缓冲大小（与 outbox 同策略，满时丢弃最旧，保证采集永不阻塞）
+	spoolChSize = 1024
+	// spoolDrainWindow 补发协程单次从本地缓存取回的最大批次数（有界回放窗口）
+	spoolDrainWindow = 16
+	// spoolDrainBackstop 补发等待兜底间隔：仅作漏 ping 保险。
+	// 新批次落盘/重连事件即时唤醒补发，正常空闲时对存储零无效查询；
+	// 此间隔远大于事件间隔，仅兜底极端漏唤醒场景（漏 ping 时最多延迟一个间隔补发）。
+	spoolDrainBackstop = 10 * time.Second
+	// spoolTrimInterval 本地缓存达到上限后每插入 N 批执行一次批量裁剪，
+	// spoolTrimChunk 为单次删除的批次数量：满盘期把逐批 SELECT+DELETE 摊薄 N 倍，
+	// 缓解 SQLite 单连接写放大（断连持续期间）。
+	spoolTrimInterval = 16
+	spoolTrimChunk    = 16
+	// spoolWriteBatchSize 落盘协程单次合并写入的最大批次数。
+	//
+	// 断连期每个采集批次都单独进 spoolCh；逐批 INSERT 时每批都要等一次 WAL 提交
+	//（synchronous=FULL 下约 1.9ms/批，eMMC/SD 卡更慢）。把排队中的批次合并成一次
+	// 多行 INSERT，一次提交落盘数十批，断网缓存才不会被提交开销卡住而开始丢最旧。
+	// 上限同时约束单条 SQL 的大小和停机排空时单次写入的最长耗时。
+	spoolWriteBatchSize = 64
+)
+
+// Connectivity 通道连通状态判据：mqtt 由 paho 的连接/断开回调维护，
+// 时序后端为原子标志，故抽成接口而非统一字段。
+// Outbox 据此决定入队是走内存队列还是直接落盘。
+type Connectivity interface {
+	Connected() bool
+}
+
+// OutboxConfig 构造 Outbox 的一次性参数。
+type OutboxConfig struct {
+	Tag       string          // 日志前缀（后端类型名，如 "tdengine"）
+	ID        string          // 持久化 ID；断网缓存按它隔离
+	Name      string          // 展示名（状态快照用）
+	Store     tsdb.SpoolStore // 断网缓存；nil 表示关闭
+	SpoolCap  int             // 缓存批次上限（达到后裁剪最旧）
+	Conn      Connectivity    // 连通状态判据，必须非 nil
+	QueueSize int             // 出站缓冲大小；≤0 时取默认值 outboxSize
+	Logger    tsdb.Logger     // 日志；nil 时静默
+}
+
+// Outbox 时序入库端的「非阻塞出站队列 + 断网本地缓存」骨架，并持有该端的
+// 运行状态与计数。
+//
+// 数据流：
+//
+//	采集线程 ──Enqueue──▶ outbox（有界，满则丢最旧，绝不阻塞采集）
+//	                        │
+//	                        ├─ 写入成功 ──▶ 下游
+//	                        └─ 写入失败 ──▶ spoolCh ──▶ SpoolStore（按 ID 隔离）
+//	                                                          │
+//	                                       重连/落盘事件 ──▶ DrainLoop 按入队序补发
+//
+// 生命周期：Start → 后端运行自己的 worker 组消费 Batches() → Close（关 quit）
+// → 等 worker 组退出 → Wait（等落盘协程排空在途批次）。见各方法注释。
+type Outbox struct {
+	tag      string
+	id       string
+	name     string
+	spoolCap int
+	conn     Connectivity
+	log      tsdb.Logger
+
+	// spool 断网本地缓存（nil 表示未启用，回退为纯内存丢最旧行为）
+	spool tsdb.SpoolStore
+
+	queueSize int
+
+	outbox      chan tsdb.Batch
+	spoolCh     chan tsdb.Batch
+	spoolDone   chan struct{}
+	drainNotify chan struct{}
+	quit        chan struct{}
+
+	// workersDone 由 Wait 关闭：此后不会再有 worker 把批次转投 spoolCh。
+	workersDone     chan struct{}
+	workersDoneOnce sync.Once
+
+	// trimTick 满盘批量裁剪节流计数（仅 spoolWriteLoop 单协程访问，无需加锁）
+	trimTick int
+
+	mu           sync.RWMutex
+	running      bool
+	lastErr      string
+	lastPublish  time.Time
+	lastSuccess  time.Time
+	publishCount atomic.Uint64
+	droppedCount atomic.Uint64
+}
+
+// NewOutbox 构造入库端的出站队列与断网缓存。
+// Store 非 nil 时会立即做一次既有积压的 seed 计数（缓存跨重启持久化）。
+func NewOutbox(cfg OutboxConfig) *Outbox {
+	size := cfg.QueueSize
+	if size <= 0 {
+		size = outboxSize
+	}
+	return &Outbox{
+		tag:       cfg.Tag,
+		id:        cfg.ID,
+		name:      cfg.Name,
+		spoolCap:  cfg.SpoolCap,
+		conn:      cfg.Conn,
+		log:       orNop(cfg.Logger),
+		spool:     cfg.Store,
+		queueSize: size,
+	}
+}
+
+// ID 返回持久化 ID。
+func (o *Outbox) ID() string { return o.id }
+
+// Name 返回展示名。
+func (o *Outbox) Name() string { return o.name }
+
+// Spool 返回断网本地缓存，未启用时为 nil。
+// 补发策略（DrainFunc）据此删除已成功下发的批次。
+func (o *Outbox) Spool() tsdb.SpoolStore { return o.spool }
+
+// SpoolEnabled 断网本地缓存是否启用。
+func (o *Outbox) SpoolEnabled() bool { return o.spool != nil }
+
+// Quit 返回停止信号：关闭后各 worker 与落盘协程应尽快退出。
+func (o *Outbox) Quit() <-chan struct{} { return o.quit }
+
+// Batches 返回出站队列的读端，供后端的 worker 组消费。
+func (o *Outbox) Batches() <-chan tsdb.Batch { return o.outbox }
+
+// Start 创建运行时通道并启动断网缓存的落盘协程。可重复调用（已启动则 no-op）。
+//
+// 调用方（后端）随后应运行自己的 worker 组消费 Batches()，并在退出后按
+// Close → 等 worker 退出 → Wait 的顺序收尾。
+func (o *Outbox) Start() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if o.running {
+		return
+	}
+	o.running = true
+	o.quit = make(chan struct{})
+	o.workersDone = make(chan struct{})
+	o.workersDoneOnce = sync.Once{}
+	o.outbox = make(chan tsdb.Batch, o.queueSize)
+
+	// 本地缓存写协程立即启动：断连期间的批次随时可落盘
+	if o.spoolEnabled() {
+		o.spoolCh = make(chan tsdb.Batch, spoolChSize)
+		o.spoolDone = make(chan struct{})
+		o.drainNotify = make(chan struct{}, 1)
+		go o.spoolWriteLoop()
+	}
+}
+
+// Close 触发停止：关闭 quit，各 worker 与落盘协程由此退出。幂等。
+// 不等待任何协程 —— 调用方需等自己的 worker 组退出后再调用 Wait。
+func (o *Outbox) Close() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if !o.running {
+		return
+	}
+	o.running = false
+	close(o.quit)
+}
+
+// Wait 等待落盘协程把在途批次全部落盘后退出，返回后不会再有未落盘的批次。
+//
+// 调用前提：本后端的 worker 组必须已全部退出。worker 停服前会把 outbox 中
+// 写失败的批次转投缓存，提前调用会把它们留在内存通道中丢失。故调用方应先
+// Close，再等自己的 worker 组退出，最后才调用 Wait。
+func (o *Outbox) Wait() {
+	o.mu.RLock()
+	started := o.quit != nil
+	spoolDone := o.spoolDone
+	o.mu.RUnlock()
+
+	if !started {
+		return // 从未 Start，没有落盘协程可等
+	}
+	o.workersDoneOnce.Do(func() { close(o.workersDone) })
+	if spoolDone != nil {
+		<-spoolDone
+	}
+}
+
+// ReconnectLoop 连通性维护协程：首连立即尝试，之后仅在断开时按 interval 重试，
+// 直至 Outbox 停止。
+//
+// 放在 Outbox 上是因为它只需要「停止信号 + 连通状态」这两样，而两者都在这里；
+// 真正的建连（含幂等的建库建表）由后端的 tryConnect 负责 —— 它成功时必须置位
+// 连通状态并调用 Notify 唤醒补发，否则断连期间落盘的批次会一直等到兜底 timer。
+func (o *Outbox) ReconnectLoop(interval time.Duration, tryConnect func()) {
+	if !o.isConnected() {
+		tryConnect()
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-o.quit:
+			return
+		case <-ticker.C:
+			if !o.isConnected() {
+				tryConnect()
+			}
+		}
+	}
+}
+
+// Enqueue 非阻塞入队，绝不阻塞采集线程。
+// 路由：
+//   - 断连且启用本地缓存：直接落盘，避免进内存队列后被 worker 丢弃；
+//   - 否则内存 outbox 快路径，满时启用本地缓存则溢写，未启用则丢弃最旧（兼容旧行为）。
+func (o *Outbox) Enqueue(b tsdb.Batch) {
+	// 断连且启用本地缓存：直接落盘
+	if o.spoolEnabled() && !o.isConnected() {
+		o.SpoolEnqueue(b)
+		return
+	}
+
+	// 内存快路径
+	select {
+	case o.outbox <- b:
+		return
+	default:
+	}
+
+	// 内存队列满：启用本地缓存则溢写，否则丢弃最旧
+	if o.spoolEnabled() {
+		o.SpoolEnqueue(b)
+		return
+	}
+
+	// 丢弃最旧、保留最新，被丢弃的批次计入 droppedCount
+	select {
+	case <-o.outbox:
+		o.droppedCount.Add(1)
+	default:
+	}
+
+	select {
+	case o.outbox <- b:
+	default:
+		o.droppedCount.Add(1) // 仍满，丢弃本条
+	}
+}
+
+// Notify 非阻塞通知补发协程有新批次可补发（cap=1 自动合流，无信号时 no-op）。
+// 重连回调与新批次落盘都经此唤醒补发，避免定时轮询。
+func (o *Outbox) Notify() {
+	select {
+	case o.drainNotify <- struct{}{}:
+	default:
+	}
+}
+
+// WaitDrain 阻塞等待补发信号：新批次落盘/重连事件即时唤醒，
+// 兜底 timer 仅防漏 ping。返回 false 表示通道已停止。
+func (o *Outbox) WaitDrain() bool {
+	backstop := time.NewTimer(spoolDrainBackstop)
+	defer backstop.Stop()
+
+	select {
+	case <-o.quit:
+		return false
+	case <-o.drainNotify:
+		return true
+	case <-backstop.C:
+		return true
+	}
+}
+
+// MarkPublished 记录 n 次成功下发：累加成功计数并刷新最近发布/成功时间。
+func (o *Outbox) MarkPublished(n uint64) {
+	now := time.Now()
+	o.mu.Lock()
+	o.lastPublish = now
+	o.lastSuccess = now
+	o.mu.Unlock()
+	o.publishCount.Add(n)
+}
+
+// Drop 累加被丢弃的批次数（队列满、缓存满、毒批次、未启用缓存时的下发失败）。
+func (o *Outbox) Drop(n uint64) { o.droppedCount.Add(n) }
+
+// Dropped 返回累计丢弃批次数的当前值。
+func (o *Outbox) Dropped() uint64 { return o.droppedCount.Load() }
+
+// SetLastErr 记录最近一次错误。
+func (o *Outbox) SetLastErr(msg string) {
+	o.mu.Lock()
+	o.lastErr = msg
+	o.mu.Unlock()
+}
+
+// LastErr 返回最近一次错误文案（并发安全）。
+// 供后端在写失败后生成观测记录：真正的错误由各后端 write 设置，回调本身拿不到。
+func (o *Outbox) LastErr() string {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.lastErr
+}
+
+// FillStatus 用队列与缓存的实时状态填充状态快照的公共字段
+// （ID/Name/Running/Connected/队列深度/缓存积压/计数/时间/错误）。
+// 后端负责先补齐自身类型相关的字段（Type/Broker/Topic）。
+func (o *Outbox) FillStatus(vo *tsdb.Status) {
+	// 连通状态在锁外取：conn 的实现可能持有自己的锁，避免与 o.mu 形成嵌套锁序。
+	connected := o.isConnected()
+
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	spoolDepth := uint64(0)
+	if o.spoolEnabled() {
+		if n, err := o.spool.Count(); err == nil {
+			spoolDepth = uint64(n)
+		}
+	}
+
+	vo.ID = o.id
+	vo.Name = o.name
+	vo.Running = o.running
+	vo.Connected = connected
+	vo.QueueDepth = uint64(len(o.outbox))
+	vo.SpoolDepth = spoolDepth
+	vo.PublishCount = o.publishCount.Load()
+	vo.DroppedCount = o.droppedCount.Load()
+	vo.LastPublish = tsdb.FormatTime(o.lastPublish)
+	vo.LastSuccess = tsdb.FormatTime(o.lastSuccess)
+	vo.LastErr = o.lastErr
+}
+
+// spoolEnabled 断网本地缓存是否实际可用（构造时按配置决定，运行期不变）。
+func (o *Outbox) spoolEnabled() bool { return o.spool != nil }
+
+// isConnected 查询通道连通状态（conn 为 nil 的裸构造视为未连接）。
+func (o *Outbox) isConnected() bool {
+	return o.conn != nil && o.conn.Connected()
+}
+
+// SpoolEnqueue 非阻塞把批次转投本地缓存写入缓冲，缓冲满时丢弃最旧
+// （同 outbox 策略），保证采集线程永不阻塞。未启用缓存时 no-op。
+// 供后端在写入失败、或内存队列满且已启用缓存时转投。
+func (o *Outbox) SpoolEnqueue(b tsdb.Batch) {
+	if !o.spoolEnabled() {
+		return
+	}
+	select {
+	case o.spoolCh <- b:
+		return
+	default:
+	}
+
+	select {
+	case <-o.spoolCh:
+		o.droppedCount.Add(1)
+	default:
+	}
+
+	select {
+	case o.spoolCh <- b:
+	default:
+		o.droppedCount.Add(1) // 仍满，丢弃本条
+	}
+}
+
+// spoolWriteLoop 本地缓存写协程：消费 spoolCh，把排队中的批次合并后写入存储。
+//
+// 退出前（quit 关闭）先排空在途批次，再等 Wait 标记 worker 组已退出 ——
+// worker 停服前会把 outbox 中写失败的批次转投 spoolCh，提前返回会把它们
+// 留在内存通道中丢失。
+func (o *Outbox) spoolWriteLoop() {
+	defer close(o.spoolDone)
+
+	buf := make([]tsdb.Batch, 0, spoolWriteBatchSize)
+	for {
+		select {
+		case <-o.quit:
+			o.drainSpoolCh()
+			for {
+				select {
+				case <-o.workersDone:
+					o.drainSpoolCh()
+					return
+				case b := <-o.spoolCh:
+					buf = o.collectSpoolBatch(append(buf[:0], b))
+					o.insertMany(buf)
+				}
+			}
+		case b := <-o.spoolCh:
+			buf = o.collectSpoolBatch(append(buf[:0], b))
+			o.insertMany(buf)
+		}
+	}
+}
+
+// collectSpoolBatch 非阻塞地把 spoolCh 中已在排队的批次追加到 buf，最多
+// spoolWriteBatchSize 条。返回的切片会复用 buf 的底层数组，调用方消费完即可丢弃。
+func (o *Outbox) collectSpoolBatch(buf []tsdb.Batch) []tsdb.Batch {
+	for len(buf) < spoolWriteBatchSize {
+		select {
+		case b := <-o.spoolCh:
+			buf = append(buf, b)
+		default:
+			return buf
+		}
+	}
+	return buf
+}
+
+// drainSpoolCh 非阻塞排空 spoolCh 中的在途批次（写协程退出前的收尾用）。
+func (o *Outbox) drainSpoolCh() {
+	buf := make([]tsdb.Batch, 0, spoolWriteBatchSize)
+	for {
+		select {
+		case b := <-o.spoolCh:
+			buf = o.collectSpoolBatch(append(buf[:0], b))
+			o.insertMany(buf)
+		default:
+			return
+		}
+	}
+}
+
+// insertMany 将合并后的多个批次写入本地缓存，并 ping 补发协程（事件驱动补发，无需轮询）。
+// 达到上限后按 N 批批量裁剪最旧以约束磁盘占用：Count 为内存计数（无查询），
+// 裁剪由原逐批 DeleteOldest(1) 改为批量 DeleteOldest(N)，
+// 摊薄满盘期的存储写放大。
+func (o *Outbox) insertMany(batches []tsdb.Batch) {
+	defer o.Notify()
+
+	if o.spool == nil || len(batches) == 0 {
+		return
+	}
+	o.trimTick += len(batches)
+	if o.trimTick >= spoolTrimInterval {
+		o.trimTick = 0
+		if count, err := o.spool.Count(); err == nil && count >= int64(o.spoolCap) {
+			if err := o.spool.DeleteOldest(spoolTrimChunk); err != nil {
+				o.logger().Errorf("%s: spool trim oldest failed: %v", o.tag, err)
+			}
+		}
+	}
+	if err := o.spool.InsertMany(batches); err != nil {
+		// 合并写失败时退回逐条写：一条坏数据（或超长语句）不应连坐整批，
+		// 其余批次照常落盘 —— 与合并前「坏批次单独失败」的语义一致。
+		o.logger().Errorf("%s: spool insert %d batches failed, falling back to one by one: %v",
+			o.tag, len(batches), err)
+		for _, b := range batches {
+			if err := o.spool.Insert(b); err != nil {
+				errMsg := fmt.Sprintf("spool insert: %v", err)
+				o.logger().Errorf("%s", errMsg)
+				o.SetLastErr(errMsg)
+			}
+		}
+	}
+}
+
+// logger 返回非 nil 日志器，保证零值 Outbox（测试或手工构造）不会空指针。
+func (o *Outbox) logger() tsdb.Logger { return orNop(o.log) }

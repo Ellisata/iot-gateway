@@ -1,0 +1,407 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Edwin and iot-gateway contributors
+
+package postgres
+
+import (
+	"fmt"
+	"os"
+	"sync/atomic"
+	"testing"
+
+	"gorm.io/gorm"
+
+	"github.com/Ellisata/iot-gateway/tsdb"
+)
+
+// 测试需要一个真实 Postgres（无需预建表）。本地跑：
+//
+//	TSDB_POSTGRES_DSN='postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable' go test ./spool/postgres
+//
+// 未设置 DSN 时整组跳过（CI 不跑真实 Postgres）。
+const dsnEnv = "TSDB_POSTGRES_DSN"
+
+var testTableSeq atomic.Int64
+
+func openTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	dsn := os.Getenv(dsnEnv)
+	if dsn == "" {
+		t.Skipf("%s 未设置，跳过 Postgres 断网缓存测试", dsnEnv)
+	}
+	db, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("open postgres failed: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql.DB failed: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	return db
+}
+
+// newTestTable 为每个测试分配独立表名（pid+序号），测试并行/重复跑互不干扰。
+func newTestTable() string {
+	return fmt.Sprintf("spool_test_%d_%d", os.Getpid(), testTableSeq.Add(1))
+}
+
+// newTestSpool 在独立表上建好缓存，测试结束自动删表。
+func newTestSpool(t *testing.T, channelID string) (*Spool, *gorm.DB, string) {
+	t.Helper()
+	db := openTestDB(t)
+	table := newTestTable()
+	t.Cleanup(func() { db.Exec("DROP TABLE IF EXISTS " + quoteIdent(table)) })
+	return newTestSpoolOn(t, db, table, channelID), db, table
+}
+
+// newTestSpoolOn 在指定库/表上建缓存（跨实例共享同一张表的场景用）。
+// 先迁移再构造：NewSpool 构造时会预载计数，表不存在会打一条 warning。
+func newTestSpoolOn(t *testing.T, db *gorm.DB, table, channelID string) *Spool {
+	t.Helper()
+	if err := NewSpool(db, channelID, WithTable(table)).Migrate(); err != nil {
+		t.Fatalf("migrate failed: %v", err)
+	}
+	return NewSpool(db, channelID, WithTable(table))
+}
+
+// sampleBatch 构造一个测试批次。
+func sampleBatch(deviceID, collectedAt string, values ...string) tsdb.Batch {
+	recs := make([]tsdb.Record, 0, len(values))
+	for _, v := range values {
+		recs = append(recs, tsdb.Record{
+			DeviceID: deviceID, DeviceAddressID: "a1", Value: v, Kind: "int", Quality: 192,
+		})
+	}
+	return tsdb.Batch{DeviceID: deviceID, CollectedAt: collectedAt, Records: recs}
+}
+
+func TestPostgresSpoolMigrateIdempotent(t *testing.T) {
+	s, _, _ := newTestSpool(t, "c1")
+	if err := s.Migrate(); err != nil {
+		t.Fatalf("second migrate failed: %v", err)
+	}
+}
+
+func TestPostgresSpoolInsertFetchOrder(t *testing.T) {
+	s, _, _ := newTestSpool(t, "c1")
+
+	if err := s.Insert(sampleBatch("d1", "t1", "v1")); err != nil {
+		t.Fatalf("insert #1 failed: %v", err)
+	}
+	if err := s.Insert(sampleBatch("d1", "t2", "v2", "v3")); err != nil {
+		t.Fatalf("insert #2 failed: %v", err)
+	}
+	if err := s.Insert(sampleBatch("d1", "t3", "v4")); err != nil {
+		t.Fatalf("insert #3 failed: %v", err)
+	}
+
+	got, err := s.FetchOldest(10)
+	if err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	// 按入队序（id ASC）返回，最旧在前
+	for i, wantTs := range []string{"t1", "t2", "t3"} {
+		if got[i].CollectedAt != wantTs {
+			t.Errorf("batch[%d] collectedAt = %q, want %q", i, got[i].CollectedAt, wantTs)
+		}
+		if got[i].ID <= 0 {
+			t.Errorf("batch[%d] id = %d, want > 0", i, got[i].ID)
+		}
+	}
+	// 记录 JSON 往返还原
+	if len(got[1].Records) != 2 || got[1].Records[0].Value != "v2" || got[1].Records[1].Value != "v3" {
+		t.Errorf("records roundtrip failed: %+v", got[1].Records)
+	}
+	// Kind 携带 json tag：断网缓存序列化/反序列化后不丢失（补发时推送通道仍按 Kind 类型化）
+	if got[1].Records[0].Kind != "int" {
+		t.Errorf("record Kind should survive spool JSON roundtrip, got %q", got[1].Records[0].Kind)
+	}
+}
+
+// TestPostgresSpoolReplayPreservesTopicCodes 断网缓存回放时也要能拼出与在线时
+// 相同的 topic：设备编码/物模型编码/组编码必须随 records_json 一起往返。
+func TestPostgresSpoolReplayPreservesTopicCodes(t *testing.T) {
+	s, _, _ := newTestSpool(t, "c1")
+
+	batch := tsdb.Batch{
+		DeviceID:    "d1",
+		CollectedAt: "t1",
+		Records: []tsdb.Record{{
+			DeviceID: "d1", DeviceCode: "plc-a", ThingModelCode: "th_sensor",
+			DeviceAddressID: "a1", Value: "1", Kind: "int", Quality: 192,
+			GroupID: "g1", GroupCode: "fast", GroupName: "快组", GroupIntervalMs: 500,
+		}},
+	}
+	if err := s.Insert(batch); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// 批次级编码也要落盘：没有记录可回退时（防御性场景），topic 仍能重建。
+	batchOnly := tsdb.Batch{
+		DeviceID: "d2", DeviceCode: "plc-b", ThingModelCode: "th_meter",
+		GroupID: "g2", GroupCode: "slow", GroupName: "慢组", GroupIntervalMs: 5000,
+		CollectedAt: "t2",
+	}
+	if err := s.Insert(batchOnly); err != nil {
+		t.Fatalf("insert batch-only: %v", err)
+	}
+
+	rows, err := s.FetchOldest(2)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("fetch = %+v, err = %v", rows, err)
+	}
+	replayed := rows[0].ToBatch()
+	if replayed.DeviceCode != "plc-a" || replayed.ThingModelCode != "th_sensor" ||
+		replayed.GroupCode != "fast" || replayed.GroupID != "g1" || replayed.GroupName != "快组" {
+		t.Fatalf("replayed identity (from records) = %+v", replayed)
+	}
+	replayed = rows[1].ToBatch()
+	if replayed.DeviceCode != "plc-b" || replayed.ThingModelCode != "th_meter" ||
+		replayed.GroupCode != "slow" || replayed.GroupID != "g2" || replayed.GroupName != "慢组" {
+		t.Fatalf("replayed identity (batch columns) = %+v", replayed)
+	}
+}
+
+// InsertMany 一次提交写入多批，入队序与 JSON 往返与逐条 Insert 完全一致。
+func TestPostgresSpoolInsertMany(t *testing.T) {
+	s, _, _ := newTestSpool(t, "c1")
+
+	err := s.InsertMany([]tsdb.Batch{
+		sampleBatch("d1", "t1", "v1"),
+		sampleBatch("d1", "t2", "v2", "v3"),
+		sampleBatch("d1", "t3", "v4"),
+	})
+	if err != nil {
+		t.Fatalf("insert many failed: %v", err)
+	}
+	if n, _ := s.Count(); n != 3 {
+		t.Fatalf("count = %d, want 3", n)
+	}
+
+	got, err := s.FetchOldest(10)
+	if err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	for i, wantTs := range []string{"t1", "t2", "t3"} {
+		if got[i].CollectedAt != wantTs {
+			t.Errorf("batch[%d] collectedAt = %q, want %q", i, got[i].CollectedAt, wantTs)
+		}
+	}
+	if len(got[1].Records) != 2 || got[1].Records[0].Value != "v2" {
+		t.Errorf("records roundtrip failed: %+v", got[1].Records)
+	}
+
+	// 空切片 no-op，计数不变
+	if err := s.InsertMany(nil); err != nil {
+		t.Fatalf("empty insert many failed: %v", err)
+	}
+	if n, _ := s.Count(); n != 3 {
+		t.Errorf("count after empty insert many = %d, want 3", n)
+	}
+}
+
+func TestPostgresSpoolFetchLimit(t *testing.T) {
+	s, _, _ := newTestSpool(t, "c1")
+	for i, ts := range []string{"t1", "t2", "t3"} {
+		if err := s.Insert(sampleBatch("d1", ts)); err != nil {
+			t.Fatalf("insert #%d failed: %v", i, err)
+		}
+	}
+
+	got, err := s.FetchOldest(2)
+	if err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].CollectedAt != "t1" || got[1].CollectedAt != "t2" {
+		t.Errorf("limit fetch order = %q/%q, want t1/t2", got[0].CollectedAt, got[1].CollectedAt)
+	}
+
+	// limit ≤ 0 返回空
+	if got, err := s.FetchOldest(0); err != nil || len(got) != 0 {
+		t.Errorf("FetchOldest(0) = %d rows, err=%v; want 0, nil", len(got), err)
+	}
+}
+
+func TestPostgresSpoolDeleteAndCount(t *testing.T) {
+	s, _, _ := newTestSpool(t, "c1")
+	if err := s.Insert(sampleBatch("d1", "t1")); err != nil {
+		t.Fatalf("insert #1 failed: %v", err)
+	}
+	if err := s.Insert(sampleBatch("d1", "t2")); err != nil {
+		t.Fatalf("insert #2 failed: %v", err)
+	}
+
+	if n, err := s.Count(); err != nil || n != 2 {
+		t.Fatalf("count = %d, err=%v; want 2, nil", n, err)
+	}
+
+	got, err := s.FetchOldest(10)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("fetch before delete failed: %v", err)
+	}
+	if err := s.Delete(got[0].ID); err != nil {
+		t.Fatalf("delete failed: %v", err)
+	}
+
+	if n, _ := s.Count(); n != 1 {
+		t.Errorf("count after delete = %d, want 1", n)
+	}
+	rest, _ := s.FetchOldest(10)
+	if len(rest) != 1 || rest[0].CollectedAt != "t2" {
+		t.Errorf("after delete first, remaining = %+v, want only t2", rest)
+	}
+}
+
+func TestPostgresSpoolDeleteBatch(t *testing.T) {
+	s, _, _ := newTestSpool(t, "c1")
+	for _, ts := range []string{"t1", "t2", "t3", "t4"} {
+		if err := s.Insert(sampleBatch("d1", ts)); err != nil {
+			t.Fatalf("insert failed: %v", err)
+		}
+	}
+
+	got, _ := s.FetchOldest(10)
+	if err := s.DeleteBatch([]int64{got[0].ID, got[1].ID, got[3].ID}); err != nil {
+		t.Fatalf("delete batch failed: %v", err)
+	}
+	if n, _ := s.Count(); n != 1 {
+		t.Fatalf("count after delete batch = %d, want 1", n)
+	}
+	rest, _ := s.FetchOldest(10)
+	if len(rest) != 1 || rest[0].CollectedAt != "t3" {
+		t.Errorf("after batch delete, remaining = %+v, want only t3", rest)
+	}
+
+	// 幂等：重复删除（RowsAffected=0）不影响计数
+	if err := s.DeleteBatch([]int64{got[0].ID}); err != nil {
+		t.Fatalf("idempotent delete failed: %v", err)
+	}
+	if n, _ := s.Count(); n != 1 {
+		t.Errorf("count after idempotent delete = %d, want 1", n)
+	}
+	// 空切片为 no-op
+	if err := s.DeleteBatch(nil); err != nil {
+		t.Fatalf("empty delete batch failed: %v", err)
+	}
+	if n, _ := s.Count(); n != 1 {
+		t.Errorf("count after empty delete batch = %d, want 1", n)
+	}
+}
+
+func TestPostgresSpoolDeleteOldest(t *testing.T) {
+	s, _, _ := newTestSpool(t, "c1")
+	for _, ts := range []string{"t1", "t2", "t3", "t4"} {
+		if err := s.Insert(sampleBatch("d1", ts)); err != nil {
+			t.Fatalf("insert failed: %v", err)
+		}
+	}
+
+	if err := s.DeleteOldest(2); err != nil {
+		t.Fatalf("delete oldest failed: %v", err)
+	}
+
+	if n, _ := s.Count(); n != 2 {
+		t.Fatalf("count after trim = %d, want 2", n)
+	}
+	rest, _ := s.FetchOldest(10)
+	if len(rest) != 2 || rest[0].CollectedAt != "t3" || rest[1].CollectedAt != "t4" {
+		t.Errorf("after trim, remaining = %+v, want t3/t4", rest)
+	}
+}
+
+func TestPostgresSpoolSeedsExistingCount(t *testing.T) {
+	db := openTestDB(t)
+	table := newTestTable()
+	t.Cleanup(func() { db.Exec("DROP TABLE IF EXISTS " + quoteIdent(table)) })
+
+	// 预置既有积压（模拟 push_outbox 跨重启持久化的待补发数据）
+	s1 := newTestSpoolOn(t, db, table, "c1")
+	if err := s1.Insert(sampleBatch("d1", "t1")); err != nil {
+		t.Fatalf("insert #1 failed: %v", err)
+	}
+	if err := s1.Insert(sampleBatch("d1", "t2")); err != nil {
+		t.Fatalf("insert #2 failed: %v", err)
+	}
+
+	// 新实例构造时应一次性预载既有积压计数，裁剪判断不再依赖每批 COUNT 查询
+	s2 := newTestSpoolOn(t, db, table, "c1")
+	if n, err := s2.Count(); err != nil || n != 2 {
+		t.Fatalf("seeded count = %d, err=%v; want 2, nil", n, err)
+	}
+
+	// 内存计数随本实例操作同步增长
+	if err := s2.Insert(sampleBatch("d1", "t3")); err != nil {
+		t.Fatalf("insert #3 failed: %v", err)
+	}
+	if n, _ := s2.Count(); n != 3 {
+		t.Errorf("count after insert on seeded instance = %d, want 3", n)
+	}
+	// 底层确实落库（经库查询验证，内存计数为实例私有）
+	if got, _ := s1.FetchOldest(10); len(got) != 3 {
+		t.Errorf("underlying rows = %d, want 3", len(got))
+	}
+}
+
+func TestPostgresSpoolIsolationByChannel(t *testing.T) {
+	db := openTestDB(t)
+	table := newTestTable()
+	t.Cleanup(func() { db.Exec("DROP TABLE IF EXISTS " + quoteIdent(table)) })
+
+	s1 := newTestSpoolOn(t, db, table, "c1")
+	s2 := newTestSpoolOn(t, db, table, "c2")
+
+	if err := s1.Insert(sampleBatch("d1", "t1")); err != nil {
+		t.Fatalf("insert c1 failed: %v", err)
+	}
+	if err := s1.Insert(sampleBatch("d1", "t2")); err != nil {
+		t.Fatalf("insert c1 failed: %v", err)
+	}
+	if err := s2.Insert(sampleBatch("d2", "t1")); err != nil {
+		t.Fatalf("insert c2 failed: %v", err)
+	}
+
+	n1, _ := s1.Count()
+	n2, _ := s2.Count()
+	if n1 != 2 || n2 != 1 {
+		t.Errorf("counts = %d/%d, want 2/1", n1, n2)
+	}
+
+	// 删除互不影响
+	got, _ := s2.FetchOldest(10)
+	if err := s2.Delete(got[0].ID); err != nil {
+		t.Fatalf("delete c2 failed: %v", err)
+	}
+	n1, _ = s1.Count()
+	if n1 != 2 {
+		t.Errorf("c1 count after deleting c2 row = %d, want 2", n1)
+	}
+	if got, _ := s1.FetchOldest(10); len(got) != 2 {
+		t.Errorf("c1 rows after deleting c2 row = %d, want 2", len(got))
+	}
+}
+
+// TestPostgresSpoolSanitizeTable 表名白名单：注入字符被剔除，纯符号回落默认表名。
+func TestPostgresSpoolSanitizeTable(t *testing.T) {
+	cases := map[string]string{
+		"spool_outbox":               "spool_outbox",
+		`bad"; DROP TABLE users; --`: "badDROPTABLEusers",
+		"表名":                         defaultTable,
+		"":                           defaultTable,
+		"a-b.c":                      "abc",
+	}
+	for in, want := range cases {
+		if got := sanitizeTable(in); got != want {
+			t.Errorf("sanitizeTable(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
