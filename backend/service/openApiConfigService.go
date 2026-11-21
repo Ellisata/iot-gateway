@@ -184,11 +184,7 @@ func (s *OpenApiConfigService) PageDeviceConfigs(ctx context.Context, req *dto.O
 	if err != nil {
 		return nil, err
 	}
-	modelCodes, err := s.loadThingModelCodes(ctx, devices)
-	if err != nil {
-		return nil, err
-	}
-	propertyIdentifiers, err := s.loadPropertyIdentifiers(ctx, addrsByDevice)
+	propertyIdentifiers, propertyModelCodes, err := s.loadPropertySemanticsByDevice(ctx, addrsByDevice)
 	if err != nil {
 		return nil, err
 	}
@@ -209,6 +205,7 @@ func (s *OpenApiConfigService) PageDeviceConfigs(ctx context.Context, req *dto.O
 				Description:        a.Description,
 				Status:             a.Status,
 				PropertyIdentifier: propertyIdentifiers[a.PropertyID],
+				ModelCode:          propertyModelCodes[a.PropertyID],
 				GroupName:          groupNameByID(groups, a.GroupID),
 				ThresholdEnabled:   a.ThresholdEnabled == 1,
 				ThresholdOp:        a.ThresholdOp,
@@ -225,6 +222,7 @@ func (s *OpenApiConfigService) PageDeviceConfigs(ctx context.Context, req *dto.O
 				"description":        point.Description,
 				"status":             point.Status,
 				"propertyIdentifier": point.PropertyIdentifier,
+				"modelCode":          point.ModelCode,
 				"groupName":          point.GroupName,
 				"threshold": map[string]any{
 					"enabled": point.ThresholdEnabled,
@@ -244,13 +242,13 @@ func (s *OpenApiConfigService) PageDeviceConfigs(ctx context.Context, req *dto.O
 			"name":         d.Name,
 			"protocolName": protocolNames[d.ProtocolID],
 			"protocolJson": canonicaljson.MaskSecrets(protocolJSON),
-			"modelCode":    modelCodes[d.ModelID],
+			"modelCode":    commonPointModelCode(points),
 			"description":  d.Description,
 			"status":       d.Status,
 			"groups":       collectorGroupPayloads(groups),
 			"points":       pointPayloads,
 		}
-		hash, err := deviceConfigHash(d, protocolNames[d.ProtocolID], modelCodes[d.ModelID], groups, points)
+		hash, err := deviceConfigHash(d, protocolNames[d.ProtocolID], groups, points)
 		if err != nil {
 			return nil, err
 		}
@@ -599,28 +597,48 @@ func (s *OpenApiConfigService) loadProtocolNames(ctx context.Context, devices []
 	return out, nil
 }
 
-func (s *OpenApiConfigService) loadThingModelCodes(ctx context.Context, devices []po.Device) (map[string]string, error) {
-	ids := make([]string, 0, len(devices))
-	for _, d := range devices {
-		if d.ModelID != "" {
-			ids = append(ids, d.ModelID)
+// loadPropertySemantics 返回属性 ID -> 属性标识符 / 所属模型编码。
+// 设备不再绑定模型，导出时模型编码由点位绑定的属性推导。
+func (s *OpenApiConfigService) loadPropertySemantics(ctx context.Context, propertyIDs []string) (map[string]string, map[string]string, error) {
+	identifiers := make(map[string]string, len(propertyIDs))
+	modelCodes := make(map[string]string, len(propertyIDs))
+	if len(propertyIDs) == 0 {
+		return identifiers, modelCodes, nil
+	}
+	var props []po.ThingModelProperty
+	if err := s.sqliteDB.WithContext(ctx).Where("id IN ?", propertyIDs).Find(&props).Error; err != nil {
+		return nil, nil, err
+	}
+	if len(props) == 0 {
+		return identifiers, modelCodes, nil
+	}
+	modelIDs := make([]string, 0, len(props))
+	seenModel := make(map[string]struct{}, len(props))
+	for _, p := range props {
+		if _, ok := seenModel[p.ModelID]; ok {
+			continue
+		}
+		seenModel[p.ModelID] = struct{}{}
+		modelIDs = append(modelIDs, p.ModelID)
+	}
+	codeByModel := make(map[string]string, len(modelIDs))
+	if len(modelIDs) > 0 {
+		var models []po.ThingModel
+		if err := s.sqliteDB.WithContext(ctx).Where("id IN ?", modelIDs).Find(&models).Error; err != nil {
+			return nil, nil, err
+		}
+		for _, m := range models {
+			codeByModel[m.ID] = m.Code
 		}
 	}
-	out := make(map[string]string, len(ids))
-	if len(ids) == 0 {
-		return out, nil
+	for _, p := range props {
+		identifiers[p.ID] = p.Identifier
+		modelCodes[p.ID] = codeByModel[p.ModelID]
 	}
-	var rows []po.ThingModel
-	if err := s.sqliteDB.WithContext(ctx).Where("id IN ?", ids).Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	for _, r := range rows {
-		out[r.ID] = r.Code
-	}
-	return out, nil
+	return identifiers, modelCodes, nil
 }
 
-func (s *OpenApiConfigService) loadPropertyIdentifiers(ctx context.Context, addrsByDevice map[string][]po.DeviceAddress) (map[string]string, error) {
+func (s *OpenApiConfigService) loadPropertySemanticsByDevice(ctx context.Context, addrsByDevice map[string][]po.DeviceAddress) (map[string]string, map[string]string, error) {
 	ids := make([]string, 0)
 	for _, addrs := range addrsByDevice {
 		for _, a := range addrs {
@@ -629,18 +647,26 @@ func (s *OpenApiConfigService) loadPropertyIdentifiers(ctx context.Context, addr
 			}
 		}
 	}
-	out := make(map[string]string, len(ids))
-	if len(ids) == 0 {
-		return out, nil
+	return s.loadPropertySemantics(ctx, ids)
+}
+
+// commonPointModelCode 返回设备级 modelCode：所有已绑定属性的点位同属一个模型时
+// 取该模型编码，否则留空（多模型设备按点位各自携带 modelCode）。
+func commonPointModelCode(points []devicePointSemantic) string {
+	code := ""
+	for _, p := range points {
+		if p.ModelCode == "" {
+			continue
+		}
+		if code == "" {
+			code = p.ModelCode
+			continue
+		}
+		if code != p.ModelCode {
+			return ""
+		}
 	}
-	var rows []po.ThingModelProperty
-	if err := s.sqliteDB.WithContext(ctx).Where("id IN ?", ids).Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	for _, r := range rows {
-		out[r.ID] = r.Identifier
-	}
-	return out, nil
+	return code
 }
 
 func thingModelPropertyPayloads(props []po.ThingModelProperty) []map[string]any {

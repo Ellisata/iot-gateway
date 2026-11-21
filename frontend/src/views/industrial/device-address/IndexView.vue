@@ -152,13 +152,17 @@
           show-overflow-tooltip
           class-name="iot-col-muted"
         />
+        <!-- 物模型属性：identifier 只在模型内唯一，点位又可绑定任意模型的属性，
+             所以带上模型名（与新增/编辑下拉的 `模型名 · identifier · 属性名` 同一口径）。
+             不单开一列：两列是一对一关系，这个表格已经十几列宽。 -->
         <el-table-column
           :label="t('deviceAddress.property')"
-          width="180"
+          width="220"
           show-overflow-tooltip
         >
           <template #default="{ row }">
             <span v-if="row.propertyIdentifier">
+              <span v-if="row.propertyModelName" class="iot-cell-muted">{{ row.propertyModelName }} · </span>
               <span class="iot-mono">{{ row.propertyIdentifier }}</span>
               <span class="iot-cell-muted"> · {{ row.propertyName }}</span>
             </span>
@@ -331,25 +335,25 @@
         <el-table-column :label="t('common.action')" width="100" align="center" fixed="right">
           <template #default="{ row }">
             <div class="iot-row-actions">
-              <el-tooltip :content="t('common.edit')" placement="top">
+              <el-tooltip :content="t('deviceAddress.editAction')" placement="top">
                 <el-button
                   class="iot-row-btn"
                   type="primary"
                   link
                   size="small"
                   :icon="EditPen"
-                  :aria-label="t('common.edit')"
+                  :aria-label="t('deviceAddress.editAction')"
                   @click="handleEdit(row)"
                 />
               </el-tooltip>
-              <el-tooltip :content="t('common.delete')" placement="top">
+              <el-tooltip :content="t('deviceAddress.deleteAction')" placement="top">
                 <el-button
                   class="iot-row-btn"
                   type="danger"
                   link
                   size="small"
                   :icon="Delete"
-                  :aria-label="t('common.delete')"
+                  :aria-label="t('deviceAddress.deleteAction')"
                   @click="handleDelete(row)"
                 />
               </el-tooltip>

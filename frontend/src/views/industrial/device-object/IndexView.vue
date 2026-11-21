@@ -143,17 +143,6 @@
         </el-table-column>
         <el-table-column
           v-if="!compact"
-          :label="t('deviceObject.thingModel')"
-          width="150"
-          show-overflow-tooltip
-        >
-          <template #default="{ row }">
-            <span v-if="row.modelName" class="proto-chip">{{ row.modelName }}</span>
-            <span v-else class="cell-muted">{{ t('deviceObject.unboundModel') }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column
-          v-if="!compact"
           prop="description"
           :label="t('common.description')"
           min-width="98"
@@ -179,14 +168,15 @@
         <el-table-column :label="t('common.action')" width="148" align="center" fixed="right">
           <template #default="{ row }">
             <div class="row-actions">
-              <el-tooltip :content="t('deviceObject.deviceConfig')" placement="top">
+              <!-- 走的是点位配置页签，文案与页签共用同一个 key，避免两处叫法漂移 -->
+              <el-tooltip :content="t('deviceWorkspace.tabs.address')" placement="top">
                 <el-button
                   class="row-btn"
                   type="primary"
                   link
                   size="small"
-                  :icon="Position"
-                  :aria-label="t('deviceObject.deviceConfig')"
+                  :icon="Settings"
+                  :aria-label="t('deviceWorkspace.tabs.address')"
                   @click="handleViewAddresses(row)"
                 />
               </el-tooltip>
@@ -316,24 +306,6 @@
               maxlength="100"
               show-word-limit
             />
-          </el-form-item>
-          <el-form-item :label="t('deviceObject.thingModel')" prop="modelId">
-            <el-select
-              v-model="formData.modelId"
-              :placeholder="t('deviceObject.modelPlaceholder')"
-              clearable
-              filterable
-              style="width: 100%"
-            >
-              <el-option
-                v-for="opt in modelOptions"
-                :key="opt.id"
-                :label="`${opt.name} (${opt.code})`"
-                :value="opt.id"
-                :disabled="opt.status !== 1"
-              />
-            </el-select>
-            <div class="iot-form-hint is-block">{{ t('deviceObject.modelHint') }}</div>
           </el-form-item>
           <el-form-item :label="t('common.description')" prop="description">
             <el-input
@@ -505,10 +477,10 @@ import {
   IconCpu as DeviceChip,
   IconDeviceDesktop as Monitor,
   IconDownload as Download,
-  IconMapPin as Position,
   IconPencil as EditPen,
   IconPlus as Plus,
   IconSearch as Search,
+  IconSettings as Settings,
   IconTrash as Delete,
   IconUpload as Upload,
 } from '@tabler/icons-vue'
@@ -524,7 +496,6 @@ import {
   downloadDeviceTemplate,
 } from '@/api/modules/deviceObject'
 import { getProtocolById, getProtocolList } from '@/api/modules/protocol'
-import { getThingModels } from '@/api/modules/thingModel'
 import ProtocolSelector from '@/components/ProtocolSelector.vue'
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
 import { useExcelImport } from '@/composables/useExcelImport'
@@ -544,7 +515,6 @@ function handleViewAddresses(row) {
     query: {
       deviceObjectName: row.name,
       protocolName: row.protocolName,
-      modelId: row.modelId || undefined,
     },
   })
 }
@@ -754,24 +724,12 @@ const formData = reactive({
   id: '',
   code: '',
   name: '',
-  modelId: '',
   protocol: '',
   protocolId: '',
   description: '',
   status: 1,
   protocolJson: '',
 })
-
-// 可绑定的物模型（停用的也返回，前端置灰；服务端仍会拒绝新绑定）。
-const modelOptions = ref([])
-
-async function fetchModelOptions() {
-  try {
-    modelOptions.value = (await getThingModels()) || []
-  } catch {
-    modelOptions.value = []
-  }
-}
 
 // ---------- 表单校验规则 ----------
 const formRules = {
@@ -980,7 +938,6 @@ function handleAdd() {
   formData.id = ''
   formData.code = ''
   formData.name = ''
-  formData.modelId = ''
   formData.protocol = ''
   formData.protocolId = ''
   formData.description = ''
@@ -1002,7 +959,6 @@ async function handleEdit(row) {
   formData.id = row.id
   formData.code = row.code ?? ''
   formData.name = row.name
-  formData.modelId = row.modelId ?? ''
   // 列表/详情接口回传的协议字段是 protocolName，没有 protocol；
   // 取错字段会让 protocolSelected 为 false，第二步的协议参数区整块不渲染
   formData.protocol = row.protocolName ?? ''
@@ -1013,7 +969,6 @@ async function handleEdit(row) {
   try {
     const detail = await getDeviceObjectById(row.id)
     formData.code = detail?.code ?? formData.code
-    formData.modelId = detail?.modelId ?? formData.modelId
     formData.protocolJson = detail?.protocolJson ?? ''
     formData.protocolId = detail?.protocolId ?? ''
     if (detail?.protocolName) formData.protocol = detail.protocolName
@@ -1170,7 +1125,6 @@ async function handleSubmit() {
     const payload = {
       code: formData.code.trim(),
       name: formData.name.trim(),
-      modelId: formData.modelId || '',
       protocolId: formData.protocolId,
       description: formData.description.trim() || undefined,
       status: formData.status,
@@ -1199,16 +1153,15 @@ async function handleSubmit() {
 
 // ---------- 初始化 ----------
 onMounted(() => {
-  // 九列的固定宽度合计 1152，低于这个值就切到紧凑列 —— 差几个像素时表格
+  // 固定宽度合计约 1002，低于这个值就切到紧凑列 —— 差几个像素时表格
   // 会横向滚动，固定操作列又会盖住创建时间，不如少两列让关键字段完整可见
   if (typeof ResizeObserver !== 'undefined' && panelRef.value) {
     panelObserver = new ResizeObserver(([entry]) => {
-      compact.value = entry.contentRect.width < 1155
+      compact.value = entry.contentRect.width < 1005
     })
     panelObserver.observe(panelRef.value)
   }
   fetchList()
-  fetchModelOptions()
 })
 
 onBeforeUnmount(() => {

@@ -5,8 +5,7 @@ package vo
 
 // ThingModelVO 物模型响应。
 //
-// PropertyCount / DeviceCount 是列表页需要的派生计数，不落库：前者是模型下
-// 属性数，后者是绑定到该模型的设备数（device.model_id）。
+// PropertyCount 是列表页需要的派生计数，不落库：模型下的属性数。
 type ThingModelVO struct {
 	ID            string `json:"id"`
 	Code          string `json:"code"`
@@ -16,12 +15,11 @@ type ThingModelVO struct {
 	Description   string `json:"description"`
 	Status        int    `json:"status"`
 	PropertyCount int64  `json:"propertyCount"`
-	DeviceCount   int64  `json:"deviceCount"`
 	CreatedAt     string `json:"createdAt"`
 	UpdatedAt     string `json:"updatedAt"`
 }
 
-// ThingModelOptionVO 物模型下拉选项（设备绑定用）。
+// ThingModelOptionVO 物模型下拉选项。
 type ThingModelOptionVO struct {
 	ID     string `json:"id"`
 	Code   string `json:"code"`
@@ -29,41 +27,21 @@ type ThingModelOptionVO struct {
 	Status int    `json:"status"`
 }
 
-// ThingModelDeviceOptionVO 物模型绑定设备下拉选项。
+// ThingModelPropertyOptionVO 跨模型的属性下拉选项（设备点位绑定属性用）。
 //
-// Locked 表示该设备已有点位绑定属性：此时改绑/解绑设备会被服务层以 41013
-// 拒绝，前端据此置灰并说明原因。
-type ThingModelDeviceOptionVO struct {
-	ID        string `json:"id"`
-	Code      string `json:"code"`
-	Name      string `json:"name"`
-	ModelID   string `json:"modelId"`
-	ModelName string `json:"modelName"`
-	Locked    bool   `json:"locked"`
-	Status    int    `json:"status"`
-}
-
-// ThingModelBoundDeviceVO 物模型列表「设备数」抽屉里的已绑定设备。
-//
-// 与设备候选分开：这里只回答“谁绑了我”，不需要可选性判断，
-// 但需要协议名，方便运维认出设备类型。
-type ThingModelBoundDeviceVO struct {
-	ID           string `json:"id"`
-	Code         string `json:"code"`
-	Name         string `json:"name"`
-	ProtocolID   string `json:"protocolId"`
-	ProtocolName string `json:"protocolName"`
-	Status       int    `json:"status"`
-}
-
-// ThingModelDeviceOptionPageVO 设备候选的远程搜索结果。
-//
-// Keyword 搜索有上限（见 service.thingModelDeviceOptionLimit）；命中更多时
-// Truncated 为 true，前端据此提示“继续输入更精确的关键字”。不分页是刻意的：
-// 下拉候选只服务于“找到并勾选”，翻页会把选择动作切成两段。
-type ThingModelDeviceOptionPageVO struct {
-	Records   []ThingModelDeviceOptionVO `json:"records"`
-	Truncated bool                       `json:"truncated"`
+// 点位可直接绑定任意模型下的属性，因此下拉必须带上模型标识与名称，
+// 否则不同模型里同名的 identifier 在选项里无法区分。
+type ThingModelPropertyOptionVO struct {
+	ID         string `json:"id"`
+	ModelID    string `json:"modelId"`
+	ModelCode  string `json:"modelCode"`
+	ModelName  string `json:"modelName"`
+	Identifier string `json:"identifier"`
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	AccessMode string `json:"accessMode"`
+	Unit       string `json:"unit"`
+	Status     int    `json:"status"`
 }
 
 // ThingModelPointOptionVO 属性绑定点位下拉选项。
@@ -71,6 +49,8 @@ type ThingModelDeviceOptionPageVO struct {
 // Kind 由设备协议名 + 点位内部数据类型经 driver 类型注册表推导；协议未加载
 // 或类型无法识别时为空串（前端据此禁用，因为无法自证与属性兼容）。
 // PropertyID 非空表示该点位已绑定属性；不等于当前属性时不能被抢绑。
+// 属性标识只在物模型内唯一，因此带上 ModelName：候选列表里不同模型可以有
+// 同名属性，只显示属性名会让「已绑定属性」指向不明。
 type ThingModelPointOptionVO struct {
 	AddressID          string `json:"addressId"`
 	DeviceID           string `json:"deviceId"`
@@ -85,6 +65,8 @@ type ThingModelPointOptionVO struct {
 	PropertyID         string `json:"propertyId"`
 	PropertyIdentifier string `json:"propertyIdentifier"`
 	PropertyName       string `json:"propertyName"`
+	ModelID            string `json:"modelId"`
+	ModelName          string `json:"modelName"`
 	Status             int    `json:"status"`
 }
 

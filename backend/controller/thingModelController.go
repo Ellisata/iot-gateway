@@ -112,32 +112,21 @@ func (ctr *ThingModelController) ListThingModelProperties(c *gin.Context) {
 	c.JSON(200, response.Success(data))
 }
 
-// ListThingModelDeviceOptions 物模型表单的设备候选（keyword 远程搜索）
-func (ctr *ThingModelController) ListThingModelDeviceOptions(c *gin.Context) {
-	ctx := c.Request.Context()
-	data, err := ctr.thingModelService.ListThingModelDeviceOptions(ctx, c.Query("modelId"), c.Query("keyword"))
-	if err != nil {
-		c.JSON(200, appError.HandleErrorCtx(ctx, err))
-		return
-	}
-	c.JSON(200, response.Success(data))
-}
-
-// ListThingModelDevices 列出绑定到某模型的设备（列表页「设备数」抽屉）
-func (ctr *ThingModelController) ListThingModelDevices(c *gin.Context) {
-	ctx := c.Request.Context()
-	data, err := ctr.thingModelService.ListThingModelDevices(ctx, c.Query("modelId"))
-	if err != nil {
-		c.JSON(200, appError.HandleErrorCtx(ctx, err))
-		return
-	}
-	c.JSON(200, response.Success(data))
-}
-
-// ListThingModelPointOptions 属性表单的点位候选（限该模型下的设备）
+// ListThingModelPointOptions 属性表单的点位候选（任意设备的点位）
 func (ctr *ThingModelController) ListThingModelPointOptions(c *gin.Context) {
 	ctx := c.Request.Context()
-	data, err := ctr.thingModelService.ListThingModelPointOptions(ctx, c.Query("modelId"))
+	data, err := ctr.thingModelService.ListThingModelPointOptions(ctx)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// ListAllThingModelProperties 跨模型的属性下拉（设备点位绑定属性用）
+func (ctr *ThingModelController) ListAllThingModelProperties(c *gin.Context) {
+	ctx := c.Request.Context()
+	data, err := ctr.thingModelService.ListAllThingModelProperties(ctx)
 	if err != nil {
 		c.JSON(200, appError.HandleErrorCtx(ctx, err))
 		return

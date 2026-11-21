@@ -103,7 +103,7 @@
 | `collectedAt` | string | 同 §2 的 `collectedAt`；**帧级**，同一帧内的点位共享 |
 | `deviceId` / `deviceCode` / `deviceName` | string | 同 §2；每帧只出现一次，不随点位重复 |
 | `protocol` | string | 同 §2；同一批次只含一台设备，因此是帧级字段；`dataType` 仍是逐点字段 |
-| `thingModelCode` | string | 同 §2；设备级，只出现一次 |
+| `thingModelCode` | string | 同 §2；**帧级**，同一帧内的点位共享。推送引擎按「设备 + 采集组 + 物模型」分桶，同一设备不同模型的点位会拆成多帧 |
 | `groupId` | string | 采集组内部主键；未分组为空串 |
 | `groupCode` | string | 采集组编码（`collector_group.code`），创建后不可修改，**下游优先用它关联业务**；未分组为空串 |
 | `groupName` | string | 采集组名称，仅展示用；未分组为空串 |
@@ -137,8 +137,8 @@
 | `kind` | string | 数据类型类别（6 类之一），`value` 解析的**唯一事实来源** |
 | `quality` | int | 采集质量码（`driver.QualityXxx`，类别在高 2 位、成因在低 6 位）：192=正常、128=不确定但值可用、0=坏但未归类、1=坏·地址、2=坏·通信、3=坏·解析。**判"坏"要写 `quality < 128`，不能写 `quality == 0`**（区间读取失败时置坏码，value 为空串） |
 | `collectedAt` | string | 采集时间，格式 `2006-01-02 15:04:05.000`（毫秒精度），**本地时区** |
-| `thingModelCode` | string | 设备绑定的物模型编码（`thing_model.code`）；未绑定为空串。创建后不可修改，可作稳定维度 |
-| `propertyCode` | string | 点位绑定的物模型属性标识符（`thing_model_property.identifier`）；未绑定为空串。绑定时已校验属性属于设备的物模型 |
+| `thingModelCode` | string | 点位绑定的属性所属物模型编码（`thing_model.code`）；未绑定属性或模型缺失时为空串。创建后不可修改，可作稳定维度 |
+| `propertyCode` | string | 点位绑定的物模型属性标识符（`thing_model_property.identifier`）；未绑定为空串。属性可来自任意物模型，与设备无绑定关系 |
 | `trigger` | object | **仅事件触发定向推送时存在**，正常采集/外部订阅**没有这个键**。结构见 §2.1 |
 
 `deviceCode` 位于 `deviceId` 之后；`thingModelCode` / `propertyCode` 是**追加字段**（位于

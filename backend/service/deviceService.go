@@ -71,11 +71,6 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req *dto.CreateDeviceD
 			return deviceCodeExistsErr()
 		}
 
-		modelID := strings.TrimSpace(req.ModelID)
-		if err := ensureThingModelBindable(tx, modelID); err != nil {
-			return err
-		}
-
 		now := time.Now().Format("2006-01-02 15:04:05")
 		protocolJson := ""
 		if req.ProtocolJSON != nil {
@@ -90,7 +85,6 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req *dto.CreateDeviceD
 			Name:         req.Name,
 			ProtocolID:   req.ProtocolID,
 			ProtocolJSON: protocolJson,
-			ModelID:      modelID,
 			Description:  req.Description,
 			Status:       1,
 			ScanIdentity: deriveScanIdentityFromJSON(protocolName, protocolJson),
@@ -159,27 +153,6 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, req *dto.UpdateDeviceD
 					return deviceCodeExistsErr()
 				}
 				updates["code"] = code
-			}
-		}
-		if req.ModelID != nil {
-			newModelID := strings.TrimSpace(*req.ModelID)
-			if newModelID != existing.ModelID {
-				// 已有点位绑定了属性时拒绝更换/解除模型：那些属性的归属就是当前模型，
-				// 直接换会留下「点位绑着另一个模型的属性」的悬空语义。
-				var bound int64
-				if err := tx.Model(&po.DeviceAddress{}).
-					Where("device_id = ? AND property_id <> ''", existing.ID).
-					Count(&bound).Error; err != nil {
-					return err
-				}
-				if bound > 0 {
-					return appError.NewAppErrorCtx(enums.ThingModelBindingLockedEnum.GetCode(),
-						enums.ThingModelBindingLockedEnum.GetMessage(), enums.ThingModelBindingLockedEnum.GetMsgKey())
-				}
-				if err := ensureThingModelBindable(tx, newModelID); err != nil {
-					return err
-				}
-				updates["model_id"] = newModelID
 			}
 		}
 		if req.Name != "" {
@@ -409,8 +382,6 @@ func (s *DeviceService) GetDeviceByID(ctx context.Context, id string) (*vo.Devic
 		ProtocolID:      device.ProtocolID,
 		ProtocolName:    protocolName,
 		ProtocolJSON:    device.ProtocolJSON,
-		ModelID:         device.ModelID,
-		ModelName:       s.getThingModelName(ctx, device.ModelID),
 		ScanIdentity:    device.ScanIdentity,
 		Description:     device.Description,
 		Status:          device.Status,
@@ -677,8 +648,6 @@ func (s *DeviceService) toDeviceVOs(ctx context.Context, devices []po.Device) []
 		}
 	}
 
-	modelNames := s.thingModelNames(ctx, devices)
-
 	records := make([]vo.DeviceVO, len(devices))
 	for i, d := range devices {
 		records[i] = vo.DeviceVO{
@@ -688,8 +657,6 @@ func (s *DeviceService) toDeviceVOs(ctx context.Context, devices []po.Device) []
 			ProtocolID:      d.ProtocolID,
 			ProtocolName:    s.getProtocolName(ctx, d.ProtocolID),
 			ProtocolJSON:    d.ProtocolJSON,
-			ModelID:         d.ModelID,
-			ModelName:       modelNames[d.ModelID],
 			ScanIdentity:    d.ScanIdentity,
 			Description:     d.Description,
 			Status:          d.Status,
@@ -755,66 +722,6 @@ func (s *DeviceService) getProtocolName(ctx context.Context, protocolID string) 
 		return ""
 	}
 	return protocol.Name
-}
-
-// ensureThingModelBindable 校验物模型存在且启用。空串表示“不绑定”，直接通过。
-func ensureThingModelBindable(db *gorm.DB, modelID string) error {
-	if modelID == "" {
-		return nil
-	}
-	var model po.ThingModel
-	if err := db.Where("id = ?", modelID).First(&model).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return appError.NewAppErrorCtx(enums.ThingModelNotExistsEnum.GetCode(),
-				enums.ThingModelNotExistsEnum.GetMessage(), enums.ThingModelNotExistsEnum.GetMsgKey())
-		}
-		return err
-	}
-	if model.Status != 1 {
-		return appError.NewAppErrorCtx(enums.ThingModelDisabledEnum.GetCode(),
-			enums.ThingModelDisabledEnum.GetMessage(), enums.ThingModelDisabledEnum.GetMsgKey())
-	}
-	return nil
-}
-
-// getThingModelName 查物模型显示名；空 id 或查不到返回空串。
-func (s *DeviceService) getThingModelName(ctx context.Context, modelID string) string {
-	if modelID == "" {
-		return ""
-	}
-	var model po.ThingModel
-	if err := s.sqliteDB.WithContext(ctx).Select("name").Where("id = ?", modelID).First(&model).Error; err != nil {
-		return ""
-	}
-	return model.Name
-}
-
-// thingModelNames 一次性取这批设备引用的物模型名，避免列表页逐台查询。
-func (s *DeviceService) thingModelNames(ctx context.Context, devices []po.Device) map[string]string {
-	out := make(map[string]string)
-	ids := make([]string, 0, len(devices))
-	seen := make(map[string]struct{}, len(devices))
-	for _, d := range devices {
-		if d.ModelID == "" {
-			continue
-		}
-		if _, ok := seen[d.ModelID]; ok {
-			continue
-		}
-		seen[d.ModelID] = struct{}{}
-		ids = append(ids, d.ModelID)
-	}
-	if len(ids) == 0 {
-		return out
-	}
-	var models []po.ThingModel
-	if err := s.sqliteDB.WithContext(ctx).Select("id", "name").Where("id IN ?", ids).Find(&models).Error; err != nil {
-		return out
-	}
-	for _, m := range models {
-		out[m.ID] = m.Name
-	}
-	return out
 }
 
 // GetDeviceOverview 统计设备在线情况（只读聚合，无写库）。
@@ -938,11 +845,6 @@ func (s *DeviceService) ImportDevices(ctx context.Context, data []byte) (*vo.Exc
 		protocols[protocol.Name] = protocol
 	}
 
-	models, err := loadThingModelIndex(ctx, s.sqliteDB)
-	if err != nil {
-		return nil, err
-	}
-
 	lang := i18n.LangFromCtx(ctx)
 	var plan *deviceImportPlan
 	now := time.Now().Format("2006-01-02 15:04:05")
@@ -977,7 +879,7 @@ func (s *DeviceService) ImportDevices(ctx context.Context, data []byte) (*vo.Exc
 			return nil
 		},
 		Parse: func(row []string) (*po.Device, string, string) {
-			return parseDeviceImportRow(row, plan, protocols, models, codeTaken, now)
+			return parseDeviceImportRow(row, plan, protocols, codeTaken, now)
 		},
 		// status 列带 gorm default:1，Create 会把 0 当成未设置而写回 1。
 		// 显式补一次 UpdateColumn，让导入的“禁用”设备真正以 0 落库。

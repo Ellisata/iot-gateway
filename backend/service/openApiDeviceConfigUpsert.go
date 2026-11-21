@@ -144,8 +144,8 @@ func (s *OpenApiConfigService) upsertDeviceConfig(ctx context.Context, item *dto
 			return err
 		}
 
+		// 设备不再绑定模型；modelCode 只作为点位属性标识符的默认命名空间。
 		var model po.ThingModel
-		modelID := ""
 		if modelCode != "" {
 			if err := tx.Where("code = ?", modelCode).First(&model).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -158,7 +158,6 @@ func (s *OpenApiConfigService) upsertDeviceConfig(ctx context.Context, item *dto
 				return appError.NewAppErrorCtx(enums.CfgThingModelNotExistsEnum.GetCode(),
 					enums.CfgThingModelNotExistsEnum.GetMessage(), enums.CfgThingModelNotExistsEnum.GetMsgKey())
 			}
-			modelID = model.ID
 		}
 
 		device, exists, err := findDeviceForUpsert(tx, code, name)
@@ -213,7 +212,6 @@ func (s *OpenApiConfigService) upsertDeviceConfig(ctx context.Context, item *dto
 				Name:         name,
 				ProtocolID:   protocol.ID,
 				ProtocolJSON: protocolJSON,
-				ModelID:      modelID,
 				Description:  desc,
 				Status:       status,
 				ScanIdentity: deriveScanIdentityFromJSON(protocolName, protocolJSON),
@@ -272,14 +270,6 @@ func (s *OpenApiConfigService) upsertDeviceConfig(ctx context.Context, item *dto
 			if protocolChanged || len(updates) > 0 {
 				updates["scan_identity"] = deriveScanIdentityFromJSON(protocolName, device.ProtocolJSON)
 				device.ScanIdentity = deriveScanIdentityFromJSON(protocolName, device.ProtocolJSON)
-			}
-
-			if device.ModelID != modelID {
-				if err := ensureModelChangePointsSubmitted(tx, device.ID, payloadPointNames); err != nil {
-					return err
-				}
-				updates["model_id"] = modelID
-				device.ModelID = modelID
 			}
 
 			if len(updates) > 0 {
@@ -477,12 +467,24 @@ func (s *OpenApiConfigService) upsertDevicePoints(ctx context.Context, tx *gorm.
 		if item.PropertyIdentifier != nil {
 			identifier := strings.TrimSpace(*item.PropertyIdentifier)
 			if identifier != "" {
-				if model == nil || model.ID == "" {
+				propertyModel := model
+				if code := strings.TrimSpace(item.ModelCode); code != "" {
+					var m po.ThingModel
+					if err := tx.Where("code = ?", code).First(&m).Error; err != nil {
+						if errors.Is(err, gorm.ErrRecordNotFound) {
+							return appError.NewAppErrorCtx(enums.CfgThingModelNotExistsEnum.GetCode(),
+								enums.CfgThingModelNotExistsEnum.GetMessage(), enums.CfgThingModelNotExistsEnum.GetMsgKey())
+						}
+						return err
+					}
+					propertyModel = &m
+				}
+				if propertyModel == nil || propertyModel.ID == "" {
 					return appError.NewAppErrorCtx(enums.CfgDeviceConfigInvalidEnum.GetCode(),
-						"点位绑定属性前必须先绑定物模型", enums.CfgDeviceConfigInvalidEnum.GetMsgKey())
+						"点位绑定属性时必须提供 modelCode（设备级或点位级）", enums.CfgDeviceConfigInvalidEnum.GetMsgKey())
 				}
 				var property po.ThingModelProperty
-				if err := tx.Where("model_id = ? AND identifier = ?", model.ID, identifier).First(&property).Error; err != nil {
+				if err := tx.Where("model_id = ? AND identifier = ?", propertyModel.ID, identifier).First(&property).Error; err != nil {
 					if errors.Is(err, gorm.ErrRecordNotFound) {
 						return appError.NewAppErrorCtx(enums.ThingModelPropertyNotExistsEnum.GetCode(),
 							enums.ThingModelPropertyNotExistsEnum.GetMessage(), enums.ThingModelPropertyNotExistsEnum.GetMsgKey())
@@ -529,7 +531,7 @@ func (s *OpenApiConfigService) upsertDevicePoints(ctx context.Context, tx *gorm.
 		err = tx.Where("device_id = ? AND name = ?", device.ID, name).First(&existing).Error
 		switch {
 		case errors.Is(err, gorm.ErrRecordNotFound):
-			if err := validatePropertyBindingDB(ctx, tx, *device, propertyID, protocolName, internal, rw, false); err != nil {
+			if err := validatePropertyBindingDB(ctx, tx, propertyID, protocolName, internal, rw, false); err != nil {
 				return err
 			}
 			if err := ensureDevicePropertyUnique(ctx, tx, device.ID, propertyID, ""); err != nil {
@@ -561,7 +563,7 @@ func (s *OpenApiConfigService) upsertDevicePoints(ctx context.Context, tx *gorm.
 		case err != nil:
 			return err
 		default:
-			if err := validatePropertyBindingDB(ctx, tx, *device, propertyID, protocolName, internal, rw, existing.PropertyID == propertyID); err != nil {
+			if err := validatePropertyBindingDB(ctx, tx, propertyID, protocolName, internal, rw, existing.PropertyID == propertyID); err != nil {
 				return err
 			}
 			if err := ensureDevicePropertyUnique(ctx, tx, device.ID, propertyID, existing.ID); err != nil {
@@ -655,13 +657,6 @@ func (s *OpenApiConfigService) deviceConfigHashByID(ctx context.Context, deviceI
 			protocolName = p.Name
 		}
 	}
-	modelCode := ""
-	if d.ModelID != "" {
-		var m po.ThingModel
-		if err := s.sqliteDB.WithContext(ctx).Where("id = ?", d.ModelID).First(&m).Error; err == nil {
-			modelCode = m.Code
-		}
-	}
 	var groups []po.CollectorGroup
 	if err := s.sqliteDB.WithContext(ctx).Where("device_id = ?", d.ID).Order("name ASC").Find(&groups).Error; err != nil {
 		return "", err
@@ -676,15 +671,9 @@ func (s *OpenApiConfigService) deviceConfigHashByID(ctx context.Context, deviceI
 			propIDs = append(propIDs, a.PropertyID)
 		}
 	}
-	propIdentifiers := make(map[string]string, len(propIDs))
-	if len(propIDs) > 0 {
-		var props []po.ThingModelProperty
-		if err := s.sqliteDB.WithContext(ctx).Where("id IN ?", propIDs).Find(&props).Error; err != nil {
-			return "", err
-		}
-		for _, p := range props {
-			propIdentifiers[p.ID] = p.Identifier
-		}
+	propIdentifiers, propModelCodes, err := s.loadPropertySemantics(ctx, propIDs)
+	if err != nil {
+		return "", err
 	}
 	points := make([]devicePointSemantic, 0, len(addrs))
 	for _, a := range addrs {
@@ -697,6 +686,7 @@ func (s *OpenApiConfigService) deviceConfigHashByID(ctx context.Context, deviceI
 			Description:        a.Description,
 			Status:             a.Status,
 			PropertyIdentifier: propIdentifiers[a.PropertyID],
+			ModelCode:          propModelCodes[a.PropertyID],
 			GroupName:          groupNameByID(groups, a.GroupID),
 			ThresholdEnabled:   a.ThresholdEnabled == 1,
 			ThresholdOp:        a.ThresholdOp,
@@ -704,7 +694,7 @@ func (s *OpenApiConfigService) deviceConfigHashByID(ctx context.Context, deviceI
 			Transforms:         parseJSONArrayOrEmpty(a.TransformJSON),
 		})
 	}
-	return deviceConfigHash(d, protocolName, modelCode, groups, points)
+	return deviceConfigHash(d, protocolName, groups, points)
 }
 
 // ==================== 查询/校验辅助 ====================
@@ -819,20 +809,6 @@ func ensureAllPointsSubmitted(tx *gorm.DB, deviceID string, keep map[string]bool
 		if !keep[a.Name] {
 			return appError.NewAppErrorCtx(enums.CfgProtocolChangePointsMissingEnum.GetCode(),
 				enums.CfgProtocolChangePointsMissingEnum.GetMessage(), enums.CfgProtocolChangePointsMissingEnum.GetMsgKey())
-		}
-	}
-	return nil
-}
-
-func ensureModelChangePointsSubmitted(tx *gorm.DB, deviceID string, keep map[string]bool) error {
-	var addrs []po.DeviceAddress
-	if err := tx.Select("name").Where("device_id = ? AND property_id <> ''", deviceID).Find(&addrs).Error; err != nil {
-		return err
-	}
-	for _, a := range addrs {
-		if !keep[a.Name] {
-			return appError.NewAppErrorCtx(enums.CfgThingModelPointsMissingEnum.GetCode(),
-				enums.CfgThingModelPointsMissingEnum.GetMessage(), enums.CfgThingModelPointsMissingEnum.GetMsgKey())
 		}
 	}
 	return nil

@@ -31,6 +31,8 @@
 | v1.18 | 2026-11-15 | Added: collector group list (4.16.2) — collector group IDs/codes/names across devices, for the management platform's push channel "collector group subscription" selector (`config.groupIds` are gateway-local keys) | - |
 | v1.19 | 2026-11-15 | Added: outbound mapping preview (4.16.8) — encode `mapping-json` / `script` against a fixed sample batch, for the management platform's visual mapping editor. Encoding only; nothing is sent or persisted | - |
 | v1.20 | 2026-11-16 | Added: push channel runtime status (4.22) — in-memory snapshot of the push engine with connection state, queue/spool depth, publish/write counters, last success and last error, for the management platform to aggregate per gateway. Read-only, does not touch downstreams; counters reset on restart | - |
+| v1.21 | 2026-11-21 | Point objects gain the bound thing-model property (`propertyId`/`propertyIdentifier`/`propertyName`/`propertyModelId`/`propertyModelName`, effective in both 4.4 and 4.5); all empty strings when no property is bound | - |
+| v1.22 | 2026-11-21 | 4.3 batch address labels gains the same five thing-model property fields, so all three read-only point endpoints use the same field set | - |
 
 ## Compatibility Commitment
 
@@ -281,6 +283,11 @@ Content-Type: application/json
 | deviceId | string | Owning device ID |
 | deviceName | string | Owning device name; empty string `""` if the device has been deleted |
 | label | string | Address label (human-readable description of the address name, e.g. "temperature", "current") |
+| propertyId | string | ID of the bound thing-model property; **empty string when unbound** |
+| propertyIdentifier | string | Property identifier (e.g. `temperature`); empty string when unbound |
+| propertyName | string | Property display name; empty string when unbound |
+| propertyModelId | string | ID of the thing model that owns the property; empty string when unbound |
+| propertyModelName | string | Name of the thing model that owns the property; empty string when unbound |
 
 > Notes:
 > - The return order matches the order of the given `addressIds`;
@@ -301,8 +308,16 @@ curl -X POST -H "X-Api-Key: your-app-key" -H "Content-Type: application/json" \
   "msg": "success",
   "isSuccess": true,
   "data": [
-    { "id": "f6e5d4c3b2a1", "deviceId": "a1b2c3d4e5f6", "deviceName": "PLC-01", "label": "Furnace temperature" },
-    { "id": "0e9d8c7b6a5f", "deviceId": "a1b2c3d4e5f6", "deviceName": "PLC-01", "label": "Spindle current" }
+    {
+      "id": "f6e5d4c3b2a1", "deviceId": "a1b2c3d4e5f6", "deviceName": "PLC-01", "label": "Furnace temperature",
+      "propertyId": "9b1c2d3e4f5a", "propertyIdentifier": "temperature", "propertyName": "Furnace temperature",
+      "propertyModelId": "7a8b9c0d1e2f", "propertyModelName": "Temp & humidity sensor"
+    },
+    {
+      "id": "0e9d8c7b6a5f", "deviceId": "a1b2c3d4e5f6", "deviceName": "PLC-01", "label": "Spindle current",
+      "propertyId": "", "propertyIdentifier": "", "propertyName": "",
+      "propertyModelId": "", "propertyModelName": ""
+    }
   ],
   "serverTime": "2026-09-07 10:35:00"
 }
@@ -333,6 +348,11 @@ GET /openApi/deviceAddress/page
 | deviceId | string | Owning device ID |
 | name | string | Address name |
 | label | string | Human-readable description of the name (e.g. "temperature", "current") |
+| propertyId | string | ID of the bound thing-model property; **empty string when unbound** |
+| propertyIdentifier | string | Property identifier (e.g. `temperature`); empty string when unbound |
+| propertyName | string | Property display name; empty string when unbound |
+| propertyModelId | string | ID of the thing model that owns the property; empty string when unbound |
+| propertyModelName | string | Name of the thing model that owns the property (e.g. "Temp & humidity sensor"); empty string when unbound. Property identifiers are unique only within a model — use this to disambiguate same-named properties across models |
 | commonDataType | string | Common data type name (as displayed in the admin console) |
 | dataType | string | Protocol-internal data type name (e.g. `modbus.bool`, `s7.int16`), used by the driver for decoding |
 | rwPermission | string | Read/write permission: `R`=read-only, `W`=write-only, `RW`=read-write |
@@ -364,6 +384,11 @@ curl -H "X-Api-Key: your-app-key" \
         "deviceId": "a1b2c3d4e5f6",
         "name": "D100/temperature",
         "label": "Furnace temperature",
+        "propertyId": "9b1c2d3e4f5a",
+        "propertyIdentifier": "temperature",
+        "propertyName": "Furnace temperature",
+        "propertyModelId": "7a8b9c0d1e2f",
+        "propertyModelName": "Temp & humidity sensor",
         "commonDataType": "float32",
         "dataType": "modbus.float32",
         "rwPermission": "R",
@@ -415,6 +440,11 @@ GET /openApi/device/sync
 | addresses[].deviceId | string | Owning device ID |
 | addresses[].name | string | Address name (the device address notation, e.g. `%MW100`) |
 | addresses[].label | string | Human-readable name (e.g. "temperature", "current") |
+| addresses[].propertyId | string | ID of the bound thing-model property; **empty string when unbound** |
+| addresses[].propertyIdentifier | string | Property identifier (e.g. `temperature`); empty string when unbound |
+| addresses[].propertyName | string | Property display name; empty string when unbound |
+| addresses[].propertyModelId | string | ID of the thing model that owns the property; empty string when unbound |
+| addresses[].propertyModelName | string | Name of the thing model that owns the property; empty string when unbound |
 | addresses[].commonDataType | string | Common data type name |
 | addresses[].dataType | string | Protocol-internal data type name (e.g. `modbus.float32`) |
 | addresses[].rwPermission | string | `R` / `W` / `RW` |

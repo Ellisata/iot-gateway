@@ -135,6 +135,9 @@ type OpenApiDeviceConfigBatchUpsertDTO struct {
 //
 // Mode: merge（默认，只 upsert）| replace（删除本次未出现的点位与采集组）。
 // 管理平台统一使用 replace，否则期望态无法收敛。
+//
+// ModelCode 是点位属性的默认模型命名空间：设备的点位通过 propertyIdentifier
+// 引用属性时，先看点位的 modelCode，未填时用这里的值。设备本身不再绑定模型。
 type OpenApiDeviceConfigUpsertDTO struct {
 	Mode         string                           `json:"mode"`
 	Code         string                           `json:"code"`
@@ -159,7 +162,8 @@ type OpenApiCollectorGroupUpsertDTO struct {
 
 // OpenApiDevicePointUpsertDTO 点位。设备内按 Name（设备地址写法）匹配。
 //
-// PropertyIdentifier / GroupName 使用自然键，禁止传网关内部 ID。
+// PropertyIdentifier / ModelCode / GroupName 使用自然键，禁止传网关内部 ID。
+// ModelCode 非空时优先于设备级 modelCode，用于同一设备的不同点位绑定不同模型的属性。
 type OpenApiDevicePointUpsertDTO struct {
 	Name               string               `json:"name"`
 	Label              string               `json:"label"`
@@ -169,6 +173,7 @@ type OpenApiDevicePointUpsertDTO struct {
 	Description        *string              `json:"description"`
 	Status             *int                 `json:"status"`
 	PropertyIdentifier *string              `json:"propertyIdentifier"`
+	ModelCode          string               `json:"modelCode"`
 	GroupName          *string              `json:"groupName"`
 	Threshold          *OpenApiThresholdDTO `json:"threshold"`
 	Transform          json.RawMessage      `json:"transform"`

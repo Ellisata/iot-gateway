@@ -7,7 +7,6 @@ import (
 	"context"
 
 	"iot-gateway/model/dto"
-	"iot-gateway/model/po"
 	"iot-gateway/model/vo"
 	"iot-gateway/response"
 )
@@ -79,9 +78,18 @@ func (s *OpenApiService) ListOpenApiAddressLabels(ctx context.Context, deviceIDs
 	if err != nil {
 		return nil, err
 	}
-	addrByID := make(map[string]po.DeviceAddress, len(addrs))
-	deviceIDSet := make(map[string]bool, len(addrs))
-	for _, a := range addrs {
+	records := make([]vo.DeviceAddressVO, len(addrs))
+	for i, a := range addrs {
+		records[i] = addressVO(a)
+	}
+	// 物模型属性与 4.4 / 4.5 同口径补全：标签接口同样要能回答「这是哪个模型的哪个属性」，
+	// 否则同一个点位在三个只读接口里字段不一致，调用方得再拉一次 4.4 才能对上。
+	if err := s.deviceAddressService.fillAddressProperty(ctx, records); err != nil {
+		return nil, err
+	}
+	addrByID := make(map[string]vo.DeviceAddressVO, len(records))
+	deviceIDSet := make(map[string]bool, len(records))
+	for _, a := range records {
 		addrByID[a.ID] = a
 		deviceIDSet[a.DeviceID] = true
 	}
@@ -99,10 +107,15 @@ func (s *OpenApiService) ListOpenApiAddressLabels(ctx context.Context, deviceIDs
 	for _, id := range addressIDs {
 		if a, ok := addrByID[id]; ok {
 			result = append(result, vo.OpenApiAddressLabelVO{
-				ID:         a.ID,
-				DeviceID:   a.DeviceID,
-				DeviceName: deviceNames[a.DeviceID],
-				Label:      a.Label,
+				ID:                 a.ID,
+				DeviceID:           a.DeviceID,
+				DeviceName:         deviceNames[a.DeviceID],
+				Label:              a.Label,
+				PropertyID:         a.PropertyID,
+				PropertyIdentifier: a.PropertyIdentifier,
+				PropertyName:       a.PropertyName,
+				PropertyModelID:    a.PropertyModelID,
+				PropertyModelName:  a.PropertyModelName,
 			})
 		}
 	}
@@ -303,18 +316,23 @@ func (s *OpenApiService) PageThresholdRecords(ctx context.Context, req *dto.Page
 // 4.4 分页与 4.5 同步共用，避免两处各写一份字段映射。
 func openApiAddressVO(a vo.DeviceAddressVO) vo.OpenApiDeviceAddressVO {
 	return vo.OpenApiDeviceAddressVO{
-		ID:             a.ID,
-		DeviceID:       a.DeviceID,
-		Name:           a.Name,
-		Label:          a.Label,
-		CommonDataType: a.CommonDataType,
-		DataType:       a.DataType,
-		RwPermission:   a.RwPermission,
-		ScanFrequency:  a.ScanFrequency,
-		Description:    a.Description,
-		Status:         a.Status,
-		CreatedAt:      a.CreatedAt,
-		UpdatedAt:      a.UpdatedAt,
+		ID:                 a.ID,
+		DeviceID:           a.DeviceID,
+		Name:               a.Name,
+		Label:              a.Label,
+		PropertyID:         a.PropertyID,
+		PropertyIdentifier: a.PropertyIdentifier,
+		PropertyName:       a.PropertyName,
+		PropertyModelID:    a.PropertyModelID,
+		PropertyModelName:  a.PropertyModelName,
+		CommonDataType:     a.CommonDataType,
+		DataType:           a.DataType,
+		RwPermission:       a.RwPermission,
+		ScanFrequency:      a.ScanFrequency,
+		Description:        a.Description,
+		Status:             a.Status,
+		CreatedAt:          a.CreatedAt,
+		UpdatedAt:          a.UpdatedAt,
 	}
 }
 

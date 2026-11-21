@@ -33,6 +33,8 @@
 | v1.18 | 2026-11-15 | 新增：采集组列表（4.16.2）—— 返回网关各设备的采集组 ID/编码/名称，供管理平台的推送通道「采集组订阅」下拉框使用（`config.groupIds` 是网关本地主键） | - |
 | v1.19 | 2026-11-15 | 新增：出站映射预览（4.16.8）—— 用固定样例批次试编码 mapping-json / script，供管理平台可视化映射编辑器即时预览。只编码，不发送、不落库 | - |
 | v1.20 | 2026-11-16 | 新增：推送通道运行状态（4.22）—— 推送引擎内存快照，含连接状态、队列/补发深度、发布/写出计数、最近成功与错误，供管理平台按网关聚合监控。只读，不触达下游；重启清零 | - |
+| v1.21 | 2026-11-21 | 点位对象新增绑定的物模型属性（`propertyId`/`propertyIdentifier`/`propertyName`/`propertyModelId`/`propertyModelName`，4.4 与 4.5 同时生效）；未绑定属性时各项为空串 | - |
+| v1.22 | 2026-11-21 | 4.3 批量点位标签同步补齐上述五个物模型属性字段，三个只读点位接口口径一致 | - |
 
 ## 兼容性承诺
 
@@ -286,6 +288,11 @@ Content-Type: application/json
 | deviceId | string | 所属设备 ID |
 | deviceName | string | 所属设备名称；设备已被删除时为空串 `""` |
 | label | string | 点位标签（地址名称的中文说明，如"温度"、"电流"） |
+| propertyId | string | 绑定的物模型属性 ID；**未绑定为空串** |
+| propertyIdentifier | string | 属性标识（如 `temperature`）；未绑定为空串 |
+| propertyName | string | 属性显示名；未绑定为空串 |
+| propertyModelId | string | 属性所属物模型 ID；未绑定为空串 |
+| propertyModelName | string | 属性所属物模型名称；未绑定为空串 |
 
 > 说明：
 > - 返回顺序与传入 `addressIds` 顺序一致；
@@ -306,8 +313,16 @@ curl -X POST -H "X-Api-Key: your-app-key" -H "Content-Type: application/json" \
   "msg": "success",
   "isSuccess": true,
   "data": [
-    { "id": "f6e5d4c3b2a1", "deviceId": "a1b2c3d4e5f6", "deviceName": "1号PLC", "label": "炉膛温度" },
-    { "id": "0e9d8c7b6a5f", "deviceId": "a1b2c3d4e5f6", "deviceName": "1号PLC", "label": "主轴电流" }
+    {
+      "id": "f6e5d4c3b2a1", "deviceId": "a1b2c3d4e5f6", "deviceName": "1号PLC", "label": "炉膛温度",
+      "propertyId": "9b1c2d3e4f5a", "propertyIdentifier": "temperature", "propertyName": "炉膛温度",
+      "propertyModelId": "7a8b9c0d1e2f", "propertyModelName": "温湿度传感器"
+    },
+    {
+      "id": "0e9d8c7b6a5f", "deviceId": "a1b2c3d4e5f6", "deviceName": "1号PLC", "label": "主轴电流",
+      "propertyId": "", "propertyIdentifier": "", "propertyName": "",
+      "propertyModelId": "", "propertyModelName": ""
+    }
   ],
   "serverTime": "2026-09-07 10:35:00"
 }
@@ -338,6 +353,11 @@ GET /openApi/deviceAddress/page
 | deviceId | string | 所属设备 ID |
 | name | string | 地址名称 |
 | label | string | 名称的中文说明（如"温度"、"电流"） |
+| propertyId | string | 绑定的物模型属性 ID；**未绑定为空串** |
+| propertyIdentifier | string | 属性标识（如 `temperature`）；未绑定为空串 |
+| propertyName | string | 属性显示名（如"炉膛温度"）；未绑定为空串 |
+| propertyModelId | string | 属性所属物模型 ID；未绑定为空串 |
+| propertyModelName | string | 属性所属物模型名称（如"温湿度传感器"）；未绑定为空串。属性标识只在模型内唯一，跨模型同名时靠它区分 |
 | commonDataType | string | 通用数据类型名（与管理端展示一致） |
 | dataType | string | 协议内部数据类型名（如 `modbus.bool`、`s7.int16`），驱动解码用 |
 | rwPermission | string | 读写权限：`R`=只读，`W`=只写，`RW`=读写 |
@@ -369,6 +389,11 @@ curl -H "X-Api-Key: your-app-key" \
         "deviceId": "a1b2c3d4e5f6",
         "name": "D100/temperature",
         "label": "炉膛温度",
+        "propertyId": "9b1c2d3e4f5a",
+        "propertyIdentifier": "temperature",
+        "propertyName": "炉膛温度",
+        "propertyModelId": "7a8b9c0d1e2f",
+        "propertyModelName": "温湿度传感器",
         "commonDataType": "float32",
         "dataType": "modbus.float32",
         "rwPermission": "R",
@@ -419,6 +444,11 @@ GET /openApi/device/sync
 | addresses[].deviceId | string | 所属设备 ID |
 | addresses[].name | string | 地址名称（设备地址写法，如 `%MW100`） |
 | addresses[].label | string | 名称的中文说明（如"温度"、"电流"） |
+| addresses[].propertyId | string | 绑定的物模型属性 ID；**未绑定为空串** |
+| addresses[].propertyIdentifier | string | 属性标识（如 `temperature`）；未绑定为空串 |
+| addresses[].propertyName | string | 属性显示名；未绑定为空串 |
+| addresses[].propertyModelId | string | 属性所属物模型 ID；未绑定为空串 |
+| addresses[].propertyModelName | string | 属性所属物模型名称；未绑定为空串 |
 | addresses[].commonDataType | string | 通用数据类型名 |
 | addresses[].dataType | string | 协议内部数据类型名（如 `modbus.float32`） |
 | addresses[].rwPermission | string | `R` / `W` / `RW` |

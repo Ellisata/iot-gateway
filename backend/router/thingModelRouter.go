@@ -19,9 +19,8 @@ func ThingModelRoutes(r gin.IRouter, tc *controller.ThingModelController) {
 		g.GET("/getThingModelById/:id", tc.GetThingModelByID)
 		g.GET("/pageThingModel", tc.PageThingModel)
 		g.GET("/listThingModels", tc.ListThingModels)
-		g.GET("/listThingModelDeviceOptions", tc.ListThingModelDeviceOptions)
-		g.GET("/listThingModelDevices", tc.ListThingModelDevices)
 		g.GET("/listThingModelPointOptions", tc.ListThingModelPointOptions)
+		g.GET("/listAllThingModelProperties", tc.ListAllThingModelProperties)
 		g.POST("/importThingModel", tc.ImportThingModel)
 		g.GET("/importThingModelTemplate", tc.ImportThingModelTemplate)
 

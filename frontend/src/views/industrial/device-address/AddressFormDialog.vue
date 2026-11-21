@@ -231,21 +231,19 @@
                 v-model="formData.propertyId"
                 :placeholder="t('deviceAddress.propertyPlaceholder')"
                 clearable
-                :disabled="!deviceModelId"
+                filterable
                 :loading="propertyLoading"
                 style="width: 100%"
               >
                 <el-option
                   v-for="p in compatiblePropertyOptions"
                   :key="p.id"
-                  :label="`${p.identifier} · ${p.name}`"
+                  :label="propertyOptionLabel(p)"
                   :value="p.id"
                   :disabled="p.status !== 1 && p.id !== formData.propertyId"
                 />
               </el-select>
-              <div class="dp-field-hint is-block">
-                {{ deviceModelId ? t('deviceAddress.propertyHint') : t('deviceAddress.noModelBound') }}
-              </div>
+              <div class="dp-field-hint is-block">{{ t('deviceAddress.propertyHint') }}</div>
               <div v-if="selectedPropertyReadSuppressed" class="dp-field-hint is-block is-warning">
                 {{ t('deviceAddress.propertyWriteonlyHint') }}
               </div>
@@ -447,8 +445,7 @@ import {
   getDeviceAddressById,
 } from '@/api/modules/deviceAddress'
 import { getDataTypes } from '@/api/modules/protocol'
-import { getDeviceObjectById } from '@/api/modules/deviceObject'
-import { listThingModelProperties } from '@/api/modules/thingModel'
+import { listAllThingModelProperties } from '@/api/modules/thingModel'
 import { listCollectorGroups } from '@/api/modules/collectorGroup'
 import { useScanFrequencyOptions } from '@/composables/useScanFrequencyOptions'
 import { getAddressExample, getAddressSpec } from '@/utils/addressSyntax'
@@ -575,28 +572,19 @@ const addressPlaceholder = computed(() =>
 )
 
 // ---------- 物模型属性 ----------
-// 设备绑定模型后，点位可绑定该模型下的属性。表单被地址页与实时页共用，
-// 这里按 deviceId 回查设备详情拿到模型 id；查不到就让属性下拉保持不可用。
-const deviceModelId = ref('')
+// 点位可直接绑定任意模型下的属性，与设备是否绑定模型无关。
 const propertyOptionsAll = ref([])
 const propertyLoading = ref(false)
 
+function propertyOptionLabel(p) {
+  const name = `${p.identifier} · ${p.name}`
+  return p.modelName ? `${p.modelName} · ${name}` : name
+}
+
 async function fetchPropertyOptions() {
-  if (!deviceModelId.value) {
-    try {
-      const detail = await getDeviceObjectById(props.deviceId)
-      deviceModelId.value = detail?.modelId || ''
-    } catch {
-      deviceModelId.value = ''
-    }
-  }
-  if (!deviceModelId.value) {
-    propertyOptionsAll.value = []
-    return
-  }
   propertyLoading.value = true
   try {
-    propertyOptionsAll.value = (await listThingModelProperties(deviceModelId.value)) || []
+    propertyOptionsAll.value = (await listAllThingModelProperties()) || []
   } catch {
     propertyOptionsAll.value = []
   } finally {

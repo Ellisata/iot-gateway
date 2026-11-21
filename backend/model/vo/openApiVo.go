@@ -31,20 +31,33 @@ type OpenApiAddressLabelVO struct {
 	DeviceID   string `json:"deviceId"`
 	DeviceName string `json:"deviceName"` // 所属设备名称（设备已删除时为空串）
 	Label      string `json:"label"`      // 地址 name 的中文说明（如温度、电流）
+	// 绑定的物模型属性（全部为空串 = 未绑定），与 4.4 / 4.5 的点位对象同口径。
+	PropertyID         string `json:"propertyId"`
+	PropertyIdentifier string `json:"propertyIdentifier"`
+	PropertyName       string `json:"propertyName"`
+	PropertyModelID    string `json:"propertyModelId"`
+	PropertyModelName  string `json:"propertyModelName"`
 }
 
 // OpenApiDeviceAddressVO 开放接口设备地址响应（只读点位定义）
 type OpenApiDeviceAddressVO struct {
-	ID             string `json:"id"`
-	DeviceID       string `json:"deviceId"`
-	Name           string `json:"name"`
-	Label          string `json:"label"` // 地址 name 的中文说明（如温度、电流）
-	CommonDataType string `json:"commonDataType"`
-	DataType       string `json:"dataType"`
-	RwPermission   string `json:"rwPermission"`
-	ScanFrequency  int    `json:"scanFrequency"`
-	Description    string `json:"description"`
-	Status         int    `json:"status"`
+	ID       string `json:"id"`
+	DeviceID string `json:"deviceId"`
+	Name     string `json:"name"`
+	Label    string `json:"label"` // 地址 name 的中文说明（如温度、电流）
+	// 绑定的物模型属性（全部为空串 = 未绑定）。点位可绑定任意模型的属性，
+	// identifier 只在模型内唯一，跨模型同名时靠 modelName 区分。
+	PropertyID         string `json:"propertyId"`
+	PropertyIdentifier string `json:"propertyIdentifier"`
+	PropertyName       string `json:"propertyName"`
+	PropertyModelID    string `json:"propertyModelId"`
+	PropertyModelName  string `json:"propertyModelName"`
+	CommonDataType     string `json:"commonDataType"`
+	DataType           string `json:"dataType"`
+	RwPermission       string `json:"rwPermission"`
+	ScanFrequency      int    `json:"scanFrequency"`
+	Description        string `json:"description"`
+	Status             int    `json:"status"`
 	// 时间戳与设备 VO 对齐，供外部系统判断"这个点位是不是新配的/刚改过"。
 	// 格式与网关其余时间字段一致（yyyy-MM-dd HH:mm:ss）。
 	CreatedAt string `json:"createdAt"`

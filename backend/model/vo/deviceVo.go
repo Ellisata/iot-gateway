@@ -13,9 +13,6 @@ type DeviceVO struct {
 	ProtocolID   string `json:"protocolId"`
 	ProtocolName string `json:"protocolName"`
 	ProtocolJSON string `json:"protocolJson"`
-	// ModelID / ModelName 绑定的物模型（空串 = 未绑定）。
-	ModelID   string `json:"modelId"`
-	ModelName string `json:"modelName"`
 	// ScanIdentity 扫描来源身份签名（`协议|主机|端口|站号`），空串 = 当前配置
 	// 里认不出 host（串口协议、通用模板、尚未配置连接参数）。语义与写入规则见
 	// po.Device.ScanIdentity —— 对外只读展示，不能拿来当作设备地址使用。
@@ -55,6 +52,10 @@ type DeviceAddressVO struct {
 	PropertyID         string `json:"propertyId"`
 	PropertyIdentifier string `json:"propertyIdentifier"`
 	PropertyName       string `json:"propertyName"`
+	// PropertyModelID / PropertyModelName 属性所属物模型（未绑定为空串）。
+	// identifier 只在模型内唯一，列表页靠模型名区分同名属性（如两个模型的 temperature）。
+	PropertyModelID   string `json:"propertyModelId"`
+	PropertyModelName string `json:"propertyModelName"`
 	// PropertyAccessMode 绑定属性的读写模式（R/W/RW，未绑定为空串）。
 	// 属性不含 R 时点位不进入采集，列表页据此显示「不采集」而不是「等待采集」。
 	PropertyAccessMode string `json:"propertyAccessMode"`

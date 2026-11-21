@@ -81,12 +81,12 @@ type gatewayTask struct {
 	// addrLabelMap: deviceID -> addressID -> 地址 name 的中文说明（如温度、电流）
 	addrLabelMap map[string]map[string]string
 
-	// modelCodes: deviceID -> 物模型编码（thing_model.code）。只含已绑定且模型存在的设备。
-	// 设备级常量，toRecords 在循环外取一次；未绑定取不到，记录里就是空串。
-	modelCodes map[string]string
+	// addrModelCodes: addressID -> 物模型编码（thing_model.code）。
+	// 点位绑定的属性决定记录里的物模型编码；未绑定或属性/模型缺失时为 ""。
+	// 同一设备的不同点位可以来自不同模型，因此按点位而不是按设备取。
+	addrModelCodes map[string]string
 	// addrPropCodes: addressID -> 物模型属性标识符（thing_model_property.identifier）。
-	// 只含「属性属于该设备所绑模型」的点位（绑定时已校验，这里按设备模型再核一遍，
-	// 防止历史数据/直接改库留下跨模型绑定）。点位 ID 是 UUID，全局唯一，故单层映射即可。
+	// 点位 ID 是 UUID，全局唯一，故单层映射即可。
 	addrPropCodes map[string]string
 
 	// protocols: deviceID -> 协议名称（iot_protocol.name，如 "ModBus.TCP"）。
@@ -391,9 +391,9 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 	lockKeys := buildLockKeys(devices, drvMap)
 
 	// 物模型编码/属性编码随记录下发（见 CollectedRecord.ThingModelCode）。
-	// 绑定关系（device.model_id / device_address.property_id）已在 checksum 里，
-	// 因此改绑定会触发热加载重建任务；模型编码与属性标识符本身创建后不可修改。
-	modelCodes, propCodes := loadThingModelCodes(db, devices)
+	// 绑定关系（device_address.property_id）已在 checksum 里，因此改绑定会触发热加载
+	// 重建任务；模型编码与属性标识符本身创建后不可修改。
+	propCodes := loadThingModelCodes(db)
 
 	// 采集组：点位绑定组后，组周期是生效周期；组不存在/跨设备/已停用的点位
 	// 不进入采集调度（与实时页的「不采集」判定一致）。
@@ -406,6 +406,7 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 	addrNameMap := make(map[string]map[string]string)             // deviceID -> addressID -> name
 	addrLabelMap := make(map[string]map[string]string)            // deviceID -> addressID -> 中文说明
 	addrPropCodes := make(map[string]string)                      // addressID -> 属性标识符
+	addrModelCodes := make(map[string]string)                     // addressID -> 物模型编码
 	addrGroupIDs := make(map[string]string)                       // addressID -> 采集组 ID
 	addrTransforms := make(map[string]compiledTransform)          // addressID -> 工程量变换
 
@@ -447,10 +448,9 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 			// 绑定的物模型属性是读取能力的硬上界：属性 access_mode 不含 R 时，
 			// 即使点位物理可读（rw_permission=RW）也不采集、不推送。绑定校验允许
 			// 「RW 点位 + W 属性」（点位覆盖属性），业务语义只写，与只写点位同理。
-			// 只在绑定有效（属性属于设备所绑模型）时收紧；悬空/跨模型绑定维持原行为。
+			// 属性可以来自任意模型，与设备没有绑定关系；悬空绑定维持原行为。
 			if addr.PropertyID != "" {
-				if p, ok := propCodes[addr.PropertyID]; ok && p.modelID == dev.ModelID &&
-					!strings.Contains(p.accessMode, "R") {
+				if p, ok := propCodes[addr.PropertyID]; ok && !strings.Contains(p.accessMode, "R") {
 					continue
 				}
 			}
@@ -484,10 +484,11 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 			addrNameMap[dev.ID][addr.ID] = addr.Name
 			addrLabelMap[dev.ID][addr.ID] = addr.Label
 
-			// 属性必须属于设备所绑的物模型才生效（正常写入路径已校验，这里防历史数据/直接改库）。
+			// 点位绑定的属性决定记录里的属性编码与物模型编码；属性可以来自任意模型。
 			if addr.PropertyID != "" {
-				if p, ok := propCodes[addr.PropertyID]; ok && p.modelID == dev.ModelID {
+				if p, ok := propCodes[addr.PropertyID]; ok {
 					addrPropCodes[addr.ID] = p.code
+					addrModelCodes[addr.ID] = p.modelCode
 				}
 			}
 
@@ -505,7 +506,7 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 		lockKeys:       lockKeys,
 		addrNameMap:    addrNameMap,
 		addrLabelMap:   addrLabelMap,
-		modelCodes:     modelCodes,
+		addrModelCodes: addrModelCodes,
 		addrPropCodes:  addrPropCodes,
 		protocols:      devProtocols,
 		groupByID:      groups,
@@ -1042,8 +1043,6 @@ func (t *gatewayTask) ensureConnected(drv driver.Driver, dev *po.Device) bool {
 func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, results []driver.ReadResult) []CollectedRecord {
 	records := make([]CollectedRecord, 0, len(results))
 	protocol := t.protocols[dev.ID]
-	// 物模型编码是设备级常量，提到循环外取一次（toRecords 是热点路径）。
-	modelCode := t.modelCodes[dev.ID]
 	for i, r := range results {
 		name, label := "", ""
 		groupID := ""
@@ -1104,7 +1103,7 @@ func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, result
 			Kind:               kind,
 			Protocol:           protocol,
 			Quality:            r.Quality,
-			ThingModelCode:     modelCode,
+			ThingModelCode:     t.addrModelCodes[r.DeviceAddressID],
 			PropertyCode:       t.addrPropCodes[r.DeviceAddressID],
 			GroupID:            groupID,
 			GroupCode:          groupCode,
@@ -1115,70 +1114,47 @@ func (t *gatewayTask) toRecords(dev *po.Device, addrs []po.DeviceAddress, result
 	return records
 }
 
-// propertyCode 物模型属性编码（identifier）+ 所属模型 ID + 读写模式。
-// 带上 model_id 是为了在任务构建时再核一次「点位绑定的属性确实属于设备所绑的模型」；
-// accessMode 决定该点位是否进入采集调度（不含 R 即只写属性，不采集）。
+// propertyCode 物模型属性编码（identifier）+ 所属模型编码（thing_model.code）+ 读写模式。
+// modelCode 随绑定该属性的点位下发到记录；accessMode 决定该点位是否进入采集调度
+// （不含 R 即只写属性，不采集）。
 type propertyCode struct {
-	modelID    string
+	modelCode  string
 	code       string
 	accessMode string
 }
 
-// loadThingModelCodes 预加载设备物模型编码（deviceID -> thing_model.code）与
-// 属性编码/读写模式（propertyID -> thing_model_property），前者供 toRecords 随
-// 记录下发，后者供任务构建时判断点位是否进入采集（只写属性不采集）。
+// loadThingModelCodes 预加载全部物模型属性的编码/读写模式（propertyID -> propertyCode）。
 //
-// 物模型是**可选绑定**：没绑定就没有编码（记录里是空串）。两张表缺失或查询失败
-// 只记一条警告并返回空表 —— 此时不做属性侧收紧（与历史行为一致），也不该让整台
-// 设备因此停采（单测库与早期版本库不一定有这两张表）。
-//
-// 查询按设备所绑模型一次取回（而不是按点位 IN 上千个属性 ID），避免拼出超长
-// SQL；物模型数量本就远小于点位数。
-func loadThingModelCodes(db *gorm.DB, devices []po.Device) (map[string]string, map[string]propertyCode) {
-	deviceCodes := make(map[string]string)
+// 设备不再绑定物模型，物模型编码由点位绑定的属性推导，因此这里只需属性表与模型表。
+// 物模型是**可选绑定**：点位没绑定属性就没有编码（记录里是空串）。两张表缺失或
+// 查询失败只记一条警告并返回空表 —— 此时不做属性侧收紧（与历史行为一致），也不该
+// 让设备因此停采（单测库与早期版本库不一定有这两张表）。
+func loadThingModelCodes(db *gorm.DB) map[string]propertyCode {
 	propCodes := make(map[string]propertyCode)
 
-	modelIDs := make([]string, 0, len(devices))
-	seen := make(map[string]struct{}, len(devices))
-	for _, d := range devices {
-		if d.ModelID == "" {
-			continue
-		}
-		if _, ok := seen[d.ModelID]; ok {
-			continue
-		}
-		seen[d.ModelID] = struct{}{}
-		modelIDs = append(modelIDs, d.ModelID)
-	}
-	if len(modelIDs) == 0 {
-		return deviceCodes, propCodes
-	}
-
 	var models []po.ThingModel
-	if err := db.Select("id", "code").Where("id IN ?", modelIDs).Find(&models).Error; err != nil {
+	if err := db.Select("id", "code").Find(&models).Error; err != nil {
 		logger.Warn("collector: load thing models failed, records will omit thingModelCode: %v", err)
-		return deviceCodes, propCodes
+		return propCodes
 	}
 	codeByModel := make(map[string]string, len(models))
 	for _, m := range models {
 		codeByModel[m.ID] = m.Code
 	}
-	for _, d := range devices {
-		if c, ok := codeByModel[d.ModelID]; ok && c != "" {
-			deviceCodes[d.ID] = c
-		}
-	}
 
 	var props []po.ThingModelProperty
-	if err := db.Select("id", "model_id", "identifier", "access_mode").
-		Where("model_id IN ?", modelIDs).Find(&props).Error; err != nil {
+	if err := db.Select("id", "model_id", "identifier", "access_mode").Find(&props).Error; err != nil {
 		logger.Warn("collector: load thing model properties failed, records will omit propertyCode: %v", err)
-		return deviceCodes, propCodes
+		return propCodes
 	}
 	for _, p := range props {
-		propCodes[p.ID] = propertyCode{modelID: p.ModelID, code: p.Identifier, accessMode: p.AccessMode}
+		propCodes[p.ID] = propertyCode{
+			modelCode:  codeByModel[p.ModelID],
+			code:       p.Identifier,
+			accessMode: p.AccessMode,
+		}
 	}
-	return deviceCodes, propCodes
+	return propCodes
 }
 
 // loadCollectorGroups 加载全部采集组（含停用组，由调用方按 status 判定）。

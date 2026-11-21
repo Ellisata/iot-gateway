@@ -32,12 +32,12 @@ func openThingModelTestDB(t *testing.T, models ...any) *gorm.DB {
 	return db
 }
 
-// TestToRecordsCarriesThingModelCodes 采集记录必须带上设备物模型编码与点位属性编码。
+// TestToRecordsCarriesThingModelCodes 采集记录必须带上点位属性编码与属性所属模型编码。
 func TestToRecordsCarriesThingModelCodes(t *testing.T) {
 	task := &gatewayTask{
-		protocols:     map[string]string{"dev-1": "ModBus.TCP"},
-		modelCodes:    map[string]string{"dev-1": "th_sensor"},
-		addrPropCodes: map[string]string{"addr-1": "temperature"},
+		protocols:      map[string]string{"dev-1": "ModBus.TCP"},
+		addrModelCodes: map[string]string{"addr-1": "th_sensor"},
+		addrPropCodes:  map[string]string{"addr-1": "temperature"},
 	}
 	dev := &po.Device{ID: "dev-1", Name: "dev1"}
 	addrs := []po.DeviceAddress{
@@ -57,8 +57,8 @@ func TestToRecordsCarriesThingModelCodes(t *testing.T) {
 		t.Errorf("bound record codes = (%q,%q), want (th_sensor,temperature)",
 			recs[0].ThingModelCode, recs[0].PropertyCode)
 	}
-	if recs[1].ThingModelCode != "th_sensor" || recs[1].PropertyCode != "" {
-		t.Errorf("model-only record codes = (%q,%q), want (th_sensor,\"\")",
+	if recs[1].ThingModelCode != "" || recs[1].PropertyCode != "" {
+		t.Errorf("unbound record codes = (%q,%q), want (\"\",\"\")",
 			recs[1].ThingModelCode, recs[1].PropertyCode)
 	}
 
@@ -70,10 +70,10 @@ func TestToRecordsCarriesThingModelCodes(t *testing.T) {
 	}
 }
 
-// TestLoadThingModelCodes 绑定关系解析：只取设备所绑模型的编码；属性必须属于
-// 该模型才生效（防历史数据/直接改库留下的跨模型绑定）。
+// TestLoadThingModelCodes 属性编码解析：全部属性都加载，并带上所属模型编码；
+// 设备不再参与（点位绑定的属性可以来自任意模型）。
 func TestLoadThingModelCodes(t *testing.T) {
-	db := openThingModelTestDB(t, &po.Device{}, &po.ThingModel{}, &po.ThingModelProperty{})
+	db := openThingModelTestDB(t, &po.ThingModel{}, &po.ThingModelProperty{})
 	for _, m := range []po.ThingModel{
 		{ID: "m1", Code: "th_sensor", Name: "温湿度传感器"},
 		{ID: "m2", Code: "th_meter", Name: "电表"},
@@ -89,29 +89,13 @@ func TestLoadThingModelCodes(t *testing.T) {
 	if err := db.Create(&props).Error; err != nil {
 		t.Fatal(err)
 	}
-	devices := []po.Device{
-		{ID: "dev-1", Name: "sensor", ModelID: "m1"},
-		{ID: "dev-2", Name: "unbound"},
-		{ID: "dev-3", Name: "dangling", ModelID: "missing-model"},
-	}
 
-	modelCodes, propCodes := loadThingModelCodes(db, devices)
-	if modelCodes["dev-1"] != "th_sensor" {
-		t.Errorf("dev-1 model code = %q, want th_sensor", modelCodes["dev-1"])
+	propCodes := loadThingModelCodes(db)
+	if p := propCodes["p1"]; p.code != "temperature" || p.modelCode != "th_sensor" {
+		t.Errorf("p1 = %+v, want {th_sensor temperature}", p)
 	}
-	if _, ok := modelCodes["dev-2"]; ok {
-		t.Error("unbound device must not have a model code")
-	}
-	if _, ok := modelCodes["dev-3"]; ok {
-		t.Error("device bound to a missing model must not have a model code")
-	}
-	if p := propCodes["p1"]; p.code != "temperature" || p.modelID != "m1" {
-		t.Errorf("p1 = %+v, want {m1 temperature}", p)
-	}
-	// 查询按「设备所绑模型」收敛：没有任何设备绑 m2，故 p2 不该被加载
-	// （这也是避免按上千个属性 ID 拼 IN 的原因）。
-	if _, ok := propCodes["p2"]; ok {
-		t.Error("p2 belongs to an unbound model and should not be loaded")
+	if p := propCodes["p2"]; p.code != "voltage" || p.modelCode != "th_meter" {
+		t.Errorf("p2 = %+v, want {th_meter voltage}", p)
 	}
 }
 
@@ -119,8 +103,8 @@ func TestLoadThingModelCodes(t *testing.T) {
 // 没有编码，绝不返回错误让采集停摆。
 func TestLoadThingModelCodesMissingTables(t *testing.T) {
 	db := openThingModelTestDB(t, &po.Device{})
-	modelCodes, propCodes := loadThingModelCodes(db, []po.Device{{ID: "dev-1", ModelID: "m1"}})
-	if len(modelCodes) != 0 || len(propCodes) != 0 {
-		t.Errorf("missing tables should degrade to empty maps, got %v / %v", modelCodes, propCodes)
+	propCodes := loadThingModelCodes(db)
+	if len(propCodes) != 0 {
+		t.Errorf("missing tables should degrade to an empty map, got %v", propCodes)
 	}
 }

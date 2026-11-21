@@ -19,8 +19,9 @@ type Device struct {
 	Name         string `gorm:"column:name;uniqueIndex;not null" json:"name"`
 	ProtocolID   string `gorm:"column:protocol_id;not null" json:"protocolId"`
 	ProtocolJSON string `gorm:"column:protocol_json;not null" json:"protocolJson"`
-	// ModelID 绑定的物模型 ID（thing_model.id）。空串 = 未绑定。
-	ModelID     string `gorm:"column:model_id;not null;default:'';index:idx_device_model" json:"modelId"`
+	// ModelID 已废弃：设备不再绑定物模型，属性直接绑定设备点位。
+	// 列保留只为兼容旧库，不再读写。
+	ModelID     string `gorm:"column:model_id;not null;default:'';index:idx_device_model" json:"-"`
 	Description string `gorm:"column:description" json:"description"`
 	Status      int    `gorm:"column:status;default:1" json:"status"`
 	CreatedAt   string `gorm:"column:created_at" json:"createdAt"`

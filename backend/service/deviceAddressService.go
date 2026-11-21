@@ -81,8 +81,8 @@ func (s *DeviceAddressService) CreateDeviceAddress(ctx context.Context, req *dto
 		return err
 	}
 
-	// 物模型属性绑定：设备必须绑定该属性所属模型，且 kind/读写权限兼容。
-	if err := s.validatePropertyBinding(ctx, device, req.PropertyID, protocolName, internal, req.RwPermission, false); err != nil {
+	// 物模型属性绑定：属性存在，且 kind/读写权限兼容（与设备所属模型无关）。
+	if err := s.validatePropertyBinding(ctx, req.PropertyID, protocolName, internal, req.RwPermission, false); err != nil {
 		return err
 	}
 	if err := ensureDevicePropertyUnique(ctx, db, req.DeviceID, req.PropertyID, ""); err != nil {
@@ -187,18 +187,19 @@ func ensureDevicePropertyUnique(ctx context.Context, db *gorm.DB, deviceID, prop
 	return nil
 }
 
-// validatePropertyBinding 校验点位绑定物模型属性的四项前提：
-// 属性存在、设备已绑定其所属模型、kind 一致、点位读写权限覆盖属性读写模式。
+// validatePropertyBinding 校验点位绑定物模型属性的三项前提：
+// 属性存在、kind 一致、点位读写权限覆盖属性读写模式。
+//
+// 属性与设备之间没有绑定关系：任意设备的点位都可以绑定任意模型下的属性。
 //
 // allowDisabled 用于「既有绑定」：模型或属性后来被停用，不应阻止用户保存该点位的
 // 其它字段（改名/改阈值）。新建绑定或换绑时传 false，要求模型与属性都处于启用状态。
 func (s *DeviceAddressService) validatePropertyBinding(
 	ctx context.Context,
-	device po.Device,
 	propertyID, protocolName, internalType, addressRW string,
 	allowDisabled bool,
 ) error {
-	return validatePropertyBindingDB(ctx, s.sqliteDB, device, propertyID, protocolName, internalType, addressRW, allowDisabled)
+	return validatePropertyBindingDB(ctx, s.sqliteDB, propertyID, protocolName, internalType, addressRW, allowDisabled)
 }
 
 // validatePropertyBindingDB 是 validatePropertyBinding 的事务版本：
@@ -206,7 +207,6 @@ func (s *DeviceAddressService) validatePropertyBinding(
 func validatePropertyBindingDB(
 	ctx context.Context,
 	db *gorm.DB,
-	device po.Device,
 	propertyID, protocolName, internalType, addressRW string,
 	allowDisabled bool,
 ) error {
@@ -222,10 +222,6 @@ func validatePropertyBindingDB(
 				enums.ThingModelPropertyNotExistsEnum.GetMessage(), enums.ThingModelPropertyNotExistsEnum.GetMsgKey())
 		}
 		return err
-	}
-	if device.ModelID == "" || device.ModelID != property.ModelID {
-		return appError.NewAppErrorCtx(enums.ThingModelBindingMismatchEnum.GetCode(),
-			enums.ThingModelBindingMismatchEnum.GetMessage(), enums.ThingModelBindingMismatchEnum.GetMsgKey())
 	}
 	if !allowDisabled {
 		if property.Status != 1 {
@@ -544,7 +540,7 @@ func (s *DeviceAddressService) UpdateDeviceAddress(ctx context.Context, req *dto
 			if err := loadDevice(); err != nil {
 				return err
 			}
-			if err := s.validatePropertyBinding(ctx, device, newPropertyID,
+			if err := s.validatePropertyBinding(ctx, newPropertyID,
 				s.getProtocolName(ctx, device.ProtocolID), effectiveInternal, effectiveRW,
 				newPropertyID == existing.PropertyID); err != nil {
 				return err
@@ -558,7 +554,7 @@ func (s *DeviceAddressService) UpdateDeviceAddress(ctx context.Context, req *dto
 		if err := loadDevice(); err != nil {
 			return err
 		}
-		if err := s.validatePropertyBinding(ctx, device, existing.PropertyID,
+		if err := s.validatePropertyBinding(ctx, existing.PropertyID,
 			s.getProtocolName(ctx, device.ProtocolID), effectiveInternal, effectiveRW, true); err != nil {
 			return err
 		}
@@ -844,7 +840,7 @@ func (s *DeviceAddressService) PageDeviceAddress(ctx context.Context, req *dto.P
 	}, nil
 }
 
-// GetAddressesByIDs 根据设备ID数组 + 点位ID数组批量查询点位（仅取 id/device_id/label 三列）。
+// GetAddressesByIDs 根据设备ID数组 + 点位ID数组批量查询点位（仅取 id/device_id/label/property_id 四列）。
 // deviceIDs 作归属过滤：不属于这些设备的点位视为不存在。库中不存在的ID不出现在结果里；
 // 任一列表为空直接返回空切片，不访问数据库。
 func (s *DeviceAddressService) GetAddressesByIDs(ctx context.Context, deviceIDs, addressIDs []string) ([]po.DeviceAddress, error) {
@@ -852,7 +848,7 @@ func (s *DeviceAddressService) GetAddressesByIDs(ctx context.Context, deviceIDs,
 		return nil, nil
 	}
 	var addrs []po.DeviceAddress
-	if err := s.sqliteDB.WithContext(ctx).Select("id", "device_id", "label").
+	if err := s.sqliteDB.WithContext(ctx).Select("id", "device_id", "label", "property_id").
 		Where("device_id IN ? AND id IN ?", deviceIDs, addressIDs).Find(&addrs).Error; err != nil {
 		return nil, err
 	}
@@ -910,38 +906,10 @@ func addressVO(a po.DeviceAddress) vo.DeviceAddressVO {
 	}
 }
 
-// enrichAddressVOs 按 PropertyID 批量补全属性的 identifier/name（展示用）。
-// 查不到时留空：属性删除有绑定守卫，正常不会出现悬空 id，这里不把它升级成错误。
+// enrichAddressVOs 为由 DB 行直接映射的点位 VO 补齐展示用冗余字段（物模型属性 + 采集组）。
 func (s *DeviceAddressService) enrichAddressVOs(ctx context.Context, records []vo.DeviceAddressVO) error {
-	ids := make([]string, 0, len(records))
-	seen := make(map[string]struct{}, len(records))
-	for _, r := range records {
-		if r.PropertyID == "" {
-			continue
-		}
-		if _, ok := seen[r.PropertyID]; ok {
-			continue
-		}
-		seen[r.PropertyID] = struct{}{}
-		ids = append(ids, r.PropertyID)
-	}
-	if len(ids) > 0 {
-		var props []po.ThingModelProperty
-		if err := s.sqliteDB.WithContext(ctx).Select("id", "identifier", "name", "access_mode").
-			Where("id IN ?", ids).Find(&props).Error; err != nil {
-			return err
-		}
-		byID := make(map[string]po.ThingModelProperty, len(props))
-		for _, p := range props {
-			byID[p.ID] = p
-		}
-		for i := range records {
-			if p, ok := byID[records[i].PropertyID]; ok {
-				records[i].PropertyIdentifier = p.Identifier
-				records[i].PropertyName = p.Name
-				records[i].PropertyAccessMode = p.AccessMode
-			}
-		}
+	if err := s.fillAddressProperty(ctx, records); err != nil {
+		return err
 	}
 
 	// 采集组展示字段：按 groupId 批量补全，避免每行再查一次。
@@ -975,6 +943,70 @@ func (s *DeviceAddressService) enrichAddressVOs(ctx context.Context, records []v
 			records[i].GroupName = g.Name
 			records[i].GroupIntervalMs = g.IntervalMs
 			records[i].GroupStatus = g.Status
+		}
+	}
+	return nil
+}
+
+// fillAddressProperty 按 PropertyID 批量补全属性的 identifier/name/accessMode 与所属物模型名（展示用）。
+// 查不到时留空：属性删除有绑定守卫，正常不会出现悬空 id，这里不把它升级成错误。
+//
+// 单列出来是因为开放接口的批量点位标签（4.3）只要这组字段，不需要采集组补全。
+func (s *DeviceAddressService) fillAddressProperty(ctx context.Context, records []vo.DeviceAddressVO) error {
+	ids := make([]string, 0, len(records))
+	seen := make(map[string]struct{}, len(records))
+	for _, r := range records {
+		if r.PropertyID == "" {
+			continue
+		}
+		if _, ok := seen[r.PropertyID]; ok {
+			continue
+		}
+		seen[r.PropertyID] = struct{}{}
+		ids = append(ids, r.PropertyID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	var props []po.ThingModelProperty
+	if err := s.sqliteDB.WithContext(ctx).Select("id", "model_id", "identifier", "name", "access_mode").
+		Where("id IN ?", ids).Find(&props).Error; err != nil {
+		return err
+	}
+	byID := make(map[string]po.ThingModelProperty, len(props))
+	modelIDs := make([]string, 0, len(props))
+	seenModel := make(map[string]struct{}, len(props))
+	for _, p := range props {
+		byID[p.ID] = p
+		if p.ModelID == "" {
+			continue
+		}
+		if _, ok := seenModel[p.ModelID]; ok {
+			continue
+		}
+		seenModel[p.ModelID] = struct{}{}
+		modelIDs = append(modelIDs, p.ModelID)
+	}
+	// 模型名同样是展示冗余，一次请求涉及的模型数很小，仍按 IN 批量查。
+	modelNames := make(map[string]string, len(modelIDs))
+	if len(modelIDs) > 0 {
+		var models []po.ThingModel
+		if err := s.sqliteDB.WithContext(ctx).Select("id", "name").
+			Where("id IN ?", modelIDs).Find(&models).Error; err != nil {
+			return err
+		}
+		for _, m := range models {
+			modelNames[m.ID] = m.Name
+		}
+	}
+	for i := range records {
+		if p, ok := byID[records[i].PropertyID]; ok {
+			records[i].PropertyIdentifier = p.Identifier
+			records[i].PropertyName = p.Name
+			records[i].PropertyAccessMode = p.AccessMode
+			records[i].PropertyModelID = p.ModelID
+			records[i].PropertyModelName = modelNames[p.ModelID]
 		}
 	}
 	return nil

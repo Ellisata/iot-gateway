@@ -44,4 +44,8 @@ const (
 	// KeyControlEnabled 控制下发（写 PLC 点位）总开关。
 	// 出厂关闭：写点位会改变现场设备状态，与只读采集是完全不同的风险面。
 	KeyControlEnabled Key = "control.enabled"
+
+	// KeyThingModelMenuEnabled 管理端「物模型」菜单是否展示。出厂 true。
+	// 只影响前端菜单，不改变采集与推送；前端加载布局时从 /systemConfig/list 现读。
+	KeyThingModelMenuEnabled Key = "ui.thingModelMenu.enabled"
 )

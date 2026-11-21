@@ -5,7 +5,6 @@ package service
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,7 +31,6 @@ const (
 	importColProtocol
 	importColDescription
 	importColCode
-	importColModel
 	importColStatus
 	importBaseCols
 )
@@ -55,7 +53,6 @@ type deviceImportPlan struct {
 	ProtocolCol    int
 	DescriptionCol int
 	CodeCol        int
-	ModelCol       int
 	StatusCol      int
 
 	// Params 协议参数列。为空表示通用模板/旧模板，导入时 protocol_json 保持 "{}"。
@@ -81,7 +78,6 @@ func buildDeviceImportPlan(header []string) (*deviceImportPlan, error) {
 		ProtocolCol:    -1,
 		DescriptionCol: -1,
 		CodeCol:        -1,
-		ModelCol:       -1,
 		StatusCol:      -1,
 	}
 	seenBase := make(map[int]bool)
@@ -125,8 +121,6 @@ func buildDeviceImportPlan(header []string) (*deviceImportPlan, error) {
 			plan.DescriptionCol = idx
 		case importColCode:
 			plan.CodeCol = idx
-		case importColModel:
-			plan.ModelCol = idx
 		case importColStatus:
 			plan.StatusCol = idx
 		}
@@ -183,8 +177,6 @@ func baseColumnOf(header string) (int, bool) {
 		return importColDescription, true
 	case "编码", "code":
 		return importColCode, true
-	case "物模型", "thingmodel", "model":
-		return importColModel, true
 	case "状态", "status":
 		return importColStatus, true
 	default:
@@ -265,54 +257,6 @@ func (p *deviceImportPlan) bindFields(doc *formjson.Document, protocolName strin
 
 	p.Fields = fields
 	return nil
-}
-
-// thingModelIndex 物模型按名称/标识双向索引。名称与标识都可能被用户填进模板。
-type thingModelIndex struct {
-	byName map[string]po.ThingModel
-	byCode map[string]po.ThingModel
-}
-
-func loadThingModelIndex(ctx context.Context, db *gorm.DB) (thingModelIndex, error) {
-	var models []po.ThingModel
-	if err := db.WithContext(ctx).Select("id", "name", "code", "status").Find(&models).Error; err != nil {
-		return thingModelIndex{}, err
-	}
-	idx := thingModelIndex{
-		byName: make(map[string]po.ThingModel, len(models)),
-		byCode: make(map[string]po.ThingModel, len(models)),
-	}
-	for _, model := range models {
-		idx.byName[model.Name] = model
-		if model.Code != "" {
-			idx.byCode[model.Code] = model
-		}
-	}
-	return idx, nil
-}
-
-// resolve 返回物模型 ID；text 为空表示不绑定。
-func (idx thingModelIndex) resolve(text string) (string, string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return "", ""
-	}
-	byName, hasName := idx.byName[text]
-	byCode, hasCode := idx.byCode[text]
-	if hasName && hasCode && byName.ID != byCode.ID {
-		return "", fmt.Sprintf("物模型不明确（名称与标识指向不同模型）：%s", text)
-	}
-	model, ok := byName, hasName
-	if !ok {
-		model, ok = byCode, hasCode
-	}
-	if !ok {
-		return "", "物模型不存在：" + text
-	}
-	if model.Status != 1 {
-		return "", "物模型已停用，不能绑定：" + text
-	}
-	return model.ID, ""
 }
 
 // parseImportStatus 解析启停状态；空值默认启用。
@@ -436,12 +380,11 @@ func buildProtocolJSON(values map[string]json.RawMessage) (string, error) {
 }
 
 // parseDeviceImportRow 校验并组装一台设备。
-// protocols 用于逐行确认协议仍然存在；models 用于物模型绑定；codeTaken 在文件内避让编码。
+// protocols 用于逐行确认协议仍然存在；codeTaken 在文件内避让编码。
 func parseDeviceImportRow(
 	row []string,
 	plan *deviceImportPlan,
 	protocols map[string]po.IotProtocol,
-	models thingModelIndex,
 	codeTaken map[string]bool,
 	now string,
 ) (*po.Device, string, string) {
@@ -474,15 +417,6 @@ func parseDeviceImportRow(
 	}
 	if codeTaken[code] {
 		return nil, name, enums.DeviceCodeExistsEnum.GetMessage()
-	}
-
-	modelID := ""
-	if plan.ModelCol >= 0 {
-		resolvedID, reason := models.resolve(excelutil.Cell(row, plan.ModelCol))
-		if reason != "" {
-			return nil, name, reason
-		}
-		modelID = resolvedID
 	}
 
 	status := 1
@@ -522,7 +456,6 @@ func parseDeviceImportRow(
 		Name:         name,
 		ProtocolID:   protocol.ID,
 		ProtocolJSON: protocolJSON,
-		ModelID:      modelID,
 		Description:  description,
 		Status:       status,
 		ScanIdentity: scanIdentity,
@@ -659,7 +592,7 @@ func importTableError(message string) error {
 	return appError.NewAppErrorCtx(enums.ParamValidEnum.GetCode(), message, "")
 }
 
-// deviceTemplateBase 模板的固定六列（名称/协议/描述/编码/物模型/状态）。
+// deviceTemplateBase 模板的固定五列（名称/协议/描述/编码/状态）。
 type deviceTemplateBase struct {
 	headers      []string
 	example      []string
@@ -679,7 +612,6 @@ func newDeviceTemplateBase(lang string) deviceTemplateBase {
 			i18n.T(lang, "device.import.header.protocol") + " *",
 			i18n.T(lang, "device.import.header.description"),
 			i18n.T(lang, "device.import.header.code") + " *",
-			i18n.T(lang, "device.import.header.model"),
 			i18n.T(lang, "device.import.header.status"),
 		},
 		example: []string{
@@ -687,11 +619,10 @@ func newDeviceTemplateBase(lang string) deviceTemplateBase {
 			"", // 协议在模板生成时按需填入；通用模板留空，避免示例行看起来像可直接导入
 			i18n.T(lang, "device.import.example.description"),
 			i18n.T(lang, "device.import.example.code"),
-			"",
 			enabled,
 		},
-		widths:   []float64{22, 24, 32, 18, 20, 10},
-		textCols: []int{importColName, importColDescription, importColCode, importColModel, importColStatus},
+		widths:   []float64{22, 24, 32, 18, 10},
+		textCols: []int{importColName, importColDescription, importColCode, importColStatus},
 		lists: []excelutil.ListValidation{{
 			Col:     importColStatus,
 			Options: []string{enabled, disabled},

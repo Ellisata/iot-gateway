@@ -432,10 +432,12 @@
 - `default.yaml` 是**默认值**的唯一真源;[runtimecfg/](runtimecfg/) 在它之上叠加
   SQLite `system_config` 表里的覆盖值(页面 / `/systemConfig/*` 写入),优先级更高、
   重启后保留。「恢复默认」= 删除覆盖行,不是把默认值写进表。
-- 首批登记 7 个开关:`discovery.enabled`、`deviceScan.enabled`、`push.changeOnly`、
+- 首批登记 8 个开关:`discovery.enabled`、`deviceScan.enabled`、`push.changeOnly`、
   `push.keepaliveIntervalSec`(枚举 0/60/300/600 秒,无变化重发)、`agentApi.enabled`、
-  `control.enabled`(立即生效,组件从 `runtimecfg.Reader` / `IntReader` 现读),
-  `plugin.enabled`(重启生效,插件管理器在构造时冻结 —— `Stop` 是终态的)。
+  `control.enabled`(立即生效,组件从 `runtimecfg.Reader` / `IntReader` 现读)、
+  `plugin.enabled`(重启生效,插件管理器在构造时冻结 —— `Stop` 是终态的)、
+  `ui.thingModelMenu.enabled`(立即生效,纯前端展示项:侧栏从
+  `/systemConfig/list` 现读,关闭只隐藏「物模型」菜单项,不影响数据与路由)。
 - `agentApi.enabled` 与 `control.enabled` **出厂 false**,与其余开关方向相反:
   `control.enabled` 控制写 PLC 点位(出厂关闭,打开前还需协议 `Writable` 与点位 W 权限)。
   `agentApi.enabled` 控制整组免鉴权的

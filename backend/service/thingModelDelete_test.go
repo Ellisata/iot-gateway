@@ -63,17 +63,19 @@ func TestBatchDeleteOpenApiThingModels(t *testing.T) {
 	}
 }
 
-// TestBatchDeleteOpenApiThingModelsBound 设备绑定 / 属性被点位绑定都拒绝删除。
+// TestBatchDeleteOpenApiThingModelsBound 只有属性被点位绑定时拒绝删除；
+// 设备不再绑定模型，因此仅存在设备不阻止删除。
 func TestBatchDeleteOpenApiThingModelsBound(t *testing.T) {
 	db := newThingModelTestDB(t)
 	svc := NewThingModelService(db)
 	ctx := context.Background()
 
-	// 模型被设备绑定
+	// 只被设备使用（历史 model_id）不再阻止删除。
 	devModel := seedThingModel(t, svc, "th_dev", "设备模型", "plc")
-	if err := db.Create(&po.Device{ID: "dev-1", Name: "1号PLC", ModelID: devModel.ID}).Error; err != nil {
+	if err := db.Create(&po.Device{ID: "dev-1", Name: "1号PLC"}).Error; err != nil {
 		t.Fatalf("seed device: %v", err)
 	}
+	_ = devModel
 
 	// 模型的属性被点位绑定
 	addrModel := seedThingModel(t, svc, "th_addr", "点位模型", "sensor")
@@ -91,19 +93,18 @@ func TestBatchDeleteOpenApiThingModelsBound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("batch delete: %v", err)
 	}
-	if res.Deleted != 0 || res.Failed != 2 {
+	if res.Deleted != 1 || res.Failed != 1 {
 		t.Fatalf("统计不符: %+v", res)
 	}
-	for i := range res.Results {
-		wantDeleteAction(t, res.Results[i].Action, res.Results[i].ErrorCode,
-			vo.ThingModelDeleteActionFailed, enums.ThingModelInUseEnum.GetCode())
-	}
+	wantDeleteAction(t, res.Results[0].Action, res.Results[0].ErrorCode, vo.ThingModelDeleteActionDeleted, "")
+	wantDeleteAction(t, res.Results[1].Action, res.Results[1].ErrorCode,
+		vo.ThingModelDeleteActionFailed, enums.ThingModelInUseEnum.GetCode())
 
 	var n int64
 	if err := db.Model(&po.ThingModel{}).Count(&n).Error; err != nil {
 		t.Fatalf("count models: %v", err)
 	}
-	if n != 2 {
+	if n != 1 {
 		t.Fatalf("被拒绝的模型不应被删除，实际剩 %d 个", n)
 	}
 }

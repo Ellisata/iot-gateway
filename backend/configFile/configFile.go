@@ -100,6 +100,9 @@ type Config struct {
 	// Control 控制下发（写 PLC 点位）配置
 	Control ControlConfig `mapstructure:"control"`
 
+	// UI 管理端界面展示配置（只影响前端菜单与页面可见性）
+	UI UIConfig `mapstructure:"ui"`
+
 	// Backup 本机备份与恢复配置（P0：整库快照 + 本机轮转 + CLI 恢复）
 	Backup BackupConfig `mapstructure:"backup"`
 }
@@ -176,6 +179,24 @@ type AgentApiConfig struct {
 	// **本项只是默认值**：运行期经过 runtimecfg.Manager 读取，可在「运行开关」页
 	// 动态切换，**立即生效** —— 分组中间件按请求现读开关，关闭后下一次请求即被拒，
 	// 不需要撤掉已注册的路由（gin 的路由表在启动后不可增删）。
+	Enabled bool `mapstructure:"enabled"`
+}
+
+// UIConfig 管理端界面的展示配置。
+//
+// 这里的开关只影响前端菜单与页面是否展示，不改变采集、推送等后端行为；
+// 因此前端在加载布局时通过 /systemConfig/list 现读，改完刷新即生效。
+type UIConfig struct {
+	// ThingModelMenu 物模型菜单（工业物联网 → 物模型）的展示配置。
+	ThingModelMenu ThingModelMenuConfig `mapstructure:"thingModelMenu"`
+}
+
+// ThingModelMenuConfig 物模型菜单展示配置。
+//
+// **默认 true**：物模型是设备的语义层，大多数现场都会用到。关闭只隐藏左侧
+// 菜单项，已绑定的物模型数据与采集不受影响；路由仍然保留，直接访问 URL 可以打开。
+type ThingModelMenuConfig struct {
+	// Enabled 是否展示物模型菜单项。可在「运行开关」页动态修改（ui.thingModelMenu.enabled）。
 	Enabled bool `mapstructure:"enabled"`
 }
 

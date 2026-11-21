@@ -334,15 +334,13 @@ func (s *PushChannelService) samplePushBatch(ctx context.Context) push.PushBatch
 		dataType = "float32"
 	}
 	// 物模型编码/属性编码与运行期记录同源：预览与测试发送也要能看到这两个字段，
-	// 否则用户会以为映射里的路径写错了。未绑定/查询失败时留空即可。
+	// 否则用户会以为映射里的路径写错了。编码由点位绑定的属性推导；未绑定/查询失败时留空。
 	var model po.ThingModel
-	if dev.ModelID != "" {
-		_ = s.sqliteDB.WithContext(ctx).Where("id = ?", dev.ModelID).First(&model).Error
-	}
 	var property po.ThingModelProperty
-	if addr.PropertyID != "" && model.ID != "" {
-		_ = s.sqliteDB.WithContext(ctx).Where("id = ? AND model_id = ?", addr.PropertyID, model.ID).
-			First(&property).Error
+	if addr.PropertyID != "" {
+		if err := s.sqliteDB.WithContext(ctx).Where("id = ?", addr.PropertyID).First(&property).Error; err == nil && property.ModelID != "" {
+			_ = s.sqliteDB.WithContext(ctx).Where("id = ?", property.ModelID).First(&model).Error
+		}
 	}
 	// 采集组身份与运行期记录同源：预览/测试发送要能看到 groupId/groupName，
 	// 否则 group-json 预览会是一帧没有组头的空壳。

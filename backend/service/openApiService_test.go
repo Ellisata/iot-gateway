@@ -17,6 +17,7 @@ import (
 
 	"iot-gateway/model/dto"
 	"iot-gateway/model/po"
+	"iot-gateway/model/vo"
 )
 
 // newOpenApiSyncTestDB 构建分批同步测试库（临时文件 SQLite，含设备/协议/点位三张表）。
@@ -411,5 +412,74 @@ func TestSyncDevicePointsDTOValidation(t *testing.T) {
 				t.Errorf("订阅同步 query %q 绑定失败: %v", tt.query, subErr)
 			}
 		})
+	}
+}
+
+// openApiAddressVO 是「点位 VO → 对外点位」的裁剪点：外部系统同样要区分
+// 「哪个模型的同名属性」，所以物模型属性五列必须透传；阈值/变换等内部配置不进对外 VO。
+func TestOpenApiAddressVOKeepsThingModelProperty(t *testing.T) {
+	out := openApiAddressVO(vo.DeviceAddressVO{
+		ID: "a1", DeviceID: "d1", Name: "D100", Label: "炉膛温度",
+		PropertyID: "p1", PropertyIdentifier: "temperature", PropertyName: "炉膛温度",
+		PropertyModelID: "m1", PropertyModelName: "温湿度传感器",
+		CommonDataType: "float32", DataType: "modbus.float32",
+		RwPermission: "R", ScanFrequency: 1000,
+		ThresholdEnabled: 1, ThresholdOp: "gt", ThresholdValue: `["10"]`,
+	})
+	if out.PropertyID != "p1" || out.PropertyIdentifier != "temperature" ||
+		out.PropertyName != "炉膛温度" || out.PropertyModelID != "m1" ||
+		out.PropertyModelName != "温湿度传感器" {
+		t.Fatalf("对外点位未透传物模型属性: %+v", out)
+	}
+}
+
+// 4.3 批量点位标签与 4.4 / 4.5 同口径：绑定的物模型属性必须一并返回。
+// 否则同一个点位在不同只读接口里字段不一致，调用方还得再拉一次 4.4 才能对上。
+func TestListOpenApiAddressLabelsKeepsThingModelProperty(t *testing.T) {
+	db := newThingModelTestDB(t)
+	ctx := context.Background()
+
+	if err := db.Create(&po.ThingModel{
+		ID: "m1", Code: "th_sensor", Name: "温湿度传感器", Status: 1,
+	}).Error; err != nil {
+		t.Fatalf("seed model: %v", err)
+	}
+	if err := db.Create(&po.ThingModelProperty{
+		ID: "p1", ModelID: "m1", Identifier: "temperature", Name: "炉膛温度",
+		Kind: "float", AccessMode: "R", Status: 1,
+	}).Error; err != nil {
+		t.Fatalf("seed property: %v", err)
+	}
+	if err := db.Create(&po.Device{
+		ID: "d1", Name: "1号PLC", ProtocolID: "proto-1", ProtocolJSON: "{}",
+	}).Error; err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+	if err := db.Create(&[]po.DeviceAddress{
+		{ID: "a1", DeviceID: "d1", Name: "D100", Label: "炉膛温度", PropertyID: "p1",
+			CommonDataType: "float", DataType: "float", RwPermission: "R", ScanFrequency: 1000, Status: 1},
+		{ID: "a2", DeviceID: "d1", Name: "D101", Label: "主轴电流",
+			CommonDataType: "float", DataType: "float", RwPermission: "R", ScanFrequency: 1000, Status: 1},
+	}).Error; err != nil {
+		t.Fatalf("seed addresses: %v", err)
+	}
+
+	svc := NewOpenApiService(NewDeviceService(db, nil, nil), NewDeviceAddressService(db, nil), nil, nil)
+	out, err := svc.ListOpenApiAddressLabels(ctx, []string{"d1"}, []string{"a2", "a1", "missing"})
+	if err != nil {
+		t.Fatalf("list labels: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("不存在的点位应被省略，实际返回 %d 条: %+v", len(out), out)
+	}
+	bound, unbound := out[0], out[1]
+	if bound.ID != "a2" || bound.PropertyIdentifier != "" || bound.PropertyModelName != "" {
+		t.Fatalf("未绑定属性的点位不应出现物模型字段: %+v", bound)
+	}
+	if unbound.ID != "a1" ||
+		unbound.PropertyID != "p1" || unbound.PropertyIdentifier != "temperature" ||
+		unbound.PropertyName != "炉膛温度" || unbound.PropertyModelID != "m1" ||
+		unbound.PropertyModelName != "温湿度传感器" {
+		t.Fatalf("标签接口未补全物模型属性: %+v", unbound)
 	}
 }

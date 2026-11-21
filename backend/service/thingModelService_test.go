@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -270,6 +271,62 @@ func TestPageThingModelProperties(t *testing.T) {
 	}(), enums.ThingModelNotExistsEnum.GetCode())
 }
 
+// TestPageThingModelPropertiesKeyword 钉住 keyword 过滤：同时命中标识符与名称、
+// 空串/纯空白不过滤；maxSortOrder 始终按模型全量计算，不随过滤收缩。
+func TestPageThingModelPropertiesKeyword(t *testing.T) {
+	db := newThingModelTestDB(t)
+	svc := NewThingModelService(db)
+	ctx := context.Background()
+
+	model := seedThingModel(t, svc, "th_meter_kw", "检索模型", "meter")
+	props := []struct{ identifier, name string }{
+		{"voltage", "电压"},
+		{"current", "电流"},
+		{"power", "有功功率"},
+	}
+	for i, p := range props {
+		if err := svc.CreateThingModelProperty(ctx, &dto.CreateThingModelPropertyDTO{
+			ModelID: model.ID, Identifier: p.identifier, Name: p.name,
+			Kind: "float", AccessMode: "R", SortOrder: (i + 1) * 10,
+		}); err != nil {
+			t.Fatalf("create property %q: %v", p.identifier, err)
+		}
+	}
+
+	cases := []struct {
+		keyword string
+		want    []string
+	}{
+		{"", []string{"voltage", "current", "power"}},   // 空串 = 不过滤
+		{"  ", []string{"voltage", "current", "power"}}, // 纯空白同样不过滤
+		{" volt ", []string{"voltage"}},                 // 只命中标识符，首尾空白被裁掉
+		{"电流", []string{"current"}},                     // 只命中名称
+		{"电", []string{"voltage", "current"}},           // 名称里都有「电」，保持 sort_order 升序
+		{"nothing", nil},                                // 无命中
+	}
+	for _, c := range cases {
+		page, err := svc.PageThingModelProperties(ctx, &dto.PageThingModelPropertyDTO{
+			ModelID: model.ID, Page: 1, Size: 10, Keyword: c.keyword,
+		})
+		if err != nil {
+			t.Fatalf("page keyword %q: %v", c.keyword, err)
+		}
+		got := make([]string, len(page.Records))
+		for i, r := range page.Records {
+			got[i] = r.Identifier
+		}
+		if !slices.Equal(got, c.want) {
+			t.Errorf("keyword %q = %v，期望 %v", c.keyword, got, c.want)
+		}
+		if int64(len(c.want)) != page.Total {
+			t.Errorf("keyword %q total = %d，期望 %d", c.keyword, page.Total, len(c.want))
+		}
+		if page.MaxSortOrder != 30 {
+			t.Errorf("keyword %q maxSortOrder = %d，期望 30（按模型全量计算）", c.keyword, page.MaxSortOrder)
+		}
+	}
+}
+
 func TestThingModelDeleteGuards(t *testing.T) {
 	db := newThingModelTestDB(t)
 	svc := NewThingModelService(db)
@@ -278,16 +335,14 @@ func TestThingModelDeleteGuards(t *testing.T) {
 	model := seedThingModel(t, svc, "th_meter", "电表", "meter")
 	prop := seedThingModelProperty(t, svc, model.ID, "voltage")
 
+	// 设备不再绑定模型；历史 model_id 值也不阻止删除模型。
 	device := po.Device{
-		Name: "电表1", ProtocolID: "ModBus.TCP", ProtocolJSON: "{}", ModelID: model.ID,
+		Name: "电表1", ProtocolID: "ModBus.TCP", ProtocolJSON: "{}",
 		Status: 1, CreatedAt: "2026-01-01 00:00:00", UpdatedAt: "2026-01-01 00:00:00",
 	}
 	if err := db.Create(&device).Error; err != nil {
 		t.Fatalf("create device: %v", err)
 	}
-
-	// 设备绑定模型 → 模型不可删
-	wantThingModelErrCode(t, svc.DeleteThingModel(ctx, model.ID), enums.ThingModelInUseEnum.GetCode())
 
 	// 点位绑定属性 → 属性不可删
 	addr := po.DeviceAddress{
@@ -299,10 +354,13 @@ func TestThingModelDeleteGuards(t *testing.T) {
 		t.Fatalf("create address: %v", err)
 	}
 	wantThingModelErrCode(t, svc.DeleteThingModelProperty(ctx, prop.ID), enums.ThingModelPropertyInUseEnum.GetCode())
-
-	// 即使设备解绑模型，只要点位仍指向该属性，删模型仍要拒绝（防止留下悬空绑定）
-	if err := db.Model(&po.Device{}).Where("id = ?", device.ID).Update("model_id", "").Error; err != nil {
-		t.Fatalf("unbind device: %v", err)
-	}
 	wantThingModelErrCode(t, svc.DeleteThingModel(ctx, model.ID), enums.ThingModelInUseEnum.GetCode())
+
+	// 解绑点位后模型可删。
+	if err := db.Delete(&addr).Error; err != nil {
+		t.Fatalf("delete address: %v", err)
+	}
+	if err := svc.DeleteThingModel(ctx, model.ID); err != nil {
+		t.Fatalf("delete model after unbind: %v", err)
+	}
 }

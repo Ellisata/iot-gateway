@@ -55,7 +55,7 @@
     "err.thing_model_not_found": "物模型不存在",
     "err.thing_model_property_exists": "属性标识符已存在",
     "err.thing_model_property_not_found": "物模型属性不存在",
-    "err.thing_model_in_use": "物模型已被设备绑定，不能删除",
+    "err.thing_model_in_use": "物模型属性仍被点位绑定，不能删除",
     "err.thing_model_property_in_use": "属性已被点位绑定，不能删除",
     "err.thing_model_code_invalid": "物模型标识不合法：需字母开头，仅含字母、数字、下划线或短横线",
     "err.thing_model_identifier_invalid": "属性标识符不合法：需字母开头，仅含字母、数字或下划线",

@@ -38,6 +38,19 @@ const routes = [
         meta: { titleKey: 'menu.thingModel', icon: 'Box' },
       },
       {
+        // 属性的主要编辑界面：表格宽、停留久，独立成页而不是叠在列表上的抽屉。
+        // 与 device-address 等钻取页同一套约定：hidden 路由 + 父级面包屑 + 页头返回。
+        path: 'industrial/thing-model/:id/properties',
+        name: 'ThingModelProperties',
+        component: () => import('@/views/industrial/thing-model/properties/IndexView.vue'),
+        meta: {
+          titleKey: 'menu.thingModelProperties',
+          parentTitleKey: 'menu.thingModel',
+          parentName: 'ThingModel',
+          hidden: true,
+        },
+      },
+      {
         path: 'industrial/device-object/:gatewayId?',
         name: 'GatewayDeviceObject',
         component: () => import('@/views/industrial/device-object/IndexView.vue'),
@@ -54,6 +67,19 @@ const routes = [
         name: 'GatewayCollectorGroup',
         component: () => import('@/views/industrial/collector-group/IndexView.vue'),
         meta: { titleKey: 'menu.collectorGroup', hidden: true },
+      },
+      {
+        // 属性级控制下发：属性可跨多台设备绑定点位，但执行仍是逐设备写入。
+        // 从物模型属性页的操作列进入，所以是 hidden 路由 + 返回属性页的页头入口。
+        path: 'industrial/realtime/property/:propertyId',
+        name: 'GatewayPropertyControl',
+        component: () => import('@/views/industrial/realtime/PropertyControlView.vue'),
+        meta: {
+          titleKey: 'thingModel.propertyControlTitle',
+          parentTitleKey: 'menu.thingModel',
+          parentName: 'ThingModel',
+          hidden: true,
+        },
       },
       {
         path: 'industrial/realtime/:deviceObjectId',

@@ -82,8 +82,8 @@ type OpenApiThingModelPropertyUpsertDTO struct {
 
 // OpenApiThingModelBatchDeleteDTO 开放接口物模型批量删除请求。
 //
-// 按模型标识（code）删除；模型下的属性随模型一起删除。已被设备绑定、或其属性
-// 已被点位绑定的模型会被拒绝（41005），逐条结果互不影响。
+// 按模型标识（code）删除；模型下的属性随模型一起删除。其属性仍被点位绑定
+// 的模型会被拒绝（41005），逐条结果互不影响。
 type OpenApiThingModelBatchDeleteDTO struct {
 	Codes []string `json:"codes" binding:"required,min=1,max=200"`
 }

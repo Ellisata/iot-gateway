@@ -155,6 +155,18 @@ var specs = []Spec{
 		Mode: ApplyHotRead,
 		Base: func(c *configFile.Config) any { return c.Control.Enabled },
 	},
+	{
+		Key:           KeyThingModelMenuEnabled,
+		Type:          ValueTypeBool,
+		Group:         "ui",
+		GroupLabelKey: "runtimeConfig.groups.ui",
+		LabelKey:      "runtimeConfig.fields.thingModelMenuEnabled.label",
+		DescKey:       "runtimeConfig.fields.thingModelMenuEnabled.hint",
+		// 纯前端展示项：侧栏挂载时与「运行开关」页保存后都从 /systemConfig/list
+		// 现读，不需要后端 applier，也不影响采集、推送等组件。
+		Mode: ApplyHotRead,
+		Base: func(c *configFile.Config) any { return c.UI.ThingModelMenu.Enabled },
+	},
 }
 
 // All 返回注册表的副本，调用方不得依赖修改它来影响运行时。

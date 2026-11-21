@@ -137,6 +137,7 @@ import {
 import { useI18n } from 'vue-i18n'
 
 import { listSystemConfig, updateSystemConfig, resetSystemConfig } from '@/api/modules/systemConfig'
+import { applyRuntimeFlags } from '@/composables/useRuntimeFlags'
 
 const { t } = useI18n()
 
@@ -232,6 +233,8 @@ async function fetchConfig() {
   try {
     const res = await listSystemConfig()
     groups.value = res?.groups ?? []
+    // 界面类开关（如物模型菜单）需要让侧栏立即跟随，不必等整页刷新。
+    applyRuntimeFlags(groups.value)
   } catch (err) {
     console.error('获取运行开关失败', err)
     // 拦截器已经弹过错误提示

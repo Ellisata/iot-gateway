@@ -13,7 +13,8 @@ import (
 //
 // 物模型是**协议无关的语义模板**：它只声明“这类设备有哪些属性”，不保存寄存器
 // 地址、协议内部类型、采集频率或报警阈值 —— 那些仍属于 device / device_address。
-// 同一模型可被使用不同协议的设备复用，因此本表刻意没有 protocol_id 列。
+// 同一模型可被使用不同协议的设备复用，因此本表刻意没有 protocol_id 列；
+// 模型也不绑定设备 —— 属性直接绑定设备点位，一个设备的点位可以来自多个模型。
 //
 // v1 只做属性（properties）。事件由现有报警状态机承担，服务需要驱动具备统一的
 // 写/调用能力，而当前 SDK 的 Driver 只有 Read，故暂不建表。
@@ -26,10 +27,10 @@ type ThingModel struct {
 	// Category 分类 code（固定枚举，见 constants.ThingModelCategory*）。
 	// 只存 code，展示名由前端 i18n 提供，避免英文界面出现中文分类名。
 	Category string `gorm:"column:category;not null;default:''" json:"category"`
-	// Version 仅作展示。v1 不做多版本绑定：设备只认 model_id，不携带版本快照。
+	// Version 仅作展示，不参与点位绑定：绑定只认属性的模型归属。
 	Version     string `gorm:"column:version;not null;default:'1.0.0'" json:"version"`
 	Description string `gorm:"column:description;not null;default:''" json:"description"`
-	// Status 1 启用 / 0 停用。停用只影响“新建绑定”，不影响已绑定设备的采集。
+	// Status 1 启用 / 0 停用。停用只影响“新建点位绑定”，不影响已绑定属性的采集。
 	Status    int    `gorm:"column:status;default:1" json:"status"`
 	CreatedAt string `gorm:"column:created_at" json:"createdAt"`
 	UpdatedAt string `gorm:"column:updated_at" json:"updatedAt"`

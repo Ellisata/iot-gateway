@@ -31,6 +31,7 @@ type devicePointSemantic struct {
 	Description        string
 	Status             int
 	PropertyIdentifier string
+	ModelCode          string
 	GroupName          string
 	ThresholdEnabled   bool
 	ThresholdOp        string
@@ -94,7 +95,7 @@ func alarmWebhookConfigHash(w po.AlarmWebhook) (string, error) {
 	})
 }
 
-func deviceConfigHash(d po.Device, protocolName, modelCode string, groups []po.CollectorGroup, points []devicePointSemantic) (string, error) {
+func deviceConfigHash(d po.Device, protocolName string, groups []po.CollectorGroup, points []devicePointSemantic) (string, error) {
 	protocolJSON, err := parseJSONValueOrEmptyObject(d.ProtocolJSON)
 	if err != nil {
 		return "", err
@@ -129,6 +130,7 @@ func deviceConfigHash(d po.Device, protocolName, modelCode string, groups []po.C
 			"description":        p.Description,
 			"status":             p.Status,
 			"propertyIdentifier": p.PropertyIdentifier,
+			"modelCode":          p.ModelCode,
 			"groupName":          p.GroupName,
 			"threshold": map[string]any{
 				"enabled": p.ThresholdEnabled,
@@ -147,7 +149,6 @@ func deviceConfigHash(d po.Device, protocolName, modelCode string, groups []po.C
 		"name":         d.Name,
 		"protocolName": protocolName,
 		"protocolJson": protocolJSON,
-		"modelCode":    modelCode,
 		"description":  d.Description,
 		"status":       d.Status,
 		"groups":       groupItems,

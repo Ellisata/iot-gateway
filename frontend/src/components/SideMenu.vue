@@ -53,7 +53,7 @@
           <el-icon><MenuIcon name="deviceObject" /></el-icon>
           <template #title>{{ t('menu.deviceObject') }}</template>
         </el-menu-item>
-        <el-menu-item index="/industrial/thing-model">
+        <el-menu-item v-if="thingModelMenuEnabled" index="/industrial/thing-model">
           <el-icon><MenuIcon name="thingModel" /></el-icon>
           <template #title>{{ t('menu.thingModel') }}</template>
         </el-menu-item>
@@ -228,10 +228,12 @@
 </template>
 
 <script setup>
+import { onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store'
 import MenuIcon from '@/components/MenuIcon.vue'
+import { useRuntimeFlags, refreshRuntimeFlags } from '@/composables/useRuntimeFlags'
 
 // 新窗口打开的页面（全页阅读型内容，不在管理端布局内展示）
 const NEW_WINDOW_ROUTES = ['/open-api/doc']
@@ -257,6 +259,10 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const { t } = useI18n()
+const { thingModelMenuEnabled } = useRuntimeFlags()
+
+// 菜单可见性来自运行开关；挂载时拉一次，接口失败则按默认值展示。
+onMounted(refreshRuntimeFlags)
 
 /**
  * 菜单点击处理：常规项当前窗口跳转，阅读型文档项新开窗口。

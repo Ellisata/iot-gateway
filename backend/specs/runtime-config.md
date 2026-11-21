@@ -27,6 +27,7 @@ system_config 表里的覆盖行  >  configFile（default.yaml + APP_ENV 环境�
 | `plugin.enabled` | **重启后生效** | 插件管理器的 `Stop` 是终态的，运行期启停需要重写进程监管生命周期。 |
 | `agentApi.enabled` | 立即生效 | **出厂 false**。控制整组免鉴权的 `/agentApi` 镜像：路由始终注册（gin 启动后不可增删），分组中间件按请求现读开关，关闭时整组返回 403 —— 包括清单与 `/agentApi/systemConfig/update`，即 dsh 不能自己把自己打开。 |
 | `control.enabled` | 立即生效 | 控制下发（写 PLC 点位）总开关，**出厂 false**。`ControlService` 每次请求现读；Web / OpenAPI / MQTT 控制主题的写路径都汇聚到这里。关闭只拒绝新的下发，执行中的那一批不受影响。打开仍需插件 `Writable` 与点位 `rw_permission` 两层条件。 |
+| `ui.thingModelMenu.enabled` | 立即生效 | 管理端左侧「工业物联网 → 物模型」菜单是否展示，**出厂 true**。纯前端展示项：侧栏挂载时与「运行开关」页保存后从 `/systemConfig/list` 现读，关闭只隐藏菜单；物模型路由、数据、采集与推送均不受影响。 |
 
 未纳入（有意为之）：`server.port`、`jwt.*`、`log.*`、`sqlite.path`、
 `plugin.dir/glob/timeouts`、`discovery.port/intervalMs`，以及

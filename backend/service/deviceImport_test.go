@@ -238,7 +238,7 @@ func TestGenerateImportTemplate(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("首表行数 = %d, want 1（仅表头）: %v", len(rows), rows)
 	}
-	want := []string{"名称 *", "协议 *", "描述", "编码 *", "物模型", "状态"}
+	want := []string{"名称 *", "协议 *", "描述", "编码 *", "状态"}
 	if len(rows[0]) != len(want) {
 		t.Fatalf("表头 = %v, want %v", rows[0], want)
 	}
@@ -319,7 +319,7 @@ func TestBuildDeviceImportPlan(t *testing.T) {
 		if plan.NameCol != 0 || plan.ProtocolCol != 1 || plan.DescriptionCol != 2 || plan.CodeCol != 3 {
 			t.Errorf("plan = %+v", plan)
 		}
-		if plan.ModelCol != -1 || plan.StatusCol != -1 || plan.hasParams() {
+		if plan.StatusCol != -1 || plan.hasParams() {
 			t.Errorf("四列模板不应识别出其余列: %+v", plan)
 		}
 	})
@@ -337,12 +337,13 @@ func TestBuildDeviceImportPlan(t *testing.T) {
 		}
 	})
 
-	t.Run("英文六列", func(t *testing.T) {
+	t.Run("英文模板含未知列", func(t *testing.T) {
+		// 物模型列已移除；旧模板里的 "Thing model" 视为未知列被忽略。
 		plan, err := buildDeviceImportPlan([]string{"*Name", "*Protocol", "Description", "Code", "Thing model", "Status"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if plan.NameCol != 0 || plan.ProtocolCol != 1 || plan.CodeCol != 3 || plan.ModelCol != 4 || plan.StatusCol != 5 {
+		if plan.NameCol != 0 || plan.ProtocolCol != 1 || plan.CodeCol != 3 || plan.StatusCol != 5 {
 			t.Errorf("plan = %+v", plan)
 		}
 	})
@@ -471,64 +472,19 @@ func TestParseImportStatus(t *testing.T) {
 	}
 }
 
-func TestThingModelIndexResolve(t *testing.T) {
-	idx := thingModelIndex{
-		byName: map[string]po.ThingModel{
-			"温度计":  {ID: "tm1", Name: "温度计", Code: "temp", Status: 1},
-			"停用模型": {ID: "tm2", Name: "停用模型", Code: "off", Status: 0},
-			"歧义":   {ID: "tm3", Name: "歧义", Code: "x", Status: 1},
-		},
-		byCode: map[string]po.ThingModel{
-			"temp": {ID: "tm1", Name: "温度计", Code: "temp", Status: 1},
-			"off":  {ID: "tm2", Name: "停用模型", Code: "off", Status: 0},
-			"歧义":   {ID: "tm4", Name: "另一个", Code: "歧义", Status: 1},
-		},
-	}
-
-	if id, reason := idx.resolve(""); id != "" || reason != "" {
-		t.Errorf("空值 = %q/%q", id, reason)
-	}
-	if id, reason := idx.resolve("温度计"); id != "tm1" || reason != "" {
-		t.Errorf("按名称 = %q/%q", id, reason)
-	}
-	if id, reason := idx.resolve("temp"); id != "tm1" || reason != "" {
-		t.Errorf("按标识 = %q/%q", id, reason)
-	}
-	if _, reason := idx.resolve("不存在"); !strings.Contains(reason, "不存在") {
-		t.Errorf("不存在 reason = %q", reason)
-	}
-	if _, reason := idx.resolve("停用模型"); !strings.Contains(reason, "已停用") {
-		t.Errorf("停用 reason = %q", reason)
-	}
-	if _, reason := idx.resolve("歧义"); !strings.Contains(reason, "不明确") {
-		t.Errorf("歧义 reason = %q", reason)
-	}
-}
-
 func TestImportDevicesWithProtocolParams(t *testing.T) {
 	db := newImportTestDB(t)
 	seedImportProtocol(t, db, "proto-1", "ModBus.TCP", importTestProtocolForm)
-	models := []po.ThingModel{
-		{ID: "tm1", Name: "温度计", Code: "temp", Status: 1},
-		{ID: "tm2", Name: "停用模型", Code: "off", Status: 1},
-	}
-	if err := db.Create(&models).Error; err != nil {
-		t.Fatal(err)
-	}
-	// status 列有 default:1，GORM 会把零值当成未设置；显式更新成停用。
-	if err := db.Model(&po.ThingModel{}).Where("id = ?", "tm2").Update("status", 0).Error; err != nil {
-		t.Fatal(err)
-	}
 	svc := &DeviceService{sqliteDB: db}
 
 	rows := [][]string{
-		{"*名称", "*协议", "描述", "编码", "物模型", "状态", "设备IP *[host]", "设备端口 *[port]", "字节序[byteOrder]"},
-		{"设备1", "ModBus.TCP", "d1", "code-1", "温度计", "禁用", "10.0.0.1", "502", "布尔选项"},
-		{"设备2", "ModBus.TCP", "", "", "", "", "10.0.0.2", "502", "不存在"},    // select 非法
-		{"设备3", "ModBus.TCP", "", "", "", "", "", "502", ""},               // 必填为空
-		{"设备4", "ModBus.TCP", "", "", "", "", "10.0.0.4", "abc", ""},       // 端口非数字
-		{"设备5", "ModBus.TCP", "", "", "停用模型", "", "10.0.0.5", "502", ""},   // 物模型停用
-		{"设备6", "ModBus.TCP", "", "code-1", "", "", "10.0.0.6", "502", ""}, // 编码重复
+		{"*名称", "*协议", "描述", "编码", "状态", "设备IP *[host]", "设备端口 *[port]", "字节序[byteOrder]"},
+		{"设备1", "ModBus.TCP", "d1", "code-1", "禁用", "10.0.0.1", "502", "布尔选项"},
+		{"设备2", "ModBus.TCP", "", "", "", "10.0.0.2", "502", "不存在"},    // select 非法
+		{"设备3", "ModBus.TCP", "", "", "", "", "502", ""},               // 必填为空
+		{"设备4", "ModBus.TCP", "", "", "", "10.0.0.4", "abc", ""},       // 端口非数字
+		{"设备5", "ModBus.TCP", "", "", "", "10.0.0.5", "502", ""},       // 编码为空
+		{"设备6", "ModBus.TCP", "", "code-1", "", "10.0.0.6", "502", ""}, // 编码重复
 	}
 
 	result, err := svc.ImportDevices(context.Background(), buildImportXlsx(t, rows))
@@ -543,7 +499,7 @@ func TestImportDevicesWithProtocolParams(t *testing.T) {
 	if err := db.Where("name = ?", "设备1").First(&device).Error; err != nil {
 		t.Fatal(err)
 	}
-	if device.Code != "code-1" || device.ModelID != "tm1" || device.Status != 0 {
+	if device.Code != "code-1" || device.Status != 0 {
 		t.Errorf("设备1 = %+v", device)
 	}
 	var config map[string]any
@@ -722,7 +678,7 @@ func TestGenerateImportTemplateForProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantHeaders := []string{"名称 *", "协议 *", "描述", "编码 *", "物模型", "状态", "设备IP [host] *", "设备端口 [port] *", "字节序 [byteOrder]"}
+	wantHeaders := []string{"名称 *", "协议 *", "描述", "编码 *", "状态", "设备IP [host] *", "设备端口 [port] *", "字节序 [byteOrder]"}
 	if len(rows) != 1 || len(rows[0]) != len(wantHeaders) {
 		t.Fatalf("表头 = %v", rows)
 	}
@@ -768,7 +724,7 @@ func TestGenerateImportTemplateForProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if enRows[0][0] != "Name *" || enRows[0][1] != "Protocol *" || enRows[0][6] != "Device IP [host] *" {
+	if enRows[0][0] != "Name *" || enRows[0][1] != "Protocol *" || enRows[0][5] != "Device IP [host] *" {
 		t.Errorf("英文表头 = %v", enRows[0])
 	}
 

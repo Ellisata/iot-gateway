@@ -59,6 +59,36 @@ func TestPushRecordsBucketsByGroup(t *testing.T) {
 	}
 }
 
+// TestPushRecordsBucketsByThingModel 同一设备同一组内绑定不同模型的点位必须拆帧，
+// 保证帧级 thingModelCode 与主题模板一致。
+func TestPushRecordsBucketsByThingModel(t *testing.T) {
+	ch := &stubChannel{id: "c1"}
+	e := newEngineWith(ch)
+
+	e.PushRecords([]collector.CollectedRecord{
+		{DeviceID: "d1", GroupID: "g1", DeviceAddressID: "a1", ThingModelCode: "th_sensor", Value: "1", Quality: 192},
+		{DeviceID: "d1", GroupID: "g1", DeviceAddressID: "a2", ThingModelCode: "th_sensor", Value: "2", Quality: 192},
+		{DeviceID: "d1", GroupID: "g1", DeviceAddressID: "a3", ThingModelCode: "th_meter", Value: "3", Quality: 192},
+		{DeviceID: "d1", GroupID: "g1", DeviceAddressID: "a4", ThingModelCode: "", Value: "4", Quality: 192},
+	})
+
+	batches := ch.drain()
+	if len(batches) != 3 {
+		t.Fatalf("batches = %d, want 3", len(batches))
+	}
+	want := []string{"", "th_meter", "th_sensor"}
+	for i, b := range batches {
+		if b.ThingModelCode != want[i] {
+			t.Errorf("batch %d thingModelCode = %q, want %q", i, b.ThingModelCode, want[i])
+		}
+		for _, r := range b.Records {
+			if r.ThingModelCode != b.ThingModelCode {
+				t.Errorf("batch %d contains record with model %q", i, r.ThingModelCode)
+			}
+		}
+	}
+}
+
 // TestPushRecordsGroupSelectorFilters 非空订阅只收匹配组，未分组记录不接收；
 // 未实现 GroupSelector 的通道收全部。
 func TestPushRecordsGroupSelectorFilters(t *testing.T) {

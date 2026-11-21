@@ -172,7 +172,7 @@ var (
 	ThingModelNotExistsEnum              = NewBusinessEnum("41002", "物模型不存在", "err.thing_model_not_found")
 	ThingModelPropertyExistsEnum         = NewBusinessEnum("41003", "属性标识符已存在", "err.thing_model_property_exists")
 	ThingModelPropertyNotExistsEnum      = NewBusinessEnum("41004", "物模型属性不存在", "err.thing_model_property_not_found")
-	ThingModelInUseEnum                  = NewBusinessEnum("41005", "物模型已被设备绑定，不能删除", "err.thing_model_in_use")
+	ThingModelInUseEnum                  = NewBusinessEnum("41005", "物模型属性仍被点位绑定，不能删除", "err.thing_model_in_use")
 	ThingModelPropertyInUseEnum          = NewBusinessEnum("41006", "属性已被点位绑定，不能删除", "err.thing_model_property_in_use")
 	ThingModelCodeInvalidEnum            = NewBusinessEnum("41007", "物模型标识不合法（字母开头，仅字母数字下划线短横线）", "err.thing_model_code_invalid")
 	ThingModelIdentifierInvalidEnum      = NewBusinessEnum("41008", "属性标识符不合法（字母开头，仅字母数字下划线）", "err.thing_model_identifier_invalid")

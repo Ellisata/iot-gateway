@@ -6,6 +6,32 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
+## [Unreleased]
+
+### 新增
+
+- **物模型属性独立页与属性级控制下发**：属性从模型抽屉独立为页面（`/industrial/thing-model/:id/properties`，支持按标识符/名称筛选、点位抽屉与「控制下发」入口）。一个属性可绑定多台设备的点位，属性控制页按设备分行、逐台确认写入；实时页与属性页共用写入弹窗（`ControlWriteDialog`）。
+- **物模型菜单开关**：运行开关新增 `ui.thingModelMenu.enabled`（`default.yaml` 的 `ui` 段，热读）。关闭只隐藏左侧「物模型」菜单，路由、数据与采集均不受影响。
+- **开放接口点位对象补充属性字段**：4.3 批量点位标签与 4.4/4.5 点位对象统一返回 `propertyId` / `propertyIdentifier` / `propertyName` / `propertyModelId` / `propertyModelName`（未绑定为空串）；新增 `listAllThingModelProperties` 跨模型属性下拉，并镜像到 `/agentApi`。
+
+### 变更
+
+- **物模型不再绑定设备**：移除 `deviceIds` 与设备页的物模型选择（`device.model_id` 列仅保留旧库兼容），属性通过 `addressIds` 直接绑定任意设备的点位，单次上限仍为 200。采集记录的 `thingModelCode` 改由点位绑定的属性所属模型推导。开放接口配置同步支持点位级 `modelCode`，设备级 `modelCode` 仅作默认命名空间；设备导入模板由 6 列减为 5 列（去掉「物模型」）。物模型删除保护改为仅看属性是否仍被点位绑定（`41005`）。
+- **推送按「设备 + 采集组 + 物模型」拆帧**：同一设备的点位绑定不同模型时拆成多帧，保证帧内 `thingModelCode` 一致、主题模板不串。
+- **接口调整**：移除 `listThingModelDeviceOptions`、`listThingModelDevices` 与物模型列表的 `deviceCount`；`listThingModelPointOptions` 改为返回全部设备点位；设备点位对象补充 `propertyModelId` / `propertyModelName`；属性分页新增 `keyword`（同时匹配标识符与名称）。菜单与文档中的「设备地址标签」统一更名为「设备点位」。
+
+### Added
+
+- **Standalone property page and property-level control**: properties move out of the model drawer into their own page (`/industrial/thing-model/:id/properties`, with identifier/name search, a point drawer and a control entry). One property may bind points across devices; the property control page lists devices separately and confirms each write per device. The realtime page and the property control page share one write dialog (`ControlWriteDialog`).
+- **Thing-model menu switch**: runtime config gains `ui.thingModelMenu.enabled` (`ui` section of `default.yaml`, hot-read). Turning it off only hides the sidebar entry; routes, data and collection are unaffected.
+- **OpenAPI point objects gain property fields**: batch point labels (4.3) and point objects (4.4/4.5) now return `propertyId` / `propertyIdentifier` / `propertyName` / `propertyModelId` / `propertyModelName` (empty when unbound). Adds `listAllThingModelProperties` for a cross-model property picker, mirrored to `/agentApi`.
+
+### Changed
+
+- **Thing models no longer bind devices**: `deviceIds` and the device-page model picker are removed (`device.model_id` is kept only for old databases). Properties bind points of any device through `addressIds`, still capped at 200 per request. `thingModelCode` in collection records is derived from the model owning the point's bound property. OpenAPI config sync supports point-level `modelCode` with device-level `modelCode` as the default namespace; the device import template drops from six columns to five (no "thing model" column). Model deletion is now blocked only when its properties are still bound to points (`41005`).
+- **Push frames are bucketed by device + group + thing model**: points tied to different models on one device are split into separate frames so `thingModelCode` stays consistent per frame and topic templates never cross models.
+- **API changes**: `listThingModelDeviceOptions`, `listThingModelDevices` and the model list's `deviceCount` are removed; `listThingModelPointOptions` now returns points from all devices; device point objects gain `propertyModelId` / `propertyModelName`; property paging gains `keyword` (matches identifier and name). "Device address label" is renamed to "device point" across menus and docs.
+
 ## [0.8.4] - 2026-11-20
 
 ### 修复

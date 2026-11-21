@@ -112,7 +112,7 @@ export function batchDeleteDeviceAddress(data) {
 }
 
 /**
- * 监控设备地址标签数据（实时读取）
+ * 监控设备点位数据（实时读取）
  * @param {Object} params
  * @param {number} params.objectId - 设备对象 ID
  * @param {string} params.address - 设备地址
@@ -144,7 +144,7 @@ export function importDeviceAddresses(file, deviceId) {
 }
 
 /**
- * 下载设备地址导入模板（.xlsx，六列：名称/标签/通用数据类型/读写权限/扫描频率/描述）
+ * 下载设备点位导入模板（.xlsx，六列：名称/标签/通用数据类型/读写权限/扫描频率/描述）
  * @param {string} [deviceId] 设备 ID；传了按该设备的协议生成数据类型下拉
  * @returns {Promise<Blob>}
  */

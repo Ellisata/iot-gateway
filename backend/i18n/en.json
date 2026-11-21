@@ -55,7 +55,7 @@
     "err.thing_model_not_found": "Thing model not found",
     "err.thing_model_property_exists": "Property identifier already exists",
     "err.thing_model_property_not_found": "Thing model property not found",
-    "err.thing_model_in_use": "This thing model is bound to devices and cannot be deleted",
+    "err.thing_model_in_use": "This thing model's properties are still bound to points and cannot be deleted",
     "err.thing_model_property_in_use": "This property is bound to device addresses and cannot be deleted",
     "err.thing_model_code_invalid": "Invalid thing model code: start with a letter, use only letters, digits, underscores or hyphens",
     "err.thing_model_identifier_invalid": "Invalid property identifier: start with a letter, use only letters, digits or underscores",

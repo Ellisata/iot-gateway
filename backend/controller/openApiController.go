@@ -648,7 +648,7 @@ func (ctr *OpenApiController) BatchUpsertThingModels(c *gin.Context) {
 
 // BatchDeleteThingModels 对外物模型批量删除（按 code）。
 //
-// 删除模型会连带删除其属性；已被设备绑定或其属性已被点位绑定的模型会被拒绝。
+// 删除模型会连带删除其属性；属性仍被点位绑定的模型会被拒绝。
 // 逐条结果互不影响，顶层响应仍为成功信封。
 func (ctr *OpenApiController) BatchDeleteThingModels(c *gin.Context) {
 	ctx := c.Request.Context()

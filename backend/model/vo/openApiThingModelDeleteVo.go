@@ -12,7 +12,7 @@ const (
 // OpenApiThingModelBatchDeleteVO 开放接口物模型批量删除响应。
 //
 // Requested/Deleted/Failed 以**模型**为单位。删除模型会连带删除其属性；
-// 已被设备绑定、或其属性已被点位绑定的模型会失败（41005），其余模型继续。
+// 其属性仍被点位绑定的模型会失败（41005），其余模型继续。
 type OpenApiThingModelBatchDeleteVO struct {
 	Requested int                             `json:"requested"`
 	Deleted   int                             `json:"deleted"`

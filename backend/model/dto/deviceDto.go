@@ -14,9 +14,7 @@ type CreateDeviceDTO struct {
 	Name         string          `json:"name" binding:"required,min=1,max=100"`
 	ProtocolID   string          `json:"protocolId" binding:"required"`
 	ProtocolJSON json.RawMessage `json:"protocolJson" binding:"required"`
-	// ModelID 绑定的物模型 id，空串 = 未绑定。模型必须存在且启用。
-	ModelID     string `json:"modelId"`
-	Description string `json:"description"`
+	Description  string          `json:"description"`
 }
 
 // UpdateDeviceDTO 更新设备请求
@@ -27,12 +25,8 @@ type UpdateDeviceDTO struct {
 	Name         string          `json:"name"`
 	ProtocolID   string          `json:"protocolId"`
 	ProtocolJSON json.RawMessage `json:"protocolJson"`
-	// ModelID 三态：省略 = 不改；空串 = 解除绑定；非空 = 绑定到该模型。
-	// 用指针是因为平铺 string 下「没传」与「传空」都解码成零值，
-	// 旧客户端不带该字段时会被静默解绑。
-	ModelID     *string `json:"modelId"`
-	Description string  `json:"description"`
-	Status      *int    `json:"status"`
+	Description  string          `json:"description"`
+	Status       *int            `json:"status"`
 }
 
 // TestDeviceConnectionDTO 测试设备连接请求
@@ -79,7 +73,7 @@ type CreateDeviceAddressDTO struct {
 	RwPermission   string `json:"rwPermission" binding:"required,oneof=R W RW"`
 	ScanFrequency  int    `json:"scanFrequency"`
 	// PropertyID 绑定的物模型属性 id，空串 = 未绑定。
-	// 绑定时校验：设备已绑定该属性所属模型、kind 一致、读写权限覆盖。
+	// 绑定时校验：属性存在且启用、kind 一致、读写权限覆盖；属性可来自任意模型。
 	PropertyID string `json:"propertyId"`
 	// GroupID 绑定的采集组 id，空串 = 不分组（按 scanFrequency 采集）。
 	// 绑定时校验组属于同一设备；绑定后采集周期由组决定，scanFrequency 不生效。

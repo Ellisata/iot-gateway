@@ -283,13 +283,15 @@ func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(C
 	// 毫秒精度:TDengine 主键含时间戳(亚秒级轮次同秒会覆盖),秒级格式会静默丢数据
 	collectedAt := now.Format("2006-01-02 15:04:05.000")
 
-	// 先按 (设备, 采集组) 桶化：组是推送帧、主题与订阅的单位。
+	// 先按 (设备, 采集组, 物模型) 桶化：组是推送帧、主题与订阅的单位；
+	// 物模型编码是主题模板的帧级字段，而同一设备的不同点位可能绑定不同模型的属性，
+	// 因此必须进桶键，保证每帧内的 thingModelCode 一致（topic 才不会串）。
 	// 组身份必须在变化过滤之前确定 —— 不同通道可能订阅不同组。
-	type bucketKey struct{ deviceID, groupID string }
+	type bucketKey struct{ deviceID, groupID, thingModelCode string }
 	buckets := make(map[bucketKey][]collector.CollectedRecord)
 	keys := make([]bucketKey, 0, len(records))
 	for _, r := range records {
-		k := bucketKey{deviceID: r.DeviceID, groupID: r.GroupID}
+		k := bucketKey{deviceID: r.DeviceID, groupID: r.GroupID, thingModelCode: r.ThingModelCode}
 		if _, ok := buckets[k]; !ok {
 			keys = append(keys, k)
 		}
@@ -300,7 +302,10 @@ func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(C
 		if keys[i].deviceID != keys[j].deviceID {
 			return keys[i].deviceID < keys[j].deviceID
 		}
-		return keys[i].groupID < keys[j].groupID
+		if keys[i].groupID != keys[j].groupID {
+			return keys[i].groupID < keys[j].groupID
+		}
+		return keys[i].thingModelCode < keys[j].thingModelCode
 	})
 
 	for _, k := range keys {
@@ -331,7 +336,7 @@ func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(C
 		}
 
 		// 桶内再按 ≤maxRecordsPerBatch 切片，绝不跨组合并。
-		for _, b := range splitBatches(k.deviceID, k.groupID, collectedAt, bucket) {
+		for _, b := range splitBatches(k.deviceID, k.groupID, k.thingModelCode, collectedAt, bucket) {
 			for _, ch := range targets {
 				ch.Enqueue(b)
 			}
@@ -339,13 +344,12 @@ func (e *Engine) pushRecords(records []collector.CollectedRecord, include func(C
 	}
 }
 
-// splitBatches 将同一 (设备, 采集组) 的记录切片为 ≤maxRecordsPerBatch 的小批次。
-// 对底层数组零拷贝切片，各批次共享同一采集时间戳与组身份。
-func splitBatches(deviceID, groupID, collectedAt string, records []collector.CollectedRecord) []PushBatch {
-	deviceCode, thingModelCode, groupCode, groupName, groupInterval := "", "", "", "", 0
+// splitBatches 将同一 (设备, 采集组, 物模型) 的记录切片为 ≤maxRecordsPerBatch 的小批次。
+// 对底层数组零拷贝切片，各批次共享同一采集时间戳、组身份与物模型编码。
+func splitBatches(deviceID, groupID, thingModelCode, collectedAt string, records []collector.CollectedRecord) []PushBatch {
+	deviceCode, groupCode, groupName, groupInterval := "", "", "", 0
 	if len(records) > 0 {
 		deviceCode = records[0].DeviceCode
-		thingModelCode = records[0].ThingModelCode
 		groupCode = records[0].GroupCode
 		groupName = records[0].GroupName
 		groupInterval = records[0].GroupIntervalMs

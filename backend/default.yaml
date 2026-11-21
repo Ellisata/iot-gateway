@@ -2,7 +2,8 @@
 # 运行期配置覆盖：本文件是**默认值**。
 #
 # 其中 discovery.enabled / deviceScan.enabled / push.changeOnly / plugin.enabled /
-# agentApi.enabled / control.enabled 可在管理端「运行开关」页面动态修改：
+# agentApi.enabled / control.enabled / ui.thingModelMenu.enabled 可在管理端
+# 「运行开关」页面动态修改：
 # 修改结果写入 SQLite 的 system_config 表，
 # 优先级高于本文件，重启后仍然有效；页面「恢复默认」删除覆盖值，回到这里。
 # 未登记在 runtimecfg 注册表里的配置项仍只在本文件维护，改动需要重启。
@@ -302,3 +303,12 @@ control:
   # 单个点位每分钟最多写入次数。0 = 不限制。默认 20。
   # 与设备级限制同时生效，任一超限即整批拒绝。
   maxWritesPerPointPerMinute: 20
+
+# 管理端界面展示。只影响前端菜单是否出现，不改变采集、推送等后端行为；
+# 可在「运行开关」页动态切换（热读：刷新页面即生效），这里只是默认值。
+ui:
+  thingModelMenu:
+    # 「工业物联网 → 物模型」菜单项是否展示。**默认展示**。
+    # 关闭只隐藏左侧菜单项，已绑定的物模型数据与采集不受影响；
+    # 路由仍然保留，直接访问 /admin/industrial/thing-model 可以打开。
+    enabled: true

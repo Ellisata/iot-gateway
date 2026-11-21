@@ -90,7 +90,6 @@ func TestBuildScanExportRowsRoundTripsToImport(t *testing.T) {
 	device, _, reason := parseDeviceImportRow(
 		rows[0], plan,
 		map[string]po.IotProtocol{protocol.Name: protocol},
-		thingModelIndex{byName: map[string]po.ThingModel{}, byCode: map[string]po.ThingModel{}},
 		map[string]bool{},
 		"2026-01-01 00:00:00",
 	)

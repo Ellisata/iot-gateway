@@ -18,8 +18,8 @@ import (
 
 func strPtr(v string) *string { return &v }
 
-// TestThingModelDeviceAndAddressBinding 覆盖设备↔模型、点位↔属性的完整绑定规则：
-// kind 一致、读写覆盖、模型匹配、已绑定时禁止换模型/改属性类型。
+// TestThingModelDeviceAndAddressBinding 覆盖点位↔属性的绑定规则：
+// 属性可来自任意模型、kind 一致、读写覆盖、已绑定时禁止改类型。
 func TestThingModelDeviceAndAddressBinding(t *testing.T) {
 	drivertest.EnsureSyntheticProtocol()
 	db := newThingModelTestDB(t)
@@ -36,26 +36,16 @@ func TestThingModelDeviceAndAddressBinding(t *testing.T) {
 	model := seedThingModel(t, modelSvc, "th_sensor", "温湿度传感器", "sensor")
 	prop := seedThingModelProperty(t, modelSvc, model.ID, "temperature") // kind=float, access=R
 
-	// 设备绑定模型，详情回带模型名
+	// 设备不再绑定模型。
 	if err := deviceSvc.CreateDevice(ctx, &dto.CreateDeviceDTO{
 		Code: "bind-test-dev", Name: "绑定测试设备", ProtocolID: "proto-1",
-		ProtocolJSON: json.RawMessage(`{}`), ModelID: model.ID,
+		ProtocolJSON: json.RawMessage(`{}`),
 	}); err != nil {
 		t.Fatalf("create device: %v", err)
 	}
 	var device po.Device
 	if err := db.Where("name = ?", "绑定测试设备").First(&device).Error; err != nil {
 		t.Fatalf("load device: %v", err)
-	}
-	if device.ModelID != model.ID {
-		t.Fatalf("device.model_id = %q, want %q", device.ModelID, model.ID)
-	}
-	deviceVO, err := deviceSvc.GetDeviceByID(ctx, device.ID)
-	if err != nil {
-		t.Fatalf("get device: %v", err)
-	}
-	if deviceVO.ModelName != "温湿度传感器" {
-		t.Fatalf("modelName = %q", deviceVO.ModelName)
 	}
 
 	// 正确的绑定：float 点位 + R 权限 → float 属性 + R
@@ -76,6 +66,21 @@ func TestThingModelDeviceAndAddressBinding(t *testing.T) {
 	}
 	if addrVO.PropertyIdentifier != "temperature" || addrVO.PropertyName != "temperature" {
 		t.Fatalf("address VO 未补全属性信息: %+v", addrVO)
+	}
+	// 点位可绑定任意模型的属性，identifier 只在模型内唯一：列表页要靠模型名消歧。
+	if addrVO.PropertyModelID != model.ID || addrVO.PropertyModelName != "温湿度传感器" {
+		t.Fatalf("address VO 未补全所属物模型: %+v", addrVO)
+	}
+
+	// 另一模型的属性也能直接绑到同一台设备的点位（不再要求设备绑定模型）。
+	otherModel := seedThingModel(t, modelSvc, "th_meter", "电表", "meter")
+	otherProp := seedThingModelProperty(t, modelSvc, otherModel.ID, "voltage")
+	if err := addressSvc.CreateDeviceAddress(ctx, &dto.CreateDeviceAddressDTO{
+		DeviceID: device.ID, Name: "D103", Label: "跨模型",
+		CommonDataType: driver.TypeFloat, RwPermission: "R", ScanFrequency: 1000,
+		PropertyID: otherProp.ID,
+	}); err != nil {
+		t.Fatalf("bind cross-model property: %v", err)
 	}
 
 	// kind 不匹配：字符串点位不能绑 float 属性
@@ -102,35 +107,22 @@ func TestThingModelDeviceAndAddressBinding(t *testing.T) {
 		PropertyID: rwProp.ID,
 	}), enums.ThingModelAccessMismatchEnum.GetCode())
 
-	// 模型不匹配：另一模型的属性不能绑到这台设备
-	otherModel := seedThingModel(t, modelSvc, "th_meter", "电表", "meter")
-	otherProp := seedThingModelProperty(t, modelSvc, otherModel.ID, "voltage")
-	wantThingModelErrCode(t, addressSvc.CreateDeviceAddress(ctx, &dto.CreateDeviceAddressDTO{
-		DeviceID: device.ID, Name: "D103", Label: "跨模型",
-		CommonDataType: driver.TypeFloat, RwPermission: "R", ScanFrequency: 1000,
-		PropertyID: otherProp.ID,
-	}), enums.ThingModelBindingMismatchEnum.GetCode())
-
-	// 已有点位绑定属性时，设备不能更换模型
-	wantThingModelErrCode(t, deviceSvc.UpdateDevice(ctx, &dto.UpdateDeviceDTO{
-		ID: device.ID, ModelID: strPtr(otherModel.ID),
-	}), enums.ThingModelBindingLockedEnum.GetCode())
-
 	// 属性被点位绑定后，不能改 kind / access_mode
 	wantThingModelErrCode(t, modelSvc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
 		ID: prop.ID, Identifier: "temperature", Name: "温度",
 		Kind: "string", AccessMode: "R",
 	}), enums.ThingModelPropertyBoundImmutableEnum.GetCode())
 
-	// 解除点位绑定后，设备可以换模型
+	// 解除点位绑定后可以改类型。
 	if err := addressSvc.UpdateDeviceAddress(ctx, &dto.UpdateDeviceAddressDTO{
 		ID: addr.ID, Label: "进风温度", PropertyID: strPtr(""),
 	}); err != nil {
 		t.Fatalf("unbind address: %v", err)
 	}
-	if err := deviceSvc.UpdateDevice(ctx, &dto.UpdateDeviceDTO{
-		ID: device.ID, ModelID: strPtr(otherModel.ID),
+	if err := modelSvc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
+		ID: prop.ID, Identifier: "temperature", Name: "温度",
+		Kind: "string", AccessMode: "R",
 	}); err != nil {
-		t.Fatalf("change device model after unbind: %v", err)
+		t.Fatalf("change property kind after unbind: %v", err)
 	}
 }
