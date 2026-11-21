@@ -1165,7 +1165,11 @@ async function loadDynamicForm(type, prefillConfig) {
       // 会把 modelValue 当作字段初值。mounted 之后再 setValue 是行不通的 ——
       // 多语言会把 rule 复制成普通对象，form-create 对非响应式规则上的
       // setValue 只改内部 formData，不会更新已经渲染出来的控件。
-      dynamicFormValues.value = pickPrefillValues(prefillConfig, config.rule)
+      dynamicFormValues.value = applyIotdbTlsPrefill(
+        type,
+        pickPrefillValues(prefillConfig, config.rule),
+        config.rule,
+      )
       dynamicFormRule.value = config.rule
       dynamicFormOptions.value = {
         ...(config.options || {}),
@@ -1247,6 +1251,42 @@ function pruneHttpAuthFields(config) {
   return config
 }
 
+// IoTDB 的证书字段由 tlsEnabled 开关联动显示（见迁移 038）。被隐藏的控件值
+// 仍留在 formData 里，开关关闭时必须剔除，否则旧证书路径会让后端继续走 TLS。
+const IOTDB_TLS_FIELDS = [
+  'tlsEnabled',
+  'tlsCAFile',
+  'tlsCertFile',
+  'tlsKeyFile',
+  'insecureSkipVerify',
+]
+const IOTDB_TLS_PREFILL_FIELDS = ['tlsCAFile', 'tlsCertFile', 'tlsKeyFile']
+
+function formDeclaresField(rule, field) {
+  return Array.isArray(rule) && rule.some((item) => item?.field === field)
+}
+
+function pruneIotdbTlsFields(type, config, rule) {
+  // 表单被运行时定制、还没升级出开关时保持旧语义，不擅自删掉证书配置。
+  if (type !== 'iotdb-v2' || !formDeclaresField(rule, 'tlsEnabled')) return config
+  if (config.tlsEnabled === true) return config
+  IOTDB_TLS_FIELDS.forEach((field) => delete config[field])
+  return config
+}
+
+// 引入开关之前保存的 IoTDB 通道没有 tlsEnabled，但后端一直把「证书路径非空」
+// 当作已启用 TLS。编辑这类通道时按旧语义补上开关，避免默认关闭把已有证书配置
+// 静默丢掉。
+function applyIotdbTlsPrefill(type, values, rule) {
+  if (type !== 'iotdb-v2' || !formDeclaresField(rule, 'tlsEnabled')) return values
+  if (values.tlsEnabled !== undefined) return values
+  const legacyTls =
+    IOTDB_TLS_PREFILL_FIELDS.some((field) => String(values[field] ?? '').trim() !== '') ||
+    values.insecureSkipVerify === true
+  if (legacyTls) values.tlsEnabled = true
+  return values
+}
+
 /** 统一构造提交/预览/测试发送的 configJson，保证三处完全一致。 */
 function buildConfigJson() {
   const config = { ...(dynamicFormApi.value?.formData?.() ?? {}) }
@@ -1284,7 +1324,11 @@ function buildConfigJson() {
     delete config.mapping
     delete config.groupIds
   }
-  return pruneHttpAuthFields(config)
+  return pruneIotdbTlsFields(
+    formData.type,
+    pruneHttpAuthFields(config),
+    dynamicFormRule.value,
+  )
 }
 
 function buildConfigOrWarn() {

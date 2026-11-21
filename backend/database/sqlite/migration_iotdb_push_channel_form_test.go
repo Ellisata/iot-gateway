@@ -33,8 +33,12 @@ func TestMigration037SeedsIotdbForm(t *testing.T) {
 
 	var form struct {
 		Rule []struct {
-			Field string `json:"field"`
-			Type  string `json:"type"`
+			Field   string            `json:"field"`
+			Type    string            `json:"type"`
+			Value   any               `json:"value"`
+			Display *bool             `json:"display"`
+			Props   map[string]any    `json:"props"`
+			Control []json.RawMessage `json:"control"`
 		} `json:"rule"`
 		Options struct {
 			Language map[string]map[string]string `json:"language"`
@@ -44,13 +48,13 @@ func TestMigration037SeedsIotdbForm(t *testing.T) {
 		t.Fatalf("unmarshal form: %v", err)
 	}
 
-	fields := make(map[string]string, len(form.Rule))
-	for _, rule := range form.Rule {
-		fields[rule.Field] = rule.Type
+	fields := make(map[string]int, len(form.Rule))
+	for i, rule := range form.Rule {
+		fields[rule.Field] = i
 	}
 	for _, want := range []string{
 		"host", "port", "username", "password", "database", "nodes",
-		"rpcCompression", "tlsCAFile", "tlsCertFile", "tlsKeyFile",
+		"rpcCompression", "tlsEnabled", "tlsCAFile", "tlsCertFile", "tlsKeyFile",
 		"insecureSkipVerify", "spoolDisabled", "spoolMaxBatches",
 	} {
 		if _, ok := fields[want]; !ok {
@@ -58,9 +62,52 @@ func TestMigration037SeedsIotdbForm(t *testing.T) {
 		}
 	}
 
+	// 证书字段由「启用 TLS」开关联动，默认关闭时全部隐藏。
+	swIdx, ok := fields["tlsEnabled"]
+	if !ok {
+		t.Fatal("iotdb-v2 表单缺少 tlsEnabled 开关")
+	}
+	sw := form.Rule[swIdx]
+	if sw.Type != "switch" {
+		t.Errorf("tlsEnabled type = %q, want switch", sw.Type)
+	}
+	if sw.Value != false {
+		t.Errorf("tlsEnabled 默认值 = %v, want false", sw.Value)
+	}
+	if len(sw.Control) != 1 {
+		t.Fatalf("tlsEnabled control 条数 = %d, want 1", len(sw.Control))
+	}
+	// 密码框允许切换明文显示（Element Plus el-input 的 show-password）。
+	pwdIdx, ok := fields["password"]
+	if !ok {
+		t.Fatal("iotdb-v2 表单缺少 password 字段")
+	}
+	if got, _ := form.Rule[pwdIdx].Props["type"].(string); got != "password" {
+		t.Errorf("password props.type = %q, want password", got)
+	}
+	if show, _ := form.Rule[pwdIdx].Props["showPassword"].(bool); !show {
+		t.Error("password 应支持切换明文显示（props.showPassword=true）")
+	}
+
+	for _, field := range []string{"tlsCAFile", "tlsCertFile", "tlsKeyFile", "insecureSkipVerify"} {
+		i, ok := fields[field]
+		if !ok {
+			continue
+		}
+		if form.Rule[i].Display == nil || *form.Rule[i].Display {
+			t.Errorf("%s 应默认隐藏（display=false）", field)
+		}
+	}
+
 	for _, lang := range []string{"zh-cn", "en"} {
 		if len(form.Options.Language[lang]) == 0 {
 			t.Errorf("iotdb-v2 表单缺少 %s 文案", lang)
+		}
+		if form.Options.Language[lang]["tlsEnabled_title"] == "" {
+			t.Errorf("iotdb-v2 表单缺少 %s 的 tlsEnabled_title", lang)
+		}
+		if form.Options.Language[lang]["tlsEnabled_info"] == "" {
+			t.Errorf("iotdb-v2 表单缺少 %s 的 tlsEnabled_info", lang)
 		}
 	}
 
