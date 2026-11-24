@@ -326,6 +326,9 @@ func (s *ControlService) Write(ctx context.Context, req *dto.ControlDTO, source,
 			Name:            a.Name,
 			DataType:        a.DataType,
 			Value:           valueByID[a.ID],
+			// 与读路径同一份点位级布局：写下去的值必须按同一个排列约定编码，
+			// 否则同一个点位会「读回来是对的、写下去是错的」。
+			ByteOrderLayout: a.ByteOrderLayout,
 		})
 	}
 

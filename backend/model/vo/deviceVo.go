@@ -61,14 +61,17 @@ type DeviceAddressVO struct {
 	PropertyAccessMode string `json:"propertyAccessMode"`
 	// 采集组绑定（空 = 未分组）。GroupName/GroupIntervalMs/GroupStatus 是展示用冗余字段，
 	// 由服务层按 groupId 批量补全，避免前端为每一行再查一次。
-	GroupID          string `json:"groupId"`
-	GroupName        string `json:"groupName"`
-	GroupIntervalMs  int    `json:"groupIntervalMs"`
-	GroupStatus      int    `json:"groupStatus"`
-	Name             string `json:"name"`
-	Label            string `json:"label"` // 地址 name 的中文说明（如温度、电流）
-	CommonDataType   string `json:"commonDataType"`
-	DataType         string `json:"dataType"`
+	GroupID         string `json:"groupId"`
+	GroupName       string `json:"groupName"`
+	GroupIntervalMs int    `json:"groupIntervalMs"`
+	GroupStatus     int    `json:"groupStatus"`
+	Name            string `json:"name"`
+	Label           string `json:"label"` // 地址 name 的中文说明（如温度、电流）
+	CommonDataType  string `json:"commonDataType"`
+	DataType        string `json:"dataType"`
+	// ByteOrderLayout 点位级字节/字排列布局（空串 = 跟随设备配置）。
+	// 前端直接展示布局名（与编辑框下拉同一份取值）。
+	ByteOrderLayout  string `json:"byteOrderLayout"`
 	RwPermission     string `json:"rwPermission"`
 	ScanFrequency    int    `json:"scanFrequency"`
 	Description      string `json:"description"`

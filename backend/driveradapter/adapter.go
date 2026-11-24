@@ -15,13 +15,15 @@ import (
 )
 
 // FromPO 把一个数据库点位转换成驱动契约里的地址。
-// 只有 ID / Name / DataType 会过进程边界；CommonDataType 仅供宿主侧类型回退使用。
+// ID / Name / DataType / ByteOrderLayout 会过进程边界；
+// CommonDataType 仅供宿主侧类型回退使用。
 func FromPO(a po.DeviceAddress) driver.DeviceAddress {
 	return driver.DeviceAddress{
-		ID:             a.ID,
-		Name:           a.Name,
-		DataType:       a.DataType,
-		CommonDataType: a.CommonDataType,
+		ID:              a.ID,
+		Name:            a.Name,
+		DataType:        a.DataType,
+		ByteOrderLayout: a.ByteOrderLayout,
+		CommonDataType:  a.CommonDataType,
 	}
 }
 

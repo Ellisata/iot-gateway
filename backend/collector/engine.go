@@ -306,6 +306,11 @@ func (e *Engine) loadConfigChecksum() uint64 {
 		io.WriteString(h, "|")
 		// 工程量变换在任务构建期编译、采集侧执行，改它必须重建任务才会生效。
 		io.WriteString(h, a.TransformJSON)
+		io.WriteString(h, "|")
+		// 点位级布局同理：驱动解码用的是**任务构建期**那一份
+		// po.DeviceAddress。不参与校验和的话，只改布局不会触发热加载，
+		// 采集侧会一直按旧布局（通常回落到设备级）解码 —— 表现为"改了没生效"。
+		io.WriteString(h, a.ByteOrderLayout)
 		io.WriteString(h, "\n")
 	}
 

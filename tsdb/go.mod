@@ -3,7 +3,7 @@ module github.com/Ellisata/iot-gateway/tsdb
 go 1.26.0
 
 require (
-	github.com/Ellisata/iot-gateway-sdk v0.5.0
+	github.com/Ellisata/iot-gateway-sdk v0.6.0
 	github.com/apache/iotdb-client-go/v2 v2.0.10
 	github.com/glebarez/sqlite v1.11.0
 	github.com/taosdata/driver-go/v3 v3.8.2

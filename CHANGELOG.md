@@ -6,6 +6,24 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
+## [未发布]
+
+### 新增
+
+- **Modbus 点位级字节序布局**：设备点位新增「字节序布局」配置（`device_address.byte_order`），留空 = 跟随设备 `protocol_json`。可选集合按值宽度：16 位 `ABCD`/`BADC`，32 位 `ABCD`/`CDAB`/`BADC`/`DCBA`，64 位 `ABCDEFGH`/`CDABGHEF`/`BADCFEHG`/`HGFEDCBA`/`GHEFCDAB`，字符串仅 `ABCD`/`BADC`。编辑弹窗仅 Modbus 显示该下拉，切换数据类型会清空失效布局；保存与 Excel 导入按宽度校验。采集、控制下发与点位扫描共用同一布局，布局参与配置校验和，改完热加载生效。导入模板新增第七列「字节序布局」，旧六列文件仍可导入。
+
+### Added
+
+- **Point-level byte order layout for Modbus points**: points gain a byte-order layout setting (`device_address.byte_order`); empty follows the device's `protocol_json`. Available layouts depend on value width: `ABCD`/`BADC` for 16-bit, `ABCD`/`CDAB`/`BADC`/`DCBA` for 32-bit, `ABCDEFGH`/`CDABGHEF`/`BADCFEHG`/`HGFEDCBA`/`GHEFCDAB` for 64-bit, and `ABCD`/`BADC` for strings. The dialog shows the dropdown for Modbus only and clears a layout that the newly selected data type no longer supports; saving and Excel import validate against the width. Collection, control writes and point scan share the same layout, which is part of the config checksum, so changes apply via hot reload. The import template gains a seventh "byte order layout" column; old six-column files still import.
+
+### 变更
+
+- 依赖 SDK **v0.6.0** 与官方驱动 **v0.6.0**：线协议 `APIVersion` 由 4 进位到 5，**全部插件必须与主二进制成对重编**；旧插件在新网关、新插件在旧网关上均会在握手期被拒绝。
+
+### Changed
+
+- Depends on SDK **v0.6.0** and official drivers **v0.6.0**: the wire `APIVersion` moves from 4 to 5, so **all plugins must be rebuilt together** with the main binary; old plugins are rejected at handshake by a new gateway, and vice versa.
+
 ## [0.8.5] - 2026-11-21
 
 ### 新增

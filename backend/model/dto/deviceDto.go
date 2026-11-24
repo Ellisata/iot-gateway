@@ -70,8 +70,12 @@ type CreateDeviceAddressDTO struct {
 	Label          string `json:"label" binding:"required,min=1,max=100"` // 地址 name 的中文说明（如温度、电流）
 	CommonDataType string `json:"commonDataType"`
 	DataType       string `json:"dataType"` // 兼容旧请求，服务端映射后覆盖
-	RwPermission   string `json:"rwPermission" binding:"required,oneof=R W RW"`
-	ScanFrequency  int    `json:"scanFrequency"`
+	// ByteOrderLayout 点位级字节/字排列布局：空串 = 跟随设备配置；非空须是
+	// 当前数据类型宽度对应的布局名（16 位 ABCD/BADC，32 位 ABCD/CDAB/BADC/DCBA，
+	// 64 位 ABCDEFGH/CDABGHEF/BADCFEHG/HGFEDCBA/GHEFCDAB；字符串只有 ABCD/BADC）。
+	ByteOrderLayout string `json:"byteOrderLayout"`
+	RwPermission    string `json:"rwPermission" binding:"required,oneof=R W RW"`
+	ScanFrequency   int    `json:"scanFrequency"`
 	// PropertyID 绑定的物模型属性 id，空串 = 未绑定。
 	// 绑定时校验：属性存在且启用、kind 一致、读写权限覆盖；属性可来自任意模型。
 	PropertyID string `json:"propertyId"`
@@ -95,8 +99,11 @@ type UpdateDeviceAddressDTO struct {
 	Label          string `json:"label" binding:"required,min=1,max=100"` // 地址 name 的中文说明（如温度、电流）
 	CommonDataType string `json:"commonDataType"`
 	DataType       string `json:"dataType"` // 兼容旧请求，服务端映射后覆盖
-	RwPermission   string `json:"rwPermission"`
-	ScanFrequency  int    `json:"scanFrequency"`
+	// ByteOrderLayout 三态：省略 = 不动；空串 = 清空覆写（回到跟随设备）；
+	// 非空 = 覆写。表单始终整份提交，故正常路径不会落到"省略"分支。
+	ByteOrderLayout *string `json:"byteOrderLayout"`
+	RwPermission    string  `json:"rwPermission"`
+	ScanFrequency   int     `json:"scanFrequency"`
 	// PropertyID 三态：省略 = 不改；空串 = 解除绑定；非空 = 绑定到该属性。
 	PropertyID *string `json:"propertyId"`
 	// GroupID 三态：省略 = 不改；空串 = 解绑（回到 scanFrequency）；非空 = 绑到该组。

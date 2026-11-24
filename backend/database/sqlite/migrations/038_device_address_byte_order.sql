@@ -1,0 +1,15 @@
+-- 点位级字节/字排列布局。
+--
+-- 背景：同一台 Modbus 设备上，不同点位可能来自不同厂商的子模块，各自的
+-- 字节/寄存器排列约定并不一致（ABCD / CDAB / BADC / DCBA，64 位还有
+-- ABCDEFGH / CDABGHEF / BADCFEHG / HGFEDCBA / GHEFCDAB）。设备级
+-- protocol_json 只能表达一种，必然错一半。
+--
+-- 存**布局名**而不是两轴：布局名直接写出规范大端字节的排列，并且按值宽度
+-- 解释（16/32/64 位各有自己的一组名字）。两轴模型在 64 位下无法表达
+-- 「寄存器顺序整体反转」等常见约定，且把 32 位的 BADC 套到 8 字节会得到
+-- 没有任何厂商使用的排列 —— 详见驱动 modbusdrv/layout.go。
+--
+-- 空串 = **跟随设备配置**，这是绝大多数点位与全部存量行的取值，行为与本次
+-- 迁移前完全一致。布局由驱动在插件进程内展开成字节排列，主二进制不做解码。
+ALTER TABLE device_address ADD COLUMN byte_order TEXT NOT NULL DEFAULT '';

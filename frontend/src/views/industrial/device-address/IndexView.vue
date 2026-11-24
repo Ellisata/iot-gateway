@@ -253,10 +253,14 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column :label="t('deviceAddress.dataType')" width="130" align="center">
+        <el-table-column :label="t('deviceAddress.dataType')" width="150" align="center">
           <template #default="{ row }">
             <span v-if="row.dataType" class="iot-chip">{{ row.dataType }}</span>
-            <span v-else class="iot-cell-muted">—</span>
+            <!-- 点位级字节序只对 Modbus 有意义；跟随设备时不显示，避免每行都挂着「默认」噪音 -->
+            <el-tooltip v-if="row.byteOrderLayout" :content="t('deviceAddress.byteOrderTooltip')" placement="top">
+              <span class="iot-cell-muted iot-layout-tag">{{ row.byteOrderLayout }}</span>
+            </el-tooltip>
+            <span v-if="!row.dataType" class="iot-cell-muted">—</span>
           </template>
         </el-table-column>
         <el-table-column :label="t('deviceAddress.commonDataType')" width="140" align="center">
@@ -618,6 +622,8 @@ function liveOf(row) {
   return liveValues.value[row.id] || {}
 }
 
+// 点位级布局直接显示后端返回的布局名（空串 = 跟随设备，模板里不渲染）。
+
 // 质量优先于新鲜度：地址错误/通讯失败比「值过期」更能解释为什么没有数
 function livePillClass(live) {
   if (live.quality <= 3) return 'is-rose'
@@ -935,6 +941,14 @@ onBeforeUnmount(() => {
   color: var(--ink-2);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 字节序布局标记：紧跟类型胶囊，弱化但等宽，便于和类型一起扫读 */
+.iot-layout-tag {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
 }
 
 /* 实时值列：表头带一个暂停按钮，让「等一会看变化」和「别一直刷」都能就地做到 */

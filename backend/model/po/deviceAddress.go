@@ -22,7 +22,12 @@ type DeviceAddress struct {
 	Label          string `gorm:"column:label;not null" json:"label"`                     // 地址 name 的中文说明（如温度、电流）
 	CommonDataType string `gorm:"column:common_data_type;not null" json:"commonDataType"` // 通用数据类型名（配置界面展示）
 	DataType       string `gorm:"column:data_type;not null" json:"dataType"`              // 对应协议的内部数据类型名（驱动解码用）
-	RwPermission   string `gorm:"column:rw_permission;not null" json:"rwPermission"`
+	// ByteOrderLayout 点位级字节/字排列布局（如 ABCD / CDAB / BADC / DCBA；
+	// 64 位为 ABCDEFGH / CDABGHEF / …）。空串 = 跟随设备的 protocol_json 配置
+	// （存量行与绝大多数点位），非空时优先生效。布局按值宽度解释，由驱动展开成
+	// 字节排列；读、写、点扫共用同一份规则。见 modbusdrv/layout.go。
+	ByteOrderLayout string `gorm:"column:byte_order;not null;default:''" json:"byteOrderLayout"`
+	RwPermission    string `gorm:"column:rw_permission;not null" json:"rwPermission"`
 	// 报警条件：开关 + 比较符 + 操作数。比较符按数据类型取（矩阵见 driver/thresholdOp.go）；
 	// ThresholdValue 是操作数的 JSON 数组字符串（如 ["10","40"]、["FAULT"]、["A","B"]）。
 	ThresholdEnabled int    `gorm:"column:threshold_enabled;not null;default:0" json:"thresholdEnabled"`

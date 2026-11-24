@@ -112,6 +112,13 @@ func (s *DeviceAddressService) CreateDeviceAddress(ctx context.Context, req *dto
 		return err
 	}
 
+	// 点位级布局：空串表示跟随设备配置，非空按**值宽度**校验（16/32/64 位各有
+	// 自己的一组布局名，字符串只支持寄存器内字节交换）。
+	byteOrderLayout, err := s.normalizeAddressLayout(req.ByteOrderLayout, protocolName, internal)
+	if err != nil {
+		return err
+	}
+
 	now := time.Now().Format("2006-01-02 15:04:05")
 	addr := &po.DeviceAddress{
 		DeviceID:         req.DeviceID,
@@ -119,6 +126,7 @@ func (s *DeviceAddressService) CreateDeviceAddress(ctx context.Context, req *dto
 		Label:            req.Label,
 		CommonDataType:   common,
 		DataType:         internal,
+		ByteOrderLayout:  byteOrderLayout,
 		RwPermission:     req.RwPermission,
 		PropertyID:       strings.TrimSpace(req.PropertyID),
 		GroupID:          groupID,
@@ -140,6 +148,105 @@ func (s *DeviceAddressService) CreateDeviceAddress(ctx context.Context, req *dto
 		return err
 	}
 	return nil
+}
+
+// addressLayoutsBySize 各值宽度支持的布局名，与驱动 modbusdrv/layout.go 的排列
+// 表一一对应。size 0 代表 string（动态长度，只支持寄存器内字节交换）。
+//
+// **按宽度分组是刻意的**：把 32 位的 BADC 套到 8 字节会得到 FEHGBADC 这种
+// 没有任何厂商使用的排列，而 64 位最常见的「寄存器顺序整体反转」（GHEFCDAB）
+// 在两轴模型下根本表达不出来。布局名写清楚排列本身，宽度决定可选集合。
+var addressLayoutsBySize = map[int][]string{
+	0: {DriverLayoutABCD, DriverLayoutBADC}, // string
+	2: {DriverLayoutABCD, DriverLayoutBADC},
+	4: {DriverLayoutABCD, DriverLayoutCDAB, DriverLayoutBADC, DriverLayoutDCBA},
+	8: {
+		DriverLayoutABCDEFGH, DriverLayoutCDABGHEF, DriverLayoutBADCFEHG,
+		DriverLayoutHGFEDCBA, DriverLayoutGHEFCDAB,
+	},
+}
+
+// 布局名的唯一真源在驱动侧；后端只做校验与展示，因此这里只保留字符串常量。
+// 改布局集合必须同时改 modbusdrv/layout.go 与前端下拉。
+const (
+	DriverLayoutABCD     = "ABCD"
+	DriverLayoutCDAB     = "CDAB"
+	DriverLayoutBADC     = "BADC"
+	DriverLayoutDCBA     = "DCBA"
+	DriverLayoutABCDEFGH = "ABCDEFGH"
+	DriverLayoutCDABGHEF = "CDABGHEF"
+	DriverLayoutBADCFEHG = "BADCFEHG"
+	DriverLayoutHGFEDCBA = "HGFEDCBA"
+	DriverLayoutGHEFCDAB = "GHEFCDAB"
+)
+
+// addressLayoutOptions 导入模板下拉的布局全集（按宽度顺序排列，便于阅读）。
+var addressLayoutOptions = []string{
+	DriverLayoutABCD, DriverLayoutBADC,
+	DriverLayoutCDAB, DriverLayoutDCBA,
+	DriverLayoutABCDEFGH, DriverLayoutCDABGHEF, DriverLayoutBADCFEHG,
+	DriverLayoutHGFEDCBA, DriverLayoutGHEFCDAB,
+}
+
+// addressTypeSize 返回协议内部类型的字节宽度。0 = string（动态长度），
+// -1 = 类型未注册（调用方已 resolveDataType 成功时不应出现）。
+func addressTypeSize(protocolName, internalType string) int {
+	dt, ok := driver.GetTypeRegistry().ForProtocol(driver.ScopeOf(protocolName)).Get(internalType)
+	if !ok {
+		return -1
+	}
+	return dt.Size
+}
+
+// addressSizeLabel 把宽度转成用户能看懂的说法（错误文案用）。
+func addressSizeLabel(size int) string {
+	switch size {
+	case 0:
+		return "字符串"
+	case 2:
+		return "16 位"
+	case 4:
+		return "32 位"
+	case 8:
+		return "64 位"
+	case -1:
+		return "未知类型"
+	default:
+		return fmt.Sprintf("%d 字节", size)
+	}
+}
+
+// resolveAddressLayout 归一布局名并按宽度校验。返回空串表示跟随设备配置。
+// 失败时 reason 非空，直接面向用户（保存接口报错与导入行内原因共用）。
+//
+// **必须在保存时拒绝不匹配的取值**：驱动对不适用的布局会报解析失败，若放过去，
+// 症状是「点位能采、值却错了」或整点质量码变坏，现场几乎无法从数据本身看出问题。
+func resolveAddressLayout(raw string, size int) (layout, reason string) {
+	v := strings.ToUpper(strings.TrimSpace(raw))
+	switch v {
+	case "", "跟随设备", "DEVICE", "DEFAULT":
+		return "", ""
+	}
+	allowed, ok := addressLayoutsBySize[size]
+	if !ok {
+		return "", fmt.Sprintf("当前数据类型（%s）不支持布局配置，请留空跟随设备配置", addressSizeLabel(size))
+	}
+	for _, l := range allowed {
+		if v == l {
+			return v, ""
+		}
+	}
+	return "", fmt.Sprintf("布局 %s 不适用于该数据类型（%s），可选：%s",
+		v, addressSizeLabel(size), strings.Join(allowed, " / "))
+}
+
+// normalizeAddressLayout 服务层包装：把 resolveAddressLayout 的 reason 转成业务错误。
+func (s *DeviceAddressService) normalizeAddressLayout(raw, protocolName, internalType string) (string, error) {
+	layout, reason := resolveAddressLayout(raw, addressTypeSize(protocolName, internalType))
+	if reason != "" {
+		return "", appError.NewAppErrorCtx(enums.ParamValidEnum.GetCode(), reason, enums.ParamValidEnum.GetMsgKey())
+	}
+	return layout, nil
 }
 
 // thresholdFields 把请求里的条件配置解成 (启用, 算子, 操作数)；Threshold 为 nil 时取零值。
@@ -531,6 +638,20 @@ func (s *DeviceAddressService) UpdateDeviceAddress(ctx context.Context, req *dto
 		effectiveRW = req.RwPermission
 	}
 
+	// 点位级布局三态：省略 = 不动；空串 = 清空覆写（回到跟随设备）；非空 = 覆写。
+	// 表单始终整份提交，所以正常路径上指针不会是 nil。
+	if req.ByteOrderLayout != nil {
+		if err := loadDevice(); err != nil {
+			return err
+		}
+		v, err := s.normalizeAddressLayout(*req.ByteOrderLayout,
+			s.getProtocolName(ctx, device.ProtocolID), effectiveInternal)
+		if err != nil {
+			return err
+		}
+		updates["byte_order"] = v
+	}
+
 	// 物模型属性绑定是三态的：省略 = 不动，空串 = 解绑，非空 = 绑定。
 	// 绑定或改变了类型/读写权限时，按更新后的生效值重新校验既有绑定。
 	typeOrRWChanged := req.CommonDataType != "" || req.DataType != "" || req.RwPermission != ""
@@ -892,6 +1013,7 @@ func addressVO(a po.DeviceAddress) vo.DeviceAddressVO {
 		Label:            a.Label,
 		CommonDataType:   a.CommonDataType,
 		DataType:         a.DataType,
+		ByteOrderLayout:  a.ByteOrderLayout,
 		RwPermission:     a.RwPermission,
 		GroupID:          a.GroupID,
 		ScanFrequency:    a.ScanFrequency,
@@ -1106,7 +1228,9 @@ func deviceAddressTypeCodes(protocolName string) []string {
 }
 
 // ImportDeviceAddresses 从 Excel(.xlsx) 批量导入指定设备下的地址点位。
-// 模板六列：名称 / 标签 / 通用数据类型 / 读写权限 / 扫描频率 / 描述。
+// 模板七列：名称 / 标签 / 通用数据类型 / 读写权限 / 扫描频率 / 描述 / 字节序布局。
+// 前六列是历史模板的完整表头，**保持前缀校验**，因此旧的六列文件仍可直接导入；
+// 第七列「字节序布局」省略时按跟随设备处理。
 // 按当前设备的协议将通用数据类型映射为协议内部类型；字段不合法或协议不支持该类型时跳过该行，
 // 名称重复（库内或文件内）跳过该行；其余行部分导入并返回汇总，供前端展示失败明细。
 func (s *DeviceAddressService) ImportDeviceAddresses(ctx context.Context, deviceID string, data []byte) (*vo.ExcelImportResultVO, error) {
@@ -1129,9 +1253,10 @@ func (s *DeviceAddressService) ImportDeviceAddresses(ctx context.Context, device
 
 	now := time.Now().Format("2006-01-02 15:04:05")
 	return excelutil.Import(ctx, s.sqliteDB, data, excelutil.Options[po.DeviceAddress]{
+		// 表头只校验前 6 列：新模板多了第七列「字节序布局」，但旧文件必须继续可导入。
 		Headers:      []string{"名称", "标签", "通用数据类型", "读写权限", "扫描频率", "描述"},
 		ExistingKeys: names,
-		Cols:         6,
+		Cols:         7,
 		DupMsg:       enums.DeviceAddressExistsEnum.GetMessage(),
 		Parse: func(row []string) (*po.DeviceAddress, string, string) {
 			name := excelutil.Cell(row, 0)
@@ -1140,6 +1265,7 @@ func (s *DeviceAddressService) ImportDeviceAddresses(ctx context.Context, device
 			rwRaw := excelutil.Cell(row, 3)
 			scanFreq := excelutil.Cell(row, 4)
 			desc := excelutil.Cell(row, 5)
+			layoutRaw := excelutil.Cell(row, 6) // 第七列可省略（旧模板）：空串 = 跟随设备
 			reason, frequency := validateAddressImportRow(name, label, commonTypeRaw, rwRaw, scanFreq)
 			if reason != "" {
 				return nil, name, reason
@@ -1163,18 +1289,24 @@ func (s *DeviceAddressService) ImportDeviceAddresses(ctx context.Context, device
 			if !ok {
 				return nil, name, fmt.Sprintf("协议不支持该数据类型：%s", commonType)
 			}
+			// 布局必须在类型解析之后校验：可选集合由值宽度决定。
+			layout, layoutReason := resolveAddressLayout(layoutRaw, addressTypeSize(protocolName, internal))
+			if layoutReason != "" {
+				return nil, name, layoutReason
+			}
 			return &po.DeviceAddress{
-				DeviceID:       deviceID,
-				Name:           name,
-				Label:          label,
-				CommonDataType: commonType,
-				DataType:       internal,
-				RwPermission:   rwPermission,
-				ScanFrequency:  frequency,
-				Description:    desc,
-				Status:         1,
-				CreatedAt:      now,
-				UpdatedAt:      now,
+				DeviceID:        deviceID,
+				Name:            name,
+				Label:           label,
+				CommonDataType:  commonType,
+				DataType:        internal,
+				ByteOrderLayout: layout,
+				RwPermission:    rwPermission,
+				ScanFrequency:   frequency,
+				Description:     desc,
+				Status:          1,
+				CreatedAt:       now,
+				UpdatedAt:       now,
 			}, name, ""
 		},
 	})
@@ -1216,7 +1348,8 @@ func validateAddressImportRow(name, label, commonType, rwPermission, scanFreq st
 }
 
 // GenerateDeviceAddressImportTemplate 生成设备地址导入模板（.xlsx）：
-// 表头「名称/标签/通用数据类型/读写权限/扫描频率/描述」+ 示例行 + 冻结首行。
+// 表头「名称/标签/通用数据类型/读写权限/扫描频率/描述/字节序布局」+ 示例行 + 冻结首行。
+// 「字节序布局」是固定五选一（跟随设备/ABCD/CDAB/BADC/DCBA），省略按跟随设备处理。
 //
 // deviceID 非空时按该设备的协议给出数据类型下拉（common + 扩展类型），
 // 否则回退到通用类型清单并允许手工填写扩展类型。
@@ -1242,9 +1375,9 @@ func (s *DeviceAddressService) GenerateDeviceAddressImportTemplate(ctx context.C
 	}
 
 	return excelutil.BuildTemplateWithLists(
-		[]string{"名称", "标签", "通用数据类型", "读写权限", "扫描频率", "描述"},
-		[]string{"D0", "车间温度", "单精度浮点（Float）", "只读（R）", "1000（1 秒，默认）", "示例数据，可删除或覆盖"},
-		[]float64{24, 24, 22, 16, 18, 36},
+		[]string{"名称", "标签", "通用数据类型", "读写权限", "扫描频率", "描述", "字节序布局"},
+		[]string{"D0", "车间温度", "单精度浮点（Float）", "只读（R）", "1000（1 秒，默认）", "示例数据，可删除或覆盖", "跟随设备"},
+		[]float64{24, 24, 22, 16, 18, 36, 16},
 		[]excelutil.ListValidation{
 			{
 				Col:         2,
@@ -1262,6 +1395,11 @@ func (s *DeviceAddressService) GenerateDeviceAddressImportTemplate(ctx context.C
 				Options:     deviceAddressScanFrequencyOptions,
 				Prompt:      "请选择常用扫描频率（毫秒），也可直接输入正整数",
 				AllowCustom: true,
+			},
+			{
+				Col:     6,
+				Options: append([]string{"跟随设备"}, addressLayoutOptions...),
+				Prompt:  "排列布局按数据类型的值宽度选择：16 位 ABCD/BADC，32 位 ABCD/CDAB/BADC/DCBA，64 位为带 8 个字母的名字。不确定时保持「跟随设备」",
 			},
 		},
 	)

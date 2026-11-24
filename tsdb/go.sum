@@ -1,5 +1,5 @@
-github.com/Ellisata/iot-gateway-sdk v0.5.0 h1:KgSaUzGPB8j9arOAdWA5j1ixpp2vgKzJ5FQG0fsqkGo=
-github.com/Ellisata/iot-gateway-sdk v0.5.0/go.mod h1:2iq2mDm5UCI6/UFWgZYOQPxVsJdqCYG1nUnLc95PMh4=
+github.com/Ellisata/iot-gateway-sdk v0.6.0 h1:pb6vQQDhgWJZ+tbL0INGXvXVhIhx9KWQpKE/Pm3dKcI=
+github.com/Ellisata/iot-gateway-sdk v0.6.0/go.mod h1:2iq2mDm5UCI6/UFWgZYOQPxVsJdqCYG1nUnLc95PMh4=
 github.com/apache/iotdb-client-go/v2 v2.0.10 h1:SC3ZFENEGfcbXl5hGBfLizk/s8Ba4r3/mNb0o4IH5PY=
 github.com/apache/iotdb-client-go/v2 v2.0.10/go.mod h1:Ef61z8w2tRnuAcQKESFfiH03kDvfQniVPUgOXCxWnNw=
 github.com/apache/thrift v0.24.0 h1:zy31L1a49QTNB2bG1BBfMXol3yJrTH975G3pPubQVLQ=

@@ -175,7 +175,12 @@ func (d *remoteDriver) Read(addrs []driver.DeviceAddress) ([]driver.ReadResult, 
 
 	wa := make([]driversdk.WireAddr, len(addrs))
 	for i, a := range addrs {
-		wa[i] = driversdk.WireAddr{ID: a.ID, Name: a.Name, DataType: a.DataType}
+		wa[i] = driversdk.WireAddr{
+			ID:              a.ID,
+			Name:            a.Name,
+			DataType:        a.DataType,
+			ByteOrderLayout: a.ByteOrderLayout,
+		}
 	}
 
 	var reply driversdk.ReadReply

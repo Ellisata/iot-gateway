@@ -199,6 +199,58 @@
               </el-select>
             </el-form-item>
 
+            <!-- 扫描频率是必填项，与其它必填字段（地址/标签/类型/权限）同区，保证它在
+                 打开表单的第一屏就可见。与采集组的互斥关系仍由下方的置灰状态和说明交代：
+                 绑组后周期由组决定，这里不生效。
+                 必填星号由 rules 的 required 键或本组件的 required 属性驱动；校验是条件式的
+                 （绑了组就不填），所以不能给规则加静态 required，否则组内也会显示星号。 -->
+            <el-form-item
+              :label="t('deviceAddress.scanFrequency')"
+              prop="scanFrequency"
+              :required="!formData.groupId"
+              class="dp-span-2"
+            >
+              <el-select
+                v-model="formData.scanFrequency"
+                :placeholder="t('deviceAddress.scanPlaceholder')"
+                :disabled="!!formData.groupId"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in scanFrequencyOptions"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
+              <div class="dp-field-hint is-block">{{ t('deviceAddress.scanFrequencyInlineHint') }}</div>
+            </el-form-item>
+
+            <!-- 字节序布局：仅 Modbus 需要（同一设备上不同点位可能来自不同厂商子模块，
+                 排列约定不一致）。留空 = 跟随设备的 protocol_json 配置，这是默认。
+                 可选集合随数据类型宽度变化：16/32/64 位各一组布局名，位与 8 位类型不显示。 -->
+            <el-form-item
+              v-if="isModbus && byteOrderLayoutOptions.length"
+              :label="t('deviceAddress.byteOrderLayout')"
+              prop="byteOrderLayout"
+              class="dp-span-2"
+            >
+              <el-select
+                v-model="formData.byteOrderLayout"
+                :placeholder="t('deviceAddress.byteOrderFollowDevice')"
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in byteOrderLayoutOptions"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
+              <div class="dp-field-hint is-block">{{ t('deviceAddress.byteOrderHint') }}</div>
+            </el-form-item>
+
             <el-form-item :label="t('common.description')" prop="description" class="dp-span-2">
               <el-input
                 v-model="formData.description"
@@ -270,22 +322,6 @@
               </div>
             </el-form-item>
 
-            <el-form-item :label="t('deviceAddress.scanFrequency')" prop="scanFrequency">
-              <el-select
-                v-model="formData.scanFrequency"
-                :placeholder="t('deviceAddress.scanPlaceholder')"
-                :disabled="!!formData.groupId"
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in scanFrequencyOptions"
-                  :key="item.value"
-                  :label="item.label"
-                  :value="item.value"
-                />
-              </el-select>
-              <div class="dp-field-hint is-block">{{ t('deviceAddress.scanFrequencyInlineHint') }}</div>
-            </el-form-item>
           </div>
         </div>
       </section>
@@ -555,6 +591,60 @@ const rwPermissionOptions = computed(() => [
   { value: 'RW', label: t('deviceAddress.readwriteShort') },
 ])
 
+// ---------- 字节序布局（仅 Modbus） ----------
+// 同设备不同点位可能来自不同厂商子模块，字节/寄存器排列约定不一致。库与驱动直接
+// 存**布局名**（ABCD/CDAB/…），可选集合由当前数据类型的**值宽度**决定：
+// 16 位只有字节交换，32 位四种经典排列，64 位用带 8 个字母的名字 —— 后者能表达
+// 「寄存器顺序整体反转」（GHEFCDAB）等两轴模型做不到的约定。空串 = 跟随设备配置。
+const isModbus = computed(() => /^modbus/i.test(props.protocolName || ''))
+
+// 类型名（小写后）→ 值宽度分类。Modbus 插件的类型表固定，这里覆盖它会下发的
+// 通用名、扩展名（Int/Real）与历史数据里可能残留的内部名（float32 等）。
+// 未收录的类型回退到「全部布局」，由后端按宽度兜底拒绝。
+const LAYOUT_BY_TYPE = {
+  boolean: 'bit', bool: 'bit',
+  byte: 'small', char: 'small', int8: 'small', uint8: 'small',
+  short: '16', word: '16', bcd: '16', int16: '16', uint16: '16',
+  long: '32', dword: '32', float: '32', real: '32', int: '32',
+  date: '32', lbcd: '32', int32: '32', uint32: '32', float32: '32',
+  double: '64', float64: '64',
+  string: 'string',
+}
+
+const LAYOUTS_BY_WIDTH = {
+  bit: [],
+  small: [],
+  '16': ['ABCD', 'BADC'],
+  '32': ['ABCD', 'CDAB', 'BADC', 'DCBA'],
+  '64': ['ABCDEFGH', 'CDABGHEF', 'BADCFEHG', 'HGFEDCBA', 'GHEFCDAB'],
+  string: ['ABCD', 'BADC'],
+}
+
+const LAYOUT_LABEL_KEYS = {
+  ABCD: 'deviceAddress.layoutABCD',
+  CDAB: 'deviceAddress.layoutCDAB',
+  BADC: 'deviceAddress.layoutBADC',
+  DCBA: 'deviceAddress.layoutDCBA',
+  ABCDEFGH: 'deviceAddress.layoutABCDEFGH',
+  CDABGHEF: 'deviceAddress.layoutCDABGHEF',
+  BADCFEHG: 'deviceAddress.layoutBADCFEHG',
+  HGFEDCBA: 'deviceAddress.layoutHGFEDCBA',
+  GHEFCDAB: 'deviceAddress.layoutGHEFCDAB',
+}
+
+const layoutWidth = computed(
+  () => LAYOUT_BY_TYPE[String(formData.dataType || '').toLowerCase()] || 'all',
+)
+
+const byteOrderLayoutOptions = computed(() => {
+  const width = layoutWidth.value
+  const codes =
+    width === 'all'
+      ? [...new Set([...LAYOUTS_BY_WIDTH['16'], ...LAYOUTS_BY_WIDTH['32'], ...LAYOUTS_BY_WIDTH['64']])]
+      : LAYOUTS_BY_WIDTH[width] || []
+  return codes.map((code) => ({ value: code, label: t(LAYOUT_LABEL_KEYS[code]) }))
+})
+
 // 扫描频率下拉与「自动发现点位」弹窗共用一份（composables/useScanFrequencyOptions.js）：
 // 两处写的是同一个 device_address.scan_frequency，选项必须一致
 const scanFrequencyOptions = useScanFrequencyOptions()
@@ -622,6 +712,8 @@ const formData = reactive({
   label: '',
   dataType: '',
   rwPermission: '',
+  // 字节序布局：'' = 跟随设备；非空是布局名（ABCD/CDAB/…，64 位为 8 字母名字）。
+  byteOrderLayout: '',
   propertyId: '',
   groupId: '',
   scanFrequency: null,
@@ -694,6 +786,7 @@ async function loadAddress(id) {
     formData.label = row.label ?? ''
     formData.dataType = row.commonDataType ?? ''
     formData.rwPermission = row.rwPermission ?? ''
+    formData.byteOrderLayout = row.byteOrderLayout ?? ''
     formData.propertyId = row.propertyId ?? ''
     formData.groupId = row.groupId ?? ''
     formData.scanFrequency = row.scanFrequency ?? null
@@ -726,6 +819,7 @@ function resetFormData() {
   formData.label = ''
   formData.dataType = ''
   formData.rwPermission = ''
+  formData.byteOrderLayout = ''
   formData.propertyId = ''
   formData.groupId = ''
   formData.scanFrequency = null
@@ -843,6 +937,14 @@ function operatorLabel(op) {
 function onDataTypeChange() {
   formData.thresholdOp = ''
   formData.thresholdValues = []
+  // 值宽度变了，旧布局可能不再适用（如 Float → Double，ABCD 在 64 位下不合法）。
+  // 保留会让保存被后端拒绝，且用户看不出是这个字段的问题。
+  if (
+    formData.byteOrderLayout &&
+    !byteOrderLayoutOptions.value.some((item) => item.value === formData.byteOrderLayout)
+  ) {
+    formData.byteOrderLayout = ''
+  }
 }
 
 // 换算子时按新算子应有的形状整理操作数。这里是**保值**的：
@@ -919,6 +1021,9 @@ async function handleSubmit() {
       name: formData.name.trim(),
       label: formData.label.trim(),
       commonDataType: formData.dataType,
+      // 始终整份提交（空串 = 跟随设备）。编辑接口按「字段是否省略」三态处理，
+      // 所以清空布局时必须显式传空串，而不是省略字段。
+      byteOrderLayout: formData.byteOrderLayout || '',
       rwPermission: formData.rwPermission,
       propertyId: formData.propertyId || '',
       groupId: formData.groupId || '',
