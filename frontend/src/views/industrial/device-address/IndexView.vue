@@ -5,18 +5,24 @@
 
 <template>
   <div class="iot-page">
+    <!-- 页头两排：返回链接与分类标签同排，标题与说明同排；右侧常驻点位数。
+         说明文案是长句，与标题同行放不下时整段落到标题下方。 -->
     <header class="iot-head iot-enter">
-      <div>
-        <button type="button" class="iot-back" @click="goBack">
-          <el-icon><ArrowLeft /></el-icon>
-          {{ t('deviceAddress.backToList') }}
-        </button>
-        <p class="iot-eyebrow">
-          <span class="iot-eyebrow-dot" aria-hidden="true" />
-          {{ t('menu.deviceAddress') }}
-        </p>
-        <h1 class="iot-title">{{ t('deviceAddress.title') }} — {{ deviceObjectName }}</h1>
-        <p class="iot-sub">{{ t('deviceAddress.subtitle') }}</p>
+      <div class="iot-head-main">
+        <div class="iot-head-top">
+          <button type="button" class="iot-back" @click="goBack">
+            <el-icon><ArrowLeft /></el-icon>
+            {{ t('deviceAddress.backToList') }}
+          </button>
+          <p class="iot-eyebrow">
+            <span class="iot-eyebrow-dot" aria-hidden="true" />
+            {{ t('menu.deviceAddress') }}
+          </p>
+        </div>
+        <div class="iot-title-row">
+          <h1 class="iot-title">{{ t('deviceAddress.title') }} — {{ deviceObjectName }}</h1>
+          <span class="iot-head-sub">{{ t('deviceAddress.subtitle') }}</span>
+        </div>
       </div>
       <div class="iot-head-aside">
         <div class="iot-stat">

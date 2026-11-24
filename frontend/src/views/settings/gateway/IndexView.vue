@@ -6,13 +6,17 @@
 <template>
   <div class="iot-page">
     <header class="iot-head iot-enter">
-      <div>
-        <p class="iot-eyebrow">
-          <span class="iot-eyebrow-dot" aria-hidden="true" />
-          {{ t('menu.systemSettings') }}
-        </p>
-        <h1 class="iot-title">{{ t('menu.gatewaySettings') }}</h1>
-        <p class="iot-sub">{{ t('systemSettings.subtitle') }}</p>
+      <div class="iot-head-main">
+        <div class="iot-head-top">
+          <p class="iot-eyebrow">
+            <span class="iot-eyebrow-dot" aria-hidden="true" />
+            {{ t('menu.systemSettings') }}
+          </p>
+        </div>
+        <div class="iot-title-row">
+          <h1 class="iot-title">{{ t('menu.gatewaySettings') }}</h1>
+          <span class="iot-head-sub">{{ t('systemSettings.subtitle') }}</span>
+        </div>
       </div>
       <!-- 版本是这一页最常被核对的一项，放到页头右侧常驻 -->
       <div class="iot-head-aside">

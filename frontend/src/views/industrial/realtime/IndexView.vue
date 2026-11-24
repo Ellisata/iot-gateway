@@ -5,21 +5,26 @@
 
 <template>
   <div class="iot-page">
+    <!-- 页头两排：返回链接与分类标签同排，标题与说明同排。
+         协议不在这里重复 —— 下方状态格栅已有一项「协议」。 -->
     <header class="iot-head iot-enter">
-      <div>
-        <!-- 返回入口放在标题块里，与设备对象页的层级一致，不再单独占一条面包屑 -->
-        <button type="button" class="iot-back" @click="goBack">
-          <el-icon><ArrowLeft /></el-icon>
-          {{ t('realtime.backToList') }}
-        </button>
-        <p class="iot-eyebrow">
-          <span class="iot-eyebrow-dot" aria-hidden="true" />
-          {{ t('menu.realtime') }}
-        </p>
-        <h1 class="iot-title">
-          {{ t('realtime.title') }} — {{ snapshot?.deviceName || deviceObjectName || '—' }}
-        </h1>
-        <p class="iot-sub">{{ t('realtime.subtitle') }}</p>
+      <div class="iot-head-main">
+        <div class="iot-head-top">
+          <button type="button" class="iot-back" @click="goBack">
+            <el-icon><ArrowLeft /></el-icon>
+            {{ t('realtime.backToList') }}
+          </button>
+          <p class="iot-eyebrow">
+            <span class="iot-eyebrow-dot" aria-hidden="true" />
+            {{ t('menu.realtime') }}
+          </p>
+        </div>
+        <div class="iot-title-row">
+          <h1 class="iot-title">
+            {{ t('realtime.title') }} — {{ snapshot?.deviceName || deviceObjectName || '—' }}
+          </h1>
+          <span class="iot-head-sub">{{ t('realtime.subtitle') }}</span>
+        </div>
       </div>
       <div class="iot-head-aside">
         <div class="iot-stat">

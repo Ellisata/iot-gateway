@@ -8,13 +8,17 @@
     <!-- 页头：与设备对象页同一套字号/留白层级；右侧常驻「本次发现」计数，
          扫到一台就跳一下，不用视线下移去某张卡片里找数字。 -->
     <header class="page-head enter">
-      <div>
-        <p class="eyebrow">
-          <span class="eyebrow-dot" aria-hidden="true" />
-          {{ t('menu.industrial') }}
-        </p>
-        <h1 class="page-title">{{ t('menu.deviceScan') }}</h1>
-        <p class="page-sub">{{ t('deviceScan.intro') }}</p>
+      <div class="page-head-main">
+        <div class="page-head-top">
+          <p class="eyebrow">
+            <span class="eyebrow-dot" aria-hidden="true" />
+            {{ t('menu.industrial') }}
+          </p>
+        </div>
+        <div class="page-title-row">
+          <h1 class="page-title">{{ t('menu.deviceScan') }}</h1>
+          <span class="page-head-sub">{{ t('deviceScan.intro') }}</span>
+        </div>
       </div>
       <div class="page-stat" :class="{ 'is-idle': !job }">
         <span class="page-stat-mark" aria-hidden="true">
@@ -1282,6 +1286,30 @@ async function copyJson(text) {
   font-size: 12.5px;
   line-height: 1.6;
   color: var(--ink-3);
+}
+
+.page-head-main {
+  min-width: 0;
+}
+.page-head-top {
+  margin-bottom: 8px;
+}
+/* 分类标签原本自带下边距，改由 .page-head-top 统一控制 */
+.page-head-top .eyebrow {
+  margin: 0;
+}
+.page-title-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.page-head-sub {
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.6;
+  color: var(--ink-3);
+  letter-spacing: normal;
 }
 
 /* 右侧发现计数：不再是一个飘在页头基线上的数字，而是一枚与面板同族的

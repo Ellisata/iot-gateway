@@ -6,14 +6,18 @@
 <template>
   <div class="iot-page">
     <header class="iot-head iot-enter">
-      <div>
-        <p class="iot-eyebrow">
-          <span class="iot-eyebrow-dot" aria-hidden="true" />
-          {{ t('menu.alarm') }}
-        </p>
-        <h1 class="iot-title">{{ t('thresholdRecord.title') }}</h1>
-        <!-- 常驻说明：本表与「超限报警」不是一回事，用户很容易以为报警页漏了记录 -->
-        <p class="iot-sub">{{ t('thresholdRecord.hint') }}</p>
+      <div class="iot-head-main">
+        <div class="iot-head-top">
+          <p class="iot-eyebrow">
+            <span class="iot-eyebrow-dot" aria-hidden="true" />
+            {{ t('menu.alarm') }}
+          </p>
+        </div>
+        <div class="iot-title-row">
+          <h1 class="iot-title">{{ t('thresholdRecord.title') }}</h1>
+          <!-- 常驻说明：本表与「超限报警」不是一回事，用户很容易以为报警页漏了记录 -->
+          <span class="iot-head-sub">{{ t('thresholdRecord.hint') }}</span>
+        </div>
       </div>
       <div class="iot-head-aside">
         <div class="iot-stat">

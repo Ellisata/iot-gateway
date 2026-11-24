@@ -6,18 +6,22 @@
 <template>
   <div class="iot-page">
     <header class="iot-head iot-enter">
-      <div>
-        <p class="iot-eyebrow">
-          <span class="iot-eyebrow-dot" aria-hidden="true" />
-          {{ t('menu.alarm') }}
-        </p>
-        <h1 class="iot-title">{{ t('reliability.title') }}</h1>
-        <!-- 常驻说明：这一页的两个榜单都**只覆盖出过问题的对象**，不写清楚会被读成全量清单 -->
-        <p class="iot-sub">
-          {{ t('reliability.hint') }}
-          <!-- 括号随语言走（中文全角 / 英文半角），不写死在模板里 -->
-          <span v-if="gatewayName">{{ t('reliability.gatewaySuffix', { name: gatewayName }) }}</span>
-        </p>
+      <div class="iot-head-main">
+        <div class="iot-head-top">
+          <p class="iot-eyebrow">
+            <span class="iot-eyebrow-dot" aria-hidden="true" />
+            {{ t('menu.alarm') }}
+          </p>
+        </div>
+        <div class="iot-title-row">
+          <h1 class="iot-title">{{ t('reliability.title') }}</h1>
+          <!-- 常驻说明：这一页的两个榜单都**只覆盖出过问题的对象**，不写清楚会被读成全量清单 -->
+          <span class="iot-head-sub">
+            {{ t('reliability.hint') }}
+            <!-- 括号随语言走（中文全角 / 英文半角），不写死在模板里 -->
+            <span v-if="gatewayName">{{ t('reliability.gatewaySuffix', { name: gatewayName }) }}</span>
+          </span>
+        </div>
       </div>
     </header>
 

@@ -9,20 +9,26 @@
 -->
 <template>
   <div class="iot-page">
+    <!-- 页头两排：返回链接与分类标签同排，标题与说明同排；右侧常驻协议与组数 -->
     <header class="iot-head iot-enter">
-      <div>
-        <button type="button" class="iot-back" @click="goBack">
-          <el-icon><ArrowLeft /></el-icon>
-          {{ t('collectorGroup.backToList') }}
-        </button>
-        <p class="iot-eyebrow">
-          <span class="iot-eyebrow-dot" aria-hidden="true" />
-          {{ t('menu.collectorGroup') }}
-        </p>
-        <h1 class="iot-title">{{ t('collectorGroup.title') }} — {{ deviceObjectName }}</h1>
-        <p class="iot-sub">{{ t('collectorGroup.subtitle') }}</p>
+      <div class="iot-head-main">
+        <div class="iot-head-top">
+          <button type="button" class="iot-back" @click="goBack">
+            <el-icon><ArrowLeft /></el-icon>
+            {{ t('collectorGroup.backToList') }}
+          </button>
+          <p class="iot-eyebrow">
+            <span class="iot-eyebrow-dot" aria-hidden="true" />
+            {{ t('menu.collectorGroup') }}
+          </p>
+        </div>
+        <div class="iot-title-row">
+          <h1 class="iot-title">{{ t('collectorGroup.title') }} — {{ deviceObjectName }}</h1>
+          <span class="iot-head-sub">{{ t('collectorGroup.subtitle') }}</span>
+        </div>
       </div>
       <div class="iot-head-aside">
+        <span v-if="protocolName" class="iot-chip">{{ protocolName }}</span>
         <div class="iot-stat">
           <span class="iot-stat-num">{{ total }}</span>
           <span class="iot-stat-label">{{ t('collectorGroup.totalUnit') }}</span>

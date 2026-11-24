@@ -107,6 +107,41 @@
   color: var(--ink-3);
 }
 
+/* 工作区页头（设备点位 / 采集组 / 实时监控三张页签共用）：
+   返回链接与分类标签同一排，标题与说明同一排 —— 说明是长句，放不下时
+   整段换到标题下方，而不是逐字挤在半空。 */
+.iot-head-main {
+  min-width: 0;
+}
+
+.iot-head-top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+/* 两个元素各自带纵向留白，同排时由 .iot-head-top 统一控制间距 */
+.iot-head-top .iot-back,
+.iot-head-top .iot-eyebrow {
+  margin: 0;
+}
+
+.iot-title-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.iot-head-sub {
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.6;
+  color: var(--ink-3);
+  letter-spacing: normal;
+}
+
 .iot-head-aside {
   display: flex;
   align-items: center;

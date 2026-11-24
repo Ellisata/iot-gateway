@@ -12,18 +12,22 @@
 <template>
   <div class="iot-page">
     <header class="iot-head iot-enter">
-      <div>
-        <!-- hidden 路由没有菜单项：这条链接是回到规则列表的主入口 -->
-        <button type="button" class="iot-back" @click="goBack">
-          <el-icon><ArrowLeft /></el-icon>
-          {{ t('triggerRuleRecord.backToList') }}
-        </button>
-        <p class="iot-eyebrow">
-          <span class="iot-eyebrow-dot" aria-hidden="true" />
-          {{ t('menu.industrial') }}
-        </p>
-        <h1 class="iot-title">{{ t('triggerRuleRecord.title') }}</h1>
-        <p class="iot-sub">{{ t('triggerRuleRecord.subtitle') }}</p>
+      <div class="iot-head-main">
+        <div class="iot-head-top">
+          <!-- hidden 路由没有菜单项：这条链接是回到规则列表的主入口 -->
+          <button type="button" class="iot-back" @click="goBack">
+            <el-icon><ArrowLeft /></el-icon>
+            {{ t('triggerRuleRecord.backToList') }}
+          </button>
+          <p class="iot-eyebrow">
+            <span class="iot-eyebrow-dot" aria-hidden="true" />
+            {{ t('menu.industrial') }}
+          </p>
+        </div>
+        <div class="iot-title-row">
+          <h1 class="iot-title">{{ t('triggerRuleRecord.title') }}</h1>
+          <span class="iot-head-sub">{{ t('triggerRuleRecord.subtitle') }}</span>
+        </div>
       </div>
       <div class="iot-head-aside">
         <div class="iot-stat">

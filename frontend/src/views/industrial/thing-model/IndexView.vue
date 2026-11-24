@@ -7,13 +7,17 @@
   <div class="iot-page">
     <!-- 页头：与设备对象/协议页同一套字号与留白层级 -->
     <header class="iot-head iot-enter">
-      <div>
-        <p class="iot-eyebrow">
-          <span class="iot-eyebrow-dot" aria-hidden="true" />
-          {{ t('menu.industrial') }}
-        </p>
-        <h1 class="iot-title">{{ t('menu.thingModel') }}</h1>
-        <p class="iot-sub">{{ t('thingModel.subtitle') }}</p>
+      <div class="iot-head-main">
+        <div class="iot-head-top">
+          <p class="iot-eyebrow">
+            <span class="iot-eyebrow-dot" aria-hidden="true" />
+            {{ t('menu.industrial') }}
+          </p>
+        </div>
+        <div class="iot-title-row">
+          <h1 class="iot-title">{{ t('menu.thingModel') }}</h1>
+          <span class="iot-head-sub">{{ t('thingModel.subtitle') }}</span>
+        </div>
       </div>
       <div class="iot-head-aside">
         <div class="iot-stat">

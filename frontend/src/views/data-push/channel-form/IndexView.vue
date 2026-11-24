@@ -7,13 +7,17 @@
   <div class="iot-page cf-page">
     <!-- 页头：与工业物联网、数据推送其余页面同一套层级；设计器占满剩余高度 -->
     <header class="iot-head iot-enter">
-      <div>
-        <p class="iot-eyebrow">
-          <span class="iot-eyebrow-dot" aria-hidden="true" />
-          {{ t('menu.dataPush') }}
-        </p>
-        <h1 class="iot-title">{{ t('menu.channelForm') }}</h1>
-        <p class="iot-sub">{{ t('channelForm.subtitle') }}</p>
+      <div class="iot-head-main">
+        <div class="iot-head-top">
+          <p class="iot-eyebrow">
+            <span class="iot-eyebrow-dot" aria-hidden="true" />
+            {{ t('menu.dataPush') }}
+          </p>
+        </div>
+        <div class="iot-title-row">
+          <h1 class="iot-title">{{ t('menu.channelForm') }}</h1>
+          <span class="iot-head-sub">{{ t('channelForm.subtitle') }}</span>
+        </div>
       </div>
     </header>
 
