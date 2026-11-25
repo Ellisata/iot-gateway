@@ -38,6 +38,22 @@ func (ctr *ThingModelController) CreateThingModel(c *gin.Context) {
 	c.JSON(200, response.Success(nil))
 }
 
+// CopyThingModel 复制物模型为新的空模型（只复制基础信息，不复制属性）
+func (ctr *ThingModelController) CopyThingModel(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.CopyThingModelDTO
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.thingModelService.CopyThingModel(ctx, req.ID)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
 // UpdateThingModel 更新物模型
 func (ctr *ThingModelController) UpdateThingModel(c *gin.Context) {
 	ctx := c.Request.Context()

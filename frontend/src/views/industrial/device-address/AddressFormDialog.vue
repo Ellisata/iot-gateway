@@ -226,11 +226,12 @@
               <div class="dp-field-hint is-block">{{ t('deviceAddress.scanFrequencyInlineHint') }}</div>
             </el-form-item>
 
-            <!-- 字节序布局：仅 Modbus 需要（同一设备上不同点位可能来自不同厂商子模块，
-                 排列约定不一致）。留空 = 跟随设备的 protocol_json 配置，这是默认。
-                 可选集合随数据类型宽度变化：16/32/64 位各一组布局名，位与 8 位类型不显示。 -->
+            <!-- 字节序布局：Modbus / 欧姆龙 FINS（同一设备上不同点位可能来自不同厂商
+                 子模块，排列约定不一致）。留空 = 跟随设备的 protocol_json 配置，这是默认。
+                 可选集合随数据类型宽度变化：16/32/64 位各一组布局名，位与 8 位类型不显示；
+                 FINS 字符串也没有点位级布局。 -->
             <el-form-item
-              v-if="isModbus && byteOrderLayoutOptions.length"
+              v-if="byteOrderLayoutOptions.length"
               :label="t('deviceAddress.byteOrderLayout')"
               prop="byteOrderLayout"
               class="dp-span-2"
@@ -591,15 +592,18 @@ const rwPermissionOptions = computed(() => [
   { value: 'RW', label: t('deviceAddress.readwriteShort') },
 ])
 
-// ---------- 字节序布局（仅 Modbus） ----------
-// 同设备不同点位可能来自不同厂商子模块，字节/寄存器排列约定不一致。库与驱动直接
+// ---------- 字节序布局（Modbus / 欧姆龙 FINS） ----------
+// 同设备不同点位可能来自不同厂商子模块，字节/字排列约定不一致。库与驱动直接
 // 存**布局名**（ABCD/CDAB/…），可选集合由当前数据类型的**值宽度**决定：
-// 16 位只有字节交换，32 位四种经典排列，64 位用带 8 个字母的名字 —— 后者能表达
-// 「寄存器顺序整体反转」（GHEFCDAB）等两轴模型做不到的约定。空串 = 跟随设备配置。
-const isModbus = computed(() => /^modbus/i.test(props.protocolName || ''))
+// 16 位只有字内交换，32 位四种经典排列，64 位用带 8 个字母的名字 —— 后者能表达
+// 「字顺序整体反转」（GHEFCDAB）等两轴模型做不到的约定。空串 = 跟随设备配置。
+//
+// 后端只对 Modbus 与 FINS 接受非空布局；FINS 的 bool/8 位/字符串没有点位级布局。
+const supportsPointLayout = computed(() => /^(modbus|omron\.fins)/i.test(props.protocolName || ''))
+const isFins = computed(() => /^omron\.fins/i.test(props.protocolName || ''))
 
-// 类型名（小写后）→ 值宽度分类。Modbus 插件的类型表固定，这里覆盖它会下发的
-// 通用名、扩展名（Int/Real）与历史数据里可能残留的内部名（float32 等）。
+// 类型名（小写后）→ 值宽度分类。覆盖 Modbus 与 FINS 会下发的通用名、扩展名
+// （Int/Real）与历史数据里可能残留的内部名（float32 等）。
 // 未收录的类型回退到「全部布局」，由后端按宽度兜底拒绝。
 const LAYOUT_BY_TYPE = {
   boolean: 'bit', bool: 'bit',
@@ -616,7 +620,7 @@ const LAYOUTS_BY_WIDTH = {
   small: [],
   '16': ['ABCD', 'BADC'],
   '32': ['ABCD', 'CDAB', 'BADC', 'DCBA'],
-  '64': ['ABCDEFGH', 'CDABGHEF', 'BADCFEHG', 'HGFEDCBA', 'GHEFCDAB'],
+  '64': ['ABCDEFGH', 'CDABGHEF', 'BADCFEHG', 'HGFEDCBA', 'GHEFCDAB', 'DCBAHGFE'],
   string: ['ABCD', 'BADC'],
 }
 
@@ -630,6 +634,7 @@ const LAYOUT_LABEL_KEYS = {
   BADCFEHG: 'deviceAddress.layoutBADCFEHG',
   HGFEDCBA: 'deviceAddress.layoutHGFEDCBA',
   GHEFCDAB: 'deviceAddress.layoutGHEFCDAB',
+  DCBAHGFE: 'deviceAddress.layoutDCBAHGFE',
 }
 
 const layoutWidth = computed(
@@ -637,13 +642,27 @@ const layoutWidth = computed(
 )
 
 const byteOrderLayoutOptions = computed(() => {
+  if (!supportsPointLayout.value) return []
   const width = layoutWidth.value
+  // FINS 字符串没有点位级布局（后端保存时也会拒绝），不给一个选了必然失败的选项。
+  if (isFins.value && width === 'string') return []
   const codes =
     width === 'all'
       ? [...new Set([...LAYOUTS_BY_WIDTH['16'], ...LAYOUTS_BY_WIDTH['32'], ...LAYOUTS_BY_WIDTH['64']])]
       : LAYOUTS_BY_WIDTH[width] || []
   return codes.map((code) => ({ value: code, label: t(LAYOUT_LABEL_KEYS[code]) }))
 })
+
+// 清掉当前表单里不再适用的布局（协议/数据类型不匹配）。加载旧配置与切换类型都走
+// 这一条：保留一个后端必拒的值，用户只会看到"保存失败"却看不出是哪个字段。
+function normalizeByteOrderLayout() {
+  if (
+    formData.byteOrderLayout &&
+    !byteOrderLayoutOptions.value.some((item) => item.value === formData.byteOrderLayout)
+  ) {
+    formData.byteOrderLayout = ''
+  }
+}
 
 // 扫描频率下拉与「自动发现点位」弹窗共用一份（composables/useScanFrequencyOptions.js）：
 // 两处写的是同一个 device_address.scan_frequency，选项必须一致
@@ -796,6 +815,8 @@ async function loadAddress(id) {
     formData.thresholdOp = row.thresholdOp ?? ''
     formData.thresholdValues = parseConditionValues(row.thresholdValue)
     formData.transformRows = parseTransformRows(row.transformJson)
+    // 历史配置可能带着协议/类型已不支持的布局（例如旧版 FINS 字符串），加载时清掉。
+    normalizeByteOrderLayout()
   } catch {
     // 错误提示由响应拦截器给出；关闭对话框，别让用户对着空表单点保存
     if (token === loadToken) visible.value = false
@@ -937,14 +958,9 @@ function operatorLabel(op) {
 function onDataTypeChange() {
   formData.thresholdOp = ''
   formData.thresholdValues = []
-  // 值宽度变了，旧布局可能不再适用（如 Float → Double，ABCD 在 64 位下不合法）。
-  // 保留会让保存被后端拒绝，且用户看不出是这个字段的问题。
-  if (
-    formData.byteOrderLayout &&
-    !byteOrderLayoutOptions.value.some((item) => item.value === formData.byteOrderLayout)
-  ) {
-    formData.byteOrderLayout = ''
-  }
+  // 值宽度变了，旧布局可能不再适用（如 Float → Double，ABCD 在 64 位下不合法；
+  // FINS 切到字符串同理）。保留会让保存被后端拒绝，且用户看不出是这个字段的问题。
+  normalizeByteOrderLayout()
 }
 
 // 换算子时按新算子应有的形状整理操作数。这里是**保值**的：

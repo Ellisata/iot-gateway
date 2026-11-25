@@ -151,24 +151,39 @@ func (s *DeviceAddressService) CreateDeviceAddress(ctx context.Context, req *dto
 	return nil
 }
 
-// addressLayoutsBySize 各值宽度支持的布局名，与驱动 modbusdrv/layout.go 的排列
-// 表一一对应。size 0 代表 string（动态长度，只支持寄存器内字节交换）。
+// addressLayoutsBySize 各值宽度支持的布局名，与驱动
+// iot-gateway-drivers/internal/layout 的排列表一一对应（Modbus 与 FINS 共用）。
+// size 0 代表 string（动态长度，只支持字内字节交换）。
 //
 // **按宽度分组是刻意的**：把 32 位的 BADC 套到 8 字节会得到 FEHGBADC 这种
-// 没有任何厂商使用的排列，而 64 位最常见的「寄存器顺序整体反转」（GHEFCDAB）
-// 在两轴模型下根本表达不出来。布局名写清楚排列本身，宽度决定可选集合。
+// 没有任何厂商使用的排列，而 64 位常见的「字顺序整体反转」（GHEFCDAB）与
+// 「字内交换 + 相邻字对交换」（DCBAHGFE）都要能表达。布局名写清楚排列本身，
+// 宽度决定可选集合。
 var addressLayoutsBySize = map[int][]string{
 	0: {DriverLayoutABCD, DriverLayoutBADC}, // string
 	2: {DriverLayoutABCD, DriverLayoutBADC},
 	4: {DriverLayoutABCD, DriverLayoutCDAB, DriverLayoutBADC, DriverLayoutDCBA},
 	8: {
 		DriverLayoutABCDEFGH, DriverLayoutCDABGHEF, DriverLayoutBADCFEHG,
-		DriverLayoutHGFEDCBA, DriverLayoutGHEFCDAB,
+		DriverLayoutHGFEDCBA, DriverLayoutGHEFCDAB, DriverLayoutDCBAHGFE,
 	},
 }
 
-// 布局名的唯一真源在驱动侧；后端只做校验与展示，因此这里只保留字符串常量。
-// 改布局集合必须同时改 modbusdrv/layout.go 与前端下拉。
+// layoutCapableScopes 哪些协议 scope 的驱动实现了点位级布局，以及允许的值宽度
+// （0 = string）。驱动不通过线协议上报这项能力，宿主只能在这里登记：名单外的
+// 协议保存非空布局时直接拒绝，避免「能存、驱动却静默忽略」。
+//
+// 目前只有 Modbus 与欧姆龙 FINS。新增支持者时必须确认驱动侧真的实现了读写两条
+// 路径（Modbus 见 modbusdrv/layout.go，FINS 见 finsdrv/parser.go/write.go）。
+var layoutCapableScopes = map[string]map[int]bool{
+	"modbus": {0: true, 2: true, 4: true, 8: true},
+	// FINS 的 bool/uint8/int8（size 1）与位地址没有排列可言，字符串跨字重排
+	// 也没有公认语义 —— 这几类只能跟随设备配置。
+	"fins": {2: true, 4: true, 8: true},
+}
+
+// 布局名的唯一真源在驱动侧（iot-gateway-drivers/internal/layout）；后端只做
+// 校验与展示，因此这里只保留字符串常量。改布局集合必须同时改该共享包与前端下拉。
 const (
 	DriverLayoutABCD     = "ABCD"
 	DriverLayoutCDAB     = "CDAB"
@@ -179,6 +194,7 @@ const (
 	DriverLayoutBADCFEHG = "BADCFEHG"
 	DriverLayoutHGFEDCBA = "HGFEDCBA"
 	DriverLayoutGHEFCDAB = "GHEFCDAB"
+	DriverLayoutDCBAHGFE = "DCBAHGFE"
 )
 
 // addressLayoutOptions 导入模板下拉的布局全集（按宽度顺序排列，便于阅读）。
@@ -186,7 +202,7 @@ var addressLayoutOptions = []string{
 	DriverLayoutABCD, DriverLayoutBADC,
 	DriverLayoutCDAB, DriverLayoutDCBA,
 	DriverLayoutABCDEFGH, DriverLayoutCDABGHEF, DriverLayoutBADCFEHG,
-	DriverLayoutHGFEDCBA, DriverLayoutGHEFCDAB,
+	DriverLayoutHGFEDCBA, DriverLayoutGHEFCDAB, DriverLayoutDCBAHGFE,
 }
 
 // addressTypeSize 返回协议内部类型的字节宽度。0 = string（动态长度），
@@ -241,9 +257,39 @@ func resolveAddressLayout(raw string, size int) (layout, reason string) {
 		v, addressSizeLabel(size), strings.Join(allowed, " / "))
 }
 
-// normalizeAddressLayout 服务层包装：把 resolveAddressLayout 的 reason 转成业务错误。
+// resolveAddressLayoutForScope 在宽度校验之外再校验协议能力。
+//
+// 顺序是刻意的：先按宽度判定「这个布局名是否适用于该类型的宽度」，再判定
+// 「该协议是否支持点位级布局」。空串（跟随设备）在任何协议上都放行 —— 存量
+// 点位要能原样保存、也能把不受支持的布局清掉。
+func resolveAddressLayoutForScope(raw, scope, protocolLabel string, size int) (layout, reason string) {
+	layout, reason = resolveAddressLayout(raw, size)
+	if reason != "" || layout == "" {
+		return layout, reason
+	}
+
+	label := strings.TrimSpace(protocolLabel)
+	if label == "" {
+		label = "当前协议"
+	}
+	sizes, ok := layoutCapableScopes[strings.ToLower(scope)]
+	if !ok {
+		return "", fmt.Sprintf("%s 不支持点位级字节序布局，请留空跟随设备配置", label)
+	}
+	if !sizes[size] {
+		if size == 0 {
+			return "", fmt.Sprintf("%s 的字符串点位不支持点位级布局，请留空跟随设备配置", label)
+		}
+		return "", fmt.Sprintf("%s 的%s数据类型不支持点位级布局，请留空跟随设备配置", label, addressSizeLabel(size))
+	}
+	return layout, ""
+}
+
+// normalizeAddressLayout 服务层包装：把 resolveAddressLayoutForScope 的 reason
+// 转成业务错误。
 func (s *DeviceAddressService) normalizeAddressLayout(raw, protocolName, internalType string) (string, error) {
-	layout, reason := resolveAddressLayout(raw, addressTypeSize(protocolName, internalType))
+	layout, reason := resolveAddressLayoutForScope(raw, driver.ScopeOf(protocolName), protocolName,
+		addressTypeSize(protocolName, internalType))
 	if reason != "" {
 		return "", appError.NewAppErrorCtx(enums.ParamValidEnum.GetCode(), reason, enums.ParamValidEnum.GetMsgKey())
 	}
@@ -1287,8 +1333,9 @@ func (s *DeviceAddressService) ImportDeviceAddresses(ctx context.Context, device
 			if !ok {
 				return nil, name, fmt.Sprintf("协议不支持该数据类型：%s", commonType)
 			}
-			// 布局必须在类型解析之后校验：可选集合由值宽度决定。
-			layout, layoutReason := resolveAddressLayout(layoutRaw, addressTypeSize(protocolName, internal))
+			// 布局必须在类型解析之后校验：可选集合由值宽度与协议能力共同决定。
+			layout, layoutReason := resolveAddressLayoutForScope(layoutRaw, driver.ScopeOf(protocolName), protocolName,
+				addressTypeSize(protocolName, internal))
 			if layoutReason != "" {
 				return nil, name, layoutReason
 			}
@@ -1347,14 +1394,16 @@ func validateAddressImportRow(name, label, commonType, rwPermission, scanFreq st
 
 // GenerateDeviceAddressImportTemplate 生成设备地址导入模板（.xlsx）：
 // 表头「名称/标签/通用数据类型/读写权限/扫描频率/描述/字节序布局」+ 示例行 + 冻结首行。
-// 「字节序布局」是固定五选一（跟随设备/ABCD/CDAB/BADC/DCBA），省略按跟随设备处理。
+// 「字节序布局」的可选集合随设备协议变化，省略或「跟随设备」表示沿用设备配置。
 //
-// deviceID 非空时按该设备的协议给出数据类型下拉（common + 扩展类型），
-// 否则回退到通用类型清单并允许手工填写扩展类型。
+// deviceID 非空时按该设备的协议给出数据类型下拉（common + 扩展类型）与布局
+// 下拉；协议不支持点位级布局时，布局列只留「跟随设备」，避免模板引导用户
+// 填一个保存时必然被拒的值。deviceID 为空（通用模板）时保留完整布局集合。
 // 读写权限是固定枚举，始终严格下拉。
 func (s *DeviceAddressService) GenerateDeviceAddressImportTemplate(ctx context.Context, deviceID string) (*bytes.Buffer, error) {
 	typeCodes := []string(nil)
 	typesComplete := false
+	protocolName := ""
 	if deviceID = strings.TrimSpace(deviceID); deviceID != "" {
 		var device po.Device
 		if err := s.sqliteDB.WithContext(ctx).Where("id = ?", deviceID).First(&device).Error; err != nil {
@@ -1363,13 +1412,26 @@ func (s *DeviceAddressService) GenerateDeviceAddressImportTemplate(ctx context.C
 			}
 			return nil, err
 		}
-		protocolName := s.getProtocolName(ctx, device.ProtocolID)
+		protocolName = s.getProtocolName(ctx, device.ProtocolID)
 		common, extended := driver.AvailableTypes(driver.ScopeOf(protocolName))
 		typeCodes = append(append([]string(nil), common...), extended...)
 		typesComplete = len(typeCodes) > 0
 	}
 	if len(typeCodes) == 0 {
 		typeCodes = append(typeCodes, driver.CommonDataTypes...)
+	}
+
+	layoutOptions := []string{"跟随设备"}
+	layoutPrompt := "排列布局按数据类型的值宽度选择：16 位 ABCD/BADC，32 位 ABCD/CDAB/BADC/DCBA，64 位为带 8 个字母的名字。不确定时保持「跟随设备」"
+	if protocolName == "" {
+		layoutOptions = append(layoutOptions, addressLayoutOptions...)
+	} else if sizes, ok := layoutCapableScopes[strings.ToLower(driver.ScopeOf(protocolName))]; ok {
+		layoutOptions = append(layoutOptions, addressLayoutOptions...)
+		if !sizes[0] {
+			layoutPrompt += "；该协议的字符串点位不支持点位级布局，只能跟随设备"
+		}
+	} else {
+		layoutPrompt = fmt.Sprintf("协议 %s 不支持点位级布局，布局列只能保持「跟随设备」", protocolName)
 	}
 
 	return excelutil.BuildTemplateWithLists(
@@ -1396,8 +1458,8 @@ func (s *DeviceAddressService) GenerateDeviceAddressImportTemplate(ctx context.C
 			},
 			{
 				Col:     6,
-				Options: append([]string{"跟随设备"}, addressLayoutOptions...),
-				Prompt:  "排列布局按数据类型的值宽度选择：16 位 ABCD/BADC，32 位 ABCD/CDAB/BADC/DCBA，64 位为带 8 个字母的名字。不确定时保持「跟随设备」",
+				Options: layoutOptions,
+				Prompt:  layoutPrompt,
 			},
 		},
 	)

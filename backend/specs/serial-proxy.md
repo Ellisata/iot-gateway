@@ -1,6 +1,6 @@
 # 网关串口代理（跨插件共用物理口）
 
-> 适用版本：SDK ≥ v0.5.0、官方驱动 ≥ v0.5.0、网关 ≥ v0.8.4（未发行）。
+> 适用版本：SDK ≥ v0.5.0、官方驱动 ≥ v0.5.0、网关 ≥ v0.8.4。
 > 相关：`driversdk/serialbus`（进程内共享）、`driversdk/serialproxy`（插件侧）、
 > `pluginhost/serialhost.go`（网关侧）、`collector/serialbus.go`（启用策略）。
 

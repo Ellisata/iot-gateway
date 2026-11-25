@@ -72,7 +72,9 @@ type CreateDeviceAddressDTO struct {
 	DataType       string `json:"dataType"` // 兼容旧请求，服务端映射后覆盖
 	// ByteOrderLayout 点位级字节/字排列布局：空串 = 跟随设备配置；非空须是
 	// 当前数据类型宽度对应的布局名（16 位 ABCD/BADC，32 位 ABCD/CDAB/BADC/DCBA，
-	// 64 位 ABCDEFGH/CDABGHEF/BADCFEHG/HGFEDCBA/GHEFCDAB；字符串只有 ABCD/BADC）。
+	// 64 位 ABCDEFGH/CDABGHEF/BADCFEHG/HGFEDCBA/GHEFCDAB/DCBAHGFE；Modbus 字符串
+	// 只有 ABCD/BADC）。另外只有实现了该能力的协议（Modbus、欧姆龙 FINS）接受
+	// 非空值，FINS 字符串/bool/8 位类型/位地址只能跟随设备。
 	ByteOrderLayout string `json:"byteOrderLayout"`
 	RwPermission    string `json:"rwPermission" binding:"required,oneof=R W RW"`
 	ScanFrequency   int    `json:"scanFrequency"`

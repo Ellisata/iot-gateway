@@ -23,9 +23,11 @@ type DeviceAddress struct {
 	CommonDataType string `gorm:"column:common_data_type;not null" json:"commonDataType"` // 通用数据类型名（配置界面展示）
 	DataType       string `gorm:"column:data_type;not null" json:"dataType"`              // 对应协议的内部数据类型名（驱动解码用）
 	// ByteOrderLayout 点位级字节/字排列布局（如 ABCD / CDAB / BADC / DCBA；
-	// 64 位为 ABCDEFGH / CDABGHEF / …）。空串 = 跟随设备的 protocol_json 配置
-	// （存量行与绝大多数点位），非空时优先生效。布局按值宽度解释，由驱动展开成
-	// 字节排列；读、写、点扫共用同一份规则。见 modbusdrv/layout.go。
+	// 64 位为 ABCDEFGH / CDABGHEF / … / DCBAHGFE）。空串 = 跟随设备的
+	// protocol_json 配置（存量行与绝大多数点位），非空时优先生效。布局按值宽度
+	// 解释，由驱动展开成字节排列；读与写共用同一份规则。目前只有 Modbus 与
+	// 欧姆龙 FINS 支持（FINS 的字符串/bool/8 位类型/位地址不适用），保存与导入
+	// 按协议能力校验。驱动侧的排列表在 internal/layout。
 	ByteOrderLayout string `gorm:"column:byte_order;not null;default:''" json:"byteOrderLayout"`
 	RwPermission    string `gorm:"column:rw_permission;not null" json:"rwPermission"`
 	// 报警条件：开关 + 比较符 + 操作数。比较符按数据类型取（矩阵见 driver/thresholdOp.go）；

@@ -312,14 +312,53 @@ func TestGenerateDeviceAddressImportTemplateByProtocol(t *testing.T) {
 	if !strings.Contains(dvs[0].Formula1, "Int") || !strings.Contains(dvs[0].Formula1, "Real") {
 		t.Fatalf("类型下拉缺少协议扩展类型：%+v", dvs[0])
 	}
+	// synthetic 协议不支持点位级布局：布局下拉只应保留「跟随设备」。
+	if !strings.Contains(dvs[3].Formula1, "跟随设备") || strings.Contains(dvs[3].Formula1, "ABCD") {
+		t.Fatalf("不支持布局的协议，布局下拉应只有「跟随设备」：%+v", dvs[3])
+	}
+}
+
+// TestGenerateDeviceAddressImportTemplateForFins FINS 设备的模板应给出完整
+// 布局集合（含新补齐的 DCBAHGFE）；字符串限制由 Prompt 提示。
+func TestGenerateDeviceAddressImportTemplateForFins(t *testing.T) {
+	drivertest.EnsureSyntheticFinsProtocol()
+	db := newDeviceAddressImportTestDB(t)
+	if err := db.Create(&po.IotProtocol{ID: "proto-fins", Name: drivertest.TestFinsProtocol}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&po.Device{ID: "dev-fins", Name: "FINS 设备", ProtocolID: "proto-fins", ProtocolJSON: "{}", Status: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := &DeviceAddressService{sqliteDB: db}
+	buf, err := svc.GenerateDeviceAddressImportTemplate(context.Background(), "dev-fins")
+	if err != nil {
+		t.Fatalf("GenerateDeviceAddressImportTemplate: %v", err)
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatalf("reopen template: %v", err)
+	}
+	defer f.Close()
+	dvs, err := f.GetDataValidations(f.GetSheetName(0))
+	if err != nil || len(dvs) != 4 {
+		t.Fatalf("下拉 = %+v, err = %v", dvs, err)
+	}
+	if !strings.Contains(dvs[3].Formula1, "ABCD") ||
+		!strings.Contains(dvs[3].Formula1, "DCBAHGFE") ||
+		!strings.Contains(dvs[3].Formula1, "跟随设备") {
+		t.Fatalf("FINS 布局下拉缺少选项：%+v", dvs[3])
+	}
+	if dvs[3].Prompt == nil || !strings.Contains(*dvs[3].Prompt, "字符串") {
+		t.Fatalf("FINS 布局提示应说明字符串只能跟随设备：%+v", dvs[3].Prompt)
+	}
 }
 
 // TestImportDeviceAddressesLayout 第七列「字节序布局」：
-// 合法布局按值宽度校验后落库；宽度不匹配的行只失败该行，不影响其它行。
+// 合法布局按值宽度 + 协议能力校验后落库；不合法的行只失败该行，不影响其它行。
 func TestImportDeviceAddressesLayout(t *testing.T) {
-	drivertest.EnsureSyntheticProtocol()
+	drivertest.EnsureSyntheticFinsProtocol()
 	db := newDeviceAddressImportTestDB(t)
-	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: drivertest.TestProtocol}).Error; err != nil {
+	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: drivertest.TestFinsProtocol}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Create(&po.Device{ID: "dev-1", Name: "测试设备", ProtocolID: "proto-1", ProtocolJSON: "{}", Status: 1}).Error; err != nil {
@@ -338,7 +377,9 @@ func TestImportDeviceAddressesLayout(t *testing.T) {
 	}
 	rows := [][]string{
 		{"温度", "车间温度", "Float", "R", "1000", "", "CDAB"},     // 32 位合法
+		{"累计", "累计量", "Double", "R", "1000", "", "DCBAHGFE"}, // 64 位合法（新布局）
 		{"电流", "车间电流", "Short", "R", "1000", "", "ABCDEFGH"}, // 16 位用 64 位布局 → 失败
+		{"批次", "批次号", "String", "R", "1000", "", "ABCD"},     // FINS 字符串不支持点位级布局 → 失败
 		{"转速", "车间转速", "Float", "R", "1000", "", "跟随设备"},     // 跟随设备
 	}
 	for i, r := range rows {
@@ -358,11 +399,15 @@ func TestImportDeviceAddressesLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ImportDeviceAddresses: %v", err)
 	}
-	if result.Success != 2 || result.Failed != 1 {
-		t.Fatalf("Success/Failed = %d/%d, want 2/1；errors=%+v", result.Success, result.Failed, result.Errors)
+	if result.Success != 3 || result.Failed != 2 {
+		t.Fatalf("Success/Failed = %d/%d, want 3/2；errors=%+v", result.Success, result.Failed, result.Errors)
 	}
-	if len(result.Errors) != 1 || !strings.Contains(result.Errors[0].Reason, "不适用于该数据类型") {
-		t.Fatalf("失败原因 = %+v，期望宽度不匹配", result.Errors)
+	joinedReasons := ""
+	for _, e := range result.Errors {
+		joinedReasons += e.Reason + "\n"
+	}
+	if !strings.Contains(joinedReasons, "不适用于该数据类型") || !strings.Contains(joinedReasons, "字符串点位不支持") {
+		t.Fatalf("失败原因 = %+v，期望同时包含宽度不匹配与字符串不支持", result.Errors)
 	}
 
 	var addr po.DeviceAddress
@@ -372,11 +417,61 @@ func TestImportDeviceAddressesLayout(t *testing.T) {
 	if addr.ByteOrderLayout != "CDAB" {
 		t.Fatalf("布局落库 = %q, want CDAB", addr.ByteOrderLayout)
 	}
+	var wide po.DeviceAddress
+	if err := db.Where("device_id = ? AND name = ?", "dev-1", "累计").First(&wide).Error; err != nil {
+		t.Fatal(err)
+	}
+	if wide.ByteOrderLayout != "DCBAHGFE" {
+		t.Fatalf("64 位布局落库 = %q, want DCBAHGFE", wide.ByteOrderLayout)
+	}
 	var follow po.DeviceAddress
 	if err := db.Where("device_id = ? AND name = ?", "dev-1", "转速").First(&follow).Error; err != nil {
 		t.Fatal(err)
 	}
 	if follow.ByteOrderLayout != "" {
 		t.Fatalf("跟随设备应存空串，得到 %q", follow.ByteOrderLayout)
+	}
+}
+
+// TestImportDeviceAddressesRejectsLayoutOnUnsupportedProtocol 协议不支持点位级
+// 布局时，导入行必须明确失败（而不是存进去被驱动忽略）。
+func TestImportDeviceAddressesRejectsLayoutOnUnsupportedProtocol(t *testing.T) {
+	drivertest.EnsureSyntheticProtocol()
+	db := newDeviceAddressImportTestDB(t)
+	if err := db.Create(&po.IotProtocol{ID: "proto-1", Name: drivertest.TestProtocol}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&po.Device{ID: "dev-1", Name: "测试设备", ProtocolID: "proto-1", ProtocolJSON: "{}", Status: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := &DeviceAddressService{sqliteDB: db}
+
+	var buf bytes.Buffer
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(0)
+	for i, h := range []string{"名称", "标签", "通用数据类型", "读写权限", "扫描频率", "描述", "字节序布局"} {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		_ = f.SetCellValue(sheet, cell, h)
+	}
+	for j, v := range []string{"温度", "车间温度", "Float", "R", "1000", "", "CDAB"} {
+		if v == "" {
+			continue
+		}
+		cell, _ := excelize.CoordinatesToCellName(j+1, 2)
+		_ = f.SetCellValue(sheet, cell, v)
+	}
+	if err := f.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.ImportDeviceAddresses(context.Background(), "dev-1", buf.Bytes())
+	if err != nil {
+		t.Fatalf("ImportDeviceAddresses: %v", err)
+	}
+	if result.Success != 0 || result.Failed != 1 {
+		t.Fatalf("Success/Failed = %d/%d, want 0/1；errors=%+v", result.Success, result.Failed, result.Errors)
+	}
+	if len(result.Errors) != 1 || !strings.Contains(result.Errors[0].Reason, "不支持点位级字节序布局") {
+		t.Fatalf("失败原因 = %+v，期望协议不支持", result.Errors)
 	}
 }

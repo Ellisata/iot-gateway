@@ -323,6 +323,15 @@ PLC 地址解析、区间规划、TCP/RTU 客户端、驱动），不导入任�
   四个插件照常 `driver.RangeSig(addrs)` 算缓存键，缓存条目上限也用它
   （OPC UA / 两个 CIP 插件没有区间规划这一步，不用它）。别把它和「复用内置协议实现」混为一谈
   —— 前者是必须的、仍然存在的依赖，后者已经不存在。
+- **点位级 `ByteOrderLayout` 是可选能力**：驱动若实现，读（`DeviceAddress`）与写
+  （`WriteRequest`）必须使用同一份布局；空串表示跟随设备级 `byteOrder` / `wordOrder`。
+  该能力**不通过线协议协商**，宿主在
+  [`service/deviceAddressService.go`](../backend/service/deviceAddressService.go) 的
+  `layoutCapableScopes` 里登记协议 scope（当前 `modbus`、`fins`），名单外的协议保存
+  非空布局会被直接拒绝。排列表的唯一真源在
+  [`internal/layout`](https://github.com/Ellisata/iot-gateway-drivers/tree/main/internal/layout)，
+  网关侧校验与前端下拉是两份必须同步的副本；协议自己的例外（如 FINS 字符串/bool/8 位
+  不适用）由该能力表按值宽度表达。
 - **目录名与包名可以不一致，这是刻意的。** 每个插件是 `driversrc/<名字>/main.go`
   加一个实现子包；搬迁时只改 import、不动 `package` 子句，让每个文件的 diff 只剩
   logger 与 import，所以会出现 `driversrc/mitsubishi/mitsubishidrv/` 里是

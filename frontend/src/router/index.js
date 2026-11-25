@@ -38,8 +38,8 @@ const routes = [
         meta: { titleKey: 'menu.thingModel', icon: 'Box' },
       },
       {
-        // 属性的主要编辑界面：表格宽、停留久，独立成页而不是叠在列表上的抽屉。
-        // 与 device-address 等钻取页同一套约定：hidden 路由 + 父级面包屑 + 页头返回。
+        // 属性主编辑界面已并入物模型主从工作台右栏（/industrial/thing-model）。
+        // 这里保留独立页兜住旧深链与外部收藏：hidden 路由 + 父级面包屑 + 页头返回。
         path: 'industrial/thing-model/:id/properties',
         name: 'ThingModelProperties',
         component: () => import('@/views/industrial/thing-model/properties/IndexView.vue'),

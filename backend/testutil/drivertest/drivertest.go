@@ -35,6 +35,14 @@ const (
 
 	// TestScope 合成协议的类型 scope（两个合成协议共用）。
 	TestScope = "testsynthetic"
+
+	// TestFinsProtocol / TestFinsScope 为宿主侧「点位级字节序布局」用例提供
+	// 一个小型 FINS 风格 scope。宿主只允许 modbus 与 fins 接受非空
+	// ByteOrderLayout，而布局用例需要走到真实的 allowlist 分支；网关侧测试
+	// 不拉起真实插件（见包注释），因此协议名仍是明显的合成名，只借用真实的
+	// scope 名。类型只覆盖布局用例用到的宽度：16/32/64 位与字符串。
+	TestFinsProtocol = "Test.Synthetic.FINS"
+	TestFinsScope    = "fins"
 )
 
 // syntheticTypeMap 合成协议的类型映射。形状刻意贴近真实协议：
@@ -68,6 +76,32 @@ func EnsureSyntheticProtocol() {
 	EnsureScope(TestScope, []string{TestProtocol, TestFailingProtocol}, syntheticTypeMap, syntheticTypes...)
 	EnsureStubDriver(TestProtocol)
 	EnsureDriver(TestFailingProtocol, func() driver.Driver { return FailingDriver{} })
+}
+
+// syntheticFinsTypeMap / syntheticFinsTypes FINS 风格合成 scope 的类型，
+// 与 commonTypeMap 的常用子集一致（只保留布局用例用到的宽度）。
+var syntheticFinsTypeMap = map[string]string{
+	driver.TypeShort:  "int16",
+	driver.TypeFloat:  "float32",
+	driver.TypeDouble: "float64",
+	driver.TypeString: "string",
+}
+
+var syntheticFinsTypes = []*driver.DataType{
+	{Name: "int16", Kind: driver.KindInt, Size: 2},
+	{Name: "float32", Kind: driver.KindFloat, Size: 4},
+	{Name: "float64", Kind: driver.KindFloat, Size: 8},
+	{Name: "string", Kind: driver.KindString, Size: 0},
+}
+
+// EnsureSyntheticFinsProtocol 备好 scope=fins 的合成协议，供服务层验证
+// 「FINS 接受 16/32/64 位布局、拒绝字符串布局」这条协议级 allowlist。幂等。
+//
+// 刻意不复用 EnsureSyntheticProtocol：那个 scope 叫 testsynthetic，会被
+// allowlist 拒绝，用它测布局只会测到「不支持」，测不到 FINS 的分支。
+func EnsureSyntheticFinsProtocol() {
+	EnsureScope(TestFinsScope, []string{TestFinsProtocol}, syntheticFinsTypeMap, syntheticFinsTypes...)
+	EnsureStubDriver(TestFinsProtocol)
 }
 
 // EnsureScope 确保 scope 及其类型映射对 driver 包可见。

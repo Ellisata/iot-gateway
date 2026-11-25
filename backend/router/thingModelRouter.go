@@ -14,6 +14,7 @@ func ThingModelRoutes(r gin.IRouter, tc *controller.ThingModelController) {
 	g := r.Group("/thingModel")
 	{
 		g.POST("/createThingModel", tc.CreateThingModel)
+		g.POST("/copyThingModel", tc.CopyThingModel)
 		g.POST("/updateThingModel", tc.UpdateThingModel)
 		g.GET("/deleteThingModel/:id", tc.DeleteThingModel)
 		g.GET("/getThingModelById/:id", tc.GetThingModelByID)

@@ -294,8 +294,9 @@ const headerTitle = computed(() =>
 const accessLabel = (mode) => (mode ? t(`thingModel.access.${mode}`) : '—')
 
 function goBack() {
+  // 属性主编辑界面已并入物模型主从工作台右栏：带着 modelId 回去即恢复现场
   if (property.value?.modelId) {
-    router.push({ name: 'ThingModelProperties', params: { id: property.value.modelId } })
+    router.push({ name: 'ThingModel', query: { modelId: String(property.value.modelId) } })
     return
   }
   router.push({ name: 'ThingModel' })

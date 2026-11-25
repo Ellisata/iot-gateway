@@ -378,6 +378,14 @@ var agentApiSurface = map[string]SurfaceEntry{
 		}),
 		Note: "成功时 data 为 null，不回新模型 id —— 要 id 须按 code/name 回查分页接口",
 	},
+	"POST /thingModel/copyThingModel": {
+		Access: AccessWrite,
+		Params: argBody(dto.CopyThingModelDTO{}, map[string]string{
+			"id": "被复制的物模型 ID",
+		}),
+		Note: "只复制基础信息（标识/名称/分类/版本/描述/状态），**不复制属性**（属性与点位 1:1 绑定，" +
+			"副本沿用同一批绑定会违反约束）；标识与名称自动加 -copy 后缀并查重（-copy2…），返回 {id, code, name}",
+	},
 	"POST /thingModel/updateThingModel": {
 		Access: AccessWrite,
 		Params: argBody(dto.UpdateThingModelDTO{}, map[string]string{

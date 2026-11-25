@@ -35,6 +35,13 @@ type UpdateThingModelDTO struct {
 	Status      *int   `json:"status" binding:"omitempty,oneof=0 1"`
 }
 
+// CopyThingModelDTO 复制物模型请求。
+//
+// 只按 id 复制：副本的字段全部来自库里的原行，不接受调用方覆盖。
+type CopyThingModelDTO struct {
+	ID string `json:"id" binding:"required"`
+}
+
 // PageThingModelDTO 物模型分页查询。
 // Keyword 同时模糊匹配 code 与 name，避免为两个字段各做一个搜索框。
 type PageThingModelDTO struct {

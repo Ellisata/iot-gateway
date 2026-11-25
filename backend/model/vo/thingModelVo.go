@@ -19,6 +19,13 @@ type ThingModelVO struct {
 	UpdatedAt     string `json:"updatedAt"`
 }
 
+// ThingModelCopyVO 复制物模型的结果，供前端提示副本名称并定位到新行。
+type ThingModelCopyVO struct {
+	ID   string `json:"id"`
+	Code string `json:"code"`
+	Name string `json:"name"`
+}
+
 // ThingModelOptionVO 物模型下拉选项。
 type ThingModelOptionVO struct {
 	ID     string `json:"id"`

@@ -131,6 +131,20 @@ export function createThingModel(data) {
 }
 
 /**
+ * 复制物模型为一条新记录（只复制基础信息，不复制属性）
+ * 标识与名称自动加 -copy 后缀并查重（-copy2、-copy3…）
+ * @param {string} id 被复制的物模型 ID
+ * @returns {Promise<{id:string, code:string, name:string}>}
+ */
+export function copyThingModel(id) {
+  return request({
+    url: '/thingModel/copyThingModel',
+    method: 'post',
+    data: { id },
+  })
+}
+
+/**
  * 修改物模型（code 创建后不可改）
  * @param {Object} data
  * @param {string} data.id

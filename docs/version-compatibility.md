@@ -2,7 +2,7 @@
 
 > 适用于三个仓库：网关主程序 [`iot-gateway-premium`](../README.md)、官方驱动
 > [`iot-gateway-drivers`](https://github.com/Ellisata/iot-gateway-drivers)、驱动 SDK
-> [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk)。最后更新：2026-11-20。
+> [`iot-gateway-sdk`](https://github.com/Ellisata/iot-gateway-sdk)。最后更新：2026-11-25。
 
 ## 1. 结论
 
@@ -22,10 +22,10 @@
 
 | 版本 | 真源 | 当前值 | 参与兼容判定 |
 |---|---|---|---|
-| 网关发行版本 | git tag；构建脚本以 `-X main.version` 注入，写入 `iot_gateway.firmware_version` 并随局域网发现广播 | `v0.8.4` | 否 |
-| 官方驱动发行版本 | 仓库根的 `drivers.version`；构建时经 `-X main.version` 写入每个插件的 `Meta.Version` | `v0.5.0` | 否 |
-| 驱动 SDK 版本 | 网关 `backend/go.mod`、驱动仓库 `go.mod` | `v0.5.0` | 否 |
-| 线协议版本 | `driversdk.APIVersion`（[SDK 源码](https://github.com/Ellisata/iot-gateway-sdk/blob/main/driversdk/meta.go)） | `4` | **是，必须相等** |
+| 网关发行版本 | git tag；构建脚本以 `-X main.version` 注入，写入 `iot_gateway.firmware_version` 并随局域网发现广播 | `v0.8.6` | 否 |
+| 官方驱动发行版本 | 仓库根的 `drivers.version`；构建时经 `-X main.version` 写入每个插件的 `Meta.Version` | `v0.6.1` | 否 |
+| 驱动 SDK 版本 | 网关 `backend/go.mod`、驱动仓库 `go.mod` | `v0.6.0` | 否 |
+| 线协议版本 | `driversdk.APIVersion`（[SDK 源码](https://github.com/Ellisata/iot-gateway-sdk/blob/main/driversdk/meta.go)） | `5` | **是，必须相等** |
 | 帧魔数 | `pluginwire.FrameMagic`（[SDK 源码](https://github.com/Ellisata/iot-gateway-sdk/blob/main/pluginwire/wire.go)） | `IGP2` | 是，流层第二道保护 |
 
 网关版本的解析优先级（实现见 [configFile.ResolveGatewayVersion](../backend/configFile/configFile.go)）：
@@ -54,6 +54,8 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 | v0.8.2 | v0.4.0 | v0.4.0 | 4 | 9 / 15 | 点位级工程量变换、开放接口配置同步 / 推送通道连通性测试与运行状态 / 实时快照 / 控制能力 / 连接测试 / 设备扫描 / 插件二进制下发、实时写值区分原始值与工程值 |
 | v0.8.3 | v0.4.1 | v0.4.0 | 4 | 10 / 16 | 本机数据备份与恢复、物模型绑定管理、协议插件卸载、FANUC.CIP 驱动（含扫描与块读）与 OPC UA 控制下发、数据目录独占锁 |
 | v0.8.4 | v0.5.0 | v0.5.0 | 4 | 10 / 16 | 同一物理串口跨设备共享总线锁、跨协议插件共用物理口（串口代理，纯增量、`APIVersion` 保持 4 不进位） |
+| v0.8.5 | v0.5.0 | v0.5.0 | 4 | 10 / 16 | 物模型属性独立页与属性级控制、Apache IoTDB 2.x 推送通道、时序入库组件独立为 `tsdb` 模块、物模型不再绑定设备与推送按模型拆帧 |
+| v0.8.6 | v0.6.1 | v0.6.0 | 5 | 10 / 16 | 点位级字节序布局（Modbus 与欧姆龙 FINS）、属性与点位严格 1:1、模型标识/属性标识符可改名、物模型复制与主从工作台；`APIVersion` 4 → 5，全部插件必须重编 |
 
 维护规则：
 
@@ -68,13 +70,17 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 
 | 构建所用 SDK | `APIVersion` | 可加载于 | 不可加载于 |
 |---|---|---|---|
-| v0.1.x – v0.5.x | 4 | 任意 `APIVersion = 4` 的网关（当前即 v0.3.0 及以后） | `APIVersion ≠ 4` 的网关 |
+| v0.1.x – v0.5.x | 4 | 任意 `APIVersion = 4` 的网关（当前即 v0.3.0 – v0.8.5） | `APIVersion ≠ 4` 的网关 |
+| v0.6.x | 5 | 任意 `APIVersion = 5` 的网关（当前即 v0.8.6 及以后） | `APIVersion ≠ 5` 的网关 |
 
 补充：
 
 - 官方驱动 v0.1.0 / v0.2.0 / v0.3.0 / v0.4.0 / v0.4.1 / v0.5.0 分别用 SDK
   v0.1.0 / v0.2.0 / v0.3.0 / v0.4.0 / v0.4.0 / v0.5.0 构建，`APIVersion` 均为 4，
   因此都落在第一行。
+- 官方驱动 v0.6.0 / v0.6.1 用 SDK v0.6.0 构建，`APIVersion` 为 5，落在第二行。
+  进位是因为点位级字节序布局要过线，而 `ReadParams` 是位置式二进制载荷：旧插件会把
+  新增字段当成尾随字节并在 `Done()` 处报错，所以跨 5 不存在混跑，全部插件必须重编。
 - SDK v0.4.0 新增的 `DiscoverySpec.Transport` 是**可选字段**，不递增 `APIVersion`：
   旧插件不带该字段时网关跳过 TCP 预筛，行为与 v0.3.x 一致。
 - SDK v0.5.0 新增的 `driver.CanonicalSerialPort`、`driversdk/serialbus`、
@@ -123,7 +129,7 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 1. **网关启动日志**（启动时打印解析后的版本与插件线协议版本）：
 
    ```
-   application starting... (version v0.8.0, plugin APIVersion 4)
+   application starting... (version v0.8.6, plugin APIVersion 5)
    ```
 
 2. **插件加载日志**（每个插件一条，版本来自 `Meta.Version`）：
@@ -139,16 +145,16 @@ IOT_GATEWAY_VERSION > 构建注入版本（非 dev）> default.yaml 的 gateway.
 
    ```json
    {
-     "gateway": "v0.8.0",
+     "gateway": "v0.8.6",
      "os": "windows",
      "arch": "amd64",
-     "buildTime": "2026-11-05T08:00:00Z",
-     "sdk": "v0.4.0",
-     "apiVersion": 4,
+     "buildTime": "2026-11-25T08:00:00Z",
+     "sdk": "v0.6.0",
+     "apiVersion": 5,
      "frameMagic": "IGP2",
-     "drivers": "v0.4.0",
+     "drivers": "v0.6.1",
      "plugins": [
-       {"name": "iot-driver-modbus", "version": "v0.4.0", "sha256": "..."}
+       {"name": "iot-driver-modbus", "version": "v0.6.1", "sha256": "..."}
      ]
    }
    ```
