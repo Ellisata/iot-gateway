@@ -123,6 +123,38 @@ func (ctr *ThingModelController) ListThingModelPointOptions(c *gin.Context) {
 	c.JSON(200, response.Success(data))
 }
 
+// PageThingModelPointDevices 属性绑定点位时的设备候选（分页 + 关键词）
+func (ctr *ThingModelController) PageThingModelPointDevices(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.PageThingModelPointDeviceDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.thingModelService.PageThingModelPointDevices(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
+// PageThingModelPointOptions 属性绑定点位时的点位候选（按设备分页 + 关键词）
+func (ctr *ThingModelController) PageThingModelPointOptions(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.PageThingModelPointOptionDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	data, err := ctr.thingModelService.PageThingModelPointOptions(ctx, &req)
+	if err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	c.JSON(200, response.Success(data))
+}
+
 // ListAllThingModelProperties 跨模型的属性下拉（设备点位绑定属性用）
 func (ctr *ThingModelController) ListAllThingModelProperties(c *gin.Context) {
 	ctx := c.Request.Context()

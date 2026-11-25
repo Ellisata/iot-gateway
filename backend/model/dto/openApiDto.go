@@ -67,8 +67,10 @@ type OpenApiThingModelUpsertDTO struct {
 
 // OpenApiThingModelPropertyUpsertDTO 单个物模型属性的 upsert 条目。
 //
-// Identifier 在模型内是自然键：不存在则创建，存在则更新；创建后不可修改。
-// Kind / AccessMode 在新建时必填；更新时省略表示保持原值（被点位绑定后改变会拒绝）。
+// Identifier 在模型内是自然键：不存在则创建，存在则更新；本接口按它定位属性，
+// 改名等同于新建（旧属性保留），改名请在控制台的属性编辑里做。
+// AccessMode 在新建时必填；Kind 只是语义说明，新建/更新都可省略（省略表示未指定或
+// 保持原值）。被点位绑定后改变 AccessMode 会拒绝，Kind 可随时改。
 type OpenApiThingModelPropertyUpsertDTO struct {
 	Identifier  string  `json:"identifier"`
 	Name        string  `json:"name"`

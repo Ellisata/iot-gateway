@@ -88,17 +88,20 @@
         style="width: 100%"
       >
         <el-table-column type="index" :label="t('common.index')" width="68" align="center" />
-        <el-table-column :label="t('thingModel.identifier')" min-width="200">
+        <!-- 标识符与物模型编码同一个身份锚点：小图标底座让这一列在滚动中可被一眼拾取 -->
+        <el-table-column :label="t('thingModel.identifier')" min-width="220">
           <template #default="{ row }">
-            <span class="iot-mono" :title="row.identifier">{{ row.identifier }}</span>
+            <div class="iot-name-cell">
+              <span class="iot-name-mark" aria-hidden="true">
+                <el-icon><Variable /></el-icon>
+              </span>
+              <span class="iot-mono" :title="row.identifier">{{ row.identifier }}</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column :label="t('common.name')" min-width="160" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.name }}</template>
-        </el-table-column>
-        <el-table-column :label="t('thingModel.kind.label')" width="120" align="center">
           <template #default="{ row }">
-            <el-tag size="small" effect="plain">{{ kindLabel(row.kind) }}</el-tag>
+            <span class="tp-name" :title="row.name">{{ row.name }}</span>
           </template>
         </el-table-column>
         <el-table-column :label="t('thingModel.access.label')" width="110" align="center">
@@ -112,17 +115,29 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="t('thingModel.pointCount')" width="96" align="center">
+        <!-- 属性与点位是 1 对 1，点位数恒为 0/1，没有信息量；直接展示绑定的
+             点位是谁（设备名称.点位名称），点击仍打开点位明细抽屉。
+             存量多绑数据保留 +N 提示，保存后即收敛为一条。 -->
+        <el-table-column :label="t('thingModel.boundPoint')" min-width="240">
           <template #default="{ row }">
-            <el-button
-              v-if="row.pointCount > 0"
-              link
-              type="primary"
-              @click="openPropertyPoints(row)"
-            >
-              {{ row.pointCount }}
-            </el-button>
-            <span v-else class="iot-cell-muted">0</span>
+            <div v-if="row.pointCount > 0" class="tp-bound-point-cell">
+              <button
+                type="button"
+                class="tp-bound-point"
+                :title="boundPointLabel(row)"
+                @click="openPropertyPoints(row)"
+              >
+                {{ boundPointLabel(row) }}
+              </button>
+              <span
+                v-if="row.pointCount > 1"
+                class="tp-bound-point-extra"
+                :title="t('thingModel.bindPointsLegacyPruned', { count: row.pointCount })"
+              >
+                +{{ row.pointCount - 1 }}
+              </span>
+            </div>
+            <span v-else class="iot-cell-muted">{{ t('thingModel.pointUnbound') }}</span>
           </template>
         </el-table-column>
         <el-table-column :label="t('thingModel.unit')" width="96" align="center">
@@ -318,136 +333,184 @@
       </div>
     </el-drawer>
 
-    <!-- ========== 属性表单 ========== -->
+    <!-- ========== 属性表单 ==========
+         版式与点位表单 / 触发规则表单同一套：页头三级递进，正文按
+         「基础信息 / 点位绑定」两张卡片分组，页脚左侧常驻一句后果说明。 -->
     <el-dialog
       v-model="propertyDialogVisible"
-      class="iot-dialog"
+      class="iot-dialog thing-property-dialog"
       :title="isPropertyEdit ? t('thingModel.editPropertyTitle') : t('thingModel.addPropertyTitle')"
-      width="640px"
+      width="min(840px, 94vw)"
       append-to-body
       :close-on-click-modal="false"
       @closed="handlePropertyDialogClosed"
     >
+      <template #header>
+        <div class="tp-dialog-head">
+          <p class="tp-dialog-eyebrow">
+            <span class="tp-dialog-eyebrow-dot" aria-hidden="true" />
+            {{ isPropertyEdit ? t('thingModel.formEyebrowEdit') : t('thingModel.formEyebrowAdd') }}
+          </p>
+          <div class="tp-dialog-title-row">
+            <h2 class="tp-dialog-title">
+              {{ isPropertyEdit ? t('thingModel.editPropertyTitle') : t('thingModel.addPropertyTitle') }}
+            </h2>
+            <span v-if="modelName" class="iot-chip tp-dialog-model" :title="modelName">
+              {{ modelName }}
+            </span>
+          </div>
+          <p class="tp-dialog-sub">{{ t('thingModel.formLead') }}</p>
+        </div>
+      </template>
+
       <el-form
         ref="propertyFormRef"
         :model="propertyForm"
         :rules="propertyRules"
-        label-width="108px"
+        label-width="96px"
         label-position="right"
         status-icon
+        class="tp-form"
       >
-        <el-form-item :label="t('thingModel.identifier')" prop="identifier">
-          <el-input
-            v-model="propertyForm.identifier"
-            :disabled="isPropertyEdit"
-            :placeholder="t('thingModel.identifierPlaceholder')"
-            maxlength="64"
-          />
-          <div class="iot-form-hint is-block">
-            {{
-              isPropertyEdit
-                ? t('thingModel.identifierImmutableHint')
-                : t('thingModel.identifierHint')
-            }}
-          </div>
-        </el-form-item>
-        <el-form-item :label="t('common.name')" prop="name">
-          <el-input
-            v-model="propertyForm.name"
-            :placeholder="t('thingModel.propertyNamePlaceholder')"
-            maxlength="100"
-            show-word-limit
-          />
-        </el-form-item>
-        <el-form-item :label="t('thingModel.kind.label')" prop="kind">
-          <el-select v-model="propertyForm.kind" style="width: 100%">
-            <el-option
-              v-for="item in kindOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="t('thingModel.access.label')" prop="accessMode">
-          <el-select v-model="propertyForm.accessMode" style="width: 100%">
-            <el-option
-              v-for="item in accessOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="t('thingModel.bindPoints')" prop="addressIds">
-          <el-select
-            v-model="propertyForm.addressIds"
-            multiple
-            filterable
-            collapse-tags
-            collapse-tags-tooltip
-            :loading="propertyPointOptionsLoading"
-            :placeholder="t('thingModel.bindPointsPlaceholder')"
-            :no-data-text="t('thingModel.bindPointsEmpty')"
-            style="width: 100%"
-          >
-            <el-option-group
-              v-for="g in propertyPointGroups"
-              :key="g.deviceId"
-              :label="g.deviceLabel"
-            >
-              <el-option
-                v-for="p in g.points"
-                :key="p.addressId"
-                :label="pointOptionLabel(p)"
-                :value="p.addressId"
-                :disabled="pointOptionDisabled(p)"
+        <!-- 基础信息：启停开关收进卡片头，不与一组输入项抢同一条视觉线 -->
+        <section class="tp-card">
+          <header class="tp-card-head">
+            <span class="tp-card-icon" aria-hidden="true">
+              <el-icon><IdBadge /></el-icon>
+            </span>
+            <div class="tp-card-copy">
+              <h3 class="tp-card-title">{{ t('thingModel.sectionBasic') }}</h3>
+              <p class="tp-card-desc">{{ t('thingModel.sectionBasicDesc') }}</p>
+            </div>
+            <div v-if="isPropertyEdit" class="tp-enable">
+              <span class="tp-enable-label">{{ t('common.status') }}</span>
+              <el-switch
+                v-model="propertyForm.status"
+                :active-value="1"
+                :inactive-value="0"
               />
-            </el-option-group>
-          </el-select>
-          <div class="iot-form-hint is-block">{{ t('thingModel.bindPointsHint') }}</div>
-          <div
-            v-if="!propertyPointOptionsLoading && !propertyPointOptionsReady"
-            class="iot-form-hint is-block thing-hint-warning"
-          >
-            {{ t('thingModel.pointBindingLoadFailed') }}
+            </div>
+          </header>
+          <div class="tp-card-body">
+            <div class="tp-grid">
+              <!-- 标识符是下游映射的键，独占一行；编辑态可改名，改动时用警示色
+                   提醒下游引用要同步更新 -->
+              <el-form-item
+                :label="t('thingModel.identifier')"
+                prop="identifier"
+                class="tp-span-2"
+              >
+                <el-input
+                  v-model="propertyForm.identifier"
+                  :placeholder="t('thingModel.identifierPlaceholder')"
+                  maxlength="64"
+                />
+                <div
+                  class="tp-field-hint is-block"
+                  :class="{ 'is-warning': identifierRenamed }"
+                >
+                  {{
+                    isPropertyEdit
+                      ? t('thingModel.identifierEditHint')
+                      : t('thingModel.identifierHint')
+                  }}
+                </div>
+              </el-form-item>
+              <el-form-item :label="t('common.name')" prop="name">
+                <el-input
+                  v-model="propertyForm.name"
+                  :placeholder="t('thingModel.propertyNamePlaceholder')"
+                  maxlength="100"
+                  show-word-limit
+                />
+              </el-form-item>
+              <el-form-item :label="t('thingModel.access.label')" prop="accessMode">
+                <el-select v-model="propertyForm.accessMode" style="width: 100%">
+                  <el-option
+                    v-for="item in accessOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item :label="t('thingModel.unit')" prop="unit">
+                <el-input
+                  v-model="propertyForm.unit"
+                  :placeholder="t('thingModel.unitPlaceholder')"
+                  maxlength="32"
+                />
+              </el-form-item>
+              <el-form-item :label="t('thingModel.sortOrder')" prop="sortOrder">
+                <el-input-number
+                  v-model="propertyForm.sortOrder"
+                  class="tp-sort-input"
+                  :min="0"
+                  :max="99999"
+                  controls-position="right"
+                />
+                <div class="tp-field-hint is-block">{{ t('thingModel.sortOrderHint') }}</div>
+              </el-form-item>
+              <el-form-item :label="t('common.description')" prop="description" class="tp-span-2">
+                <el-input
+                  v-model="propertyForm.description"
+                  type="textarea"
+                  :rows="2"
+                  :placeholder="t('thingModel.descriptionPlaceholder')"
+                  maxlength="500"
+                  show-word-limit
+                />
+              </el-form-item>
+            </div>
           </div>
-        </el-form-item>
-        <el-form-item :label="t('thingModel.unit')" prop="unit">
-          <el-input
-            v-model="propertyForm.unit"
-            :placeholder="t('thingModel.unitPlaceholder')"
-            maxlength="32"
-          />
-        </el-form-item>
-        <el-form-item :label="t('thingModel.sortOrder')" prop="sortOrder">
-          <el-input-number v-model="propertyForm.sortOrder" :min="0" :max="99999" />
-        </el-form-item>
-        <el-form-item :label="t('common.description')" prop="description">
-          <el-input
-            v-model="propertyForm.description"
-            type="textarea"
-            :rows="2"
-            :placeholder="t('thingModel.descriptionPlaceholder')"
-            maxlength="500"
-            show-word-limit
-          />
-        </el-form-item>
-        <el-form-item v-if="isPropertyEdit" :label="t('common.status')" prop="status">
-          <el-switch
-            v-model="propertyForm.status"
-            :active-value="1"
-            :inactive-value="0"
-            :active-text="t('common.enabled')"
-            :inactive-text="t('common.enableDisable.off')"
-          />
-        </el-form-item>
+        </section>
+
+        <!-- 点位绑定：属性的读写对象；卡头保留当前读写模式，点开选择器时同一条约束也在 -->
+        <section class="tp-card">
+          <header class="tp-card-head">
+            <span class="tp-card-icon" aria-hidden="true">
+              <el-icon><PlugConnected /></el-icon>
+            </span>
+            <div class="tp-card-copy">
+              <h3 class="tp-card-title">{{ t('thingModel.sectionBinding') }}</h3>
+              <p class="tp-card-desc">{{ t('thingModel.sectionBindingDesc') }}</p>
+            </div>
+            <el-tag
+              v-if="propertyForm.accessMode"
+              size="small"
+              effect="plain"
+              :type="propertyForm.accessMode === 'R' ? 'info' : 'warning'"
+            >
+              {{ accessLabel(propertyForm.accessMode) }}
+            </el-tag>
+          </header>
+          <div class="tp-card-body">
+            <PointBindingPicker
+              v-model="propertyForm.addressIds"
+              :property-id="propertyForm.id"
+              :access-mode="propertyForm.accessMode"
+              :bound-points="propertyBindingSeed"
+              :ready="propertyBindingReady"
+              :active="propertyDialogVisible"
+            />
+            <p class="tp-field-hint">{{ t('thingModel.bindPointsHint') }}</p>
+            <p v-if="!propertyBindingReady" class="tp-field-hint is-warning">
+              {{ t('thingModel.pointBindingLoadFailed') }}
+            </p>
+          </div>
+        </section>
       </el-form>
+
       <template #footer>
-        <el-button @click="propertyDialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="propertySubmitting" @click="handleSubmitProperty">
-          {{ t('common.save') }}
-        </el-button>
+        <div class="tp-dialog-footer">
+          <p class="tp-footer-hint">{{ t('thingModel.formFooterHint') }}</p>
+          <div class="tp-footer-actions">
+            <el-button @click="propertyDialogVisible = false">{{ t('common.cancel') }}</el-button>
+            <el-button type="primary" :loading="propertySubmitting" @click="handleSubmitProperty">
+              {{ t('common.save') }}
+            </el-button>
+          </div>
+        </div>
       </template>
     </el-dialog>
 
@@ -459,20 +522,23 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   IconArrowLeft as ArrowLeft,
   IconDownload as Download,
+  IconIdBadge2 as IdBadge,
   IconPencil as EditPen,
   IconListDetails as ListDetails,
+  IconPlugConnected as PlugConnected,
   IconPlus as Plus,
   IconSearch as Search,
   IconSend as Send,
   IconTrash as Delete,
   IconUpload as Upload,
+  IconVariable as Variable,
 } from '@tabler/icons-vue'
 import {
   createThingModelProperty,
@@ -480,12 +546,12 @@ import {
   downloadThingModelPropertyTemplate,
   getThingModelById,
   importThingModelProperties,
-  listThingModelPointOptions,
   listThingModelPropertyPoints,
   pageThingModelProperties,
   updateThingModelProperty,
 } from '@/api/modules/thingModel'
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
+import PointBindingPicker from './PointBindingPicker.vue'
 import { useExcelImport } from '@/composables/useExcelImport'
 
 const { t, te } = useI18n()
@@ -498,7 +564,6 @@ const modelCode = ref('')
 const modelCategory = ref('')
 
 const CATEGORY_CODES = ['sensor', 'meter', 'actuator', 'robot', 'plc', 'other']
-const KIND_CODES = ['bool', 'int', 'uint', 'float', 'string', 'time']
 const ACCESS_CODES = ['R', 'W', 'RW']
 
 // 分类展示名来自 i18n；开放接口下发的自定义分类没有内置文案，直接展示 code。
@@ -507,12 +572,15 @@ const categoryLabel = (code) => {
   const key = `thingModel.category.${code}`
   return te(key) ? t(key) : code
 }
-const kindLabel = (kind) => t(`thingModel.kind.${kind}`)
 const accessLabel = (mode) => t(`thingModel.access.${mode}`)
 
-const kindOptions = computed(() =>
-  KIND_CODES.map((code) => ({ value: code, label: kindLabel(code) })),
-)
+// 列表页「绑定点位」列的展示名：设备名称.点位名称。设备行缺失（理论上不会）
+// 时退回点位名，避免出现以点开头的半截名字。
+function boundPointLabel(row) {
+  if (!row.pointName) return ''
+  return row.pointDeviceName ? `${row.pointDeviceName}.${row.pointName}` : row.pointName
+}
+
 const accessOptions = computed(() =>
   ACCESS_CODES.map((code) => ({ value: code, label: accessLabel(code) })),
 )
@@ -667,7 +735,9 @@ const propertyForm = reactive({
   id: '',
   identifier: '',
   name: '',
-  kind: 'float',
+  // kind 不在页面展示（只作说明）；保留在表单里是为了编辑旧属性时把原值
+  // 原样回传，避免一次保存把它清空。
+  kind: '',
   accessMode: 'R',
   unit: '',
   description: '',
@@ -677,182 +747,53 @@ const propertyForm = reactive({
 })
 const isPropertyEdit = computed(() => !!propertyForm.id)
 
-// ---------- 点位绑定候选 ----------
-// 属性可以直接绑定任意设备的点位；选项加载失败时不发送 addressIds，
-// 避免把一次失败的请求变成「全部解绑」。
-const propertyPointOptions = ref([])
-const propertyPointOptionsLoading = ref(false)
-const propertyPointOptionsReady = ref(false)
-const originalPropertyAddressIDs = ref([])
-let pointOptionsToken = 0
-
-async function loadPropertyPointOptions(propertyId) {
-  const token = ++pointOptionsToken
-  propertyPointOptionsLoading.value = true
-  propertyPointOptionsReady.value = false
-  try {
-    const rows = (await listThingModelPointOptions()) || []
-    if (token !== pointOptionsToken) return
-    propertyPointOptions.value = rows
-    propertyPointOptionsReady.value = true
-    const bound = propertyId
-      ? rows.filter((p) => p.propertyId === propertyId).map((p) => p.addressId)
-      : []
-    originalPropertyAddressIDs.value = bound
-    propertyForm.addressIds = [...bound]
-  } catch {
-    if (token === pointOptionsToken) {
-      propertyPointOptions.value = []
-      propertyPointOptionsReady.value = false
-    }
-  } finally {
-    if (token === pointOptionsToken) propertyPointOptionsLoading.value = false
-  }
-}
-
-// 仅用于末尾「已绑定其他属性」分组的 key，不会与真实设备 ID 撞名。
-const BOUND_ELSEWHERE_GROUP = '__bound_elsewhere__'
-
-// 被别的属性占用的点位。当前属性自己已绑定的不算：
-// 它们要留在设备分组里，用户改类型/权限后还能取消勾选。
-function isPointBoundElsewhere(p) {
-  return !!p.propertyId && p.propertyId !== propertyForm.id
-}
-
-// 点位所属设备名：末尾分组的条目要靠它区分设备。
-function pointDeviceLabel(p) {
-  return p.deviceName || p.deviceCode || p.deviceId
-}
-
-// 按设备分组展示，避免多台设备的同名地址混在一起分不清。
-// 已绑定其他属性的点位一律不可选，收进末尾单独一组：
-// 既保留“点位在哪、被谁占用”的信息，又不让它们冲淡真正可选项。
-const propertyPointGroups = computed(() => {
-  const groups = []
-  const byDevice = new Map()
-  const boundElsewhere = []
-  for (const p of propertyPointOptions.value) {
-    if (isPointBoundElsewhere(p)) {
-      boundElsewhere.push(p)
-      continue
-    }
-    let g = byDevice.get(p.deviceId)
-    if (!g) {
-      g = {
-        deviceId: p.deviceId,
-        deviceLabel: pointDeviceLabel(p),
-        points: [],
-      }
-      byDevice.set(p.deviceId, g)
-      groups.push(g)
-    }
-    g.points.push(p)
-  }
-  if (boundElsewhere.length > 0) {
-    groups.push({
-      deviceId: BOUND_ELSEWHERE_GROUP,
-      deviceLabel: t('thingModel.pointBoundElsewhereGroup', { count: boundElsewhere.length }),
-      points: boundElsewhere,
-    })
-  }
-  return groups
-})
-
-// 与后端 accessCovers 同一规则（R 只覆盖 R，W 只覆盖 W，RW 全覆盖）。
-function accessCovers(addressRW, propertyAccess) {
-  switch (addressRW) {
-    case 'RW':
-      return true
-    case 'R':
-      return propertyAccess === 'R'
-    case 'W':
-      return propertyAccess === 'W'
-    default:
-      return false
-  }
-}
-
-function pointOptionDisabled(p) {
-  // 当前属性已绑定的点位始终可选：改 kind/access 后用户仍要能取消勾选。
-  if (p.propertyId === propertyForm.id && p.propertyId) return false
-  if (isPointBoundElsewhere(p)) return true
-  if (!p.kind) return true
-  if (p.kind !== propertyForm.kind) return true
-  return !accessCovers(p.rwPermission, propertyForm.accessMode)
-}
-
-// 禁用原因要指明方向：只说「权限不足」会让人以为把点位改成 RW 就能绑，
-// 实际是「属性只读 vs 点位只写」这类方向性不匹配。文案按属性读写模式取，
-// 与后端 accessCovers 的三种失败组合一一对应。
-function pointAccessMismatchLabel(p) {
-  const key = `thingModel.pointAccessMismatch.${propertyForm.accessMode}`
-  return t(key, { point: accessLabel(p.rwPermission) })
-}
-
-function pointOptionLabel(p) {
-  const pointLabel = `${p.label || p.name} (${p.name})`
-  if (isPointBoundElsewhere(p)) {
-    // 末尾分组混着多台设备的点位，分组名看不出设备，条目上补设备名；
-    // 属性标识只在模型内唯一，同名属性可能来自不同模型，所以带上模型名。
-    const propertyName = p.propertyName || p.propertyIdentifier || p.propertyId
-    const boundLabel = p.modelName ? `${p.modelName} / ${propertyName}` : propertyName
-    const boundHint = t('thingModel.pointBoundElsewhereShort', { name: boundLabel })
-    return `${pointDeviceLabel(p)} / ${pointLabel} · ${boundHint}`
-  }
-  const parts = [pointLabel]
-  if (!p.kind) {
-    parts.push(t('thingModel.pointKindUnknown'))
-  } else if (p.kind !== propertyForm.kind) {
-    parts.push(t('thingModel.pointKindMismatch'))
-  } else if (!accessCovers(p.rwPermission, propertyForm.accessMode)) {
-    parts.push(pointAccessMismatchLabel(p))
-  }
-  return parts.length > 1 ? `${parts[0]} · ${parts.slice(1).join(' / ')}` : parts[0]
-}
-
-// 同一设备对同一属性只能绑一个点位（后端返回 41021，迁移里有部分唯一索引）。
-// 多选在设备维度上退化为单选：以“最后选中的”为准，静默替换同设备已选点，
-// 避免用户选完提交才看到错误。
-watch(
-  () => propertyForm.addressIds,
-  (next, prev) => {
-    if (!Array.isArray(next) || next.length < 2) return
-    const prevSet = new Set(prev || [])
-    const added = next.filter((id) => !prevSet.has(id))
-    if (added.length === 0) return
-
-    const winners = new Map()
-    for (const id of added) {
-      const p = propertyPointOptions.value.find((x) => x.addressId === id)
-      if (p) winners.set(p.deviceId, id)
-    }
-    if (winners.size === 0) return
-    const current = next.filter((id) => {
-      const p = propertyPointOptions.value.find((x) => x.addressId === id)
-      if (!p || !winners.has(p.deviceId)) return true
-      return winners.get(p.deviceId) === id
-    })
-    if (current.length !== next.length) {
-      propertyForm.addressIds = current
-    }
-  },
+// 编辑态用来判断标识符是否真的被改名：只有改动后才把提示切到警示色，
+// 打开弹窗时不必先吓人一跳。
+const propertyOriginalIdentifier = ref('')
+const identifierRenamed = computed(
+  () =>
+    isPropertyEdit.value &&
+    propertyForm.identifier.trim() !== propertyOriginalIdentifier.value,
 )
 
-// kind / accessMode 变化后，已选但不再兼容的“新增”点位自动移除；
-// 原本就绑在本属性上的点位保留，交由后端 41018 阻止改类型。
-watch([() => propertyForm.kind, () => propertyForm.accessMode], () => {
-  if (!propertyDialogVisible.value || propertyForm.addressIds.length === 0) return
-  const originals = new Set(originalPropertyAddressIDs.value)
-  const next = propertyForm.addressIds.filter((id) => {
-    if (originals.has(id)) return true
-    const p = propertyPointOptions.value.find((x) => x.addressId === id)
-    return p ? !pointOptionDisabled(p) : false
-  })
-  if (next.length !== propertyForm.addressIds.length) {
-    propertyForm.addressIds = next
-    ElMessage.warning(t('thingModel.bindPointsPruned'))
+// ---------- 点位绑定（1 对 1） ----------
+// 编辑态需要先拉回该属性当前绑定的点位用于展示与回填；加载失败时保存不发送
+// addressIds，避免把一次失败的请求变成「解绑」。
+const propertyBindingSeed = ref([])
+const propertyBindingReady = ref(true)
+let propertyBindingToken = 0
+
+async function loadPropertyBinding(propertyId) {
+  const token = ++propertyBindingToken
+  propertyBindingReady.value = false
+  propertyBindingSeed.value = []
+  propertyForm.addressIds = []
+  try {
+    const rows = (await listThingModelPropertyPoints(propertyId)) || []
+    if (token !== propertyBindingToken) return
+    propertyBindingSeed.value = rows
+    // 历史数据可能绑了多个点位；属性已改为 1 对 1，展示并保留第一条，
+    // 其余在本次保存时解除 —— 明确提示，不做静默丢弃。
+    if (rows.length > 1) {
+      ElMessage.warning(t('thingModel.bindPointsLegacyPruned', { count: rows.length }))
+    }
+    propertyForm.addressIds = rows.slice(0, 1).map((p) => p.addressId)
+    propertyBindingReady.value = true
+  } catch {
+    if (token === propertyBindingToken) {
+      propertyBindingSeed.value = []
+      propertyForm.addressIds = []
+      propertyBindingReady.value = false
+    }
   }
-})
+}
+
+function resetPropertyBinding() {
+  propertyBindingToken += 1
+  propertyBindingSeed.value = []
+  propertyBindingReady.value = true
+  propertyForm.addressIds = []
+}
 
 const propertyRules = computed(() => ({
   identifier: [
@@ -867,7 +808,6 @@ const propertyRules = computed(() => ({
     { required: true, message: t('thingModel.nameRequired'), trigger: 'blur' },
     { min: 1, max: 100, message: t('thingModel.nameLength'), trigger: 'blur' },
   ],
-  kind: [{ required: true, message: t('thingModel.kindRequired'), trigger: 'change' }],
   accessMode: [{ required: true, message: t('thingModel.accessRequired'), trigger: 'change' }],
   unit: [{ max: 32, message: t('thingModel.unitLength'), trigger: 'blur' }],
   description: [{ max: 500, message: t('thingModel.descriptionLength'), trigger: 'blur' }],
@@ -878,11 +818,12 @@ function nextSortOrder() {
 }
 
 function handleAddProperty() {
+  propertyOriginalIdentifier.value = ''
   Object.assign(propertyForm, {
     id: '',
     identifier: '',
     name: '',
-    kind: 'float',
+    kind: '',
     accessMode: 'R',
     unit: '',
     description: '',
@@ -890,18 +831,18 @@ function handleAddProperty() {
     status: 1,
     addressIds: [],
   })
-  originalPropertyAddressIDs.value = []
+  resetPropertyBinding()
   propertyDialogVisible.value = true
   nextTick(() => propertyFormRef.value?.clearValidate())
-  loadPropertyPointOptions('')
 }
 
 function handleEditProperty(row) {
+  propertyOriginalIdentifier.value = row.identifier ?? ''
   Object.assign(propertyForm, {
     id: row.id,
     identifier: row.identifier,
     name: row.name,
-    kind: row.kind,
+    kind: row.kind ?? '',
     accessMode: row.accessMode,
     unit: row.unit ?? '',
     description: row.description ?? '',
@@ -909,18 +850,15 @@ function handleEditProperty(row) {
     status: row.status,
     addressIds: [],
   })
-  originalPropertyAddressIDs.value = []
+  resetPropertyBinding()
   propertyDialogVisible.value = true
   nextTick(() => propertyFormRef.value?.clearValidate())
-  loadPropertyPointOptions(row.id)
+  loadPropertyBinding(row.id)
 }
 
 function handlePropertyDialogClosed() {
-  pointOptionsToken += 1
-  propertyPointOptions.value = []
-  propertyPointOptionsLoading.value = false
-  propertyPointOptionsReady.value = false
-  originalPropertyAddressIDs.value = []
+  propertyOriginalIdentifier.value = ''
+  resetPropertyBinding()
   propertyFormRef.value?.resetFields()
 }
 
@@ -942,8 +880,8 @@ async function handleSubmitProperty() {
       sortOrder: propertyForm.sortOrder,
     }
     if (isEdit) {
-      // 选项没加载成功就不碰绑定：发送 [] 会把原有绑定全部清掉。
-      if (propertyPointOptionsReady.value) {
+      // 绑定没加载成功就不碰：发送 [] 会把原有绑定清掉。
+      if (propertyBindingReady.value) {
         payload.addressIds = propertyForm.addressIds
       }
       await updateThingModelProperty({
@@ -1066,8 +1004,260 @@ onMounted(() => {
   line-height: 1.6;
 }
 
-.thing-hint-warning {
+/* 名称列：标识符负责识别，名称负责阅读，字重上略高于普通单元格 */
+.tp-name {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* 「绑定点位」列：设备名称.点位名称，过长时截断；点击打开点位明细抽屉 */
+.tp-bound-point-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tp-bound-point {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--brand);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tp-bound-point:hover {
+  text-decoration: underline;
+}
+
+.tp-bound-point:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* 存量多绑数据（1 对 1 之前的历史行）的剩余条数提示 */
+.tp-bound-point-extra {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--ink-4);
+}
+
+/* ---------- 属性弹窗：页头三级递进 ---------- */
+.tp-dialog-head {
+  padding-right: 28px;
+}
+
+.tp-dialog-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.tp-dialog-eyebrow-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+}
+
+.tp-dialog-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.tp-dialog-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+/* 目标模型：告诉用户这次在给哪个模型加属性，长名称截断而不是挤掉标题 */
+.tp-dialog-model {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tp-dialog-sub {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+/* ---------- 分区卡片 ---------- */
+.tp-form {
+  padding-top: 2px;
+}
+
+.tp-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.tp-card + .tp-card {
+  margin-top: 16px;
+}
+
+.tp-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.tp-card-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  font-size: 16px;
+  color: var(--brand);
+  background: linear-gradient(180deg, var(--brand-tint) 0%, var(--brand-soft) 100%);
+  border: 1px solid var(--brand-line);
+  border-radius: 10px;
+}
+
+.tp-card-copy {
+  flex: 1;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.tp-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.tp-card-desc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+/* 启停是整张卡的开关，与标题同排靠右 */
+.tp-enable {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.tp-enable-label {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.tp-card-body {
+  padding: 20px 22px;
+}
+
+.tp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 20px;
+  margin-bottom: -16px;
+}
+
+.tp-grid :deep(.el-form-item) {
+  margin-bottom: 16px;
+}
+
+/* 一侧字段带说明文字时，内容区会被网格拉高；两侧都钉到顶部才能齐平 */
+.tp-grid :deep(.el-form-item__content) {
+  align-items: flex-start;
+  align-content: flex-start;
+}
+
+.tp-grid .tp-span-2 {
+  grid-column: span 2;
+}
+
+.tp-sort-input {
+  width: 100%;
+}
+
+.tp-field-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+.tp-field-hint.is-block {
+  flex: 0 0 100%;
+}
+
+.tp-field-hint.is-warning {
   color: var(--warning);
+}
+
+/* ---------- 页脚：左侧常驻后果说明，右侧动作 ---------- */
+.tp-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tp-footer-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+.tp-footer-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .tp-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tp-grid .tp-span-2 {
+    grid-column: auto;
+  }
+
+  /* 窄屏也让页脚保持一行：说明与动作挤不下时整组换行，
+     而不是把页脚叠高、把弹窗顶出视口（页脚变高会吃掉正文的高度预算）。 */
+  .tp-dialog-footer {
+    flex-wrap: wrap;
+    align-items: center;
+  }
 }
 
 /* 属性点位抽屉里的设备单元格：名称在上、编码在下，避免与地址列混淆 */

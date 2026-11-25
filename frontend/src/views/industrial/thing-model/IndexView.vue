@@ -211,84 +211,128 @@
       </div>
     </section>
 
-    <!-- ========== 物模型表单 ========== -->
+    <!-- ========== 物模型表单 ==========
+         版式与点位表单 / 触发规则表单 / 属性表单同一套：页头三级递进，
+         正文按「基础信息」一张卡片分组，页脚左侧常驻一句后果说明。 -->
     <el-dialog
       v-model="modelDialogVisible"
-      class="iot-dialog"
+      class="iot-dialog thing-model-dialog"
       :title="isModelEdit ? t('thingModel.editTitle') : t('thingModel.addTitle')"
-      width="640px"
+      width="min(680px, 94vw)"
+      append-to-body
       :close-on-click-modal="false"
       @closed="handleModelDialogClosed"
     >
+      <template #header>
+        <div class="tm-dialog-head">
+          <p class="tm-dialog-eyebrow">
+            <span class="tm-dialog-eyebrow-dot" aria-hidden="true" />
+            {{ isModelEdit ? t('thingModel.modelFormEyebrowEdit') : t('thingModel.modelFormEyebrowAdd') }}
+          </p>
+          <h2 class="tm-dialog-title">
+            {{ isModelEdit ? t('thingModel.editTitle') : t('thingModel.addTitle') }}
+          </h2>
+          <p class="tm-dialog-sub">{{ t('thingModel.modelFormLead') }}</p>
+        </div>
+      </template>
+
       <el-form
         ref="modelFormRef"
         :model="modelForm"
         :rules="modelRules"
-        label-width="108px"
+        label-width="96px"
         label-position="right"
         status-icon
+        class="tm-form"
       >
-        <el-form-item :label="t('thingModel.code')" prop="code">
-          <el-input
-            v-model="modelForm.code"
-            :disabled="isModelEdit"
-            :placeholder="t('thingModel.codePlaceholder')"
-            maxlength="64"
-          />
-          <div class="iot-form-hint is-block">
-            {{ isModelEdit ? t('thingModel.codeImmutableHint') : t('thingModel.codeHint') }}
+        <!-- 基础信息：启停开关收进卡片头，不与一组输入项抢同一条视觉线 -->
+        <section class="tm-card">
+          <header class="tm-card-head">
+            <span class="tm-card-icon" aria-hidden="true">
+              <el-icon><Box /></el-icon>
+            </span>
+            <div class="tm-card-copy">
+              <h3 class="tm-card-title">{{ t('thingModel.sectionBasic') }}</h3>
+              <p class="tm-card-desc">{{ t('thingModel.modelSectionBasicDesc') }}</p>
+            </div>
+            <div v-if="isModelEdit" class="tm-enable">
+              <span class="tm-enable-label">{{ t('common.status') }}</span>
+              <el-switch v-model="modelForm.status" :active-value="1" :inactive-value="0" />
+            </div>
+          </header>
+          <div class="tm-card-body">
+            <div class="tm-grid">
+              <!-- 模型标识与名称是身份信息，各自独占一行：并排时半宽输入框
+                   放不下示例文案，也压不住名称的 100 字上限 -->
+              <el-form-item :label="t('thingModel.code')" prop="code" class="tm-span-2">
+                <el-input
+                  v-model="modelForm.code"
+                  :placeholder="t('thingModel.codePlaceholder')"
+                  maxlength="64"
+                />
+                <!-- 编辑态允许改名，但改名会打断外部引用：改动后提示切到警示色，
+                     打开弹窗时先不吓人一跳 -->
+                <div
+                  class="tm-field-hint is-block"
+                  :class="{ 'is-warning': modelCodeRenamed }"
+                >
+                  {{
+                    isModelEdit
+                      ? t('thingModel.codeEditHint')
+                      : t('thingModel.codeHint')
+                  }}
+                </div>
+              </el-form-item>
+              <el-form-item :label="t('common.name')" prop="name" class="tm-span-2">
+                <el-input
+                  v-model="modelForm.name"
+                  :placeholder="t('thingModel.namePlaceholder')"
+                  maxlength="100"
+                  show-word-limit
+                />
+              </el-form-item>
+              <el-form-item :label="t('thingModel.categoryLabel')" prop="category">
+                <el-select v-model="modelForm.category" style="width: 100%">
+                  <el-option
+                    v-for="opt in formCategoryOptions"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item :label="t('thingModel.version')" prop="version">
+                <el-input
+                  v-model="modelForm.version"
+                  :placeholder="t('thingModel.versionPlaceholder')"
+                  maxlength="32"
+                />
+              </el-form-item>
+              <el-form-item :label="t('common.description')" prop="description" class="tm-span-2">
+                <el-input
+                  v-model="modelForm.description"
+                  type="textarea"
+                  :rows="3"
+                  :placeholder="t('thingModel.descriptionPlaceholder')"
+                  maxlength="500"
+                  show-word-limit
+                />
+              </el-form-item>
+            </div>
           </div>
-        </el-form-item>
-        <el-form-item :label="t('common.name')" prop="name">
-          <el-input
-            v-model="modelForm.name"
-            :placeholder="t('thingModel.namePlaceholder')"
-            maxlength="100"
-            show-word-limit
-          />
-        </el-form-item>
-        <el-form-item :label="t('thingModel.categoryLabel')" prop="category">
-          <el-select v-model="modelForm.category" style="width: 100%">
-            <el-option
-              v-for="opt in formCategoryOptions"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="t('thingModel.version')" prop="version">
-          <el-input
-            v-model="modelForm.version"
-            :placeholder="t('thingModel.versionPlaceholder')"
-            maxlength="32"
-          />
-        </el-form-item>
-        <el-form-item :label="t('common.description')" prop="description">
-          <el-input
-            v-model="modelForm.description"
-            type="textarea"
-            :rows="3"
-            :placeholder="t('thingModel.descriptionPlaceholder')"
-            maxlength="500"
-            show-word-limit
-          />
-        </el-form-item>
-        <el-form-item v-if="isModelEdit" :label="t('common.status')" prop="status">
-          <el-switch
-            v-model="modelForm.status"
-            :active-value="1"
-            :inactive-value="0"
-            :active-text="t('common.enabled')"
-            :inactive-text="t('common.enableDisable.off')"
-          />
-        </el-form-item>
+        </section>
       </el-form>
+
       <template #footer>
-        <el-button @click="modelDialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="modelSubmitting" @click="handleSubmitModel">
-          {{ t('common.save') }}
-        </el-button>
+        <div class="tm-dialog-footer">
+          <p class="tm-footer-hint">{{ t('thingModel.modelFormFooterHint') }}</p>
+          <div class="tm-footer-actions">
+            <el-button @click="modelDialogVisible = false">{{ t('common.cancel') }}</el-button>
+            <el-button type="primary" :loading="modelSubmitting" @click="handleSubmitModel">
+              {{ t('common.save') }}
+            </el-button>
+          </div>
+        </div>
       </template>
     </el-dialog>
 
@@ -469,6 +513,12 @@ const modelForm = reactive({
 
 const isModelEdit = computed(() => !!modelForm.id)
 
+// 编辑态用来判断模型标识是否真的被改名：只有改动后才把提示切到警示色。
+const modelOriginalCode = ref('')
+const modelCodeRenamed = computed(
+  () => isModelEdit.value && modelForm.code.trim() !== modelOriginalCode.value,
+)
+
 const modelRules = computed(() => ({
   code: [
     { required: true, message: t('thingModel.codeRequired'), trigger: 'blur' },
@@ -499,12 +549,14 @@ function resetModelForm() {
 }
 
 function handleAdd() {
+  modelOriginalCode.value = ''
   resetModelForm()
   modelDialogVisible.value = true
   nextTick(() => modelFormRef.value?.clearValidate())
 }
 
 function handleEdit(row) {
+  modelOriginalCode.value = row.code ?? ''
   Object.assign(modelForm, {
     id: row.id,
     code: row.code,
@@ -519,6 +571,7 @@ function handleEdit(row) {
 }
 
 function handleModelDialogClosed() {
+  modelOriginalCode.value = ''
   modelFormRef.value?.resetFields()
 }
 
@@ -622,5 +675,193 @@ onMounted(fetchList)
 .thing-name {
   color: var(--ink-2);
   font-weight: 500;
+}
+
+/* ---------- 物模型弹窗：页头三级递进 ---------- */
+.tm-dialog-head {
+  padding-right: 28px;
+}
+
+.tm-dialog-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.tm-dialog-eyebrow-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+}
+
+.tm-dialog-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.tm-dialog-sub {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+/* ---------- 分区卡片 ---------- */
+.tm-form {
+  padding-top: 2px;
+}
+
+.tm-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.tm-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.tm-card-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  font-size: 16px;
+  color: var(--brand);
+  background: linear-gradient(180deg, var(--brand-tint) 0%, var(--brand-soft) 100%);
+  border: 1px solid var(--brand-line);
+  border-radius: 10px;
+}
+
+.tm-card-copy {
+  flex: 1;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.tm-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.tm-card-desc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+/* 启停是整张卡的开关，与标题同排靠右 */
+.tm-enable {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.tm-enable-label {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.tm-card-body {
+  padding: 20px 22px;
+}
+
+.tm-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 20px;
+  margin-bottom: -16px;
+}
+
+.tm-grid :deep(.el-form-item) {
+  margin-bottom: 16px;
+}
+
+/* 一侧字段带说明文字时，内容区会被网格拉高；两侧都钉到顶部才能齐平 */
+.tm-grid :deep(.el-form-item__content) {
+  align-items: flex-start;
+  align-content: flex-start;
+}
+
+.tm-grid .tm-span-2 {
+  grid-column: span 2;
+}
+
+.tm-field-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+.tm-field-hint.is-block {
+  flex: 0 0 100%;
+}
+
+/* 标识被改名时才点亮：打开弹窗先按普通提示显示 */
+.tm-field-hint.is-warning {
+  color: var(--warning);
+}
+
+/* ---------- 页脚：左侧常驻后果说明，右侧动作 ---------- */
+.tm-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tm-footer-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+.tm-footer-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .tm-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tm-grid .tm-span-2 {
+    grid-column: auto;
+  }
+
+  /* 窄屏也让页脚保持一行：说明与动作挤不下时整组换行，而不是把弹窗顶出视口 */
+  .tm-dialog-footer {
+    flex-wrap: wrap;
+    align-items: center;
+  }
 }
 </style>

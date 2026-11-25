@@ -20,6 +20,8 @@ func ThingModelRoutes(r gin.IRouter, tc *controller.ThingModelController) {
 		g.GET("/pageThingModel", tc.PageThingModel)
 		g.GET("/listThingModels", tc.ListThingModels)
 		g.GET("/listThingModelPointOptions", tc.ListThingModelPointOptions)
+		g.GET("/pageThingModelPointDevices", tc.PageThingModelPointDevices)
+		g.GET("/pageThingModelPointOptions", tc.PageThingModelPointOptions)
 		g.GET("/listAllThingModelProperties", tc.ListAllThingModelProperties)
 		g.POST("/importThingModel", tc.ImportThingModel)
 		g.GET("/importThingModelTemplate", tc.ImportThingModelTemplate)

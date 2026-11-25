@@ -168,15 +168,16 @@ var (
 	DeviceReferencedByPushChannelEnum = NewBusinessEnum("40065", "设备下的采集组已被推送通道订阅，请先修改或删除相关推送通道", "err.device_referenced_by_push_channel")
 
 	// 物模型相关错误码（归属设备域，沿用 4000x 分段）
-	ThingModelExistsEnum                 = NewBusinessEnum("41001", "物模型标识或名称已存在", "err.thing_model_exists")
-	ThingModelNotExistsEnum              = NewBusinessEnum("41002", "物模型不存在", "err.thing_model_not_found")
-	ThingModelPropertyExistsEnum         = NewBusinessEnum("41003", "属性标识符已存在", "err.thing_model_property_exists")
-	ThingModelPropertyNotExistsEnum      = NewBusinessEnum("41004", "物模型属性不存在", "err.thing_model_property_not_found")
-	ThingModelInUseEnum                  = NewBusinessEnum("41005", "物模型属性仍被点位绑定，不能删除", "err.thing_model_in_use")
-	ThingModelPropertyInUseEnum          = NewBusinessEnum("41006", "属性已被点位绑定，不能删除", "err.thing_model_property_in_use")
-	ThingModelCodeInvalidEnum            = NewBusinessEnum("41007", "物模型标识不合法（字母开头，仅字母数字下划线短横线）", "err.thing_model_code_invalid")
-	ThingModelIdentifierInvalidEnum      = NewBusinessEnum("41008", "属性标识符不合法（字母开头，仅字母数字下划线）", "err.thing_model_identifier_invalid")
-	ThingModelIdentifierImmutableEnum    = NewBusinessEnum("41009", "属性标识符不可修改", "err.thing_model_identifier_immutable")
+	ThingModelExistsEnum            = NewBusinessEnum("41001", "物模型标识或名称已存在", "err.thing_model_exists")
+	ThingModelNotExistsEnum         = NewBusinessEnum("41002", "物模型不存在", "err.thing_model_not_found")
+	ThingModelPropertyExistsEnum    = NewBusinessEnum("41003", "属性标识符已存在", "err.thing_model_property_exists")
+	ThingModelPropertyNotExistsEnum = NewBusinessEnum("41004", "物模型属性不存在", "err.thing_model_property_not_found")
+	ThingModelInUseEnum             = NewBusinessEnum("41005", "物模型属性仍被点位绑定，不能删除", "err.thing_model_in_use")
+	ThingModelPropertyInUseEnum     = NewBusinessEnum("41006", "属性已被点位绑定，不能删除", "err.thing_model_property_in_use")
+	ThingModelCodeInvalidEnum       = NewBusinessEnum("41007", "物模型标识不合法（字母开头，仅字母数字下划线短横线）", "err.thing_model_code_invalid")
+	ThingModelIdentifierInvalidEnum = NewBusinessEnum("41008", "属性标识符不合法（字母开头，仅字母数字下划线）", "err.thing_model_identifier_invalid")
+	// 41009 不再下发（属性标识符改为可改名）；保留编码与文案，避免老客户端映射断档。
+	ThingModelIdentifierImmutableEnum    = NewBusinessEnum("41009", "属性标识符不可修改（已废弃）", "err.thing_model_identifier_immutable")
 	ThingModelCategoryInvalidEnum        = NewBusinessEnum("41010", "物模型分类不合法", "err.thing_model_category_invalid")
 	ThingModelCodeImmutableEnum          = NewBusinessEnum("41011", "物模型标识不可修改", "err.thing_model_code_immutable")
 	ThingModelDisabledEnum               = NewBusinessEnum("41012", "物模型已停用，不能绑定", "err.thing_model_disabled")
@@ -189,6 +190,7 @@ var (
 	ThingModelPointBoundElsewhereEnum    = NewBusinessEnum("41019", "点位已绑定其他属性，请先解除该绑定", "err.thing_model_point_bound_elsewhere")
 	ThingModelBindingLimitEnum           = NewBusinessEnum("41020", "一次最多绑定 200 个对象", "err.thing_model_binding_limit")
 	ThingModelDevicePointDupEnum         = NewBusinessEnum("41021", "同一设备对同一属性只能绑定一个点位", "err.thing_model_device_point_duplicate")
+	ThingModelPropertySinglePointEnum    = NewBusinessEnum("41022", "一个属性只能绑定一个点位", "err.thing_model_property_single_point")
 
 	// 配置同步相关错误码（开放接口 /openApi/config/*）
 	CfgTypeUnsupportedEnum             = NewBusinessEnum("42001", "不支持的配置类型", "err.cfg_type_unsupported")

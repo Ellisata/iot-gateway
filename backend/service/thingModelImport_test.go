@@ -99,7 +99,7 @@ func TestImportThingModels(t *testing.T) {
 }
 
 // TestImportThingModelProperties 覆盖：合法入库 / 标识重复（库内与文件内）/
-// 类型与读写模式非法 / 排序非法 / 排序留空自动顺延 / 返回汇总。
+// 类型留空（未指定）与非法值 / 读写模式非法 / 排序非法 / 排序留空自动顺延 / 返回汇总。
 func TestImportThingModelProperties(t *testing.T) {
 	db := newThingModelTestDB(t)
 	svc := NewThingModelService(db)
@@ -116,30 +116,37 @@ func TestImportThingModelProperties(t *testing.T) {
 		{"bad_access", "权限错误", "float", "X", "", "", ""},        // 读写模式非法
 		{"neg_sort", "排序错误", "float", "R", "", "-1", ""},        // 排序非法
 		{"flow", "流量", "浮点（float）", "读写（RW）", "m³/h", "30", ""}, // 成功：模板下拉写法，显式排序 30
+		{"nokind", "未指定类型", "", "R", "", "40", ""},              // 成功：数据类型只是说明，可留空
 	})
 
 	result, err := svc.ImportThingModelProperties(context.Background(), model.ID, data)
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
-	if result.Total != 8 || result.Success != 3 || result.Failed != 5 {
-		t.Fatalf("汇总 = total %d / success %d / failed %d，期望 8/3/5: %+v",
+	if result.Total != 9 || result.Success != 4 || result.Failed != 5 {
+		t.Fatalf("汇总 = total %d / success %d / failed %d，期望 9/4/5: %+v",
 			result.Total, result.Success, result.Failed, result.Errors)
 	}
 
 	var rows []struct {
 		Identifier string
 		SortOrder  int
+		Kind       string
 	}
-	if err := db.Table("thing_model_property").Select("identifier, sort_order").
-		Where("model_id = ? AND identifier IN ?", model.ID, []string{"humidity", "pressure", "flow"}).
+	if err := db.Table("thing_model_property").Select("identifier, sort_order, kind").
+		Where("model_id = ? AND identifier IN ?", model.ID, []string{"humidity", "pressure", "flow", "nokind"}).
 		Order("sort_order ASC").Scan(&rows).Error; err != nil {
 		t.Fatalf("query properties: %v", err)
 	}
-	if len(rows) != 3 {
-		t.Fatalf("成功导入的属性数 = %d，期望 3", len(rows))
+	if len(rows) != 4 {
+		t.Fatalf("成功导入的属性数 = %d，期望 4", len(rows))
 	}
-	wantOrder := map[string]int{"humidity": 10, "pressure": 20, "flow": 30}
+	wantOrder := map[string]int{"humidity": 10, "pressure": 20, "flow": 30, "nokind": 40}
+	for _, r := range rows {
+		if r.Identifier == "nokind" && r.Kind != "" {
+			t.Fatalf("nokind 的 kind = %q，期望空串（未指定）", r.Kind)
+		}
+	}
 	for _, r := range rows {
 		if wantOrder[r.Identifier] != r.SortOrder {
 			t.Fatalf("%s 排序 = %d，期望 %d", r.Identifier, r.SortOrder, wantOrder[r.Identifier])

@@ -340,6 +340,21 @@ var agentApiSurface = map[string]SurfaceEntry{
 		Params: argNone(),
 		Note:   "返回全部设备的点位（属性与设备无绑定关系）；kind 由协议类型推导，无法解析时为空串；propertyId 非空表示已绑其他属性，不能抢绑",
 	},
+	"GET /thingModel/pageThingModelPointDevices": {
+		Access: AccessRead,
+		Params: argQuery(dto.PageThingModelPointDeviceDTO{}, map[string]string{
+			"keyword": "同时模糊匹配设备名称与编码；空 = 全部",
+		}),
+		Note: "属性绑定点位的第一级：只返回名下有点位的设备（含 pointCount）。属性与设备点位是 1 对 1",
+	},
+	"GET /thingModel/pageThingModelPointOptions": {
+		Access: AccessRead,
+		Params: argQuery(dto.PageThingModelPointOptionDTO{}, map[string]string{
+			"deviceId": "必填；该设备的点位",
+			"keyword":  "同时模糊匹配地址名与说明；空 = 全部",
+		}),
+		Note: "属性绑定点位的第二级：按设备分页返回点位候选，字段与 listThingModelPointOptions 一致",
+	},
 	"GET /thingModel/listAllThingModelProperties": {
 		Access: AccessRead,
 		Params: argNone(),

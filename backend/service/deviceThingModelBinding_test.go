@@ -83,12 +83,15 @@ func TestThingModelDeviceAndAddressBinding(t *testing.T) {
 		t.Fatalf("bind cross-model property: %v", err)
 	}
 
-	// kind 不匹配：字符串点位不能绑 float 属性
-	wantThingModelErrCode(t, addressSvc.CreateDeviceAddress(ctx, &dto.CreateDeviceAddressDTO{
-		DeviceID: device.ID, Name: "D101", Label: "类型不符",
+	// kind 只是语义说明：字符串点位也能直接绑到 float 属性上（不再报 41016）。
+	noteProp := seedThingModelProperty(t, modelSvc, model.ID, "kindnote")
+	if err := addressSvc.CreateDeviceAddress(ctx, &dto.CreateDeviceAddressDTO{
+		DeviceID: device.ID, Name: "D101", Label: "类型仅说明",
 		CommonDataType: driver.TypeString, RwPermission: "R", ScanFrequency: 1000,
-		PropertyID: prop.ID,
-	}), enums.ThingModelKindMismatchEnum.GetCode())
+		PropertyID: noteProp.ID,
+	}); err != nil {
+		t.Fatalf("bind kind-mismatched point: %v", err)
+	}
 
 	// 读写不覆盖：R 点位不能绑 RW 属性
 	if err := modelSvc.CreateThingModelProperty(ctx, &dto.CreateThingModelPropertyDTO{
@@ -107,13 +110,19 @@ func TestThingModelDeviceAndAddressBinding(t *testing.T) {
 		PropertyID: rwProp.ID,
 	}), enums.ThingModelAccessMismatchEnum.GetCode())
 
-	// 属性被点位绑定后，不能改 kind / access_mode
-	wantThingModelErrCode(t, modelSvc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
+	// 属性被点位绑定后：kind 只作说明，可随时改；access_mode 仍是兼容性前提，改它 41018。
+	if err := modelSvc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
 		ID: prop.ID, Identifier: "temperature", Name: "温度",
 		Kind: "string", AccessMode: "R",
+	}); err != nil {
+		t.Fatalf("change bound property kind: %v", err)
+	}
+	wantThingModelErrCode(t, modelSvc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
+		ID: prop.ID, Identifier: "temperature", Name: "温度",
+		Kind: "string", AccessMode: "RW",
 	}), enums.ThingModelPropertyBoundImmutableEnum.GetCode())
 
-	// 解除点位绑定后可以改类型。
+	// 解除点位绑定后可以改读写模式。
 	if err := addressSvc.UpdateDeviceAddress(ctx, &dto.UpdateDeviceAddressDTO{
 		ID: addr.ID, Label: "进风温度", PropertyID: strPtr(""),
 	}); err != nil {
@@ -121,8 +130,8 @@ func TestThingModelDeviceAndAddressBinding(t *testing.T) {
 	}
 	if err := modelSvc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
 		ID: prop.ID, Identifier: "temperature", Name: "温度",
-		Kind: "string", AccessMode: "R",
+		Kind: "string", AccessMode: "RW",
 	}); err != nil {
-		t.Fatalf("change property kind after unbind: %v", err)
+		t.Fatalf("change property access after unbind: %v", err)
 	}
 }

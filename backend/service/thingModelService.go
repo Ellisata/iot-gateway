@@ -96,13 +96,27 @@ func normalizeThingModelBindingIDs(ids []string) ([]string, error) {
 	return out, nil
 }
 
-// bindAddressesToProperty 把一批点位绑定到属性（事务内调用）。
+// ensureSinglePointBinding 属性与设备点位是 1 对 1：一个属性最多绑定一个点位。
 //
-// 先复用地址侧的唯一绑定校验（validatePropertyBindingDB），再改 property_id；
-// 已绑其他属性的点位直接拒绝，绝不静默抢绑。
+// 服务层兜底在 DTO 的 max=1 之后：开放接口与测试会绕过 HTTP binding 直接调服务。
+func ensureSinglePointBinding(ids []string) error {
+	if len(ids) > 1 {
+		return thingModelErr(enums.ThingModelPropertySinglePointEnum)
+	}
+	return nil
+}
+
+// bindAddressesToProperty 把一个点位绑定到属性（事务内调用）。
+//
+// 属性与点位是 1 对 1，入参超过一个点位直接拒绝。先复用地址侧的绑定校验
+// （validatePropertyBindingDB），再改 property_id；已绑其他属性的点位直接
+// 拒绝，绝不静默抢绑。
 func bindAddressesToProperty(ctx context.Context, tx *gorm.DB, propertyID string, addressIDs []string) error {
 	ids, err := normalizeThingModelBindingIDs(addressIDs)
 	if err != nil {
+		return err
+	}
+	if err := ensureSinglePointBinding(ids); err != nil {
 		return err
 	}
 	if len(ids) == 0 {
@@ -117,68 +131,12 @@ func bindAddressesToProperty(ctx context.Context, tx *gorm.DB, propertyID string
 		return thingModelErr(enums.DeviceAddressNotExistsEnum)
 	}
 
-	deviceIDs := make([]string, 0, len(addrs))
-	seenDevice := make(map[string]struct{}, len(addrs))
-	for _, a := range addrs {
-		if _, ok := seenDevice[a.DeviceID]; ok {
-			continue
-		}
-		seenDevice[a.DeviceID] = struct{}{}
-		deviceIDs = append(deviceIDs, a.DeviceID)
-	}
-	var devices []po.Device
-	if err := tx.WithContext(ctx).Where("id IN ?", deviceIDs).Find(&devices).Error; err != nil {
-		return err
-	}
-	if len(devices) != len(deviceIDs) {
-		return thingModelErr(enums.DeviceNotExistsEnum)
-	}
-	deviceByID := make(map[string]po.Device, len(devices))
-	for _, d := range devices {
-		deviceByID[d.ID] = d
-	}
-
 	for _, a := range addrs {
 		if a.PropertyID != "" && a.PropertyID != propertyID {
 			return thingModelErr(enums.ThingModelPointBoundElsewhereEnum)
 		}
-	}
-
-	// 同一设备对同一属性只能绑一个点位。027 迁移里的部分唯一索引
-	// idx_device_address_device_property 是硬约束；这里先给出可读业务错误，
-	// 免得 SQLite 的 UNIQUE constraint 文案直接冒到界面上。
-	batchDevice := make(map[string]struct{}, len(addrs))
-	for _, a := range addrs {
-		if _, ok := batchDevice[a.DeviceID]; ok {
-			return thingModelErr(enums.ThingModelDevicePointDupEnum)
-		}
-		batchDevice[a.DeviceID] = struct{}{}
-	}
-	// 更新场景：批内只包含新增点位，同设备上“保留不动”的旧绑定也要算冲突。
-	var existing []po.DeviceAddress
-	if err := tx.WithContext(ctx).
-		Where("property_id = ? AND device_id IN ?", propertyID, deviceIDs).
-		Find(&existing).Error; err != nil {
-		return err
-	}
-	inBatch := make(map[string]struct{}, len(addrs))
-	for _, a := range addrs {
-		inBatch[a.ID] = struct{}{}
-	}
-	for _, e := range existing {
-		if _, ok := inBatch[e.ID]; !ok {
-			return thingModelErr(enums.ThingModelDevicePointDupEnum)
-		}
-	}
-
-	for _, a := range addrs {
-		device := deviceByID[a.DeviceID]
-		protocolName, err := protocolNameByID(tx.WithContext(ctx), device.ProtocolID)
-		if err != nil {
-			return err
-		}
 		if err := validatePropertyBindingDB(ctx, tx.WithContext(ctx), propertyID,
-			protocolName, a.DataType, a.RwPermission, false); err != nil {
+			a.RwPermission, false); err != nil {
 			return err
 		}
 	}
@@ -248,13 +206,16 @@ func (s *ThingModelService) CreateThingModel(ctx context.Context, req *dto.Creat
 
 // UpdateThingModel 更新物模型。
 //
-// Code 创建后不可修改：它是导入导出与外部引用的稳定键。
+// Code 允许改名（与属性标识符同一口径），省略则保持原值。它仍是导入导出与
+// 外部引用的稳定键：改名后按旧标识配置的外部引用需同步更新；开放接口按 code
+// 定位模型，拿旧 code 再 upsert 会落成新模型。
 func (s *ThingModelService) UpdateThingModel(ctx context.Context, req *dto.UpdateThingModelDTO) error {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		return thingModelErr(enums.ParamValidEnum)
 	}
-	if req.Code != "" && !thingModelCodePattern.MatchString(strings.TrimSpace(req.Code)) {
+	code := strings.TrimSpace(req.Code)
+	if code != "" && !thingModelCodePattern.MatchString(code) {
 		return thingModelErr(enums.ThingModelCodeInvalidEnum)
 	}
 	category := strings.TrimSpace(req.Category)
@@ -271,8 +232,18 @@ func (s *ThingModelService) UpdateThingModel(ctx context.Context, req *dto.Updat
 			}
 			return err
 		}
-		if req.Code != "" && strings.TrimSpace(req.Code) != existing.Code {
-			return thingModelErr(enums.ThingModelCodeImmutableEnum)
+		// 改名仍须全表唯一：code 列有唯一索引，先显式查重，避免把约束冲突
+		// 直接漏成 500。
+		if code != "" && code != existing.Code {
+			var dupCode int64
+			if err := tx.Model(&po.ThingModel{}).
+				Where("code = ? AND id != ?", code, req.ID).
+				Count(&dupCode).Error; err != nil {
+				return err
+			}
+			if dupCode > 0 {
+				return thingModelErr(enums.ThingModelExistsEnum)
+			}
 		}
 		// 开放接口下发的自定义分类允许原样保留；新增或改挂仍只接受内置分类。
 		if category != existing.Category && !constants.IsValidThingModelCategory(category) {
@@ -295,6 +266,10 @@ func (s *ThingModelService) UpdateThingModel(ctx context.Context, req *dto.Updat
 			"version":     version,
 			"description": req.Description,
 			"updated_at":  nowString(),
+		}
+		// 省略 code = 不改名（与属性的 identifier 三态同一口径）。
+		if code != "" {
+			updates["code"] = code
 		}
 		if req.Status != nil {
 			updates["status"] = *req.Status
@@ -607,7 +582,7 @@ func (s *ThingModelService) ListThingModelProperties(ctx context.Context, modelI
 	for i, p := range rows {
 		out[i] = toThingModelPropertyVO(p)
 	}
-	if err := s.fillPropertyPointCounts(ctx, out); err != nil {
+	if err := s.fillPropertyPointBindings(ctx, out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -665,9 +640,15 @@ func (s *ThingModelService) ListAllThingModelProperties(ctx context.Context) ([]
 	return out, nil
 }
 
-// fillPropertyPointCounts 一次性补齐属性的点位绑定数。
-// 分页后一页最多 100 个属性，按 property_id IN (...) 分组计数，避免逐行查询。
-func (s *ThingModelService) fillPropertyPointCounts(ctx context.Context, rows []vo.ThingModelPropertyVO) error {
+// fillPropertyPointBindings 一次性补齐属性的绑定点位：数量 + 首条点位的
+// 设备名/点位名（列表页列「点位数量」已改为「绑定点位」，展示
+// 设备名称.点位名称）。
+//
+// 分页后一页最多 100 个属性，按 property_id IN (...) 联表一次取回，避免逐行
+// 查询。1 对 1 下每个属性最多一条；存量多绑属性取与
+// ListThingModelPropertyPoints（抽屉/编辑弹窗的数据源）相同排序下的第一条，
+// 保证列表页展示的就是保存后保留的那条。LEFT JOIN 保证设备行缺失时仍计入数量。
+func (s *ThingModelService) fillPropertyPointBindings(ctx context.Context, rows []vo.ThingModelPropertyVO) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -675,24 +656,36 @@ func (s *ThingModelService) fillPropertyPointCounts(ctx context.Context, rows []
 	for i := range rows {
 		ids[i] = rows[i].ID
 	}
-	type countRow struct {
+	type bindingRow struct {
 		PropertyID string `gorm:"column:property_id"`
-		Count      int64  `gorm:"column:count"`
+		PointName  string `gorm:"column:point_name"`
+		DeviceName string `gorm:"column:device_name"`
 	}
-	var counts []countRow
-	if err := s.sqliteDB.WithContext(ctx).Model(&po.DeviceAddress{}).
-		Select("property_id, COUNT(*) AS count").
-		Where("property_id IN ?", ids).
-		Group("property_id").
-		Scan(&counts).Error; err != nil {
+	var bindings []bindingRow
+	if err := s.sqliteDB.WithContext(ctx).
+		Table("device_address AS a").
+		Select("a.property_id, a.name AS point_name, d.name AS device_name").
+		Joins("LEFT JOIN device AS d ON d.id = a.device_id").
+		Where("a.property_id IN ?", ids).
+		Order("a.property_id ASC, d.name ASC, a.id ASC").
+		Scan(&bindings).Error; err != nil {
 		return err
 	}
-	byID := make(map[string]int64, len(counts))
-	for _, c := range counts {
-		byID[c.PropertyID] = c.Count
+	counts := make(map[string]int64, len(bindings))
+	// bindings 已按属性分组且组内有固定顺序，每个属性第一次出现的那条即展示项。
+	first := make(map[string]bindingRow, len(bindings))
+	for _, b := range bindings {
+		counts[b.PropertyID]++
+		if _, ok := first[b.PropertyID]; !ok {
+			first[b.PropertyID] = b
+		}
 	}
 	for i := range rows {
-		rows[i].PointCount = byID[rows[i].ID]
+		rows[i].PointCount = counts[rows[i].ID]
+		if b, ok := first[rows[i].ID]; ok {
+			rows[i].PointDeviceName = b.DeviceName
+			rows[i].PointName = b.PointName
+		}
 	}
 	return nil
 }
@@ -745,7 +738,7 @@ func (s *ThingModelService) PageThingModelProperties(ctx context.Context, req *d
 	for i, p := range rows {
 		records[i] = toThingModelPropertyVO(p)
 	}
-	if err := s.fillPropertyPointCounts(ctx, records); err != nil {
+	if err := s.fillPropertyPointBindings(ctx, records); err != nil {
 		return nil, err
 	}
 	return &vo.ThingModelPropertyPageVO{
@@ -820,22 +813,145 @@ type pointOptionRow struct {
 	ProtocolID     string `gorm:"column:protocol_id"`
 }
 
+// pointOptionSelect 是点位候选联表的固定列集，全量/分页两条路径共用。
+const pointOptionSelect = "a.id, a.device_id, a.property_id, a.name, a.label, a.common_data_type, a.data_type, " +
+	"a.rw_permission, a.status, d.code AS device_code, d.name AS device_name, d.protocol_id"
+
 // ListThingModelPointOptions 属性表单的点位候选：返回全部设备的点位。
 //
 // 属性与设备之间没有绑定关系，点位可来自任意设备，因此这里不做设备过滤。
 // 用 join 一次取完，不先查 device_id 再拼大 IN —— 设备多时后者会撞 SQLite
 // 参数上限。不要求模型启用：停用的模型也必须能打开表单解绑。
+//
+// 属性表单已改为「设备 → 点位」两级分页选择，此接口保留给仍按全量拉取
+// 的调用方（如 agentApi 镜像）；新页面请用 PageThingModelPointOptions。
 func (s *ThingModelService) ListThingModelPointOptions(ctx context.Context) ([]vo.ThingModelPointOptionVO, error) {
 	var rows []pointOptionRow
 	if err := s.sqliteDB.WithContext(ctx).
 		Table("device_address AS a").
-		Select("a.id, a.device_id, a.property_id, a.name, a.label, a.common_data_type, a.data_type, " +
-			"a.rw_permission, a.status, d.code AS device_code, d.name AS device_name, d.protocol_id").
+		Select(pointOptionSelect).
 		Joins("JOIN device AS d ON d.id = a.device_id").
 		Order("d.name ASC, a.id ASC").
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
+	return s.pointOptionsToVOs(ctx, rows)
+}
+
+// PageThingModelPointOptions 属性表单的点位候选分页（按设备）。
+//
+// keyword 同时模糊匹配地址名与说明；空串不过滤。排序按 (名称, id)：
+// 同名的点位在批量导入后很常见，只按名称排序会让翻页重复或漏行。
+func (s *ThingModelService) PageThingModelPointOptions(
+	ctx context.Context, req *dto.PageThingModelPointOptionDTO,
+) (*response.PageVo[vo.ThingModelPointOptionVO], error) {
+	deviceID := strings.TrimSpace(req.DeviceID)
+	if deviceID == "" {
+		return nil, thingModelErr(enums.ParamValidEnum)
+	}
+
+	db := s.sqliteDB.WithContext(ctx).
+		Table("device_address AS a").
+		Where("a.device_id = ?", deviceID)
+	if keyword := strings.TrimSpace(req.Keyword); keyword != "" {
+		pattern := "%" + keyword + "%"
+		db = db.Where("a.name LIKE ? OR a.label LIKE ?", pattern, pattern)
+	}
+
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	var rows []pointOptionRow
+	offset := (req.Page - 1) * req.Size
+	if err := db.Select(pointOptionSelect).
+		Joins("JOIN device AS d ON d.id = a.device_id").
+		Order("a.name ASC, a.id ASC").
+		Offset(offset).Limit(req.Size).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	records, err := s.pointOptionsToVOs(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	return &response.PageVo[vo.ThingModelPointOptionVO]{
+		Page:    req.Page,
+		Size:    req.Size,
+		Total:   total,
+		Records: records,
+	}, nil
+}
+
+// PageThingModelPointDevices 属性绑定点位时的设备候选分页。
+//
+// 只返回名下至少有一个点位的设备：没有点位的设备在这里选了也没有可绑对象。
+// PointCount 一并返回，前端可以直接展示规模而不用为每台设备再查一轮。
+func (s *ThingModelService) PageThingModelPointDevices(
+	ctx context.Context, req *dto.PageThingModelPointDeviceDTO,
+) (*response.PageVo[vo.ThingModelPointDeviceVO], error) {
+	db := s.sqliteDB.WithContext(ctx).Model(&po.Device{}).
+		Where("EXISTS (SELECT 1 FROM device_address AS a WHERE a.device_id = device.id)")
+	if keyword := strings.TrimSpace(req.Keyword); keyword != "" {
+		pattern := "%" + keyword + "%"
+		db = db.Where("(name LIKE ? OR code LIKE ?)", pattern, pattern)
+	}
+
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	var rows []struct {
+		ID         string `gorm:"column:id"`
+		Code       string `gorm:"column:code"`
+		Name       string `gorm:"column:name"`
+		Status     int    `gorm:"column:status"`
+		PointCount int64  `gorm:"column:point_count"`
+	}
+	pointsDB := s.sqliteDB.WithContext(ctx).
+		Table("device AS d").
+		Select("d.id, d.code, d.name, d.status, COUNT(a.id) AS point_count").
+		Joins("JOIN device_address AS a ON a.device_id = d.id")
+	if keyword := strings.TrimSpace(req.Keyword); keyword != "" {
+		pattern := "%" + keyword + "%"
+		pointsDB = pointsDB.Where("(d.name LIKE ? OR d.code LIKE ?)", pattern, pattern)
+	}
+	offset := (req.Page - 1) * req.Size
+	if err := pointsDB.
+		Group("d.id, d.code, d.name, d.status").
+		Order("d.name ASC, d.id ASC").
+		Offset(offset).Limit(req.Size).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	records := make([]vo.ThingModelPointDeviceVO, len(rows))
+	for i, r := range rows {
+		records[i] = vo.ThingModelPointDeviceVO{
+			ID:         r.ID,
+			Code:       r.Code,
+			Name:       r.Name,
+			Status:     r.Status,
+			PointCount: r.PointCount,
+		}
+	}
+	return &response.PageVo[vo.ThingModelPointDeviceVO]{
+		Page:    req.Page,
+		Size:    req.Size,
+		Total:   total,
+		Records: records,
+	}, nil
+}
+
+// pointOptionsToVOs 把点位候选联表行补全成 VO（协议类型、已绑定属性与模型名）。
+//
+// 全量选项与分页选项共用这一份映射：两处各写一份时，将来加字段只会加进
+// 其中一条路径，「分页里看不到已绑定属性」这类问题就会悄悄出现。
+func (s *ThingModelService) pointOptionsToVOs(
+	ctx context.Context, rows []pointOptionRow,
+) ([]vo.ThingModelPointOptionVO, error) {
 	if len(rows) == 0 {
 		return []vo.ThingModelPointOptionVO{}, nil
 	}
@@ -945,7 +1061,7 @@ func (s *ThingModelService) CreateThingModelProperty(ctx context.Context, req *d
 	if !thingModelIdentifierPattern.MatchString(identifier) {
 		return thingModelErr(enums.ThingModelIdentifierInvalidEnum)
 	}
-	if name == "" || !isThingModelKind(req.Kind) || !isThingModelAccessMode(req.AccessMode) {
+	if name == "" || (req.Kind != "" && !isThingModelKind(req.Kind)) || !isThingModelAccessMode(req.AccessMode) {
 		return thingModelErr(enums.ParamValidEnum)
 	}
 
@@ -994,10 +1110,12 @@ func (s *ThingModelService) CreateThingModelProperty(ctx context.Context, req *d
 
 // UpdateThingModelProperty 更新物模型属性。
 //
-// Identifier 创建后不可修改：绑定校验、映射与外部引用都靠它定位属性。
+// Identifier 可修改（模型内唯一）：点位绑定按 property_id 关联，改名不会断开；
+// 但映射、脚本与推送里按 identifier 引用它的地方需要同步更新。采集侧靠配置
+// 校验和感知改名并重建任务，记录里的 propertyCode 才会换成新值。
 func (s *ThingModelService) UpdateThingModelProperty(ctx context.Context, req *dto.UpdateThingModelPropertyDTO) error {
 	name := strings.TrimSpace(req.Name)
-	if name == "" || !isThingModelKind(req.Kind) || !isThingModelAccessMode(req.AccessMode) {
+	if name == "" || (req.Kind != "" && !isThingModelKind(req.Kind)) || !isThingModelAccessMode(req.AccessMode) {
 		return thingModelErr(enums.ParamValidEnum)
 	}
 	identifier := strings.TrimSpace(req.Identifier)
@@ -1013,17 +1131,33 @@ func (s *ThingModelService) UpdateThingModelProperty(ctx context.Context, req *d
 			}
 			return err
 		}
+		// 改名按模型内唯一校验：撞上同模型的其它属性直接拒绝，不能等到
+		// 唯一索引报错才给一个看不懂的「保存失败」。
+		renameTo := ""
 		if identifier != "" && identifier != existing.Identifier {
-			return thingModelErr(enums.ThingModelIdentifierImmutableEnum)
+			var count int64
+			if err := tx.Model(&po.ThingModelProperty{}).
+				Where("model_id = ? AND identifier = ? AND id <> ?", existing.ModelID, identifier, existing.ID).
+				Count(&count).Error; err != nil {
+				return err
+			}
+			if count > 0 {
+				return thingModelErr(enums.ThingModelPropertyExistsEnum)
+			}
+			renameTo = identifier
 		}
 
-		// 点位同步：先按表单解绑被移除的点位，再做 kind/access 的 41018 判定。
-		// 顺序很重要 —— 这样「改类型 + 同时清空全部绑定」可以一次保存完成，
-		// 而只要还留着任何绑定，改类型仍然被拒绝（事务回滚后绑定原样恢复）。
+		// 点位同步：先按表单解绑被移除的点位，再做 access 的 41018 判定。
+		// 顺序很重要 —— 这样「改读写模式 + 同时清空全部绑定」可以一次保存完成，
+		// 而只要还留着任何绑定，改读写模式仍然被拒绝（事务回滚后绑定原样恢复）。
+		// kind 只是说明，不参与这项判定。
 		var added []string
 		if req.AddressIDs != nil {
 			desired, err := normalizeThingModelBindingIDs(*req.AddressIDs)
 			if err != nil {
+				return err
+			}
+			if err := ensureSinglePointBinding(desired); err != nil {
 				return err
 			}
 			desiredSet := make(map[string]struct{}, len(desired))
@@ -1058,9 +1192,10 @@ func (s *ThingModelService) UpdateThingModelProperty(ctx context.Context, req *d
 			}
 		}
 
-		// 已被点位绑定后，kind/access 是绑定的兼容性前提：改了会让已有绑定
+		// 已被点位绑定后，access_mode 是绑定的兼容性前提：改了会让已有绑定
 		// 悄悄失效（采集本身照常，只是语义不对）。要求先解绑再改。
-		if req.Kind != existing.Kind || req.AccessMode != existing.AccessMode {
+		// kind 只是语义说明，改它不影响任何绑定，随时可改。
+		if req.AccessMode != existing.AccessMode {
 			var bound int64
 			if err := tx.Model(&po.DeviceAddress{}).Where("property_id = ?", req.ID).
 				Count(&bound).Error; err != nil {
@@ -1080,10 +1215,13 @@ func (s *ThingModelService) UpdateThingModelProperty(ctx context.Context, req *d
 			"sort_order":  req.SortOrder,
 			"updated_at":  nowString(),
 		}
+		if renameTo != "" {
+			updates["identifier"] = renameTo
+		}
 		if req.Status != nil {
 			updates["status"] = *req.Status
 		}
-		// 先落属性行，新增点位才能按新的 kind/access/status 校验；
+		// 先落属性行，新增点位才能按新的 access/status 校验；
 		// 保留下来的旧绑定不重复校验（模型/属性事后停用不应阻止改名保存）。
 		if err := tx.Model(&po.ThingModelProperty{}).Where("id = ?", req.ID).Updates(updates).Error; err != nil {
 			return err
@@ -1129,7 +1267,8 @@ var thingModelPropertyImportHeaders = []string{"属性标识", "名称", "数据
 //
 // 属性标识符在模型内唯一（与单条创建同口径），重复行跳过并记录原因；
 // 数据类型/读写模式接受模板下拉项「浮点（float）」「只读（R）」、中文名或 code
-// （code 忽略大小写）。排序留空时按模型内最大值 +10 顺延；其余行部分导入。
+// （code 忽略大小写）。数据类型留空表示未指定（它只是语义说明）。排序留空时按
+// 模型内最大值 +10 顺延；其余行部分导入。
 func (s *ThingModelService) ImportThingModelProperties(ctx context.Context, modelID string, data []byte) (*vo.ExcelImportResultVO, error) {
 	modelID = strings.TrimSpace(modelID)
 	if modelID == "" {
@@ -1233,9 +1372,14 @@ func validateThingModelPropertyImportRow(identifier, name, kindRaw, accessRaw, u
 	if utf8.RuneCountInString(name) > 100 {
 		return "", "", "名称不能超过100个字符"
 	}
-	kind, kindOK := constants.ParseEnumValue(kindRaw, deviceKindCodes, deviceKindDisplayNames)
-	if !kindOK {
-		return "", "", "数据类型须为下拉选项（如「浮点（float）」）"
+	// 数据类型只是语义说明：留空 = 未指定，填了才要求是下拉项之一。
+	kind = ""
+	if kindRaw != "" {
+		var kindOK bool
+		kind, kindOK = constants.ParseEnumValue(kindRaw, deviceKindCodes, deviceKindDisplayNames)
+		if !kindOK {
+			return "", "", "数据类型须为下拉选项（如「浮点（float）」），留空表示未指定"
+		}
 	}
 	accessMode, accessOK := constants.ParseEnumValue(accessRaw, thingModelAccessModeCodes, thingModelAccessModeDisplayNames)
 	if !accessOK {
@@ -1261,7 +1405,7 @@ func (s *ThingModelService) GenerateThingModelPropertyImportTemplate() (*bytes.B
 			{
 				Col:     2,
 				Options: constants.BuildEnumOptions(deviceKindCodes, deviceKindDisplayNames),
-				Prompt:  "请选择数据类型",
+				Prompt:  "可选，仅作说明；留空表示未指定",
 			},
 			{
 				Col:     3,

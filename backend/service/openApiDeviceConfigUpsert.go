@@ -531,10 +531,10 @@ func (s *OpenApiConfigService) upsertDevicePoints(ctx context.Context, tx *gorm.
 		err = tx.Where("device_id = ? AND name = ?", device.ID, name).First(&existing).Error
 		switch {
 		case errors.Is(err, gorm.ErrRecordNotFound):
-			if err := validatePropertyBindingDB(ctx, tx, propertyID, protocolName, internal, rw, false); err != nil {
+			if err := validatePropertyBindingDB(ctx, tx, propertyID, rw, false); err != nil {
 				return err
 			}
-			if err := ensureDevicePropertyUnique(ctx, tx, device.ID, propertyID, ""); err != nil {
+			if err := ensurePropertySinglePoint(ctx, tx, propertyID, ""); err != nil {
 				return err
 			}
 			now := nowString()
@@ -563,11 +563,14 @@ func (s *OpenApiConfigService) upsertDevicePoints(ctx context.Context, tx *gorm.
 		case err != nil:
 			return err
 		default:
-			if err := validatePropertyBindingDB(ctx, tx, propertyID, protocolName, internal, rw, existing.PropertyID == propertyID); err != nil {
+			if err := validatePropertyBindingDB(ctx, tx, propertyID, rw, existing.PropertyID == propertyID); err != nil {
 				return err
 			}
-			if err := ensureDevicePropertyUnique(ctx, tx, device.ID, propertyID, existing.ID); err != nil {
-				return err
+			// 只在实际换绑时检查：历史多绑行照常 upsert 其它字段。
+			if propertyID != existing.PropertyID {
+				if err := ensurePropertySinglePoint(ctx, tx, propertyID, existing.ID); err != nil {
+					return err
+				}
 			}
 			if err := tx.Model(&po.DeviceAddress{}).Where("id = ?", existing.ID).Updates(map[string]any{
 				"label":             label,

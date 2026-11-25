@@ -314,6 +314,35 @@ func (e *Engine) loadConfigChecksum() uint64 {
 		io.WriteString(h, "\n")
 	}
 
+	// 属性标识符随记录下发（CollectedRecord.PropertyCode）。改名不改变点位绑定，
+	// device_address 表里看不出变化 —— 必须单独纳入校验和，否则任务不会重建，
+	// 推送/订阅里会一直带着旧编码。只看被活跃点位引用的属性，未绑定的属性改名
+	// 不影响采集记录，不必触发重载。
+	propIDs := make(map[string]struct{})
+	for _, a := range addrs {
+		if a.PropertyID != "" {
+			propIDs[a.PropertyID] = struct{}{}
+		}
+	}
+	if len(propIDs) > 0 {
+		ids := make([]string, 0, len(propIDs))
+		for id := range propIDs {
+			ids = append(ids, id)
+		}
+		var props []po.ThingModelProperty
+		if err := e.db.Model(&po.ThingModelProperty{}).
+			Select("id", "identifier").Where("id IN ?", ids).Order("id").Find(&props).Error; err != nil {
+			logger.Warn("collector: load thing model properties for checksum failed: %v", err)
+		} else {
+			for _, p := range props {
+				io.WriteString(h, p.ID)
+				io.WriteString(h, "|")
+				io.WriteString(h, p.Identifier)
+				io.WriteString(h, "\n")
+			}
+		}
+	}
+
 	// 采集组全表参与校验和（含停用组）：组改名/改周期/启停都必须触发热加载，
 	// 否则采集侧仍按旧周期轮询、记录里仍是旧组名（topic 也会跟着错）。
 	var groups []po.CollectorGroup

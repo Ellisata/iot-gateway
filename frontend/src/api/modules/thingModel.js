@@ -61,6 +61,48 @@ export function listThingModelPointOptions() {
 }
 
 /**
+ * 属性绑定点位的第一级：设备候选（分页 + 关键词）
+ * @param {Object} params
+ * @param {number} params.page
+ * @param {number} params.size
+ * @param {string} [params.keyword] 同时模糊匹配设备名称与编码
+ * @returns {Promise<{page:number,size:number,total:number,records:Array<{id:string,code:string,name:string,status:number,pointCount:number}>}>}
+ */
+export function pageThingModelPointDevices(params = {}) {
+  return request({
+    url: '/thingModel/pageThingModelPointDevices',
+    method: 'get',
+    params: {
+      page: params.page,
+      size: params.size,
+      keyword: params.keyword || undefined,
+    },
+  })
+}
+
+/**
+ * 属性绑定点位的第二级：某设备的点位候选（分页 + 关键词）
+ * @param {Object} params
+ * @param {string} params.deviceId
+ * @param {number} params.page
+ * @param {number} params.size
+ * @param {string} [params.keyword] 同时模糊匹配地址名与说明
+ * @returns {Promise<{page:number,size:number,total:number,records:Array}>} 记录字段与 listThingModelPointOptions 一致
+ */
+export function pageThingModelPointOptions(params = {}) {
+  return request({
+    url: '/thingModel/pageThingModelPointOptions',
+    method: 'get',
+    params: {
+      deviceId: params.deviceId,
+      page: params.page,
+      size: params.size,
+      keyword: params.keyword || undefined,
+    },
+  })
+}
+
+/**
  * 跨模型的属性下拉（设备点位绑定属性用）
  * @returns {Promise<Array<{id:string,modelId:string,modelCode:string,modelName:string,identifier:string,name:string,kind:string,accessMode:string,unit:string,status:number}>>}
  */
@@ -168,7 +210,7 @@ export function pageThingModelProperties(modelId, params = {}) {
  * 新增物模型属性
  * @param {Object} data
  * @param {string} data.modelId
- * @param {string} data.identifier 属性标识符（字母开头，模型内唯一，创建后不可改）
+ * @param {string} data.identifier 属性标识符（字母开头，模型内唯一）
  * @param {string} data.name
  * @param {string} data.kind bool/int/uint/float/string/time
  * @param {string} data.accessMode R/W/RW
@@ -186,7 +228,7 @@ export function createThingModelProperty(data) {
 }
 
 /**
- * 修改物模型属性（identifier 创建后不可改）
+ * 修改物模型属性（identifier 可改名，模型内仍须唯一）
  * @param {Object} data
  * @param {string} data.id
  * @param {string} [data.identifier] 省略或与原值一致

@@ -4,408 +4,465 @@
 -->
 
 <template>
-  <div class="device-page">
-    <!-- 页头：沿用首页那套字号/留白层级，深浅两色由 token 控制，不另起一套视觉语言 -->
-    <header class="page-head enter">
-      <div class="page-head-main">
-        <div class="page-head-top">
-          <p class="eyebrow">
-            <span class="eyebrow-dot" aria-hidden="true" />
+  <div class="iot-page dw-page">
+    <!-- 页头：沿用首页那套字号/留白层级，深浅两色由 token 控制，不另起一套视觉语言。
+         设备级动作（模板/导入/新增）放页头右侧：它们作用于「设备集合」，
+         不属于当前选中的某一台，窄屏切到单列时也仍然常驻。 -->
+    <header class="iot-head dw-head">
+      <div class="iot-head-main">
+        <div class="iot-head-top">
+          <p class="iot-eyebrow">
+            <span class="iot-eyebrow-dot" aria-hidden="true" />
             {{ t('menu.industrial') }}
           </p>
         </div>
-        <div class="page-title-row">
-          <h1 class="page-title">{{ t('menu.deviceObject') }}</h1>
-          <span class="page-head-sub">{{ t('deviceObject.subtitle') }}</span>
+        <div class="iot-title-row">
+          <!-- 标题前的图标底座：与对话框卡片头、右栏设备身份用同一枚图标语言，
+               三处「设备」标识因此共享一种质感，而不是各自为政的小图标 -->
+          <div class="dw-title-main">
+            <span class="dw-title-mark" aria-hidden="true">
+              <el-icon><DeviceChip /></el-icon>
+            </span>
+            <h1 class="iot-title">{{ t('menu.deviceObject') }}</h1>
+          </div>
+          <span class="iot-head-sub">{{ t('deviceObject.subtitle') }}</span>
         </div>
       </div>
-      <div class="page-stat">
-        <span class="page-stat-num">{{ displayTotal }}</span>
-        <span class="page-stat-label">{{ t('deviceObject.totalUnit') }}</span>
-      </div>
-    </header>
-
-    <!-- 工作区：筛选、表格、分页共用一块表面。
-         原来「一条工具栏 + 一张表」是两张独立卡片，之间的 16px 空隙把同一件事切成了两半；
-         合成一块后，工具条退化成表头的一部分，视线从筛选直接落到数据上。 -->
-    <section ref="panelRef" class="panel enter" style="animation-delay: 60ms">
-      <div class="toolbar">
-        <div class="toolbar-filters">
-          <el-input
-            v-model="queryForm.name"
-            class="filter-search"
-            :placeholder="t('deviceObject.searchPlaceholder')"
-            clearable
-            @keyup.enter="handleSearch"
-          >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-          </el-input>
-          <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
-          <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
+      <div class="dw-head-aside">
+        <div class="iot-stat dw-stat-card">
+          <span class="iot-stat-num">{{ displayTotal }}</span>
+          <span class="iot-stat-label">{{ t('deviceObject.totalUnit') }}</span>
         </div>
-        <div class="toolbar-actions">
-          <!-- 批量删除放在这一组的最左边，且未勾选时置灰不移除：它是**破坏性**动作，
-               和右边的下载/导入/新增不是一类；常驻在固定位置能让人形成固定预期，
-               按勾选数变长的文案则让「删几台」在按下确认之前就可见。 -->
-          <el-button
-            type="danger"
-            plain
-            :icon="Delete"
-            :disabled="selectedRows.length === 0"
-            @click="handleBatchDelete"
-          >
-            {{ batchDeleteLabel }}
-          </el-button>
-          <span class="toolbar-sep" aria-hidden="true" />
+        <div class="dw-head-actions">
           <el-button :icon="Download" @click="openTemplateDialog">{{ t('common.downloadTemplate') }}</el-button>
           <el-button :icon="Upload" :loading="importing" @click="handleImport">{{ t('common.import') }}</el-button>
           <el-button type="primary" :icon="Plus" @click="handleAdd">{{ t('deviceObject.add') }}</el-button>
           <input ref="fileInputRef" type="file" accept=".xlsx" class="hidden" @change="handleFileChange" />
         </div>
       </div>
+    </header>
 
-      <!-- 数据表格 -->
-      <el-table
-        ref="tableRef"
-        class="device-table"
-        :data="tableData"
-        v-loading="loading"
-        row-key="id"
-        style="width: 100%"
-        @selection-change="handleSelectionChange"
-      >
-        <!-- 项目里没用 reserve-selection：跨页保留勾选会让「已勾选 N 台」与实际
-             能删到的集合不一致（翻页后看不见的行还在里面），批量删除宁可让人重勾。 -->
-        <el-table-column type="selection" width="44" align="center" />
-        <!-- 窄屏（含侧栏展开的 1280/1366）藏起序号与描述：九列挤进 1000px 会把
-             创建时间推到固定操作列底下，反而让人以为数据丢了。序号只是行号，
-             描述是次要信息；两者都在宽屏回归。 -->
-        <el-table-column v-if="!compact" type="index" :label="t('common.index')" width="68" align="center" />
-
-        <!-- 编码是对外稳定标识（导入导出、主题模板、外部引用都用它），
-             比内部 UUID 更值得占这一列；复制按钮常驻但低对比，悬停整行才完全显形。 -->
-        <el-table-column :label="t('deviceObject.code')" width="150">
-          <template #default="{ row }">
-            <div class="code-cell">
-              <el-tooltip v-if="row.code" :content="row.code" placement="top">
-                <span class="code-text">{{ row.code }}</span>
-              </el-tooltip>
-              <span v-else class="cell-muted">—</span>
-              <el-tooltip v-if="row.code" :content="t('common.copy')" placement="top">
-                <button
-                  type="button"
-                  class="copy-btn"
-                  :aria-label="t('common.copy')"
-                  @click="copyCode(row.code)"
-                >
-                  <el-icon><CopyDocument /></el-icon>
-                </button>
-              </el-tooltip>
-            </div>
-          </template>
-        </el-table-column>
-
-        <!-- 名称是这一行的身份：给一个小图标底座，让「一台设备」在滚动中可被一眼拾取。
-             扫描身份（协议|主机|端口|站号）作为第二行挂在名称下面，而不是单开一列：
-             页面宽度已顶到 1400 的版心上限，再加一列会让整张表永久横向滚动，
-             固定操作列又会盖住创建时间。空串 = 不是扫描建出来的，保持单行不占高度。 -->
-        <el-table-column :label="t('common.name')" min-width="220">
-          <template #default="{ row }">
-            <div class="name-cell">
-              <span class="name-mark" aria-hidden="true">
-                <el-icon><DeviceChip /></el-icon>
-              </span>
-              <div class="name-body">
-                <span class="name-text" :title="row.name">{{ row.name }}</span>
-                <span
-                  v-if="row.scanIdentity"
-                  class="scan-id-text"
-                  :title="row.scanIdentity"
-                >
-                  {{ row.scanIdentity }}
-                </span>
-              </div>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('deviceObject.protocol')" width="152">
-          <template #default="{ row }">
-            <!-- 协议名可以很长（Omron.FINS.HostLinkTCP 22 个字符），放不下时让省略号
-                 落在 chip **内部**，再用 tooltip 给出全名；被单元格截在胶囊外面会像渲染故障 -->
-            <el-tooltip
-              v-if="row.protocolName"
-              :content="row.protocolName"
-              placement="top"
-              :persistent="false"
+    <!-- 主从工作区：左列表选设备，右栏直接管理这台设备的点位。
+         整页定高、两栏各自滚动 —— 换设备时左列表不会跟着右栏的表格一起滚走。 -->
+    <div
+      ref="splitRef"
+      class="dw-split"
+      :class="{
+        'is-single': singleColumn,
+        'is-list-view': !selectedDevice,
+        'is-detail-view': !!selectedDevice,
+      }"
+    >
+      <!-- ========== 左：设备列表 ========== -->
+      <aside class="iot-panel dw-list" :aria-label="t('deviceObject.deviceListLabel')">
+        <div class="iot-toolbar dw-list-toolbar">
+          <div class="iot-toolbar-filters">
+            <el-input
+              v-model="queryForm.name"
+              class="iot-search"
+              :placeholder="t('deviceObject.searchPlaceholder')"
+              clearable
+              @keyup.enter="handleSearch"
             >
-              <span class="proto-chip">{{ row.protocolName }}</span>
-            </el-tooltip>
-            <span v-else class="cell-muted">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column
-          v-if="!compact"
-          prop="description"
-          :label="t('common.description')"
-          min-width="98"
-          show-overflow-tooltip
-          class-name="col-muted"
-        />
-        <el-table-column :label="t('deviceObject.onlineStatus')" width="116" class-name="col-status">
-          <template #default="{ row }">
-            <el-tooltip :content="onlineStateTip(row)" placement="top" :persistent="false">
-              <span class="status-pill" :class="`is-${onlineState(row)}`">
-                <span class="status-dot" aria-hidden="true" />
-                {{ onlineStateLabel(row) }}
-              </span>
-            </el-tooltip>
-          </template>
-        </el-table-column>
-        <el-table-column
-          prop="createdAt"
-          :label="t('common.createdAt')"
-          width="160"
-          class-name="col-time"
-        />
-        <el-table-column :label="t('common.action')" width="148" align="center" fixed="right">
-          <template #default="{ row }">
-            <div class="row-actions">
-              <!-- 走的是点位配置页签，文案与页签共用同一个 key，避免两处叫法漂移 -->
-              <el-tooltip :content="t('deviceWorkspace.tabs.address')" placement="top">
-                <el-button
-                  class="row-btn"
-                  type="primary"
-                  link
-                  size="small"
-                  :icon="Settings"
-                  :aria-label="t('deviceWorkspace.tabs.address')"
-                  @click="handleViewAddresses(row)"
-                />
-              </el-tooltip>
-              <el-tooltip :content="t('realtime.title')" placement="top">
-                <el-button
-                  class="row-btn"
-                  type="primary"
-                  link
-                  size="small"
-                  :icon="Monitor"
-                  :aria-label="t('realtime.title')"
-                  @click="handleViewRealtime(row)"
-                />
-              </el-tooltip>
-              <el-tooltip :content="t('common.edit')" placement="top">
-                <el-button
-                  class="row-btn"
-                  type="primary"
-                  link
-                  size="small"
-                  :icon="EditPen"
-                  :aria-label="t('common.edit')"
-                  @click="handleEdit(row)"
-                />
-              </el-tooltip>
-              <el-tooltip :content="t('common.delete')" placement="top">
-                <el-button
-                  class="row-btn"
-                  type="danger"
-                  link
-                  size="small"
-                  :icon="Delete"
-                  :aria-label="t('common.delete')"
-                  @click="handleDelete(row)"
-                />
-              </el-tooltip>
+              <template #prefix>
+                <el-icon><Search /></el-icon>
+              </template>
+            </el-input>
+            <div class="dw-list-filter-actions">
+              <el-button type="primary" @click="handleSearch">{{ t('common.search') }}</el-button>
+              <el-button @click="handleReset">{{ t('common.reset') }}</el-button>
+              <!-- 勾选会跨搜索/翻页丢失：批量删除宁可让人重勾，也不留下看不见的选中项。
+                   批量选择是模式开关而非查询动作，靠右站，与「搜/重」分开一类 -->
+              <el-button
+                class="dw-batch-toggle"
+                :type="selectionMode ? 'primary' : 'default'"
+                :plain="selectionMode"
+                @click="toggleSelectionMode"
+              >
+                {{ selectionMode ? t('deviceObject.batchSelectDone') : t('deviceObject.batchSelect') }}
+              </el-button>
             </div>
-          </template>
-        </el-table-column>
+          </div>
+        </div>
 
-        <!-- 空表：说清「是还没有数据，还是这次搜索没命中」，并给出下一步动作 -->
-        <template #empty>
-          <div class="empty">
-            <span class="empty-mark" aria-hidden="true">
+        <div v-if="selectionMode" class="dw-select-row">
+          <el-checkbox
+            :model-value="allPageChecked"
+            :indeterminate="somePageChecked"
+            @change="toggleSelectPage"
+          >
+            {{ t('deviceObject.selectAllPage') }}
+          </el-checkbox>
+          <el-button
+            type="danger"
+            plain
+            size="small"
+            :icon="Delete"
+            :disabled="checkedIds.size === 0"
+            @click="handleBatchDelete"
+          >
+            {{ batchDeleteLabel }}
+          </el-button>
+        </div>
+
+        <div
+          ref="listScrollRef"
+          class="dw-list-scroll"
+          role="listbox"
+          :aria-multiselectable="selectionMode"
+          :aria-label="t('deviceObject.deviceListLabel')"
+          v-loading="listLoading && !records.length"
+          @keydown.down.prevent="moveFocus(1)"
+          @keydown.up.prevent="moveFocus(-1)"
+          @keydown.home.prevent="focusCard(0)"
+          @keydown.end.prevent="focusCard(records.length - 1)"
+        >
+          <!-- 已选设备不在当前筛选结果里：保住右栏与编辑现场，只说明列表里找不到它 -->
+          <p v-if="selectedDevice && !selectedOnPage && records.length" class="dw-list-note">
+            {{ t('deviceObject.selectedNotInResults') }}
+          </p>
+
+          <div
+            v-for="(row, idx) in records"
+            :key="row.id"
+            role="option"
+            :aria-selected="selectionMode ? checkedIds.has(String(row.id)) : isSelected(row)"
+            :tabindex="idx === activeFocusIndex ? 0 : -1"
+            class="dw-card"
+            :class="{
+              'is-active': !selectionMode && isSelected(row),
+              'is-checked': selectionMode && checkedIds.has(String(row.id)),
+            }"
+            :aria-label="`${row.name}, ${row.code || ''}, ${onlineStateLabel(row)}`"
+            @focus="focusedIndex = idx"
+            @click="handleCardClick(row)"
+            @keydown.enter.prevent="handleCardClick(row, { focusDetail: true })"
+            @keydown.space.prevent="handleCardClick(row, { focusDetail: true })"
+          >
+            <span
+              class="dw-card-dot"
+              :class="`is-${onlineState(row)}`"
+              :title="onlineStateTip(row)"
+              aria-hidden="true"
+            />
+            <div class="dw-card-main">
+              <span class="dw-card-name" :title="row.name">{{ row.name }}</span>
+              <span class="dw-card-meta">
+                <span class="dw-card-code" :title="row.code || ''">{{ row.code || '—' }}</span>
+                <span v-if="row.protocolName" class="dw-card-proto" :title="row.protocolName">
+                  {{ row.protocolName }}
+                </span>
+              </span>
+            </div>
+            <span v-if="selectionMode" class="dw-card-check" aria-hidden="true">
+              <el-icon v-if="checkedIds.has(String(row.id))"><Check /></el-icon>
+            </span>
+            <!-- 悬停/选中才露出的进入提示：卡片是跳转入口而非纯展示，留一个方向感 -->
+            <span v-else class="dw-card-go" aria-hidden="true">
+              <el-icon><ChevronRight /></el-icon>
+            </span>
+          </div>
+
+          <div v-if="!listLoading && !records.length" class="iot-empty">
+            <span class="iot-empty-mark" aria-hidden="true">
               <el-icon><DeviceChip /></el-icon>
             </span>
-            <p class="empty-title">
-              {{ queryForm.name
-                ? t('deviceObject.emptySearch', { name: queryForm.name })
+            <p class="iot-empty-title">
+              {{ appliedName
+                ? t('deviceObject.emptySearch', { name: appliedName })
                 : t('deviceObject.emptyTitle') }}
             </p>
-            <p v-if="!queryForm.name" class="empty-hint">{{ t('deviceObject.emptyHint') }}</p>
-            <el-button v-if="queryForm.name" @click="handleReset">{{ t('common.reset') }}</el-button>
+            <p v-if="!appliedName" class="iot-empty-hint">{{ t('deviceObject.emptyHint') }}</p>
+            <el-button v-if="appliedName" @click="handleReset">{{ t('common.reset') }}</el-button>
             <el-button v-else type="primary" :icon="Plus" @click="handleAdd">
               {{ t('deviceObject.add') }}
             </el-button>
           </div>
-        </template>
-      </el-table>
+        </div>
 
-      <!-- 分页：与表格同处一块表面，用一条发丝线收尾 -->
-      <div class="pager">
-        <el-pagination
-          v-model:current-page="currentPage"
-          v-model:page-size="pageSize"
-          :page-sizes="[10, 20, 50, 100]"
-          :total="total"
-          layout="total, sizes, prev, pager, next, jumper"
-          background
-          @size-change="fetchList"
-          @current-change="fetchList"
-        />
-      </div>
-    </section>
+        <div v-if="total > pageSize" class="iot-pager dw-list-pager">
+          <el-pagination
+            v-model:current-page="currentPage"
+            :page-size="pageSize"
+            :total="total"
+            size="small"
+            layout="prev, pager, next"
+            background
+            @current-change="handlePageChange"
+          />
+        </div>
+      </aside>
 
-    <!-- ========== 新增 / 编辑 两步向导对话框 ========== -->
+      <!-- ========== 右：选中设备的点位工作台 ========== -->
+      <section class="iot-panel dw-detail" v-loading="hydrating">
+        <header v-if="selectedDevice" class="dw-detail-head">
+          <button
+            v-if="singleColumn"
+            type="button"
+            class="iot-back dw-back"
+            :title="t('deviceObject.backToDeviceList')"
+            @click="backToList"
+          >
+            <el-icon><ArrowLeft /></el-icon>
+            <span class="dw-back-text">{{ t('deviceObject.backToDeviceList') }}</span>
+          </button>
+
+          <div class="dw-detail-identity">
+            <span class="dw-identity-mark" aria-hidden="true">
+              <el-icon><DeviceChip /></el-icon>
+            </span>
+            <div class="dw-detail-copy">
+              <h2 ref="detailHeadingRef" class="dw-detail-name" tabindex="-1" :title="selectedDevice.name">
+                {{ selectedDevice.name }}
+              </h2>
+              <div class="dw-detail-meta">
+                <el-tooltip
+                  v-if="selectedDevice.code"
+                  :content="t('common.copy')"
+                  placement="top"
+                >
+                  <button
+                    type="button"
+                    class="dw-code-btn"
+                    :aria-label="t('common.copy')"
+                    @click="copyCode(selectedDevice.code)"
+                  >
+                    <span class="dw-code-text">{{ selectedDevice.code }}</span>
+                    <el-icon><CopyDocument /></el-icon>
+                  </button>
+                </el-tooltip>
+                <span v-if="selectedDevice.protocolName" class="dw-proto-chip" :title="selectedDevice.protocolName">
+                  {{ selectedDevice.protocolName }}
+                </span>
+                <el-tooltip :content="onlineStateTip(selectedDevice)" placement="top" :persistent="false">
+                  <span class="iot-pill" :class="onlinePillClass(selectedDevice)">
+                    <span class="iot-pill-dot" aria-hidden="true" />
+                    {{ onlineStateLabel(selectedDevice) }}
+                  </span>
+                </el-tooltip>
+                <span class="dw-points-stat">{{ pointsTotalText }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="dw-detail-actions">
+            <el-tooltip :content="t('deviceWorkspace.tabs.groups')" placement="top">
+              <el-button
+                class="iot-row-btn"
+                type="primary"
+                link
+                :icon="LayersLinked"
+                :aria-label="t('deviceWorkspace.tabs.groups')"
+                @click="handleViewGroups(selectedDevice)"
+              />
+            </el-tooltip>
+            <el-tooltip :content="t('realtime.title')" placement="top">
+              <el-button
+                class="iot-row-btn"
+                type="primary"
+                link
+                :icon="Monitor"
+                :aria-label="t('realtime.title')"
+                @click="handleViewRealtime(selectedDevice)"
+              />
+            </el-tooltip>
+            <el-tooltip :content="t('common.edit')" placement="top">
+              <el-button
+                class="iot-row-btn"
+                type="primary"
+                link
+                :icon="EditPen"
+                :aria-label="t('common.edit')"
+                @click="handleEdit(selectedDevice)"
+              />
+            </el-tooltip>
+            <el-tooltip :content="t('common.delete')" placement="top">
+              <el-button
+                class="iot-row-btn"
+                type="danger"
+                link
+                :icon="Delete"
+                :aria-label="t('common.delete')"
+                @click="handleDeleteDevice(selectedDevice)"
+              />
+            </el-tooltip>
+          </div>
+        </header>
+
+        <div class="dw-detail-body">
+          <!-- 换设备/换协议必须重挂载：实时值轮询与点位发现能力都在面板 setup 时按设备捕获；
+               `v-if` 同时保证切回列表（窄屏）或删除设备后轮询立即停止。 -->
+          <DevicePointsPanel
+            v-if="selectedDevice"
+            :key="`${selectedDevice.id}|${selectedDevice.protocolName || ''}`"
+            fill
+            :device-id="String(selectedDevice.id)"
+            :device-name="selectedDevice.name"
+            :protocol-name="selectedDevice.protocolName || ''"
+            @total-change="pointsTotal = $event"
+            @loading-change="pointsLoading = $event"
+          />
+          <div v-else class="iot-empty dw-detail-empty">
+            <span class="iot-empty-mark" aria-hidden="true">
+              <el-icon><DeviceChip /></el-icon>
+            </span>
+            <p class="iot-empty-title">{{ t('deviceObject.selectDeviceHint') }}</p>
+            <el-button type="primary" :icon="Plus" @click="handleAdd">
+              {{ t('deviceObject.add') }}
+            </el-button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ========== 新增 / 编辑对话框：基本信息与协议配置同屏 ==========
+         版式与点位表单（device-address/AddressFormDialog）同一套：页头三级递进
+         （eyebrow → 标题 → 说明），正文两张分区卡，卡头承担图标 + 说明 + 卡级动作，
+         启停开关也收进卡头，不再在表单里独占一行。 -->
     <el-dialog
       v-model="dialogVisible"
       class="device-dialog"
       :title="isEdit ? t('deviceObject.editTitle') : t('deviceObject.addTitle')"
-      width="620px"
+      width="min(720px, 94vw)"
       :close-on-click-modal="false"
       @close="handleDialogClose"
     >
-      <!-- 步骤指示器：细一号的圆点 + 一条会走完的连接线，避免两个大色块抢走表单的注意力 -->
-      <div class="stepper">
-        <div class="step" :class="{ 'is-active': currentStep === 1, 'is-done': stepPassed(1) }">
-          <span class="step-dot">
-            <el-icon v-if="stepPassed(1)"><Check /></el-icon>
-            <span v-else>1</span>
-          </span>
-          <span class="step-label">{{ t('deviceObject.stepBasicInfo') }}</span>
+      <template #header>
+        <div class="dev-dialog-head">
+          <p class="dev-dialog-eyebrow">
+            <span class="dev-dialog-eyebrow-dot" aria-hidden="true" />
+            {{ isEdit ? t('deviceObject.formEyebrowEdit') : t('deviceObject.formEyebrowAdd') }}
+          </p>
+          <h2 class="dev-dialog-title">
+            {{ isEdit ? t('deviceObject.editTitle') : t('deviceObject.addTitle') }}
+          </h2>
+          <p class="dev-dialog-sub">{{ t('deviceObject.formLead') }}</p>
         </div>
-        <span class="step-line" :class="{ 'is-done': stepPassed(1) }" aria-hidden="true" />
-        <div class="step" :class="{ 'is-active': currentStep === 2 }">
-          <span class="step-dot">2</span>
-          <span class="step-label">{{ t('deviceObject.stepProtocolConfig') }}</span>
-        </div>
-      </div>
+      </template>
 
-      <!-- ======== 第一步：基本信息 ======== -->
-      <div v-show="currentStep === 1">
-        <el-form
-          ref="formRef"
-          :model="formData"
-          :rules="formRules"
-          label-width="100px"
-          label-position="right"
-          status-icon
-        >
-          <el-form-item :label="t('deviceObject.code')" prop="code">
-            <el-input
-              v-model="formData.code"
-              :placeholder="t('deviceObject.codePlaceholder')"
-              :disabled="isEdit && !!formData.code"
-              maxlength="64"
-              show-word-limit
-            />
-            <div class="iot-form-hint is-block">
-              {{ isEdit && formData.code ? t('deviceObject.codeImmutableHint') : t('deviceObject.codeHint') }}
+      <div class="device-form">
+        <!-- 基本信息：编码/名称/描述各占一行；启停是整台设备的开关，与卡题同排靠右 -->
+        <section class="dev-card">
+          <header class="dev-card-head">
+            <span class="dev-card-icon" aria-hidden="true">
+              <el-icon><DeviceChip /></el-icon>
+            </span>
+            <div class="dev-card-copy">
+              <h3 class="dev-card-title">{{ t('deviceObject.basicInfoSection') }}</h3>
+              <p class="dev-card-desc">{{ t('deviceObject.sectionBasicDesc') }}</p>
             </div>
-          </el-form-item>
-          <el-form-item :label="t('common.name')" prop="name">
-            <el-input
-              v-model="formData.name"
-              :placeholder="t('deviceObject.namePlaceholder')"
-              maxlength="100"
-              show-word-limit
-            />
-          </el-form-item>
-          <el-form-item :label="t('common.description')" prop="description">
-            <el-input
-              v-model="formData.description"
-              :placeholder="t('deviceObject.descPlaceholder')"
-              type="textarea"
-              :rows="3"
-              maxlength="200"
-              show-word-limit
-            />
-          </el-form-item>
-          <el-form-item :label="t('common.status')" prop="status">
-            <el-switch
-              v-model="formData.status"
-              :active-value="1"
-              :inactive-value="0"
-              :active-text="t('common.enabled')"
-              :inactive-text="t('common.enableDisable.off')"
-            />
-          </el-form-item>
-        </el-form>
-      </div>
-
-      <!-- ======== 第二步：协议配置 ======== -->
-      <div v-show="currentStep === 2">
-        <el-form :label-width="protocolFormLabelWidth" label-position="right">
-          <!-- 协议选择（使用公共组件） -->
-          <el-form-item
-            :label="t('deviceObject.protocol')"
-            required
-            :validate-status="protocolSelected ? 'success' : undefined"
-          >
-            <ProtocolSelector
-              v-model="formData.protocol"
-              :button-text="t('deviceObject.selectProtocol')"
-              @select="handleProtocolSelect"
-            />
-          </el-form-item>
-
-          <!-- 协议参数与上面的选择器同属第二步，用一条发丝线接续而不是再套一层卡片。
-               **不套 el-form-item、也不加左右内边距**：动态表单要与上面的 label 列严格对齐，
-               多一层缩进就会让同一屏出现两条不同的左边缘（同 device-scan 页的说明）。 -->
-          <div v-if="protocolSelected" class="param-section">
-            <div class="param-head">
-              <span class="param-title">{{ t('deviceObject.protocolParams') }}</span>
-              <el-button
-                type="primary"
-                link
-                :loading="testingConnection"
-                @click="handleTestConnection"
-              >
-                <el-icon class="mr-1"><Connection /></el-icon> {{ t('deviceObject.testConnection') }}
-              </el-button>
-            </div>
-
-            <!-- form-create 动态渲染（:key 绑定协议名，切换时强制重建） -->
-            <div class="dynamic-form-wrapper">
-              <form-create
-                :key="`${formData.protocol || 'empty'}-${fcLocale}`"
-                ref="fcRef"
-                :rule="localizedFcRule"
-                :option="localizedFcOption"
-                :locale="fcLocale"
-                @mounted="handleFcReady"
+            <div class="dev-enable">
+              <span class="dev-enable-label">{{ t('common.status') }}</span>
+              <el-switch
+                v-model="formData.status"
+                :active-value="1"
+                :inactive-value="0"
+                :aria-label="t('common.status')"
               />
             </div>
+          </header>
+          <div class="dev-card-body">
+            <el-form
+              ref="formRef"
+              :model="formData"
+              :rules="formRules"
+              label-width="100px"
+              label-position="right"
+              status-icon
+            >
+              <el-form-item :label="t('deviceObject.code')" prop="code">
+                <el-input
+                  v-model="formData.code"
+                  :placeholder="t('deviceObject.codePlaceholder')"
+                  :disabled="isEdit && !!formData.code"
+                  maxlength="64"
+                  show-word-limit
+                />
+                <div class="dev-field-hint is-block">
+                  {{ isEdit && formData.code ? t('deviceObject.codeImmutableHint') : t('deviceObject.codeHint') }}
+                </div>
+              </el-form-item>
+              <el-form-item :label="t('common.name')" prop="name">
+                <el-input
+                  v-model="formData.name"
+                  :placeholder="t('deviceObject.namePlaceholder')"
+                  maxlength="100"
+                  show-word-limit
+                />
+              </el-form-item>
+              <el-form-item :label="t('common.description')" prop="description">
+                <el-input
+                  v-model="formData.description"
+                  :placeholder="t('deviceObject.descPlaceholder')"
+                  type="textarea"
+                  :rows="3"
+                  maxlength="200"
+                  show-word-limit
+                />
+              </el-form-item>
+            </el-form>
           </div>
-        </el-form>
+        </section>
+
+        <!-- 协议配置：选择器与动态参数同处一张卡；卡片正文只有一层内边距，
+             协议选择器与动态表单的 label 列共用同一条左边缘，不会出现双缩进 -->
+        <section class="dev-card">
+          <header class="dev-card-head">
+            <span class="dev-card-icon" aria-hidden="true">
+              <el-icon><Connection /></el-icon>
+            </span>
+            <div class="dev-card-copy">
+              <h3 class="dev-card-title">{{ t('deviceObject.protocolSection') }}</h3>
+              <p class="dev-card-desc">{{ t('deviceObject.sectionProtocolDesc') }}</p>
+            </div>
+            <el-button
+              v-if="protocolSelected"
+              class="dev-test-btn"
+              :loading="testingConnection"
+              @click="handleTestConnection"
+            >
+              <el-icon class="mr-1"><Connection /></el-icon> {{ t('deviceObject.testConnection') }}
+            </el-button>
+          </header>
+          <div class="dev-card-body">
+            <el-form :label-width="protocolFormLabelWidth" label-position="right">
+              <!-- 协议选择（使用公共组件） -->
+              <el-form-item
+                :label="t('deviceObject.protocol')"
+                required
+                :validate-status="protocolSelected ? 'success' : undefined"
+              >
+                <ProtocolSelector
+                  v-model="formData.protocol"
+                  :button-text="t('deviceObject.selectProtocol')"
+                  @select="handleProtocolSelect"
+                />
+              </el-form-item>
+
+              <!-- 协议参数紧跟选择器，不再套一层底色/卡片：动态表单要与上面的 label 列
+                   严格对齐，多一层缩进就会让同一屏出现两条不同的左边缘。
+                   form-create 动态渲染（:key 绑定协议名，切换时强制重建）。 -->
+              <div v-if="protocolSelected" class="dynamic-form-wrapper">
+                <form-create
+                  :key="`${formData.protocol || 'empty'}-${fcLocale}`"
+                  ref="fcRef"
+                  :rule="localizedFcRule"
+                  :option="localizedFcOption"
+                  :locale="fcLocale"
+                  @mounted="handleFcReady"
+                />
+              </div>
+            </el-form>
+          </div>
+        </section>
       </div>
 
-      <!-- 底部按钮 -->
       <template #footer>
-        <div class="flex items-center justify-between">
-          <!-- 左侧：上一步 -->
-          <div>
-            <el-button v-if="currentStep === 2" @click="prevStep">
-              <el-icon><ArrowLeft /></el-icon> {{ t('common.prevStep') }}
-            </el-button>
-          </div>
-          <!-- 右侧：下一步 / 提交 -->
-          <div class="flex items-center gap-2">
+        <div class="dev-dialog-footer">
+          <p class="dev-footer-hint">{{ t('deviceObject.formFooterHint') }}</p>
+          <div class="dev-footer-actions">
             <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
-            <el-button
-              v-if="currentStep === 1"
-              type="primary"
-              @click="nextStep"
-            >
-              {{ t('common.nextStep') }}
-              <el-icon class="ml-1"><ArrowRight /></el-icon>
-            </el-button>
-            <el-button
-              v-if="currentStep === 2"
-              type="primary"
-              :loading="submitting"
-              @click="handleSubmit"
-            >
+            <el-button type="primary" :loading="submitting" @click="handleSubmit">
               {{ isEdit ? t('common.save') : t('common.submit') }}
             </el-button>
           </div>
@@ -464,27 +521,26 @@
 
     <!-- ========== Excel 导入结果对话框 ========== -->
     <ImportResultDialog v-model:visible="importResultVisible" :result="importResult" />
-
-	  </div>
+  </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   IconAffiliate as Connection,
   IconArrowLeft as ArrowLeft,
-  IconArrowRight as ArrowRight,
   IconCheck as Check,
+  IconChevronRight as ChevronRight,
   IconCopy as CopyDocument,
   IconCpu as DeviceChip,
   IconDeviceDesktop as Monitor,
   IconDownload as Download,
+  IconLayersLinked as LayersLinked,
   IconPencil as EditPen,
   IconPlus as Plus,
   IconSearch as Search,
-  IconSettings as Settings,
   IconTrash as Delete,
   IconUpload as Upload,
 } from '@tabler/icons-vue'
@@ -502,6 +558,7 @@ import {
 import { getProtocolById, getProtocolList } from '@/api/modules/protocol'
 import ProtocolSelector from '@/components/ProtocolSelector.vue'
 import ImportResultDialog from '@/components/ImportResultDialog.vue'
+import DevicePointsPanel from '@/views/industrial/device-address/DevicePointsPanel.vue'
 import { useExcelImport } from '@/composables/useExcelImport'
 import { formCreateLocaleName, localizeDynamicFormRules } from '@/i18n/dynamicFormText'
 import { dynamicFormLabelWidthForRules } from '@/i18n/localizedText'
@@ -510,29 +567,8 @@ import { useI18n } from 'vue-i18n'
 const { t, locale } = useI18n()
 
 // ---------- 路由 ----------
+const route = useRoute()
 const router = useRouter()
-// ---------- 查看地址 ----------
-function handleViewAddresses(row) {
-  router.push({
-    name: 'GatewayDeviceAddress',
-    params: { deviceObjectId: row.id },
-    query: {
-      deviceObjectName: row.name,
-      protocolName: row.protocolName,
-    },
-  })
-}
-
-// ---------- 查看实时数据 ----------
-function handleViewRealtime(row) {
-  router.push({
-    name: 'GatewayRealtime',
-    params: { deviceObjectId: row.id },
-    // 协议名一并带过去：实时页的「点位配置」页签依赖它取地址写法示例与数据类型，
-    // 快照还没返回时也不至于切过去是个空壳
-    query: { deviceObjectName: row.name, protocolName: row.protocolName },
-  })
-}
 
 // ---------- 复制编码 ----------
 async function copyCode(code) {
@@ -568,79 +604,291 @@ function onlineStateTip(row) {
   return t(ONLINE_STATE_KEYS[onlineState(row)].tip)
 }
 
-// ---------- 查询表单 ----------
-const queryForm = reactive({
-  name: '',
-})
+// 详情头沿用 iot-pill 的三色语义，与列表圆点同一状态来源
+function onlinePillClass(row) {
+  return {
+    online: 'is-green',
+    offline: 'is-rose',
+    uncollected: 'is-amber',
+    disabled: 'is-gray',
+  }[onlineState(row)]
+}
 
-// ---------- 分页 ----------
+// ---------- 设备列表 ----------
+const records = ref([])
+const listLoading = ref(false)
+const queryForm = reactive({ name: '' })
+const appliedName = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
 
-// ---------- 表格数据 ----------
-const loading = ref(false)
-const tableData = ref([])
-
 // 首屏还没拿到数时显示占位符而不是 0：「0 台设备」是一个会被信以为真的假事实
 const displayTotal = computed(() =>
-  loading.value && tableData.value.length === 0 ? '—' : total.value,
+  listLoading.value && records.value.length === 0 ? '—' : total.value,
 )
 
-// ---------- 窄屏列裁剪 ----------
-// 判据取**工作区的真实宽度**而不是窗口宽度：侧栏折叠后同一窗口会多出 176px，
-// 按 window.innerWidth 判断会在折叠后仍少显示两列。
-const panelRef = ref(null)
-const compact = ref(false)
-let panelObserver = null
+// ---------- 选中设备 ----------
+const selectedDevice = ref(null)
+const pointsTotal = ref(0)
+const pointsLoading = ref(true)
+const hydrating = ref(false)
+const initialized = ref(false)
 
-// ---------- 勾选（批量删除） ----------
-const tableRef = ref(null)
-const selectedRows = ref([])
+const selectedOnPage = computed(() =>
+  records.value.some((row) => isSelected(row)),
+)
 
-function handleSelectionChange(rows) {
-  selectedRows.value = rows
+const pointsTotalText = computed(() =>
+  pointsLoading.value && pointsTotal.value === 0
+    ? '—'
+    : t('deviceObject.pointsTotal', { n: pointsTotal.value }),
+)
+
+function isSelected(row) {
+  return !!selectedDevice.value
+    && String(selectedDevice.value.id) === String(row?.id)
 }
 
-// 按钮文案带上勾选数：按确认之前就能看到"要删几台"
-const batchDeleteLabel = computed(() =>
-  selectedRows.value.length
-    ? t('deviceObject.batchDeleteCount', { n: selectedRows.value.length })
-    : t('deviceObject.batchDelete'),
-)
+// 选中设备写回 URL：刷新/分享/浏览器前进后退都能回到同一台。
+// 旧深链带过来的 deviceObjectName/protocolName 不再需要，顺手清掉。
+function writeDeviceQuery(id) {
+  const current = route.query.deviceId ? String(route.query.deviceId) : ''
+  const next = id ? String(id) : ''
+  if (current === next && !route.query.deviceObjectName && !route.query.protocolName) return
+  const query = { ...route.query }
+  if (next) query.deviceId = next
+  else delete query.deviceId
+  delete query.deviceObjectName
+  delete query.protocolName
+  router.replace({ query })
+}
 
-// ---------- 协议相关 ----------
-const protocolSelected = computed(() => !!formData.protocol)
+function setSelected(row, { writeUrl = true } = {}) {
+  selectedDevice.value = row
+  pointsTotal.value = 0
+  pointsLoading.value = true
+  if (writeUrl) writeDeviceQuery(row.id)
+}
 
-// ---------- 获取列表 ----------
-async function fetchList() {
-  loading.value = true
+// URL 里的设备不在当前页时按 id 补一次详情：列表行已含 DeviceVO 的完整字段，
+// 足以渲染右侧头部，不必等翻到那一页。
+async function hydrateDevice(id) {
+  if (!id || hydrating.value) return
+  hydrating.value = true
+  try {
+    const detail = await getDeviceObjectById(id)
+    if (detail && detail.id) {
+      setSelected(detail, { writeUrl: false })
+    } else {
+      ElMessage.warning(t('deviceObject.hydrateFailed'))
+      writeDeviceQuery('')
+    }
+  } catch {
+    ElMessage.warning(t('deviceObject.hydrateFailed'))
+    writeDeviceQuery('')
+  } finally {
+    hydrating.value = false
+  }
+}
+
+// 首屏只做一次自动选中：有 ?deviceId 优先恢复；否则宽屏选第一台，窄屏留列表。
+// 宽度未知（ResizeObserver 还没回调）时先不选，避免窄屏一进来就被详情顶掉列表。
+async function maybeAutoSelect() {
+  if (initialized.value || listLoading.value) return
+  const id = route.query.deviceId ? String(route.query.deviceId) : ''
+  if (id) {
+    const inPage = records.value.find((row) => String(row.id) === id)
+    if (inPage) {
+      initialized.value = true
+      setSelected(inPage, { writeUrl: false })
+      return
+    }
+    initialized.value = true
+    await hydrateDevice(id)
+    if (!selectedDevice.value && !singleColumn.value && records.value.length) {
+      setSelected(records.value[0])
+    }
+    return
+  }
+  if (splitWidth.value === null) return
+  initialized.value = true
+  if (!singleColumn.value && records.value.length) {
+    setSelected(records.value[0])
+  }
+}
+
+async function fetchDevices() {
+  listLoading.value = true
   try {
     const params = {
       page: currentPage.value,
       size: pageSize.value,
     }
-    if (queryForm.name) params.name = queryForm.name
+    if (appliedName.value) params.name = appliedName.value
     const res = await getDeviceObjectList(params)
-    tableData.value = res?.records ?? []
+    records.value = res?.records ?? []
     total.value = res?.total ?? 0
+    checkedIds.clear()
+    // 选中的那台若仍在结果里，用最新行刷新头部（在线状态/名称可能已变）
+    if (selectedDevice.value) {
+      const fresh = records.value.find((row) => isSelected(row))
+      if (fresh) selectedDevice.value = fresh
+    }
+    // 必须先落下 loading 再判首次选中：maybeAutoSelect 以「列表已就绪」为前提
+    listLoading.value = false
+    maybeAutoSelect()
   } catch (err) {
     console.log(err.message)
   } finally {
-    loading.value = false
+    listLoading.value = false
   }
 }
 
-// ---------- 搜索 / 重置 ----------
+// ---------- 搜索 / 重置 / 分页 ----------
+// 换一屏数据就把列表滚回顶部：分页器在列表底部，翻页时人正处在底部，
+// 不重置的话新页会停在中间、看不到前几张卡片。顺带丢掉旧的焦点序号。
+function scrollListToTop() {
+  if (listScrollRef.value) listScrollRef.value.scrollTop = 0
+  focusedIndex.value = -1
+}
+
 function handleSearch() {
+  appliedName.value = queryForm.name.trim()
   currentPage.value = 1
-  fetchList()
+  scrollListToTop()
+  fetchDevices()
 }
 
 function handleReset() {
   queryForm.name = ''
+  appliedName.value = ''
   currentPage.value = 1
-  fetchList()
+  scrollListToTop()
+  fetchDevices()
+}
+
+function handlePageChange() {
+  scrollListToTop()
+  fetchDevices()
+}
+
+// ---------- 卡片选择 / 键盘 ----------
+const focusedIndex = ref(-1)
+const listScrollRef = ref(null)
+const detailHeadingRef = ref(null)
+const activeFocusIndex = computed(() =>
+  focusedIndex.value >= 0 && focusedIndex.value < records.value.length ? focusedIndex.value : 0,
+)
+
+function handleCardClick(row, { focusDetail = false } = {}) {
+  if (selectionMode.value) {
+    toggleChecked(row)
+    return
+  }
+  focusedIndex.value = records.value.indexOf(row)
+  setSelected(row)
+  if (focusDetail && singleColumn.value) {
+    nextTick(() => detailHeadingRef.value?.focus())
+  }
+}
+
+function focusCard(index) {
+  if (!records.value.length) return
+  focusedIndex.value = Math.min(Math.max(index, 0), records.value.length - 1)
+  nextTick(() => {
+    const cards = listScrollRef.value?.querySelectorAll('.dw-card')
+    const el = cards?.[focusedIndex.value]
+    el?.focus()
+    el?.scrollIntoView({ block: 'nearest' })
+  })
+}
+
+function moveFocus(delta) {
+  focusCard(focusedIndex.value < 0 ? 0 : focusedIndex.value + delta)
+}
+
+function backToList() {
+  selectedDevice.value = null
+  pointsTotal.value = 0
+  pointsLoading.value = false
+  writeDeviceQuery('')
+  nextTick(() => focusCard(activeFocusIndex.value))
+}
+
+// 浏览器前进/后退与手改 URL：与当前选中相同就忽略，避免自触发循环
+watch(
+  () => route.query.deviceId,
+  (value) => {
+    const id = value ? String(value) : ''
+    const current = selectedDevice.value ? String(selectedDevice.value.id) : ''
+    if (id === current) return
+    if (!id) {
+      selectedDevice.value = null
+      pointsTotal.value = 0
+      pointsLoading.value = false
+      return
+    }
+    const inPage = records.value.find((row) => String(row.id) === id)
+    if (inPage) {
+      setSelected(inPage, { writeUrl: false })
+      return
+    }
+    hydrateDevice(id)
+  },
+)
+
+// ---------- 批量选择 ----------
+const selectionMode = ref(false)
+// reactive Set：模板里 checkedIds.has() / size 都能跟着增删更新
+const checkedIds = reactive(new Set())
+
+const allPageChecked = computed(() =>
+  records.value.length > 0 && records.value.every((row) => checkedIds.has(String(row.id))),
+)
+const somePageChecked = computed(() =>
+  !allPageChecked.value && records.value.some((row) => checkedIds.has(String(row.id))),
+)
+const batchDeleteLabel = computed(() =>
+  checkedIds.size
+    ? t('deviceObject.batchDeleteCount', { n: checkedIds.size })
+    : t('deviceObject.batchDelete'),
+)
+
+function toggleSelectionMode() {
+  selectionMode.value = !selectionMode.value
+  if (!selectionMode.value) checkedIds.clear()
+}
+
+function toggleChecked(row) {
+  const id = String(row.id)
+  if (checkedIds.has(id)) checkedIds.delete(id)
+  else checkedIds.add(id)
+}
+
+function toggleSelectPage(checked) {
+  for (const row of records.value) {
+    const id = String(row.id)
+    if (checked) checkedIds.add(id)
+    else checkedIds.delete(id)
+  }
+}
+
+// ---------- 跳转深链 ----------
+function handleViewRealtime(row) {
+  router.push({
+    name: 'GatewayRealtime',
+    params: { deviceObjectId: String(row.id) },
+    query: { deviceObjectName: row.name, protocolName: row.protocolName || '' },
+  })
+}
+
+function handleViewGroups(row) {
+  router.push({
+    name: 'GatewayCollectorGroup',
+    params: { deviceObjectId: String(row.id) },
+    query: { deviceObjectName: row.name, protocolName: row.protocolName || '' },
+  })
 }
 
 // ---------- Excel 导入 / 模板下载 ----------
@@ -656,7 +904,12 @@ const {
   importFn: (file) => importDeviceObjects(file),
   downloadFn: downloadDeviceTemplate,
   templateName: () => t('deviceObject.importTemplateName'),
-  refresh: fetchList,
+  refresh: () => {
+    // 导入可能来自任意页：回到第一页，并用当前搜索词重新取
+    currentPage.value = 1
+    scrollListToTop()
+    fetchDevices()
+  },
 })
 
 // ---------- 模板下载：通用 / 按协议 ----------
@@ -708,20 +961,106 @@ async function confirmDownloadTemplate() {
   if (ok) templateDialogVisible.value = false
 }
 
-// ---------- 对话框 / 向导状态 ----------
+// ---------- 删除 / 批量删除后的选中接力 ----------
+// deletedIds 里若含当前选中设备：删完按原位置选下一台；当前页删空且不是第一页则退一页。
+async function reloadAfterDeviceDelete(deletedIds, preferIndex) {
+  const deletingSelected = selectedDevice.value
+    && deletedIds.has(String(selectedDevice.value.id))
+  const pageEmptied = records.value.length > 0
+    && records.value.every((row) => deletedIds.has(String(row.id)))
+
+  if (pageEmptied && currentPage.value > 1) {
+    currentPage.value -= 1
+    scrollListToTop()
+  }
+  await fetchDevices()
+
+  if (!deletingSelected) return
+  if (!records.value.length) {
+    selectedDevice.value = null
+    pointsTotal.value = 0
+    pointsLoading.value = false
+    writeDeviceQuery('')
+    return
+  }
+  const nextIndex = Math.min(Math.max(preferIndex, 0), records.value.length - 1)
+  setSelected(records.value[nextIndex])
+}
+
+// ---------- 删除单台 ----------
+async function handleDeleteDevice(row) {
+  try {
+    await ElMessageBox.confirm(
+      t('deviceObject.deleteConfirm', { name: row.name }),
+      t('deviceObject.deleteTitle'),
+      {
+        type: 'warning',
+        confirmButtonText: t('common.confirm'),
+        cancelButtonText: t('common.cancel'),
+      },
+    )
+  } catch {
+    return
+  }
+
+  const preferIndex = records.value.findIndex((item) => String(item.id) === String(row.id))
+  try {
+    await deleteDeviceObject(row.id)
+    ElMessage.success(t('deviceObject.deleteSuccess'))
+    await reloadAfterDeviceDelete(new Set([String(row.id)]), preferIndex)
+  } catch {
+    // 失败原因由响应拦截器统一提示
+  }
+}
+
+// ---------- 批量删除 ----------
+async function handleBatchDelete() {
+  const ids = [...checkedIds]
+  if (!ids.length) return
+
+  try {
+    await ElMessageBox.confirm(
+      t('deviceObject.batchDeleteConfirm', { n: ids.length }),
+      t('deviceObject.batchDeleteTitle'),
+      {
+        type: 'warning',
+        confirmButtonText: t('common.confirm'),
+        cancelButtonText: t('common.cancel'),
+      },
+    )
+  } catch {
+    return // 用户取消
+  }
+
+  const preferIndex = selectedDevice.value
+    ? records.value.findIndex((row) => isSelected(row))
+    : -1
+  try {
+    const res = await batchDeleteDeviceObject({ ids })
+    // deleted 由服务端按**实际删除行数**给出，可能小于勾选数：勾选后又被人删掉的
+    // 设备不在删除集里。少删了要说出来，不能一律报"成功 N 台"。
+    const deleted = res?.deleted ?? 0
+    const addresses = res?.addresses ?? 0
+    const missing = ids.length - deleted
+    if (missing > 0) {
+      ElMessage.warning(t('deviceObject.batchDeletePartial', { n: deleted, missing, addresses }))
+    } else {
+      ElMessage.success(t('deviceObject.batchDeleteSuccess', { n: deleted, addresses }))
+    }
+    selectionMode.value = false
+    checkedIds.clear()
+    await reloadAfterDeviceDelete(new Set(ids), preferIndex)
+  } catch {
+    // 失败原因由响应拦截器统一提示
+  }
+}
+
+// ---------- 对话框状态 ----------
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const submitting = ref(false)
 const testingConnection = ref(false)
 const formRef = ref(null)
-const currentStep = ref(1)
-
-/** 步骤 1 是否已完成（用于步骤指示器样式） */
-const step1Passed = ref(false)
-
-function stepPassed(step) {
-  return step === 1 && step1Passed.value
-}
 
 // ---------- 表单数据 ----------
 const formData = reactive({
@@ -734,6 +1073,9 @@ const formData = reactive({
   status: 1,
   protocolJson: '',
 })
+
+// 协议参数区是否渲染：编辑回填与手动选择都只认 protocol 是否有值
+const protocolSelected = computed(() => !!formData.protocol)
 
 // ---------- 表单校验规则 ----------
 const formRules = {
@@ -910,34 +1252,9 @@ async function handleProtocolChange(protocolId) {
   }
 }
 
-// ---------- 步骤导航 ----------
-async function nextStep() {
-  // 校验第一步表单
-  if (!formRef.value) return
-  try {
-    await formRef.value.validate()
-  } catch {
-    return
-  }
-  step1Passed.value = true
-  currentStep.value = 2
-
-  // 编辑模式：如果已有协议，自动加载动态表单
-  if (isEdit.value && formData.protocolId && fcRule.value.length === 0) {
-    await nextTick()
-    await handleProtocolChange(formData.protocolId)
-  }
-}
-
-function prevStep() {
-  currentStep.value = 1
-}
-
 // ---------- 新增 ----------
 function handleAdd() {
   isEdit.value = false
-  currentStep.value = 1
-  step1Passed.value = false
 
   formData.id = ''
   formData.code = ''
@@ -957,14 +1274,12 @@ function handleAdd() {
 // ---------- 编辑 ----------
 async function handleEdit(row) {
   isEdit.value = true
-  currentStep.value = 1
-  step1Passed.value = true // 已有数据，第一步已完成
 
   formData.id = row.id
   formData.code = row.code ?? ''
   formData.name = row.name
   // 列表/详情接口回传的协议字段是 protocolName，没有 protocol；
-  // 取错字段会让 protocolSelected 为 false，第二步的协议参数区整块不渲染
+  // 取错字段会让 protocolSelected 为 false，协议参数区整块不渲染
   formData.protocol = row.protocolName ?? ''
   formData.description = row.description ?? ''
   formData.status = row.status ?? 1
@@ -983,71 +1298,18 @@ async function handleEdit(row) {
     // 不阻塞编辑流程，回填失败不影响基本信息编辑
   }
 
-  // 清空动态表单（进入第二步时会自动加载）
+  // 协议参数与基本信息同屏：打开前就把动态表单装好，编辑者不必再点「下一步」
   fcRule.value = []
+  if (formData.protocolId) {
+    await handleProtocolChange(formData.protocolId)
+  }
 
   dialogVisible.value = true
-}
-
-// ---------- 删除 ----------
-async function handleDelete(row) {
-  try {
-    await ElMessageBox.confirm(t('deviceObject.deleteConfirm', { name: row.name }), t('deviceObject.deleteTitle'), {
-      type: 'warning',
-      confirmButtonText: t('common.confirm'),
-      cancelButtonText: t('common.cancel'),
-    })
-    await deleteDeviceObject(row.id)
-    ElMessage.success(t('deviceObject.deleteSuccess'))
-    fetchList()
-  } catch {
-    // 用户取消或删除失败，不做处理
-  }
-}
-
-// ---------- 批量删除 ----------
-async function handleBatchDelete() {
-  const rows = selectedRows.value
-  if (!rows.length) return
-
-  try {
-    await ElMessageBox.confirm(
-      t('deviceObject.batchDeleteConfirm', { n: rows.length }),
-      t('deviceObject.batchDeleteTitle'),
-      {
-        type: 'warning',
-        confirmButtonText: t('common.confirm'),
-        cancelButtonText: t('common.cancel'),
-      },
-    )
-  } catch {
-    return // 用户取消
-  }
-
-  try {
-    const res = await batchDeleteDeviceObject({ ids: rows.map((row) => row.id) })
-    // deleted 由服务端按**实际删除行数**给出，可能小于勾选数：勾选后又被人删掉的
-    // 设备不在删除集里。少删了要说出来，不能一律报"成功 N 台"。
-    const deleted = res?.deleted ?? 0
-    const addresses = res?.addresses ?? 0
-    const missing = rows.length - deleted
-    if (missing > 0) {
-      ElMessage.warning(t('deviceObject.batchDeletePartial', { n: deleted, missing, addresses }))
-    } else {
-      ElMessage.success(t('deviceObject.batchDeleteSuccess', { n: deleted, addresses }))
-    }
-    tableRef.value?.clearSelection()
-    fetchList()
-  } catch {
-    // 失败原因由响应拦截器统一提示
-  }
 }
 
 // ---------- 对话框关闭 ----------
 function handleDialogClose() {
   formRef.value?.resetFields()
-  currentStep.value = 1
-  step1Passed.value = false
   fcRule.value = []
 }
 
@@ -1088,7 +1350,7 @@ async function handleTestConnection() {
     })
     ElMessage.success(t('deviceObject.connectionSuccess'))
   } catch (err) {
-    
+    // 失败原因由响应拦截器统一提示
   } finally {
     testingConnection.value = false
   }
@@ -1096,12 +1358,11 @@ async function handleTestConnection() {
 
 // ---------- 提交 ----------
 async function handleSubmit() {
-  // 校验第一步表单（防绕过）
+  // 校验基本信息表单
   if (!formRef.value) return
   try {
     await formRef.value.validate()
   } catch {
-    currentStep.value = 1
     ElMessage.warning(t('deviceObject.basicInfoIncomplete'))
     return
   }
@@ -1140,12 +1401,21 @@ async function handleSubmit() {
       await updateDeviceObject(payload)
       ElMessage.success(t('deviceObject.editSuccess'))
     } else {
-      console.log(payload);
       await addDeviceObject(payload)
       ElMessage.success(t('deviceObject.addSuccess'))
     }
     dialogVisible.value = false
-    fetchList()
+    const editedId = isEdit.value ? String(formData.id) : ''
+    await fetchDevices()
+    // 编辑后选中项可能已不在当前筛选结果里：单独按 id 刷新右栏，保证改完立即看到新值
+    if (editedId && selectedDevice.value && String(selectedDevice.value.id) === editedId) {
+      try {
+        const detail = await getDeviceObjectById(editedId)
+        if (detail?.id) selectedDevice.value = detail
+      } catch {
+        // 刷新失败不阻塞；下次列表刷新会再对齐
+      }
+    }
   } catch (err) {
     const msg = isEdit.value ? t('deviceObject.editFailed') : t('deviceObject.addFailed')
     console.error(msg, err)
@@ -1155,561 +1425,627 @@ async function handleSubmit() {
   }
 }
 
+// ---------- 响应式 ----------
+// 判据取**工作区的真实宽度**而不是窗口宽度：侧栏折叠/拖宽后同一窗口会多出上百像素。
+// 低于 1080 主从两栏放不下，切成「列表 / 详情」二选一全宽。
+const splitRef = ref(null)
+const splitWidth = ref(null)
+const singleColumn = computed(() => splitWidth.value !== null && splitWidth.value < 1080)
+let splitObserver = null
+
 // ---------- 初始化 ----------
 onMounted(() => {
-  // 固定宽度合计约 1002，低于这个值就切到紧凑列 —— 差几个像素时表格
-  // 会横向滚动，固定操作列又会盖住创建时间，不如少两列让关键字段完整可见
-  if (typeof ResizeObserver !== 'undefined' && panelRef.value) {
-    panelObserver = new ResizeObserver(([entry]) => {
-      compact.value = entry.contentRect.width < 1005
+  if (typeof ResizeObserver !== 'undefined' && splitRef.value) {
+    splitObserver = new ResizeObserver(([entry]) => {
+      splitWidth.value = entry.contentRect.width
+      maybeAutoSelect()
     })
-    panelObserver.observe(panelRef.value)
+    splitObserver.observe(splitRef.value)
   }
-  fetchList()
+  fetchDevices()
 })
 
 onBeforeUnmount(() => {
-  panelObserver?.disconnect()
+  splitObserver?.disconnect()
 })
 </script>
 
 <style scoped>
-/* 色板与字体来自 styles/tokens.css，页面只管版式 */
-.device-page {
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-/* 页头与工作区错峰落位；动画挂在区级包裹层，不挂表格行，避免影响 hover 重绘 */
-.enter {
-  animation: pageEnter 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-@keyframes pageEnter {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* ---------- 页头 ---------- */
-.page-head {
+/* 整页定高：页头之外全部交给主从两栏，各自滚动（同 protocol-form / channel-form 的约定） */
+.dw-page {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 20px;
+  flex-direction: column;
+  height: calc(100vh - var(--header-height, 60px) - 48px);
 }
 
-.eyebrow {
+.dw-head {
+  flex: none;
+}
+
+/* 标题与图标同一视觉组：图标底座把「设备对象」从纯文字标题抬成有身份的页面入口 */
+.dw-title-main {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0 0 8px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: #7c8ca3;
-}
-
-.eyebrow-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--brand);
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
-}
-
-.page-title {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-}
-
-.page-sub {
-  margin: 8px 0 0;
-  font-size: 12.5px;
-  line-height: 1.6;
-  color: var(--ink-3);
-}
-
-.page-head-main {
+  gap: 12px;
   min-width: 0;
 }
-.page-head-top {
-  margin-bottom: 8px;
-}
-/* 分类标签原本自带下边距，改由 .page-head-top 统一控制 */
-.page-head-top .eyebrow {
-  margin: 0;
-}
-.page-title-row {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-}
-.page-head-sub {
-  font-size: 12.5px;
-  font-weight: 400;
-  line-height: 1.6;
-  color: var(--ink-3);
-  letter-spacing: normal;
+
+.dw-title-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  font-size: 20px;
+  color: var(--brand);
+  background: linear-gradient(180deg, var(--brand-tint) 0%, var(--brand-soft) 100%);
+  border: 1px solid var(--brand-line);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
-.page-stat {
+.dw-head-aside {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding-bottom: 4px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+/* 计数从裸文字收进一枚浅色小卡：读数与右侧动作在纵向上分成「看」和「做」两层 */
+.dw-stat-card {
+  padding: 7px 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), inset 0 1px 0 #fff;
+}
+
+.dw-stat-card .iot-stat-num {
+  font-size: 20px;
+}
+
+.dw-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 页头按钮比工具栏更重一档：9px 圆角与工具栏同源，主按钮带一点下沉阴影 */
+.dw-head-actions :deep(.el-button) {
+  border-radius: 9px;
+  font-weight: 500;
+}
+
+.dw-head-actions :deep(.el-button--primary) {
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.22), 0 8px 18px -10px rgba(37, 99, 235, 0.55);
+}
+
+/* ---------- 主从两栏 ---------- */
+.dw-split {
+  display: flex;
+  flex: 1;
+  gap: 16px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 两块工作区共用一层「浮起」的观感：贴边仍是发丝线，远处用大偏移低透明度的
+   投影把面板从画布上托起，层次靠光而不是靠更深的边框 */
+.dw-split > .iot-panel {
+  margin-bottom: 0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 18px 44px -34px rgba(15, 23, 42, 0.32);
+}
+
+.dw-list {
+  display: flex;
+  flex: 0 0 320px;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dw-detail {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 左栏工具条：搜索独占一行，动作另起一行，320px 里不挤成一团 */
+.dw-list-toolbar {
+  padding: 12px;
+}
+
+.dw-list-toolbar .iot-toolbar-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.dw-list-toolbar .iot-search {
+  width: 100%;
+}
+
+.dw-list-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+/* 「搜/重」是一组查询动作，批量选择是模式开关：靠右站，与查询拉开一档 */
+.dw-batch-toggle {
+  margin-left: auto;
+}
+
+.dw-select-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: linear-gradient(180deg, var(--brand-tint) 0%, #ffffff 100%);
+  border-bottom: 1px solid var(--brand-line);
+}
+
+.dw-list-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.dw-list-pager {
+  flex: none;
+  justify-content: center;
+  padding: 8px 12px;
+  background: linear-gradient(180deg, #fbfcfe 0%, #ffffff 100%);
+  border-top: 1px solid var(--line-soft);
+}
+
+.dw-list-note {
+  margin: 2px 4px 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #92400e;
+  background: #fffbeb;
+  border-radius: 8px;
+}
+
+/* ---------- 设备卡片 ----------
+   静止时是一张没有边框的纯文字行；悬停/选中才补上描边、浅渐变与投影，
+   列表因此保持安静，被指向的那一张才浮起来。 */
+.dw-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px 11px 14px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.dw-card + .dw-card {
+  margin-top: 4px;
+}
+
+.dw-card:hover {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  border-color: var(--line);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 24px -20px rgba(15, 23, 42, 0.35);
+}
+
+.dw-card.is-active {
+  background: linear-gradient(180deg, #ffffff 0%, var(--brand-soft) 100%);
+  border-color: var(--brand-line);
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.08), 0 10px 24px -22px rgba(37, 99, 235, 0.55);
+}
+
+.dw-card.is-checked {
+  background: var(--brand-tint);
+  border-color: var(--brand-line);
+}
+
+/* 选中态用压在左缘的短竖条，不靠整块深色抢过右栏的读数 */
+.dw-card.is-active::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 0;
+  width: 3px;
+  background: var(--brand);
+  border-radius: 3px;
+}
+
+.dw-card:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.5);
+  outline-offset: -1px;
+}
+
+.dw-card-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dw-card-dot.is-online {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.14);
+}
+
+.dw-card-dot.is-offline {
+  background: #f43f5e;
+  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.12);
+}
+
+.dw-card-dot.is-uncollected {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.14);
+}
+
+.dw-card-dot.is-disabled {
+  background: #94a3b8;
+}
+
+.dw-card-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dw-card-name {
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.page-stat-num {
-  font-size: 22px;
-  font-weight: 650;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-}
-
-.page-stat-label {
-  font-size: 12px;
+.dw-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
   color: var(--ink-4);
 }
 
-/* ---------- 工作区 ---------- */
-.panel {
+.dw-card-code {
   overflow: hidden;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.toolbar {
+.dw-card-proto {
+  overflow: hidden;
+  max-width: 56%;
+  padding: 1px 6px;
+  font-size: 10.5px;
+  line-height: 15px;
+  color: var(--ink-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #f1f5f9;
+  border-radius: 5px;
+}
+
+.dw-card-check {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: #fff;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 50%;
+}
+
+.dw-card-check .el-icon {
+  font-size: 12px;
+}
+
+.dw-card.is-checked .dw-card-check {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+/* 进入提示：默认让位给文字，指向或被选中时才滑入，不在十张卡片上重复喊「可点」 */
+.dw-card-go {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  font-size: 14px;
+  color: var(--ink-4);
+  opacity: 0;
+  transform: translateX(-3px);
+  transition: opacity 0.16s ease, transform 0.16s ease, color 0.16s ease;
+}
+
+.dw-card:hover .dw-card-go,
+.dw-card.is-active .dw-card-go,
+.dw-card:focus-visible .dw-card-go {
+  color: var(--brand);
+  opacity: 1;
+  transform: none;
+}
+
+/* 触屏没有悬停：选中态就是可进入的提示，未选中的卡片不占这 18px */
+@media (hover: none) {
+  .dw-card-go {
+    display: none;
+  }
+}
+
+/* ---------- 右栏详情头 ---------- */
+.dw-detail-head {
   display: flex;
-  flex-wrap: wrap;
+  flex: none;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px 16px;
-  padding: 16px 20px;
+  gap: 12px;
+  padding: 14px 18px;
   background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
   border-bottom: 1px solid var(--line-soft);
 }
 
-.toolbar-filters,
-.toolbar-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
-.filter-search {
-  width: 272px;
-}
-
-/* 输入框与按钮统一 34px 高、9px 圆角：原来两者都是各自的默认高度，并排时总有 1px 的错位 */
-.toolbar :deep(.el-input__wrapper) {
-  height: 34px;
-  border-radius: 9px;
-  background: #fff;
-  box-shadow: 0 0 0 1px var(--line) inset;
-  transition: box-shadow 0.18s ease;
-}
-
-.toolbar :deep(.el-input__wrapper:hover) {
-  box-shadow: 0 0 0 1px #cbd8e6 inset;
-}
-
-.toolbar :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px var(--brand) inset, 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
-
-.toolbar :deep(.el-input__prefix) {
-  color: var(--ink-4);
-}
-
-.toolbar :deep(.el-button) {
-  height: 34px;
-  padding: 0 14px;
-  border-radius: 9px;
-  font-weight: 500;
-}
-
-/* 破坏性动作与其余按钮之间的短分隔：不画横线，只用一根 20px 的竖线分组 */
-.toolbar-sep {
-  width: 1px;
-  height: 20px;
-  margin: 0 2px;
-  background: var(--line);
-}
-
-/* ---------- 表格 ---------- */
-.device-table {
-  --el-table-border-color: transparent;
-  /* 单元格必须是**实底**：固定列靠自己的背景遮住横向滚动时从下面穿过的内容，
-     设成 transparent 会让创建时间等文字透到操作列底下（窄屏时尤其明显） */
-  --el-table-bg-color: #fff;
-  --el-table-tr-bg-color: #fff;
-  --el-table-header-bg-color: #f8fafc;
-  --el-table-row-hover-bg-color: #f8fbff;
-  font-size: 13px;
-  color: var(--ink-2);
-}
-
-.device-table :deep(td.el-table__cell) {
-  background-color: #fff;
-}
-
-.device-table :deep(.el-table__body tr:hover > td.el-table__cell) {
-  background-color: #f8fbff;
-}
-
-/* Element 默认在表体底部画一条贯穿线，与卡片圆角相撞时会在两角露头 */
-.device-table :deep(.el-table__inner-wrapper::before) {
-  display: none;
-}
-
-.device-table :deep(th.el-table__cell) {
-  height: 42px;
-  padding: 0;
-  background: #f8fafc;
-  color: var(--ink-3);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--line);
-}
-
-/* 表头宁可截断也不折行：两行表头会把行高顶开，整张表的基线随之跳动 */
-.device-table :deep(th .cell) {
-  white-space: nowrap;
-}
-
-.device-table :deep(tr.el-table__row td.el-table__cell) {
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.device-table :deep(.el-table__body tr:last-child td.el-table__cell) {
-  border-bottom: none;
-}
-
-.device-table :deep(.cell) {
-  padding: 0 16px;
-}
-
-.device-table :deep(.el-checkbox__inner) {
-  border-radius: 4px;
-}
-
-.device-table :deep(.col-time .cell) {
-  font-size: 12.5px;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 英文的 Enabled / Disabled 比中文长，收窄内边距给状态胶囊留出整词宽度 */
-.device-table :deep(.col-status .cell) {
-  padding: 0 12px;
-}
-
-.device-table :deep(.col-muted .cell) {
-  color: var(--ink-3);
-}
-
-.cell-muted {
-  color: var(--ink-4);
-}
-
-/* 编码：等宽字体压低存在感，复制按钮常驻但低对比，悬停整行才完全显形 */
-.code-cell {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-
-.code-text {
-  overflow: hidden;
-  max-width: 96px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--ink-3);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.copy-btn {
-  display: grid;
+.dw-back {
   flex: none;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  color: var(--ink-4);
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  cursor: pointer;
-  opacity: 0.45;
-  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
 }
 
-.copy-btn .el-icon {
-  font-size: 14px;
-}
-
-.device-table :deep(.el-table__row:hover) .copy-btn {
-  opacity: 1;
-}
-
-.copy-btn:hover {
-  color: var(--brand);
-  background: var(--brand-soft);
-}
-
-.copy-btn:focus-visible {
-  outline: 2px solid rgba(37, 99, 235, 0.5);
-  outline-offset: 1px;
-  opacity: 1;
-}
-
-/* 名称：一行一个身份，小图标底座让它在滚动中可被一眼拾取 */
-.name-cell {
+.dw-detail-identity {
   display: flex;
+  flex: 1;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 
-.name-mark {
-  display: grid;
+/* 与页头同一种图标底座，只是小一档：进到详情仍能认出「这是同一台设备」 */
+.dw-identity-mark {
+  display: inline-flex;
   flex: none;
-  place-items: center;
-  width: 28px;
-  height: 28px;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  font-size: 20px;
   color: var(--brand);
-  background: var(--brand-soft);
-  border-radius: 8px;
-  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+  background: linear-gradient(180deg, var(--brand-tint) 0%, var(--brand-soft) 100%);
+  border: 1px solid var(--brand-line);
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
-.name-mark .el-icon {
-  font-size: 15px;
-}
-
-.name-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.dw-detail-copy {
   min-width: 0;
 }
 
-.name-text {
+.dw-detail-name {
+  margin: 0;
   overflow: hidden;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
   color: var(--ink);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* 扫描身份是技术标识：等宽小字压低存在感，不与名称争视觉主位 */
-.scan-id-text {
-  overflow: hidden;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.4;
+.dw-detail-name:focus {
+  outline: none;
+}
+
+.dw-detail-name:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.5);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.dw-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 5px;
+  font-size: 12px;
   color: var(--ink-4);
+}
+
+.dw-code-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* 编码是一长串等宽字符：宁可截断并悬停看全名，也不要按短横线折成三行 */
+.dw-code-text {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* 协议名是技术标识，用中性 chip 而不是彩色标签，避免和状态色抢语义 */
-.proto-chip {
-  display: inline-block;
-  box-sizing: border-box;
-  max-width: 100%;
-  padding: 2px 8px;
-  overflow: hidden;
+.dw-code-btn:hover {
+  color: var(--brand);
+}
+
+.dw-code-btn .el-icon {
   font-size: 12px;
-  font-weight: 500;
+  opacity: 0.55;
+}
+
+.dw-code-btn:hover .el-icon {
+  opacity: 1;
+}
+
+.dw-proto-chip {
+  overflow: hidden;
+  max-width: 220px;
+  padding: 1px 8px;
+  font-size: 11.5px;
   line-height: 18px;
   color: var(--ink-2);
   text-overflow: ellipsis;
-  vertical-align: middle;
   white-space: nowrap;
   background: #f1f5f9;
   border: 1px solid #e8edf4;
   border-radius: 6px;
 }
 
-/* 状态：软底色 + 圆点，比实心 el-tag 安静，红绿只留给真正需要区分的两态 */
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 16px;
-  white-space: nowrap;
-  border-radius: 999px;
+.dw-points-stat {
+  font-variant-numeric: tabular-nums;
 }
 
-.status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.status-pill.is-online {
-  color: #047857;
-  background: #ecfdf5;
-}
-
-.status-pill.is-offline {
-  color: #be123c;
-  background: #fff1f2;
-}
-
-/* 未接入是「配置/能力问题」而不是设备故障，用琥珀色与离线区分 */
-.status-pill.is-uncollected {
-  color: #b45309;
-  background: #fffbeb;
-}
-
-.status-pill.is-disabled {
-  color: #64748b;
-  background: #f1f5f9;
-}
-
-/* 行内操作：默认中性灰，悬停才染蓝/红，四个图标不再每行都喊一次 */
-.row-actions {
+/* 四个图标动作收进一枚带边的按钮座：与其他白面/描边元素同一种质感，
+   不再裸浮在渐变头上；按钮仍只省在悬停时染色 */
+.dw-detail-actions {
   display: flex;
+  flex: none;
   align-items: center;
-  justify-content: center;
   gap: 2px;
+  padding: 2px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-.device-table :deep(.row-btn.el-button) {
-  width: 28px;
-  height: 28px;
+.dw-detail-actions :deep(.iot-row-btn.el-button) {
+  width: 30px;
+  height: 30px;
   margin: 0;
   padding: 0;
   color: var(--ink-4);
   border-radius: 8px;
 }
 
-.device-table :deep(.row-btn.el-button .el-icon) {
+.dw-detail-actions :deep(.iot-row-btn.el-button .el-icon) {
   font-size: 16px;
 }
 
-.device-table :deep(.row-btn.el-button:hover) {
+.dw-detail-actions :deep(.iot-row-btn.el-button:hover) {
   color: var(--brand);
   background: var(--brand-soft);
 }
 
-.device-table :deep(.row-btn.el-button.el-button--danger:hover) {
+.dw-detail-actions :deep(.iot-row-btn.el-button.el-button--danger:hover) {
   color: var(--danger);
   background: #fff1f2;
 }
 
-/* ---------- 空表 ---------- */
-.empty {
+.dw-detail-body {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 44px 16px 48px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.empty-mark {
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  margin-bottom: 14px;
-  color: var(--brand);
-  background: var(--brand-soft);
-  border-radius: 14px;
-  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+.dw-detail-body > * {
+  flex: 1;
+  min-width: 0;
 }
 
-.empty-mark .el-icon {
-  font-size: 26px;
+.dw-detail-empty {
+  justify-content: center;
+  height: 100%;
 }
 
-.empty-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink-2);
+/* ---------- 窄屏：列表 / 详情二选一 ---------- */
+.dw-split.is-single {
+  display: block;
 }
 
-.empty-hint {
-  margin: 6px 0 0;
-  font-size: 12.5px;
-  color: var(--ink-4);
+.dw-split.is-single > .dw-list,
+.dw-split.is-single > .dw-detail {
+  height: 100%;
 }
 
-.empty .el-button {
-  margin-top: 16px;
+.dw-split.is-single.is-list-view > .dw-detail {
+  display: none;
 }
 
-/* ---------- 分页 ---------- */
-.pager {
-  display: flex;
-  justify-content: flex-end;
-  padding: 14px 20px;
-  border-top: 1px solid var(--line-soft);
+.dw-split.is-single.is-detail-view > .dw-list {
+  display: none;
 }
 
-.pager :deep(.el-pagination) {
-  --el-pagination-button-bg-color: #f4f6fa;
-  --el-pagination-hover-color: var(--brand);
-}
+/* 与主从断点同一档（1080）：再窄下去页头右侧会被标题挤成两行按钮，
+   不如整块落到标题下方，旁白与动作各占一行 */
+@media (max-width: 1080px) {
+  .dw-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
 
-.pager :deep(.el-pager li),
-.pager :deep(.btn-prev),
-.pager :deep(.btn-next) {
-  border-radius: 8px;
-  font-weight: 500;
+  /* 叠放后计数与动作并成一排：高度省一行，动作仍从左侧起读 */
+  .dw-head-aside {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .dw-head-actions {
+    justify-content: flex-start;
+  }
 }
 
 /* ---------- 对话框 ----------
-   el-dialog 会被 teleport 到 body，scoped 的 :deep 够不到，用唯一类名做全局作用域 */
+   el-dialog 会被 teleport 到 body，scoped 的 :deep 够不到，用唯一类名做全局作用域。
+   版式与点位表单 / 触发规则同一套：页头渐变、正文白面、卡片分区。 */
+/* 纵向 flex：页头/页脚固定，正文吃掉剩余高度并自滚 —— 中英文案、不同视口
+   都不会把页脚顶出屏幕，也不需要再按内容猜一个 max-height 魔法数 */
 :global(.device-dialog) {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(92vh - 24px);
+  margin-top: 8vh;
   border-radius: 18px;
   box-shadow: 0 24px 60px -24px rgba(15, 23, 42, 0.35);
 }
 
-:global(.device-dialog .el-dialog__header) {
-  margin: 0;
-  padding: 20px 24px 16px;
-  border-bottom: 1px solid #eef2f7;
+:global(.device-dialog .el-dialog__header),
+:global(.device-dialog .el-dialog__footer) {
+  flex: none;
 }
 
-:global(.device-dialog .el-dialog__title) {
-  font-size: 16px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  color: #0f172a;
+:global(.device-dialog .el-dialog__header) {
+  margin: 0;
+  padding: 22px 26px 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  border-bottom: 1px solid var(--line-soft);
 }
 
 :global(.device-dialog .el-dialog__headerbtn) {
-  top: 12px;
-  right: 12px;
+  top: 14px;
+  right: 16px;
   width: 30px;
   height: 30px;
   border-radius: 8px;
@@ -1719,113 +2055,192 @@ onBeforeUnmount(() => {
   background: #f4f6fa;
 }
 
+/* 内容短时按自然高度，内容长时让出高度给滚动条；只滚主体，页脚按钮始终可点 */
 :global(.device-dialog .el-dialog__body) {
-  padding: 20px 24px 8px;
+  flex: 1;
+  min-height: 0;
+  padding: 20px 24px 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
 }
 
 :global(.device-dialog .el-dialog__footer) {
-  padding: 14px 24px 18px;
-  border-top: 1px solid #eef2f7;
+  padding: 14px 24px;
+  background: var(--surface);
+  border-top: 1px solid var(--line-soft);
 }
 
 :global(.device-dialog .el-form-item__label) {
   font-size: 13px;
-  color: #475569;
-}
-
-/* 步骤条：圆点细一号，完成态用品牌蓝而不是绿色 —— 「走过了」是流程信息，不是健康信号 */
-.stepper {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin: 2px 0 24px;
-}
-
-.step {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
-.step-dot {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ink-4);
-  background: #f1f5f9;
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 1px var(--line);
-  transition: color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.step-dot .el-icon {
-  font-size: 14px;
-}
-
-.step-label {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--ink-4);
-  white-space: nowrap;
-  transition: color 0.2s ease;
-}
-
-.step.is-done .step-dot {
-  color: var(--brand);
-  background: var(--brand-soft);
-  box-shadow: inset 0 0 0 1px #c7d9f7;
-}
-
-.step.is-done .step-label {
   color: var(--ink-2);
 }
 
-.step.is-active .step-dot {
-  color: #fff;
-  background: linear-gradient(135deg, #3b82f6, var(--brand));
+/* ---------- 弹窗头：eyebrow → 标题 → 说明，三级递进 ---------- */
+.dev-dialog-head {
+  padding-right: 28px;
+}
+
+.dev-dialog-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.dev-dialog-eyebrow-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
 }
 
-.step.is-active .step-label {
-  font-weight: 600;
+.dev-dialog-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
   color: var(--ink);
 }
 
-.step-line {
-  width: 56px;
-  height: 1px;
-  background: var(--line);
-  transition: background-color 0.2s ease;
+.dev-dialog-sub {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
 }
 
-.step-line.is-done {
-  background: linear-gradient(90deg, #bfdbfe, var(--brand));
+.device-form {
+  padding-top: 2px;
 }
 
-/* 协议参数区：一条发丝线接续，不左右缩进，保住与上方 label 列的严格对齐 */
-.param-section {
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line-soft);
+/* ---------- 分区卡片：白面浮在浅色画布上，用发丝线收边 ---------- */
+.dev-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-.param-head {
+.dev-card + .dev-card {
+  margin-top: 16px;
+}
+
+.dev-card-head {
   display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.dev-card-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  font-size: 16px;
+  color: var(--brand);
+  background: linear-gradient(180deg, var(--brand-tint) 0%, var(--brand-soft) 100%);
+  border: 1px solid var(--brand-line);
+  border-radius: 10px;
+}
+
+.dev-card-copy {
+  flex: 1;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.dev-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.dev-card-desc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+/* 启停是整台设备的开关，与卡片标题同排靠右，不再在表单里独占一行 */
+.dev-enable {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.dev-enable-label {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.dev-test-btn {
+  flex: none;
+  height: 32px;
+  margin-top: 1px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  border-radius: 9px;
+}
+
+.dev-card-body {
+  padding: 20px 22px;
+}
+
+/* 卡片正文最后一条表单项不再留尾巴，卡底留白只由 body 的内边距给出 */
+.dev-card-body :deep(.el-form > .el-form-item:last-child) {
+  margin-bottom: 0;
+}
+
+.dev-field-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+.dev-field-hint.is-block {
+  flex: 0 0 100%;
+}
+
+/* ---------- 页脚：说明在左、动作在右 ---------- */
+.dev-dialog-footer {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
+  gap: 12px 16px;
 }
 
-.param-title {
+.dev-footer-hint {
+  margin: 0;
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--ink-3);
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+/* 说明过长时整块换行，按钮始终保持右对齐（左对齐的「提交」在窄窗里没有着落点） */
+.dev-footer-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
 }
 
 /* 插件声明的参数控件收成一列，避免通栏输入框压着一个小步进器（同 device-scan 页） */
@@ -1834,19 +2249,6 @@ onBeforeUnmount(() => {
 .dynamic-form-wrapper :deep(.el-select) {
   width: 100%;
   max-width: 280px;
-}
-
-/* ---------- 窄屏 ---------- */
-@media (max-width: 900px) {
-  .page-head {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-  }
-
-  .page-stat {
-    padding-bottom: 0;
-  }
 }
 
 .template-mode {
@@ -1858,29 +2260,41 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
-@media (max-width: 640px) {
-  .toolbar-filters,
-  .toolbar-actions {
-    width: 100%;
+/* 详情头按**面板自身宽度**收缩，而不是视口宽度：侧栏展开/折叠、主从分栏，
+   真正决定头部空间的都是右栏的宽度。600px 以下让图标底座与返回文字让位，
+   把宽度留给设备名与四个动作。 */
+.dw-detail {
+  container-type: inline-size;
+}
+
+@container (max-width: 600px) {
+  .dw-detail-head {
+    gap: 10px;
+    padding: 12px 14px;
   }
 
-  .filter-search {
-    width: 100%;
+  .dw-back-text,
+  .dw-identity-mark {
+    display: none;
   }
 
-  .toolbar-actions {
-    justify-content: flex-end;
+  .dw-detail-actions :deep(.iot-row-btn.el-button) {
+    width: 28px;
+    height: 28px;
+  }
+}
+
+/* 卡头在窄视口允许换行：标题说明占满一行，卡级动作落到第二行 */
+@media (max-width: 720px) {
+  .dev-card-head {
+    flex-wrap: wrap;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .enter {
-    animation: none;
-  }
-
-  .device-page *,
-  .device-page *::before,
-  .device-page *::after {
+  .dw-page *,
+  .dw-page *::before,
+  .dw-page *::after {
     transition: none !important;
   }
 }

@@ -13,6 +13,7 @@ import (
 	"iot-gateway/enums"
 	"iot-gateway/model/dto"
 	"iot-gateway/model/po"
+	"iot-gateway/model/vo"
 	"iot-gateway/testutil/drivertest"
 )
 
@@ -71,15 +72,14 @@ func TestCreateThingModelPropertyBindsAddresses(t *testing.T) {
 	dev := seedBindingDevice(t, db, "points-dev")
 	dev2 := seedBindingDevice(t, db, "points-dev-2")
 	addr1 := seedBindingAddress(t, db, dev.ID, "PD100", "float32", driver.TypeFloat, "R", "")
-	// 一个属性可以绑多台设备的点位，但同一设备最多一个点位
 	addr2 := seedBindingAddress(t, db, dev2.ID, "PD101", "float32", driver.TypeFloat, "R", "")
 
 	if err := svc.CreateThingModelProperty(ctx, &dto.CreateThingModelPropertyDTO{
 		ModelID: model.ID, Identifier: "temperature", Name: "温度",
 		Kind: "float", AccessMode: "R",
-		AddressIDs: []string{addr1.ID, " " + addr2.ID + " ", addr1.ID},
+		AddressIDs: []string{" " + addr1.ID + " "},
 	}); err != nil {
-		t.Fatalf("create property with points: %v", err)
+		t.Fatalf("create property with point: %v", err)
 	}
 	var prop po.ThingModelProperty
 	if err := db.Where("model_id = ? AND identifier = ?", model.ID, "temperature").First(&prop).Error; err != nil {
@@ -88,17 +88,17 @@ func TestCreateThingModelPropertyBindsAddresses(t *testing.T) {
 	if got := reloadAddress(t, db, addr1.ID).PropertyID; got != prop.ID {
 		t.Fatalf("addr1.property_id = %q, want %q", got, prop.ID)
 	}
-	if got := reloadAddress(t, db, addr2.ID).PropertyID; got != prop.ID {
-		t.Fatalf("addr2.property_id = %q, want %q", got, prop.ID)
+	if got := reloadAddress(t, db, addr2.ID).PropertyID; got != "" {
+		t.Fatalf("addr2 不应被绑定, got %q", got)
 	}
 
-	// 同一设备对同一属性绑两个点位 → 41021（迁移 027 的部分唯一索引是硬约束）
+	// 属性与点位 1 对 1：一次绑两个（跨设备也算）→ 41022
 	dup1 := seedBindingAddress(t, db, dev.ID, "PD106", "float32", driver.TypeFloat, "R", "")
-	dup2 := seedBindingAddress(t, db, dev.ID, "PD107", "float32", driver.TypeFloat, "R", "")
+	dup2 := seedBindingAddress(t, db, dev2.ID, "PD107", "float32", driver.TypeFloat, "R", "")
 	wantThingModelErrCode(t, svc.CreateThingModelProperty(ctx, &dto.CreateThingModelPropertyDTO{
-		ModelID: model.ID, Identifier: "dup_points", Name: "同设备多点",
+		ModelID: model.ID, Identifier: "dup_points", Name: "一次多点",
 		Kind: "float", AccessMode: "R", AddressIDs: []string{dup1.ID, dup2.ID},
-	}), enums.ThingModelDevicePointDupEnum.GetCode())
+	}), enums.ThingModelPropertySinglePointEnum.GetCode())
 
 	// 点位已绑其他属性 → 41019
 	otherProp := seedThingModelProperty(t, svc, model.ID, "setpoint")
@@ -125,12 +125,21 @@ func TestCreateThingModelPropertyBindsAddresses(t *testing.T) {
 		t.Fatalf("crossAddr.property_id = %q, want %q", got, crossProp.ID)
 	}
 
-	// kind 不符 → 41016
+	// kind 只是语义说明：string 点位也能绑到 float 属性上（不再 41016）。
 	strAddr := seedBindingAddress(t, db, dev.ID, "PD103", "string", driver.TypeString, "R", "")
-	wantThingModelErrCode(t, svc.CreateThingModelProperty(ctx, &dto.CreateThingModelPropertyDTO{
-		ModelID: model.ID, Identifier: "kind_bad", Name: "类型不符",
+	if err := svc.CreateThingModelProperty(ctx, &dto.CreateThingModelPropertyDTO{
+		ModelID: model.ID, Identifier: "kind_note", Name: "类型仅说明",
 		Kind: "float", AccessMode: "R", AddressIDs: []string{strAddr.ID},
-	}), enums.ThingModelKindMismatchEnum.GetCode())
+	}); err != nil {
+		t.Fatalf("bind kind-mismatched point: %v", err)
+	}
+	var noteProp po.ThingModelProperty
+	if err := db.Where("model_id = ? AND identifier = ?", model.ID, "kind_note").First(&noteProp).Error; err != nil {
+		t.Fatalf("load note property: %v", err)
+	}
+	if got := reloadAddress(t, db, strAddr.ID).PropertyID; got != noteProp.ID {
+		t.Fatalf("strAddr.property_id = %q, want %q", got, noteProp.ID)
+	}
 
 	// 权限不覆盖 → 41017（R 点位绑 RW 属性）
 	rwAddr := seedBindingAddress(t, db, dev.ID, "PD104", "float32", driver.TypeFloat, "R", "")
@@ -173,7 +182,7 @@ func TestUpdateThingModelPropertySyncsAddresses(t *testing.T) {
 
 	if err := svc.CreateThingModelProperty(ctx, &dto.CreateThingModelPropertyDTO{
 		ModelID: model.ID, Identifier: "temperature", Name: "温度",
-		Kind: "float", AccessMode: "R", AddressIDs: []string{addr1.ID, addr2.ID},
+		Kind: "float", AccessMode: "R", AddressIDs: []string{addr1.ID},
 	}); err != nil {
 		t.Fatalf("create property: %v", err)
 	}
@@ -205,7 +214,7 @@ func TestUpdateThingModelPropertySyncsAddresses(t *testing.T) {
 		t.Fatalf("addr1 应被解绑, got %q", got)
 	}
 	if got := reloadAddress(t, db, addr2.ID).PropertyID; got != "" {
-		t.Fatalf("addr2 应被解绑, got %q", got)
+		t.Fatalf("addr2 不应被绑定, got %q", got)
 	}
 
 	// 同请求改 kind + 清空绑定 → 允许
@@ -229,18 +238,46 @@ func TestUpdateThingModelPropertySyncsAddresses(t *testing.T) {
 		t.Fatalf("rebind point: %v", err)
 	}
 
-	// 同一设备追加第二个点位 → 41021（同设备上保留的 addr1 与新增点冲突）
-	dupAddr := seedBindingAddress(t, db, dev.ID, "PS103", "float32", driver.TypeFloat, "R", "")
+	// 1 对 1：同一个属性追加第二个点位（跨设备也算）→ 41022
+	dupAddr := seedBindingAddress(t, db, dev2.ID, "PS103", "float32", driver.TypeFloat, "R", "")
 	dupAdd := []string{addr1.ID, dupAddr.ID}
 	wantThingModelErrCode(t, svc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
 		ID: prop.ID, Identifier: prop.Identifier, Name: "温度",
 		Kind: "float", AccessMode: "R", AddressIDs: &dupAdd,
-	}), enums.ThingModelDevicePointDupEnum.GetCode())
+	}), enums.ThingModelPropertySinglePointEnum.GetCode())
 
-	// 保留一条绑定时改 kind → 41018
-	wantThingModelErrCode(t, svc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
+	// 换绑到另一台设备的一个点位：先解绑旧点、再绑新点，允许
+	replace := []string{addr2.ID}
+	if err := svc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
+		ID: prop.ID, Identifier: prop.Identifier, Name: "温度",
+		Kind: "float", AccessMode: "R", AddressIDs: &replace,
+	}); err != nil {
+		t.Fatalf("replace binding with another device point: %v", err)
+	}
+	if got := reloadAddress(t, db, addr1.ID).PropertyID; got != "" {
+		t.Fatalf("换绑后 addr1 应被解绑, got %q", got)
+	}
+	if got := reloadAddress(t, db, addr2.ID).PropertyID; got != prop.ID {
+		t.Fatalf("换绑后 addr2 应绑定到属性, got %q", got)
+	}
+	// 换回 addr1，后续 41018/41019 断言仍以 addr1 为保留绑定
+	if err := svc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
+		ID: prop.ID, Identifier: prop.Identifier, Name: "温度",
+		Kind: "float", AccessMode: "R", AddressIDs: &rebind,
+	}); err != nil {
+		t.Fatalf("rebind addr1: %v", err)
+	}
+
+	// 保留一条绑定时：kind 只作说明可改，改 access_mode → 41018
+	if err := svc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
 		ID: prop.ID, Identifier: prop.Identifier, Name: "温度",
 		Kind: "string", AccessMode: "R", AddressIDs: &rebind,
+	}); err != nil {
+		t.Fatalf("change bound property kind: %v", err)
+	}
+	wantThingModelErrCode(t, svc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
+		ID: prop.ID, Identifier: prop.Identifier, Name: "温度",
+		Kind: "string", AccessMode: "RW", AddressIDs: &rebind,
 	}), enums.ThingModelPropertyBoundImmutableEnum.GetCode())
 
 	// 抢别的属性的点位 → 41019
@@ -274,11 +311,11 @@ func TestUpdateThingModelPropertySyncsAddresses(t *testing.T) {
 		t.Fatalf("rename with retained binding on disabled model: %v", err)
 	}
 
-	// 停用模型新增点位 → 41012（放在另一台设备上，避免先撞同设备唯一约束）
+	// 停用模型换绑到新点位 → 41012（1 对 1 下是替换而非追加）
 	newAddr := seedBindingAddress(t, db, dev2.ID, "PS102", "float32", driver.TypeFloat, "R", "")
-	add := []string{addr1.ID, newAddr.ID}
+	add := []string{newAddr.ID}
 	wantThingModelErrCode(t, svc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
-		ID: prop.ID, Identifier: prop.Identifier, Name: "停用后加点",
+		ID: prop.ID, Identifier: prop.Identifier, Name: "停用后换绑",
 		Kind: "float", AccessMode: "R", AddressIDs: &add,
 	}), enums.ThingModelDisabledEnum.GetCode())
 }
@@ -386,6 +423,22 @@ func TestListThingModelPropertyPoints(t *testing.T) {
 		t.Fatalf("pointCount 不符: A=%d B=%d C=%d",
 			pageCounts[propA.ID], pageCounts[propB.ID], pageCounts[propC.ID])
 	}
+	// 列表页展示「设备名称.点位名称」：取抽屉同排序下的第一条；未绑定为空。
+	pageByProp := make(map[string]vo.ThingModelPropertyVO, len(page.Records))
+	for _, p := range page.Records {
+		pageByProp[p.ID] = p
+	}
+	if got := pageByProp[propA.ID]; got.PointDeviceName != devA.Name || got.PointName != "PP100" {
+		t.Fatalf("属性 A 绑定点位展示 = %q.%q, want %q.PP100",
+			got.PointDeviceName, got.PointName, devA.Name)
+	}
+	if got := pageByProp[propB.ID]; got.PointDeviceName != devA.Name || got.PointName != "PP102" {
+		t.Fatalf("属性 B 绑定点位展示 = %q.%q, want %q.PP102",
+			got.PointDeviceName, got.PointName, devA.Name)
+	}
+	if got := pageByProp[propC.ID]; got.PointDeviceName != "" || got.PointName != "" {
+		t.Fatalf("属性 C 未绑定，展示字段应为空: %+v", got)
+	}
 	list, err := svc.ListThingModelProperties(ctx, model.ID)
 	if err != nil {
 		t.Fatalf("list properties: %v", err)
@@ -416,7 +469,7 @@ func TestListThingModelPropertyPoints(t *testing.T) {
 	}(), enums.ThingModelPropertyNotExistsEnum.GetCode())
 }
 
-func TestDeviceAddressRejectsSecondPointForSameProperty(t *testing.T) {
+func TestDeviceAddressRejectsSecondPointForProperty(t *testing.T) {
 	db := newThingModelTestDB(t)
 	seedBindingProtocol(t, db)
 	ctx := context.Background()
@@ -426,6 +479,7 @@ func TestDeviceAddressRejectsSecondPointForSameProperty(t *testing.T) {
 	model := seedThingModel(t, modelSvc, "m_addr_unique", "点位唯一模型", "sensor")
 	prop := seedThingModelProperty(t, modelSvc, model.ID, "temperature")
 	dev := seedBindingDevice(t, db, "addr-unique-dev")
+	dev2 := seedBindingDevice(t, db, "addr-unique-dev-2")
 
 	if err := addressSvc.CreateDeviceAddress(ctx, &dto.CreateDeviceAddressDTO{
 		DeviceID: dev.ID, Name: "AU100", Label: "温度一",
@@ -435,14 +489,21 @@ func TestDeviceAddressRejectsSecondPointForSameProperty(t *testing.T) {
 		t.Fatalf("bind first address: %v", err)
 	}
 
-	// 同一设备第二个点位绑同一属性 → 41021（不是 SQLite UNIQUE 原文）
+	// 同一设备第二个点位绑同一属性 → 41022（不是 SQLite UNIQUE 原文）
 	wantThingModelErrCode(t, addressSvc.CreateDeviceAddress(ctx, &dto.CreateDeviceAddressDTO{
 		DeviceID: dev.ID, Name: "AU101", Label: "温度二",
 		CommonDataType: driver.TypeFloat, RwPermission: "R", ScanFrequency: 1000,
 		PropertyID: prop.ID,
-	}), enums.ThingModelDevicePointDupEnum.GetCode())
+	}), enums.ThingModelPropertySinglePointEnum.GetCode())
 
-	// 先建一个未绑定点位，再编辑绑到同一属性 → 同样 41021
+	// 另一台设备的点位绑同一属性同样被拒：属性与点位是 1 对 1
+	wantThingModelErrCode(t, addressSvc.CreateDeviceAddress(ctx, &dto.CreateDeviceAddressDTO{
+		DeviceID: dev2.ID, Name: "AU104", Label: "温度四",
+		CommonDataType: driver.TypeFloat, RwPermission: "R", ScanFrequency: 1000,
+		PropertyID: prop.ID,
+	}), enums.ThingModelPropertySinglePointEnum.GetCode())
+
+	// 先建一个未绑定点位，再编辑绑到同一属性 → 同样 41022
 	if err := addressSvc.CreateDeviceAddress(ctx, &dto.CreateDeviceAddressDTO{
 		DeviceID: dev.ID, Name: "AU102", Label: "温度三",
 		CommonDataType: driver.TypeFloat, RwPermission: "R", ScanFrequency: 1000,
@@ -455,5 +516,130 @@ func TestDeviceAddressRejectsSecondPointForSameProperty(t *testing.T) {
 	}
 	wantThingModelErrCode(t, addressSvc.UpdateDeviceAddress(ctx, &dto.UpdateDeviceAddressDTO{
 		ID: second.ID, PropertyID: strPtr(prop.ID),
-	}), enums.ThingModelDevicePointDupEnum.GetCode())
+	}), enums.ThingModelPropertySinglePointEnum.GetCode())
+}
+
+func TestPageThingModelPointDevices(t *testing.T) {
+	db := newThingModelTestDB(t)
+	seedBindingProtocol(t, db)
+	svc := NewThingModelService(db)
+	ctx := context.Background()
+
+	devA := seedBindingDevice(t, db, "alarm-dev-a")
+	devB := seedBindingDevice(t, db, "alarm-dev-b")
+	devEmpty := seedBindingDevice(t, db, "alarm-dev-empty")
+	seedBindingAddress(t, db, devA.ID, "PD200", "float32", driver.TypeFloat, "R", "")
+	seedBindingAddress(t, db, devA.ID, "PD201", "float32", driver.TypeFloat, "R", "")
+	seedBindingAddress(t, db, devB.ID, "PD202", "float32", driver.TypeFloat, "R", "")
+	_ = devEmpty // 没有点位的设备不出现在候选里
+
+	page, err := svc.PageThingModelPointDevices(ctx, &dto.PageThingModelPointDeviceDTO{Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("page point devices: %v", err)
+	}
+	if page.Total != 2 || len(page.Records) != 2 {
+		t.Fatalf("设备候选 = total %d / %d 条, want 2/2: %+v", page.Total, len(page.Records), page.Records)
+	}
+	counts := make(map[string]int64, len(page.Records))
+	for _, r := range page.Records {
+		counts[r.ID] = r.PointCount
+	}
+	if counts[devA.ID] != 2 || counts[devB.ID] != 1 {
+		t.Fatalf("pointCount 不符: A=%d B=%d", counts[devA.ID], counts[devB.ID])
+	}
+	if _, ok := counts[devEmpty.ID]; ok {
+		t.Fatalf("没有点位的设备不应出现在候选中")
+	}
+
+	// 关键词同时匹配名称与编码
+	filtered, err := svc.PageThingModelPointDevices(ctx, &dto.PageThingModelPointDeviceDTO{
+		Page: 1, Size: 10, Keyword: "alarm-dev-b",
+	})
+	if err != nil {
+		t.Fatalf("page point devices with keyword: %v", err)
+	}
+	if filtered.Total != 1 || len(filtered.Records) != 1 || filtered.Records[0].ID != devB.ID {
+		t.Fatalf("关键词过滤结果不符: %+v", filtered.Records)
+	}
+
+	// 分页：按名称排序，第一页是 alarm-dev-a
+	first, err := svc.PageThingModelPointDevices(ctx, &dto.PageThingModelPointDeviceDTO{Page: 1, Size: 1})
+	if err != nil {
+		t.Fatalf("page point devices size 1: %v", err)
+	}
+	if first.Total != 2 || len(first.Records) != 1 || first.Records[0].ID != devA.ID {
+		t.Fatalf("第一页应为 devA: %+v", first.Records)
+	}
+}
+
+func TestPageThingModelPointOptions(t *testing.T) {
+	db := newThingModelTestDB(t)
+	seedBindingProtocol(t, db)
+	svc := NewThingModelService(db)
+	ctx := context.Background()
+
+	model := seedThingModel(t, svc, "m_point_page", "点位分页模型", "sensor")
+	prop := seedThingModelProperty(t, svc, model.ID, "temperature")
+	dev := seedBindingDevice(t, db, "point-page-dev")
+	other := seedBindingDevice(t, db, "point-page-other")
+	bound := seedBindingAddress(t, db, dev.ID, "PAGE100", "float32", driver.TypeFloat, "R", prop.ID)
+	unbound := seedBindingAddress(t, db, dev.ID, "PAGE101", "string", driver.TypeString, "R", "")
+	pressure := seedBindingAddress(t, db, dev.ID, "PAGE102", "float32", driver.TypeFloat, "R", "")
+	if err := db.Model(&po.DeviceAddress{}).Where("id = ?", pressure.ID).
+		Update("label", "出口压力").Error; err != nil {
+		t.Fatalf("relabel address: %v", err)
+	}
+	seedBindingAddress(t, db, other.ID, "PAGE200", "float32", driver.TypeFloat, "R", "")
+
+	page, err := svc.PageThingModelPointOptions(ctx, &dto.PageThingModelPointOptionDTO{
+		DeviceID: dev.ID, Page: 1, Size: 2,
+	})
+	if err != nil {
+		t.Fatalf("page point options: %v", err)
+	}
+	if page.Total != 3 || len(page.Records) != 2 {
+		t.Fatalf("点位候选 = total %d / %d 条, want 3/2", page.Total, len(page.Records))
+	}
+	for _, r := range page.Records {
+		if r.DeviceID != dev.ID {
+			t.Fatalf("应只返回所选设备的点位: %+v", r)
+		}
+	}
+
+	// 名称/说明模糊匹配；[PAGE102] 的 label 是「出口压力」
+	byKeyword, err := svc.PageThingModelPointOptions(ctx, &dto.PageThingModelPointOptionDTO{
+		DeviceID: dev.ID, Page: 1, Size: 10, Keyword: "压力",
+	})
+	if err != nil {
+		t.Fatalf("page point options with keyword: %v", err)
+	}
+	if byKeyword.Total != 1 || len(byKeyword.Records) != 1 ||
+		byKeyword.Records[0].AddressID != pressure.ID {
+		t.Fatalf("关键词过滤结果不符: %+v", byKeyword.Records)
+	}
+
+	// 绑定信息与 kind 仍要回填（与全量接口同一份映射）
+	all, err := svc.PageThingModelPointOptions(ctx, &dto.PageThingModelPointOptionDTO{
+		DeviceID: dev.ID, Page: 1, Size: 10,
+	})
+	if err != nil {
+		t.Fatalf("page all point options: %v", err)
+	}
+	byID := make(map[string]vo.ThingModelPointOptionVO, len(all.Records))
+	for _, r := range all.Records {
+		byID[r.AddressID] = r
+	}
+	if got := byID[bound.ID]; got.Kind != "float" || got.PropertyID != prop.ID ||
+		got.PropertyName != "temperature" || got.ModelName != model.Name {
+		t.Fatalf("绑定点位信息未回填: %+v", got)
+	}
+	if got := byID[unbound.ID]; got.Kind != "string" || got.PropertyID != "" {
+		t.Fatalf("未绑定点位信息不符: %+v", got)
+	}
+
+	// deviceId 必填
+	wantThingModelErrCode(t, func() error {
+		_, err := svc.PageThingModelPointOptions(ctx, &dto.PageThingModelPointOptionDTO{Page: 1, Size: 10})
+		return err
+	}(), enums.ParamValidEnum.GetCode())
 }

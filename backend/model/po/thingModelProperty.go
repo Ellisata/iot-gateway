@@ -17,7 +17,8 @@ import (
 type ThingModelProperty struct {
 	ID      string `gorm:"primaryKey;column:id" json:"id"`
 	ModelID string `gorm:"column:model_id;not null;index:idx_thing_model_property_model_sort,priority:1" json:"modelId"`
-	// Identifier 属性标识符（如 temperature）。模型内唯一，创建后不可修改。
+	// Identifier 属性标识符（如 temperature）。模型内唯一，可改名；
+	// 改名会进入采集配置校验和并触发热加载，下游按旧标识符的引用需同步更新。
 	Identifier string `gorm:"column:identifier;not null;uniqueIndex:idx_thing_model_property_model_identifier,priority:2" json:"identifier"`
 	// Name 属性显示名（如“温度”）。
 	Name string `gorm:"column:name;not null" json:"name"`

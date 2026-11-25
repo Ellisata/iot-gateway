@@ -20,7 +20,8 @@ import (
 // 写/调用能力，而当前 SDK 的 Driver 只有 Read，故暂不建表。
 type ThingModel struct {
 	ID string `gorm:"primaryKey;column:id" json:"id"`
-	// Code 模型标识（如 th_sensor），创建后不可修改：导入导出与外部引用靠它。
+	// Code 模型标识（如 th_sensor），可改名：导入导出与外部引用靠它，改名后
+	// 按旧标识配置的外部引用需同步更新。
 	Code string `gorm:"column:code;uniqueIndex;not null" json:"code"`
 	// Name 显示名（如“温湿度传感器”）。
 	Name string `gorm:"column:name;uniqueIndex;not null" json:"name"`

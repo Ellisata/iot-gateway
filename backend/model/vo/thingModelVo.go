@@ -70,6 +70,18 @@ type ThingModelPointOptionVO struct {
 	Status             int    `json:"status"`
 }
 
+// ThingModelPointDeviceVO 属性绑定点位时的设备候选。
+//
+// PointCount 是设备名下的点位数；候选只包含至少有一个点位的设备，
+// 因此它最小为 1。
+type ThingModelPointDeviceVO struct {
+	ID         string `json:"id"`
+	Code       string `json:"code"`
+	Name       string `json:"name"`
+	Status     int    `json:"status"`
+	PointCount int64  `json:"pointCount"`
+}
+
 // ThingModelPropertyPageVO 物模型属性分页响应。
 //
 // 没有复用 response.PageVo 是因为多带一个 MaxSortOrder：属性列表分页后前端
@@ -96,9 +108,15 @@ type ThingModelPropertyVO struct {
 	SortOrder   int    `json:"sortOrder"`
 	Status      int    `json:"status"`
 	// PointCount 绑定到该属性的设备点位数（device_address.property_id 计数）。
-	PointCount int64  `json:"pointCount"`
-	CreatedAt  string `json:"createdAt"`
-	UpdatedAt  string `json:"updatedAt"`
+	// 属性与点位是 1 对 1，正常为 0 或 1；大于 1 只出现在存量数据里，
+	// 保存时会收敛成一条。
+	PointCount int64 `json:"pointCount"`
+	// PointDeviceName / PointName 绑定点位所属设备名与点位名，列表页直接展示
+	// 「设备名称.点位名称」，省掉逐行再查一轮。未绑定时为空串。
+	PointDeviceName string `json:"pointDeviceName"`
+	PointName       string `json:"pointName"`
+	CreatedAt       string `json:"createdAt"`
+	UpdatedAt       string `json:"updatedAt"`
 }
 
 // ThingModelPropertyPointVO 绑定到某属性的设备点位（属性抽屉「点位数」用）。

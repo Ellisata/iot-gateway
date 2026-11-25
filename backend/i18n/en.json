@@ -72,6 +72,7 @@
     "err.thing_model_point_bound_elsewhere": "This point is bound to another property; unbind it first",
     "err.thing_model_binding_limit": "At most 200 objects can be bound at a time",
     "err.thing_model_device_point_duplicate": "A device can bind at most one point to the same property",
+    "err.thing_model_property_single_point": "A property can bind only one point",
     "err.control_disabled": "Control writes are disabled",
     "err.control_protocol_not_writable": "This protocol does not support control writes",
     "err.control_address_not_writable": "This point is not writable",

@@ -115,14 +115,24 @@ func TestThingModelCRUDValidation(t *testing.T) {
 		Code: "th_ok", Name: "非法分类", Category: "unknown",
 	}), enums.ThingModelCategoryInvalidEnum.GetCode())
 
-	// code 不可改，name 可改
+	// code 可改名（省略则保持原值），但不能与其它模型撞车
+	spareModel := seedThingModel(t, svc, "th_other", "其它模型", "other")
 	wantThingModelErrCode(t, svc.UpdateThingModel(ctx, &dto.UpdateThingModelDTO{
+		ID: model.ID, Code: spareModel.Code, Name: "温湿度传感器", Category: "sensor",
+	}), enums.ThingModelExistsEnum.GetCode())
+	if err := svc.UpdateThingModel(ctx, &dto.UpdateThingModelDTO{
 		ID: model.ID, Code: "th_renamed", Name: "温湿度传感器", Category: "sensor",
-	}), enums.ThingModelCodeImmutableEnum.GetCode())
+	}); err != nil {
+		t.Fatalf("rename thing model code: %v", err)
+	}
 	if err := svc.UpdateThingModel(ctx, &dto.UpdateThingModelDTO{
 		ID: model.ID, Name: "温湿度传感器-新", Category: "meter", Version: "2.0.0",
 	}); err != nil {
 		t.Fatalf("update thing model: %v", err)
+	}
+	// 省略 code 的更新不应把改名结果打回去
+	if got := loadThingModelByCode(t, svc, "th_renamed"); got.Name != "温湿度传感器-新" {
+		t.Fatalf("rename lost after update: %+v", got)
 	}
 
 	// 属性：格式、类型、唯一性
@@ -138,10 +148,23 @@ func TestThingModelCRUDValidation(t *testing.T) {
 		ModelID: model.ID, Identifier: "temperature", Name: "温度2", Kind: "float", AccessMode: "R",
 	}), enums.ThingModelPropertyExistsEnum.GetCode())
 
-	// 属性标识符不可改，其余字段可改
+	// 属性标识符可改名，但模型内必须唯一、格式合法
+	other := seedThingModelProperty(t, svc, model.ID, "humidity")
 	wantThingModelErrCode(t, svc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
+		ID: prop.ID, Identifier: "humidity", Name: "温度", Kind: "float", AccessMode: "R",
+	}), enums.ThingModelPropertyExistsEnum.GetCode())
+	wantThingModelErrCode(t, svc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
+		ID: prop.ID, Identifier: "-bad", Name: "温度", Kind: "float", AccessMode: "R",
+	}), enums.ThingModelIdentifierInvalidEnum.GetCode())
+	if err := svc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
 		ID: prop.ID, Identifier: "temp2", Name: "温度", Kind: "float", AccessMode: "R",
-	}), enums.ThingModelIdentifierImmutableEnum.GetCode())
+	}); err != nil {
+		t.Fatalf("rename property: %v", err)
+	}
+	if err := svc.DeleteThingModelProperty(ctx, other.ID); err != nil {
+		t.Fatalf("delete spare property: %v", err)
+	}
+	// 省略 identifier = 不改名；其余字段照常更新
 	if err := svc.UpdateThingModelProperty(ctx, &dto.UpdateThingModelPropertyDTO{
 		ID: prop.ID, Name: "进风温度", Kind: "float", AccessMode: "RW", Unit: "℃", SortOrder: 20,
 	}); err != nil {
@@ -153,7 +176,7 @@ func TestThingModelCRUDValidation(t *testing.T) {
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list properties = %v, err = %v", list, err)
 	}
-	if list[0].Name != "进风温度" || list[0].AccessMode != "RW" {
+	if list[0].Identifier != "temp2" || list[0].Name != "进风温度" || list[0].AccessMode != "RW" {
 		t.Fatalf("property 未更新: %+v", list[0])
 	}
 	page, err := svc.PageThingModel(ctx, &dto.PageThingModelDTO{

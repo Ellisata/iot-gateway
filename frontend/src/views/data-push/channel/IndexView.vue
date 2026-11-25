@@ -168,169 +168,207 @@
       </div>
     </section>
 
-    <!-- 新增 / 编辑 对话框 -->
+    <!-- 新增 / 编辑 对话框：与点位 / 触发规则 / 物模型表单同一套版式 ——
+         页头三级递进，正文按「基础信息 / 连接配置 / 采集组订阅 / 输出格式」
+         分区卡片分组，避免一组同权重的表单行糊成一片。 -->
     <el-dialog
       v-model="dialogVisible"
       class="iot-dialog channel-dialog"
-      :title="isEdit ? t('channel.editTitle') : t('channel.addTitle')"
-      width="min(1180px, 96vw)"
+      width="min(1080px, 96vw)"
+      append-to-body
       :close-on-click-modal="false"
       @close="handleDialogClose"
     >
-      <el-form
-        ref="formRef"
-        :model="formData"
-        :rules="formRules"
-        label-width="100px"
-        label-position="right"
-        status-icon
-      >
-        <el-form-item :label="t('channel.type')" prop="type">
-          <ChannelSelector
-            v-model="formData.type"
-            :disabled="isEdit"
-            @select="handleChannelSelect"
-          />
-        </el-form-item>
-        <el-form-item :label="t('common.name')" prop="name">
-          <el-input
-            v-model="formData.name"
-            :placeholder="t('channel.namePlaceholder')"
-            maxlength="50"
-            show-word-limit
-          />
-        </el-form-item>
-        <el-form-item :label="t('common.description')" prop="description">
-          <el-input
-            v-model="formData.description"
-            :placeholder="t('channel.descPlaceholder')"
-            type="textarea"
-            :rows="3"
-            maxlength="200"
-            show-word-limit
-          />
-        </el-form-item>
-        <el-form-item :label="t('common.status')" prop="status">
-          <el-switch
-            v-model="formData.status"
-            :active-value="1"
-            :inactive-value="0"
-            :active-text="t('common.enabled')"
-            :inactive-text="t('common.disabled')"
-          />
-        </el-form-item>
-      </el-form>
-
-      <!-- 动态连接配置表单：根据所选通道名称加载。
-           用一条发丝线接续，而不是 el-divider —— 分隔线会带着一段居中留白，
-           把「基本信息」和「连接参数」切成两张互不相干的表。 -->
-      <div v-if="formData.type" class="channel-section">
-        <div class="channel-section-head">
-          <div class="channel-section-headline">
-            <span class="channel-section-mark" aria-hidden="true">
-              <el-icon><Connection /></el-icon>
+      <!-- 页头：eyebrow → 标题 + 类型标签 → 说明，先交代这条通道做什么 -->
+      <template #header>
+        <div class="ch-dialog-head">
+          <p class="ch-dialog-eyebrow">
+            <span class="ch-dialog-eyebrow-dot" aria-hidden="true" />
+            {{ isEdit ? t('channel.formEyebrowEdit') : t('channel.formEyebrowAdd') }}
+          </p>
+          <div class="ch-dialog-title-row">
+            <h2 class="ch-dialog-title">
+              {{ isEdit ? t('channel.editTitle') : t('channel.addTitle') }}
+            </h2>
+            <span v-if="formData.type" class="ch-dialog-type">
+              {{ typeLabel(formData.type) }}
             </span>
-            <div>
-              <p class="channel-section-name">{{ t('channel.connectConfig') }}</p>
-              <p class="channel-section-sub">{{ t('channel.connectParams') }}</p>
+          </div>
+          <p class="ch-dialog-sub">{{ t('channel.formLead') }}</p>
+        </div>
+      </template>
+
+      <!-- 基础信息：启停开关收进卡片头，不与一组输入项抢同一条视觉线 -->
+      <section class="ch-card">
+        <header class="ch-card-head">
+          <span class="ch-card-icon" aria-hidden="true">
+            <el-icon><InfoCircle /></el-icon>
+          </span>
+          <div class="ch-card-copy">
+            <h3 class="ch-card-title">{{ t('channel.sectionBasic') }}</h3>
+            <p class="ch-card-desc">{{ t('channel.sectionBasicDesc') }}</p>
+          </div>
+          <div class="ch-enable">
+            <span class="ch-enable-label">{{ t('common.status') }}</span>
+            <el-switch v-model="formData.status" :active-value="1" :inactive-value="0" />
+          </div>
+        </header>
+        <div class="ch-card-body">
+          <el-form
+            ref="formRef"
+            :model="formData"
+            :rules="formRules"
+            label-width="100px"
+            label-position="right"
+            status-icon
+          >
+            <div class="ch-grid">
+              <el-form-item :label="t('channel.type')" prop="type">
+                <ChannelSelector
+                  v-model="formData.type"
+                  :disabled="isEdit"
+                  @select="handleChannelSelect"
+                />
+                <div class="ch-field-hint is-block">{{ t('channel.typeHint') }}</div>
+              </el-form-item>
+              <el-form-item :label="t('common.name')" prop="name">
+                <el-input
+                  v-model="formData.name"
+                  :placeholder="t('channel.namePlaceholder')"
+                  maxlength="50"
+                  show-word-limit
+                />
+              </el-form-item>
+              <el-form-item :label="t('common.description')" prop="description" class="ch-span-2">
+                <el-input
+                  v-model="formData.description"
+                  :placeholder="t('channel.descPlaceholder')"
+                  type="textarea"
+                  :rows="2"
+                  maxlength="200"
+                  show-word-limit
+                />
+              </el-form-item>
             </div>
+          </el-form>
+        </div>
+      </section>
+
+      <!-- 连接配置：动态表单按所选通道类型加载。未选类型时给出空态，
+           而不是把整张卡片藏起来 —— 版面结构从打开弹窗起就稳定。 -->
+      <section class="ch-card">
+        <header class="ch-card-head">
+          <span class="ch-card-icon" aria-hidden="true">
+            <el-icon><Connection /></el-icon>
+          </span>
+          <div class="ch-card-copy">
+            <h3 class="ch-card-title">{{ t('channel.connectConfig') }}</h3>
+            <p class="ch-card-desc">{{ t('channel.connectSectionDesc') }}</p>
           </div>
           <el-button
+            class="ch-card-action"
             type="primary"
             link
             :loading="testingConnection"
-            :disabled="detailLoading"
+            :disabled="!formData.type || detailLoading"
             @click="handleTestConnectivity"
           >
             {{ t('channel.testConnection') }}
           </el-button>
-        </div>
-        <div v-loading="dynamicFormLoading" class="dynamic-form-wrapper">
-          <p
-            v-if="!dynamicFormLoading && !dynamicFormRule.length"
-            class="channel-empty-config"
-          >
-            {{ t('channel.noConnectConfig') }}
+        </header>
+        <div class="ch-card-body">
+          <div v-if="!formData.type" class="ch-card-empty">
+            <span class="ch-card-empty-icon" aria-hidden="true">
+              <el-icon><PlugConnected /></el-icon>
+            </span>
+            <p class="ch-card-empty-title">{{ t('channel.pickTypeTitle') }}</p>
+            <p class="ch-card-empty-hint">{{ t('channel.pickTypeHint') }}</p>
+          </div>
+          <div v-else v-loading="dynamicFormLoading" class="dynamic-form-wrapper">
+            <p
+              v-if="!dynamicFormLoading && !dynamicFormRule.length"
+              class="ch-card-empty-text"
+            >
+              {{ t('channel.noConnectConfig') }}
+            </p>
+            <!-- 只渲染表单本身（v-else-if 而不是 v-else）：加载中不要先挂一个
+                 空规则的表单实例，否则它会触发一次假的 mounted 并清掉回填数据。
+                 key 带上 locale：表单文案在创建实例时就固定了，切语言必须重建；
+                 v-model 保住重建前已填的值 -->
+            <form-create
+              v-else-if="dynamicFormRule.length"
+              v-model="dynamicFormValues"
+              :key="`${dynamicFormKey}-${locale}`"
+              :rule="localizedDynamicFormRule"
+              :option="localizedDynamicFormOptions"
+              :locale="fcLocale"
+              @mounted="handleDynamicFormMounted"
+            />
+          </div>
+          <p v-if="formData.type === 'http'" class="ch-hint">
+            {{ t('channel.httpConnectivityHint') }}
           </p>
-          <!-- 只渲染表单本身（v-else-if 而不是 v-else）：加载中不要先挂一个
-               空规则的表单实例，否则它会触发一次假的 mounted 并清掉回填数据。
-               key 带上 locale：表单文案在创建实例时就固定了，切语言必须重建；
-               v-model 保住重建前已填的值 -->
-          <form-create
-            v-else-if="dynamicFormRule.length"
-            v-model="dynamicFormValues"
-            :key="`${dynamicFormKey}-${locale}`"
-            :rule="localizedDynamicFormRule"
-            :option="localizedDynamicFormOptions"
-            :locale="fcLocale"
-            @mounted="handleDynamicFormMounted"
-          />
+          <p v-if="formData.type === 'mqtt'" class="ch-hint">
+            {{ t('channel.mqttTopicHintPrefix') }}<code>{{ mqttTopicTokens }}</code>{{ t('channel.mqttTopicHintSuffix') }}
+          </p>
         </div>
-        <p v-if="formData.type === 'http'" class="channel-preview-hint">
-          {{ t('channel.httpConnectivityHint') }}
-        </p>
-        <p v-if="formData.type === 'mqtt'" class="channel-preview-hint">
-          {{ t('channel.mqttTopicHintPrefix') }}<code>{{ mqttTopicTokens }}</code>{{ t('channel.mqttTopicHintSuffix') }}
-        </p>
-      </div>
+      </section>
 
       <!-- 采集组订阅：空 = 收全量（含未分组）；非空 = 只收所选组。
            它是“收哪些数据”的运行期路由，排在连接配置之后、输出格式之前：
            先确定数据范围，再决定怎么编码。 -->
-      <div v-if="selectedTypeMeta?.messageBased" class="channel-section">
-        <div class="channel-section-head">
-          <div class="channel-section-headline">
-            <span class="channel-section-mark" aria-hidden="true">
-              <el-icon><LayersLinked /></el-icon>
-            </span>
-            <div>
-              <p class="channel-section-name">{{ t('channel.groupSubscription.title') }}</p>
-              <p class="channel-section-sub">{{ t('channel.groupSubscription.subtitle') }}</p>
-            </div>
+      <section v-if="selectedTypeMeta?.messageBased" class="ch-card">
+        <header class="ch-card-head">
+          <span class="ch-card-icon" aria-hidden="true">
+            <el-icon><LayersLinked /></el-icon>
+          </span>
+          <div class="ch-card-copy">
+            <h3 class="ch-card-title">{{ t('channel.groupSubscription.title') }}</h3>
+            <p class="ch-card-desc">{{ t('channel.groupSubscription.subtitle') }}</p>
           </div>
-        </div>
-        <el-select
-          v-model="subscribedGroupIds"
-          multiple
-          filterable
-          clearable
-          :loading="groupOptionsLoading"
-          :placeholder="t('channel.groupSubscription.placeholder')"
-          style="width: 100%"
-        >
-          <el-option-group
-            v-for="dev in groupOptionGroups"
-            :key="dev.deviceId"
-            :label="dev.deviceName || dev.deviceId"
+        </header>
+        <div class="ch-card-body">
+          <el-select
+            v-model="subscribedGroupIds"
+            class="ch-group-select"
+            multiple
+            filterable
+            clearable
+            :loading="groupOptionsLoading"
+            :placeholder="t('channel.groupSubscription.placeholder')"
           >
-            <el-option
-              v-for="g in dev.groups"
-              :key="g.id"
-              :label="g.status === 1 ? g.name : `${g.name} (${t('collectorGroup.disabledShort')})`"
-              :value="g.id"
-            />
-          </el-option-group>
-        </el-select>
-        <p class="iot-form-hint is-block">{{ t('channel.groupSubscription.hint') }}</p>
-      </div>
+            <el-option-group
+              v-for="dev in groupOptionGroups"
+              :key="dev.deviceId"
+              :label="dev.deviceName || dev.deviceId"
+            >
+              <el-option
+                v-for="g in dev.groups"
+                :key="g.id"
+                :label="g.status === 1 ? g.name : `${g.name} (${t('collectorGroup.disabledShort')})`"
+                :value="g.id"
+              />
+            </el-option-group>
+          </el-select>
+          <p class="ch-hint">{{ t('channel.groupSubscription.hint') }}</p>
+        </div>
+      </section>
 
       <!-- 载荷格式 / 出站映射 / 预览与测试发送：仅消息类通道显示。
            format/mapping 不放进 form-create 动态表单，避免与连接参数互相覆盖。 -->
-      <div v-if="selectedTypeMeta?.messageBased" class="channel-section">
-        <div class="channel-section-head">
-          <div class="channel-section-headline">
-            <span class="channel-section-mark" aria-hidden="true">
-              <el-icon><Braces /></el-icon>
-            </span>
-            <div>
-              <p class="channel-section-name">{{ t('channel.outputFormat') }}</p>
-              <p class="channel-section-sub">{{ t('channel.outputFormatHint') }}</p>
-            </div>
+      <section v-if="selectedTypeMeta?.messageBased" class="ch-card">
+        <header class="ch-card-head">
+          <span class="ch-card-icon" aria-hidden="true">
+            <el-icon><Braces /></el-icon>
+          </span>
+          <div class="ch-card-copy">
+            <h3 class="ch-card-title">{{ t('channel.outputFormat') }}</h3>
+            <p class="ch-card-desc">{{ t('channel.outputFormatHint') }}</p>
           </div>
           <!-- 格式下拉跟标题同排：标题已经写明「输出格式」，不再重复一个表单标签 -->
           <el-select
             v-model="outputFormat"
-            class="channel-format-select"
+            class="ch-format-select ch-card-action"
             :disabled="detailLoading"
             @change="handleFormatChange"
           >
@@ -341,71 +379,79 @@
               :value="f.name"
             />
           </el-select>
-        </div>
+        </header>
 
-        <!-- 用 v-show 而不是 v-if：切到 native-json 再切回来时，
-             高级 JSON 模式里尚未保存的文本不会丢。 -->
-        <MappingEditor
-          v-show="editorKind === 'mapping'"
-          ref="mappingEditorRef"
-          :state="mappingState"
-          :state-id="mappingStateId"
-          :disabled="detailLoading || submitting"
-          :preview-result="previewResult"
-          :preview-loading="previewing"
-          :auto-previewing="autoPreviewing"
-          @change="onMappingChange"
-          @preview="handlePreview"
-        />
-        <ScriptEditor
-          v-show="editorKind === 'script'"
-          ref="scriptEditorRef"
-          :state="scriptState"
-          :state-id="scriptStateId"
-          :disabled="detailLoading || submitting"
-          :preview-result="previewResult"
-          :preview-loading="previewing"
-          :auto-previewing="autoPreviewing"
-          @change="onScriptChange"
-          @preview="handlePreview"
-        />
+        <div class="ch-card-body">
+          <!-- 用 v-show 而不是 v-if：切到 native-json 再切回来时，
+               高级 JSON 模式里尚未保存的文本不会丢。 -->
+          <MappingEditor
+            v-show="editorKind === 'mapping'"
+            ref="mappingEditorRef"
+            :state="mappingState"
+            :state-id="mappingStateId"
+            :disabled="detailLoading || submitting"
+            :preview-result="previewResult"
+            :preview-loading="previewing"
+            :auto-previewing="autoPreviewing"
+            @change="onMappingChange"
+            @preview="handlePreview"
+          />
+          <ScriptEditor
+            v-show="editorKind === 'script'"
+            ref="scriptEditorRef"
+            :state="scriptState"
+            :state-id="scriptStateId"
+            :disabled="detailLoading || submitting"
+            :preview-result="previewResult"
+            :preview-loading="previewing"
+            :auto-previewing="autoPreviewing"
+            @change="onScriptChange"
+            @preview="handlePreview"
+          />
 
-        <div
-          v-if="!requiresMapping || selectedTypeMeta.supportsTestSend"
-          class="channel-preview-actions"
-        >
-          <el-button
-            v-if="!requiresMapping"
-            :loading="previewing"
-            :disabled="detailLoading"
-            @click="handlePreview"
+          <div
+            v-if="!requiresMapping || selectedTypeMeta.supportsTestSend"
+            class="ch-preview-actions"
+            :class="{ 'is-editor': requiresMapping }"
           >
-            {{ t('channel.previewPayload') }}
-          </el-button>
-          <el-button
-            v-if="selectedTypeMeta.supportsTestSend"
-            :loading="testSending"
-            :disabled="detailLoading"
-            @click="handleTestSend"
-          >
-            {{ t('channel.testSend') }}
-          </el-button>
-          <span v-if="!requiresMapping" class="channel-preview-hint">
-            {{ t('channel.previewHint') }}
-          </span>
+            <el-button
+              v-if="!requiresMapping"
+              :loading="previewing"
+              :disabled="detailLoading"
+              @click="handlePreview"
+            >
+              {{ t('channel.previewPayload') }}
+            </el-button>
+            <el-button
+              v-if="selectedTypeMeta.supportsTestSend"
+              :loading="testSending"
+              :disabled="detailLoading"
+              @click="handleTestSend"
+            >
+              {{ t('channel.testSend') }}
+            </el-button>
+            <span v-if="!requiresMapping" class="ch-hint is-inline">
+              {{ t('channel.previewHint') }}
+            </span>
+          </div>
+          <pre
+            v-if="!requiresMapping && previewText"
+            ref="payloadPreviewRef"
+            class="mapping-preview"
+          >{{ previewText }}</pre>
         </div>
-        <pre
-          v-if="!requiresMapping && previewText"
-          ref="payloadPreviewRef"
-          class="mapping-preview"
-        >{{ previewText }}</pre>
-      </div>
+      </section>
 
       <template #footer>
-        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="submitting" :disabled="detailLoading" @click="handleSubmit">
-          {{ t('common.confirm') }}
-        </el-button>
+        <div class="ch-dialog-footer">
+          <p class="ch-footer-hint">{{ t('channel.formFooterHint') }}</p>
+          <div class="ch-footer-actions">
+            <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
+            <el-button type="primary" :loading="submitting" :disabled="detailLoading" @click="handleSubmit">
+              {{ t('common.confirm') }}
+            </el-button>
+          </div>
+        </div>
       </template>
     </el-dialog>
 
@@ -583,8 +629,10 @@ import {
   IconAffiliate as Connection,
   IconBraces as Braces,
   IconBroadcast as Broadcast,
+  IconInfoCircle as InfoCircle,
   IconLayersLinked as LayersLinked,
   IconPencil as EditPen,
+  IconPlugConnected as PlugConnected,
   IconPlus as Plus,
   IconRefresh as Refresh,
   IconSearch as Search,
@@ -1877,99 +1925,350 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 连接配置区：在对话框里用发丝线接续基本信息，不再另起一张卡片 */
-.channel-section {
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line-soft);
+/* ---------- 弹窗头：eyebrow → 标题 + 类型标签 → 说明，三级递进 ---------- */
+.ch-dialog-head {
+  padding-right: 28px;
 }
 
-.channel-section-head {
+.ch-dialog-eyebrow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
 }
 
-.channel-section-headline {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
+.ch-dialog-eyebrow-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
 }
 
-.channel-section-mark {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  color: var(--brand);
-  background: var(--brand-soft);
-  border-radius: 8px;
-  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
-}
-
-.channel-section-mark .el-icon {
-  font-size: 15px;
-}
-
-.channel-section-name {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 650;
-  color: var(--ink);
-}
-
-.channel-section-sub {
-  margin: 2px 0 0;
-  font-size: 12px;
-  color: var(--ink-4);
-}
-
-.channel-format-select {
-  flex: none;
-  width: 200px;
-}
-
-.dynamic-form-wrapper {
-  min-height: 60px;
-  padding-bottom: 8px;
-}
-
-.channel-empty-config {
-  margin: 0;
-  padding: 10px 0;
-  font-size: 12.5px;
-  color: var(--ink-4);
-}
-
-/* 插件声明的连接参数收成一列，避免通栏输入框压着一个小步进器
-   （与设备对象页的协议参数表单同一写法） */
-.dynamic-form-wrapper :deep(.el-input),
-.dynamic-form-wrapper :deep(.el-input-number),
-.dynamic-form-wrapper :deep(.el-select) {
-  width: 100%;
-  max-width: 280px;
-}
-
-.channel-preview-actions {
+.ch-dialog-title-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 12px;
 }
 
-.channel-preview-hint {
+.ch-dialog-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+/* 类型是这条通道的身份：选中后挂在小标题旁，滚动时不用回头找下拉框 */
+.ch-dialog-type {
+  padding: 2px 9px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
+  border-radius: 999px;
+}
+
+.ch-dialog-sub {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+/* ---------- 分区卡片：白面浮在画布色正文上，用发丝线收边 ---------- */
+.ch-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.ch-card + .ch-card {
+  margin-top: 14px;
+}
+
+.ch-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 22px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.ch-card-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  font-size: 16px;
+  color: var(--brand);
+  background: linear-gradient(180deg, var(--brand-tint) 0%, var(--brand-soft) 100%);
+  border: 1px solid var(--brand-line);
+  border-radius: 10px;
+}
+
+.ch-card-copy {
+  flex: 1;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.ch-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.ch-card-desc {
+  margin: 4px 0 0;
   font-size: 12px;
+  line-height: 1.6;
   color: var(--ink-4);
 }
 
-.channel-preview-hint code {
+/* 卡片头右侧的动作（测试连接 / 格式下拉）与标题首行对齐 */
+.ch-card-action {
+  flex: none;
+  margin-top: 4px;
+}
+
+/* 未选类型时「测试连接」只是占位：Element Plus 的浅蓝仍像可点，
+   这里压成常规禁用灰 */
+.ch-card-action.is-disabled {
+  color: var(--ink-4) !important;
+}
+
+.ch-card-body {
+  padding: 20px 22px;
+}
+
+/* 启停是整张卡的开关，与标题同排靠右 */
+.ch-enable {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.ch-enable-label {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+/* ---------- 两列字段 ---------- */
+.ch-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
+  margin-bottom: -16px;
+}
+
+.ch-grid :deep(.el-form-item) {
+  margin-bottom: 16px;
+}
+
+/* 一侧字段带说明文字时，内容区会被网格拉高；两侧都钉到顶部才能齐平 */
+.ch-grid :deep(.el-form-item__content) {
+  align-items: flex-start;
+  align-content: flex-start;
+}
+
+.ch-grid .ch-span-2 {
+  grid-column: span 2;
+}
+
+.ch-field-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+.ch-field-hint.is-block {
+  flex: 0 0 100%;
+}
+
+/* 未选类型时的连接配置空态：虚线底座交代「这里将出现什么」 */
+.ch-card-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 26px 16px;
+  text-align: center;
+  background: #fbfcfe;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+}
+
+.ch-card-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 4px;
+  font-size: 18px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-radius: 50%;
+}
+
+.ch-card-empty-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.ch-card-empty-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-4);
+}
+
+.ch-card-empty-text {
+  margin: 0;
+  padding: 6px 0;
+  font-size: 12.5px;
+  color: var(--ink-4);
+}
+
+/* 常驻说明：占位符一输入就消失，而这些正是要一直看见的信息 */
+.ch-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-4);
+}
+
+.ch-hint.is-inline {
+  margin: 0;
+}
+
+.ch-hint code {
   font-family: var(--font-mono);
   color: var(--ink-3);
+}
+
+.ch-format-select {
+  width: 200px;
+}
+
+.ch-group-select {
+  width: 100%;
+}
+
+/* ---------- 连接参数动态表单：两列排布，与基础信息同一套节奏 ---------- */
+.dynamic-form-wrapper {
+  min-height: 48px;
+}
+
+.dynamic-form-wrapper :deep(.form-create) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
+  align-items: start;
+  /* 抵掉最后一行字段的下边距，卡片底部不再多出一截空 */
+  margin-bottom: -16px;
+}
+
+/* form-create 每行只包一个 24 栅格字段；让行"透明"，字段直接落进两列网格 */
+.dynamic-form-wrapper :deep(.fc-form-row) {
+  display: contents;
+}
+
+.dynamic-form-wrapper :deep(.fc-form-col) {
+  width: auto;
+  max-width: none;
+  min-width: 0;
+  padding: 0;
+}
+
+.dynamic-form-wrapper :deep(.fc-form-item) {
+  margin-bottom: 16px;
+}
+
+.dynamic-form-wrapper :deep(.el-input),
+.dynamic-form-wrapper :deep(.el-select) {
+  width: 100%;
+  max-width: none;
+}
+
+/* 步进器不铺满整格：通栏的 +/- 按钮会显得笨重，留出半格即可 */
+.dynamic-form-wrapper :deep(.el-input-number) {
+  width: 240px;
+  max-width: 100%;
+}
+
+/* 预览 / 测试发送与编辑器之间用一条发丝线分开：它们作用于整张卡。
+   没有编辑器时（native-json）按钮紧跟卡片头，不画这条线。 */
+.ch-preview-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.ch-preview-actions.is-editor {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+/* ---------- 页脚：左侧常驻说明，右侧确认按钮 ---------- */
+.ch-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ch-footer-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-4);
+}
+
+.ch-footer-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+@media (max-width: 860px) {
+  .ch-grid,
+  .dynamic-form-wrapper :deep(.form-create) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ch-grid .ch-span-2 {
+    grid-column: auto;
+  }
+
+  .ch-card-head {
+    flex-wrap: wrap;
+  }
+
+  .ch-footer-hint {
+    display: none;
+  }
 }
 
 .mapping-preview {

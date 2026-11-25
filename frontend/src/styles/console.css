@@ -863,10 +863,38 @@
   padding: 20px 24px 8px;
 }
 
-/* 通道弹窗内嵌映射编辑器，内容较长时让 body 自己滚动 */
-.channel-dialog .el-dialog__body {
-  max-height: 72vh;
+/* 通道弹窗：与点位 / 触发规则 / 物模型表单同一套版式 —— 页头渐变、
+   正文用画布色托起白色分区卡片、内容长时 body 自滚。内嵌映射编辑器，
+   正文高度必须由纵向 flex 收住，不能写死 max-height 把页脚顶出视口。 */
+.iot-dialog.channel-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(92vh - 24px);
+  margin-top: 6vh;
+}
+
+.iot-dialog.channel-dialog .el-dialog__header,
+.iot-dialog.channel-dialog .el-dialog__footer {
+  flex: none;
+}
+
+.iot-dialog.channel-dialog .el-dialog__header {
+  padding: 22px 26px 18px;
+  background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
+}
+
+.iot-dialog.channel-dialog .el-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 18px 24px 24px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--canvas);
+}
+
+.iot-dialog.channel-dialog .el-dialog__footer {
+  padding: 14px 24px;
+  background: var(--surface);
 }
 
 /* 点位表单弹窗：页头带说明、正文按卡片分组，背景用画布色把白卡托起来。
@@ -909,6 +937,99 @@
 }
 
 .trigger-rule-dialog .el-dialog__footer {
+  padding: 14px 24px;
+  background: var(--surface);
+}
+
+/* 物模型属性弹窗：与点位表单 / 触发规则同一套版式 —— 页头渐变、
+   正文卡片分组、内容长时 body 自滚。选择器带上 .iot-dialog 是为了压过
+   后面那条通用的 .iot-dialog .el-dialog__footer（否则页脚会多 4px 下边距）。 */
+.iot-dialog.thing-property-dialog {
+  /* 比普通表单高：弹窗向上收一点；用纵向 flex 让页头/页脚固定、
+     正文吃掉剩余高度并自滚 —— 中英文案或不同视口都不会把页脚顶出屏幕 */
+  display: flex;
+  flex-direction: column;
+  max-height: calc(92vh - 24px);
+  margin-top: 8vh;
+}
+
+.iot-dialog.thing-property-dialog .el-dialog__header,
+.iot-dialog.thing-property-dialog .el-dialog__footer {
+  flex: none;
+}
+
+.iot-dialog.thing-property-dialog .el-dialog__header {
+  padding: 22px 26px 18px;
+  background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
+}
+
+/* 正文吃掉剩余高度并自滚；只设 flex，不写死 max-height */
+.iot-dialog.thing-property-dialog .el-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 20px 24px 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+}
+
+.iot-dialog.thing-property-dialog .el-dialog__footer {
+  padding: 14px 24px;
+  background: var(--surface);
+}
+
+/* 物模型表单弹窗：与点位 / 触发规则 / 属性表单同一套版式 —— 页头渐变、
+   正文卡片分组、内容长时 body 自滚。选择器带上 .iot-dialog 是为了压过
+   后面那条通用的 .iot-dialog .el-dialog__footer（否则页脚会多 4px 下边距）。 */
+.iot-dialog.thing-model-dialog {
+  /* 纵向 flex 让页头/页脚固定、正文吃掉剩余高度并自滚 ——
+     中英文案或不同视口都不会把页脚顶出屏幕 */
+  display: flex;
+  flex-direction: column;
+  max-height: calc(92vh - 24px);
+  margin-top: 8vh;
+}
+
+.iot-dialog.thing-model-dialog .el-dialog__header,
+.iot-dialog.thing-model-dialog .el-dialog__footer {
+  flex: none;
+}
+
+.iot-dialog.thing-model-dialog .el-dialog__header {
+  padding: 22px 26px 18px;
+  background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
+}
+
+/* 正文吃掉剩余高度并自滚；只设 flex，不写死 max-height */
+.iot-dialog.thing-model-dialog .el-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 20px 24px 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+}
+
+.iot-dialog.thing-model-dialog .el-dialog__footer {
+  padding: 14px 24px;
+  background: var(--surface);
+}
+
+/* 点位选择弹窗：页头渐变、页脚白面，正文改用画布色，把两侧白卡托起来 */
+.point-picker-dialog .el-dialog__header {
+  padding: 22px 26px 18px;
+  background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
+}
+
+.point-picker-dialog .el-dialog__body {
+  max-height: calc(85vh - 230px);
+  padding: 20px 24px 22px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--canvas);
+}
+
+.point-picker-dialog .el-dialog__footer {
   padding: 14px 24px;
   background: var(--surface);
 }

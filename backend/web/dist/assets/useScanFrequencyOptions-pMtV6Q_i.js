@@ -1,0 +1,1 @@
+import{Wt as e,rn as t}from"./vendor-CnjBEu9a.js";var n=[100,200,500,1e3,2e3,5e3,1e4,3e4,6e4];function r(){let{t:r}=e();return t(()=>n.map(e=>({value:e,label:e%1e3==0?r(`deviceAddress.scanFrequencySeconds`,{ms:e,s:e/1e3}):`${e} ms`})))}export{r as t};

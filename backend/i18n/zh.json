@@ -72,6 +72,7 @@
     "err.thing_model_point_bound_elsewhere": "点位已绑定其他属性，请先解除该绑定",
     "err.thing_model_binding_limit": "一次最多绑定 200 个对象",
     "err.thing_model_device_point_duplicate": "同一设备对同一属性只能绑定一个点位",
+    "err.thing_model_property_single_point": "一个属性只能绑定一个点位",
     "err.control_disabled": "控制下发功能未启用",
     "err.control_protocol_not_writable": "该协议不支持控制下发",
     "err.control_address_not_writable": "该点位没有写权限",

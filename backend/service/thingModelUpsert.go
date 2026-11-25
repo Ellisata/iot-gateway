@@ -340,8 +340,12 @@ func upsertOpenApiThingModelProperties(
 			First(&existing).Error
 		switch {
 		case errors.Is(err, gorm.ErrRecordNotFound):
-			if p.Kind == nil || p.AccessMode == nil {
-				return nil, identifier, openApiThingModelParamErr("新建属性必须提供 kind 与 accessMode")
+			if p.AccessMode == nil {
+				return nil, identifier, openApiThingModelParamErr("新建属性必须提供 accessMode")
+			}
+			kind := ""
+			if p.Kind != nil {
+				kind = *p.Kind // kind 只是语义说明，可省略（= 未指定）
 			}
 			sortOrder := autoSort
 			if p.SortOrder != nil {
@@ -369,7 +373,7 @@ func upsertOpenApiThingModelProperties(
 				ModelID:     modelID,
 				Identifier:  identifier,
 				Name:        name,
-				Kind:        *p.Kind,
+				Kind:        kind,
 				AccessMode:  *p.AccessMode,
 				Unit:        unit,
 				Description: description,
@@ -391,17 +395,13 @@ func upsertOpenApiThingModelProperties(
 			return nil, identifier, err
 
 		default:
-			kind := existing.Kind
-			if p.Kind != nil {
-				kind = *p.Kind
-			}
 			accessMode := existing.AccessMode
 			if p.AccessMode != nil {
 				accessMode = *p.AccessMode
 			}
-			// 已被点位绑定时 kind/access_mode 是绑定的兼容性前提：改了会让已有
-			// 绑定悄悄失效。与 UpdateThingModelProperty 同一条规则。
-			if kind != existing.Kind || accessMode != existing.AccessMode {
+			// 已被点位绑定时 access_mode 是绑定的兼容性前提：改了会让已有绑定
+			// 悄悄失效。与 UpdateThingModelProperty 同一条规则。kind 只是说明，可随时改。
+			if accessMode != existing.AccessMode {
 				var bound int64
 				if err := tx.Model(&po.DeviceAddress{}).
 					Where("property_id = ?", existing.ID).Count(&bound).Error; err != nil {
@@ -486,7 +486,7 @@ func validateOpenApiThingModelPropertyItem(p *dto.OpenApiThingModelPropertyUpser
 	if utf8.RuneCountInString(name) > 100 {
 		return openApiThingModelParamErr("属性名称不能超过100个字符")
 	}
-	if p.Kind != nil && !isThingModelKind(*p.Kind) {
+	if p.Kind != nil && *p.Kind != "" && !isThingModelKind(*p.Kind) {
 		return openApiThingModelParamErr("属性数据类型不合法（bool/int/uint/float/string/time）")
 	}
 	if p.AccessMode != nil && !isThingModelAccessMode(*p.AccessMode) {

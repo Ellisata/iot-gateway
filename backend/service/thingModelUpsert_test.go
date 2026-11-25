@@ -249,11 +249,27 @@ func TestBatchUpsertOpenApiThingModelsBoundPropertyGuard(t *testing.T) {
 		t.Fatalf("bind address: %v", err)
 	}
 
+	// kind 只是语义说明：绑定点位后仍可修改，且与模型一起落库。
+	res, err = svc.BatchUpsertOpenApiThingModels(ctx, thingModelUpsertReq(dto.OpenApiThingModelUpsertDTO{
+		Code: "th_bound",
+		Name: "改名生效",
+		Properties: []dto.OpenApiThingModelPropertyUpsertDTO{
+			{Identifier: "temperature", Name: "温度", Kind: strPtr("int"), AccessMode: strPtr("R")},
+		},
+	}))
+	if err != nil || res.Failed != 0 {
+		t.Fatalf("kind-only upsert: err=%v res=%+v", err, res)
+	}
+	if got := loadThingModelProperties(t, svc, model.ID); got[0].Kind != "int" {
+		t.Fatalf("绑定后 kind 未更新: %q", got[0].Kind)
+	}
+
+	// access_mode 仍是绑定的兼容性前提：绑定中修改 → 41018，整个 upsert 回滚。
 	res, err = svc.BatchUpsertOpenApiThingModels(ctx, thingModelUpsertReq(dto.OpenApiThingModelUpsertDTO{
 		Code: "th_bound",
 		Name: "不该生效的新名字",
 		Properties: []dto.OpenApiThingModelPropertyUpsertDTO{
-			{Identifier: "temperature", Name: "温度", Kind: strPtr("int"), AccessMode: strPtr("R")},
+			{Identifier: "temperature", Name: "温度", Kind: strPtr("int"), AccessMode: strPtr("RW")},
 		},
 	}))
 	if err != nil {
@@ -266,11 +282,11 @@ func TestBatchUpsertOpenApiThingModelsBoundPropertyGuard(t *testing.T) {
 	if len(item.Properties) != 1 || item.Properties[0].Identifier != "temperature" {
 		t.Fatalf("失败明细未指向属性: %+v", item.Properties)
 	}
-	if got := loadThingModelByCode(t, svc, "th_bound"); got.Name != "绑定测试" {
+	if got := loadThingModelByCode(t, svc, "th_bound"); got.Name != "改名生效" {
 		t.Fatalf("模型元数据被半更新: %q", got.Name)
 	}
-	if got := loadThingModelProperties(t, svc, model.ID); got[0].Kind != "float" {
-		t.Fatalf("属性 kind 被改动: %q", got[0].Kind)
+	if got := loadThingModelProperties(t, svc, model.ID); got[0].Kind != "int" || got[0].AccessMode != "R" {
+		t.Fatalf("失败后属性被改动: kind=%q access=%q", got[0].Kind, got[0].AccessMode)
 	}
 }
 
@@ -391,9 +407,9 @@ func TestBatchUpsertOpenApiThingModelsValidation(t *testing.T) {
 			enums.ParamValidEnum.GetCode(),
 		},
 		{
-			"new property missing kind",
-			dto.OpenApiThingModelUpsertDTO{Code: "th_missing_kind", Name: "x", Properties: []dto.OpenApiThingModelPropertyUpsertDTO{
-				thingModelUpsertProp("a", "A", "", "R"),
+			"new property missing access",
+			dto.OpenApiThingModelUpsertDTO{Code: "th_missing_access", Name: "x", Properties: []dto.OpenApiThingModelPropertyUpsertDTO{
+				thingModelUpsertProp("a", "A", "float", ""),
 			}},
 			enums.ParamValidEnum.GetCode(),
 		},
@@ -413,11 +429,11 @@ func TestBatchUpsertOpenApiThingModelsValidation(t *testing.T) {
 
 	// 新建属性失败时必须回到事务前：模型不能被半创建。
 	var n int64
-	if err := db.Model(&po.ThingModel{}).Where("code = ?", "th_missing_kind").Count(&n).Error; err != nil {
+	if err := db.Model(&po.ThingModel{}).Where("code = ?", "th_missing_access").Count(&n).Error; err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 0 {
-		t.Fatalf("缺 kind 的模型不应落库，实际 %d 行", n)
+		t.Fatalf("缺 accessMode 的模型不应落库，实际 %d 行", n)
 	}
 }
 

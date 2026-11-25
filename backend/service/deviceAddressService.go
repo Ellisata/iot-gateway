@@ -81,11 +81,12 @@ func (s *DeviceAddressService) CreateDeviceAddress(ctx context.Context, req *dto
 		return err
 	}
 
-	// 物模型属性绑定：属性存在，且 kind/读写权限兼容（与设备所属模型无关）。
-	if err := s.validatePropertyBinding(ctx, req.PropertyID, protocolName, internal, req.RwPermission, false); err != nil {
+	// 物模型属性绑定：属性存在，且点位读写权限覆盖属性读写模式（与设备所属模型无关）。
+	// 数据类型只是属性的说明，不参与绑定校验。
+	if err := s.validatePropertyBinding(ctx, req.PropertyID, req.RwPermission, false); err != nil {
 		return err
 	}
-	if err := ensureDevicePropertyUnique(ctx, db, req.DeviceID, req.PropertyID, ""); err != nil {
+	if err := ensurePropertySinglePoint(ctx, db, req.PropertyID, ""); err != nil {
 		return err
 	}
 
@@ -267,18 +268,19 @@ func kindOfAddressType(protocolName, internalType string) string {
 	return driver.GetTypeRegistry().ForProtocol(driver.ScopeOf(protocolName)).KindOf(internalType)
 }
 
-// ensureDevicePropertyUnique 同一设备对同一属性只能绑一个点位。
+// ensurePropertySinglePoint 属性与设备点位是 1 对 1：一个属性只能绑一个点位。
 //
-// 迁移 027 的部分唯一索引 idx_device_address_device_property 是最终硬约束；
-// 这里先给出可读业务错误，避免用户从 SQLite 的 UNIQUE constraint 文案里
-// 反推是哪条业务规则。excludeAddressID 用于更新时排除当前点位自身。
-func ensureDevicePropertyUnique(ctx context.Context, db *gorm.DB, deviceID, propertyID, excludeAddressID string) error {
+// 从点位侧绑定时同样要守住这条规则，否则「点位页选属性」可以绕开属性表单
+// 造出多绑。迁移 027 的部分唯一索引约束的是 (device_id, property_id)，
+// 它是这条规则的真子集；这里先给出可读业务错误，避免 SQLite 的 UNIQUE
+// constraint 文案直接冒到界面上。excludeAddressID 用于更新时排除当前点位自身。
+func ensurePropertySinglePoint(ctx context.Context, db *gorm.DB, propertyID, excludeAddressID string) error {
 	propertyID = strings.TrimSpace(propertyID)
 	if propertyID == "" {
 		return nil
 	}
 	q := db.WithContext(ctx).Model(&po.DeviceAddress{}).
-		Where("device_id = ? AND property_id = ?", deviceID, propertyID)
+		Where("property_id = ?", propertyID)
 	if excludeAddressID != "" {
 		q = q.Where("id <> ?", excludeAddressID)
 	}
@@ -287,15 +289,18 @@ func ensureDevicePropertyUnique(ctx context.Context, db *gorm.DB, deviceID, prop
 		return err
 	}
 	if count > 0 {
-		return appError.NewAppErrorCtx(enums.ThingModelDevicePointDupEnum.GetCode(),
-			enums.ThingModelDevicePointDupEnum.GetMessage(),
-			enums.ThingModelDevicePointDupEnum.GetMsgKey())
+		return appError.NewAppErrorCtx(enums.ThingModelPropertySinglePointEnum.GetCode(),
+			enums.ThingModelPropertySinglePointEnum.GetMessage(),
+			enums.ThingModelPropertySinglePointEnum.GetMsgKey())
 	}
 	return nil
 }
 
-// validatePropertyBinding 校验点位绑定物模型属性的三项前提：
-// 属性存在、kind 一致、点位读写权限覆盖属性读写模式。
+// validatePropertyBinding 校验点位绑定物模型属性的两项前提：
+// 属性存在、点位读写权限覆盖属性读写模式。
+//
+// 属性的 kind 只作为语义说明，不参与绑定校验 —— 采集记录的类型始终由点位自身的
+// data_type 决定，属性类型与点位类型不一致不影响数据链路。
 //
 // 属性与设备之间没有绑定关系：任意设备的点位都可以绑定任意模型下的属性。
 //
@@ -303,10 +308,10 @@ func ensureDevicePropertyUnique(ctx context.Context, db *gorm.DB, deviceID, prop
 // 其它字段（改名/改阈值）。新建绑定或换绑时传 false，要求模型与属性都处于启用状态。
 func (s *DeviceAddressService) validatePropertyBinding(
 	ctx context.Context,
-	propertyID, protocolName, internalType, addressRW string,
+	propertyID, addressRW string,
 	allowDisabled bool,
 ) error {
-	return validatePropertyBindingDB(ctx, s.sqliteDB, propertyID, protocolName, internalType, addressRW, allowDisabled)
+	return validatePropertyBindingDB(ctx, s.sqliteDB, propertyID, addressRW, allowDisabled)
 }
 
 // validatePropertyBindingDB 是 validatePropertyBinding 的事务版本：
@@ -314,7 +319,7 @@ func (s *DeviceAddressService) validatePropertyBinding(
 func validatePropertyBindingDB(
 	ctx context.Context,
 	db *gorm.DB,
-	propertyID, protocolName, internalType, addressRW string,
+	propertyID, addressRW string,
 	allowDisabled bool,
 ) error {
 	propertyID = strings.TrimSpace(propertyID)
@@ -349,11 +354,6 @@ func validatePropertyBindingDB(
 		}
 	}
 
-	// 判不了 kind（协议/类型查不到）就拒绝绑定，而不是放行一个无法自证兼容的绑定。
-	if kindOfAddressType(protocolName, internalType) != property.Kind {
-		return appError.NewAppErrorCtx(enums.ThingModelKindMismatchEnum.GetCode(),
-			enums.ThingModelKindMismatchEnum.GetMessage(), enums.ThingModelKindMismatchEnum.GetMsgKey())
-	}
 	if !accessCovers(addressRW, property.AccessMode) {
 		return appError.NewAppErrorCtx(enums.ThingModelAccessMismatchEnum.GetCode(),
 			enums.ThingModelAccessMismatchEnum.GetMessage(), enums.ThingModelAccessMismatchEnum.GetMsgKey())
@@ -653,30 +653,28 @@ func (s *DeviceAddressService) UpdateDeviceAddress(ctx context.Context, req *dto
 	}
 
 	// 物模型属性绑定是三态的：省略 = 不动，空串 = 解绑，非空 = 绑定。
-	// 绑定或改变了类型/读写权限时，按更新后的生效值重新校验既有绑定。
-	typeOrRWChanged := req.CommonDataType != "" || req.DataType != "" || req.RwPermission != ""
+	// 绑定或改变读写权限时，按更新后的生效值重新校验既有绑定；数据类型只是
+	// 属性的说明，改点位类型不再影响绑定。
+	rwChanged := req.RwPermission != ""
+	typeChanged := req.CommonDataType != "" || req.DataType != ""
 	if req.PropertyID != nil {
 		newPropertyID := strings.TrimSpace(*req.PropertyID)
 		if newPropertyID != "" {
-			if err := loadDevice(); err != nil {
-				return err
-			}
-			if err := s.validatePropertyBinding(ctx, newPropertyID,
-				s.getProtocolName(ctx, device.ProtocolID), effectiveInternal, effectiveRW,
+			if err := s.validatePropertyBinding(ctx, newPropertyID, effectiveRW,
 				newPropertyID == existing.PropertyID); err != nil {
 				return err
 			}
-			if err := ensureDevicePropertyUnique(ctx, db, existing.DeviceID, newPropertyID, existing.ID); err != nil {
-				return err
+			// 只在换绑时检查：历史数据里的多绑行再保存其它字段不应被这条
+			// 新规则挡住（否则用户被迫先处理一件与当前编辑无关的事）。
+			if newPropertyID != existing.PropertyID {
+				if err := ensurePropertySinglePoint(ctx, db, newPropertyID, existing.ID); err != nil {
+					return err
+				}
 			}
 		}
 		updates["property_id"] = newPropertyID
-	} else if existing.PropertyID != "" && typeOrRWChanged {
-		if err := loadDevice(); err != nil {
-			return err
-		}
-		if err := s.validatePropertyBinding(ctx, existing.PropertyID,
-			s.getProtocolName(ctx, device.ProtocolID), effectiveInternal, effectiveRW, true); err != nil {
+	} else if existing.PropertyID != "" && rwChanged {
+		if err := s.validatePropertyBinding(ctx, existing.PropertyID, effectiveRW, true); err != nil {
 			return err
 		}
 	}
@@ -730,7 +728,7 @@ func (s *DeviceAddressService) UpdateDeviceAddress(ctx context.Context, req *dto
 			return err
 		}
 		updates["transform_json"] = marshalAddressTransforms(transforms)
-	} else if existing.TransformJSON != "" && typeOrRWChanged && (req.CommonDataType != "" || req.DataType != "") {
+	} else if existing.TransformJSON != "" && typeChanged {
 		// 改了数据类型但没传新流水线：按新 Kind 复核库里那份，别把一个 scale
 		// 留在已经变成 string/bool 的点位上 —— 那会让该点位每轮采集都走失败回退。
 		transforms, err := parseAddressTransforms(json.RawMessage(existing.TransformJSON))

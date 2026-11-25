@@ -391,8 +391,8 @@ func newGatewayTask(db *gorm.DB, sink RecordSink, pool *workerPool.WorkerPool, s
 	lockKeys := buildLockKeys(devices, drvMap)
 
 	// 物模型编码/属性编码随记录下发（见 CollectedRecord.ThingModelCode）。
-	// 绑定关系（device_address.property_id）已在 checksum 里，因此改绑定会触发热加载
-	// 重建任务；模型编码与属性标识符本身创建后不可修改。
+	// 绑定关系（device_address.property_id）与属性标识符都在 checksum 里，因此
+	// 改绑定或改属性标识符都会触发热加载重建任务；模型编码创建后不可修改。
 	propCodes := loadThingModelCodes(db)
 
 	// 采集组：点位绑定组后，组周期是生效周期；组不存在/跨设备/已停用的点位
