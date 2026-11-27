@@ -6,6 +6,16 @@ All notable changes to the iot-gateway gateway are documented here, following
 [Semantic Versioning](https://semver.org/). Chinese entries come first under
 each release, followed by English entries.
 
+## [未发布]
+
+### 新增
+
+- **开放接口推送通道最近报文**：新增 `GET /openApi/pushChannel/recentMessages`（openApi v1.24 / 4.23），返回推送引擎内存环形缓冲里的最近 100 条推送记录（载荷最多 2 KiB 预览，含目标、设备/组、记录数、状态码、耗时、大小、补发标记），供管理平台的推送通道监控展示。只读，不触达下游；记录随重启 / 热加载清空，通道未运行时 `active=false`。
+
+### Added
+
+- **Push channel recent messages in the public API**: adds `GET /openApi/pushChannel/recentMessages` (openApi v1.24 / 4.23), returning the latest 100 push records from the push engine's in-memory ring buffer (payload preview up to 2 KiB, with target, device/group, record count, status code, duration, size and replay flag) for the management platform's channel monitor. Read-only, does not touch downstreams; records are cleared on restart / hot reload, and `active=false` when the channel is not running.
+
 ## [0.8.6] - 2026-11-25
 
 ### 新增

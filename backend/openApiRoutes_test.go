@@ -47,6 +47,7 @@ func TestOpenApiRoutesRegistered(t *testing.T) {
 		"GET /openApi/pushChannel/types",
 		"GET /openApi/pushChannel/forms",
 		"GET /openApi/pushChannel/status",
+		"GET /openApi/pushChannel/recentMessages",
 		"POST /openApi/pushChannel/testConnectivity",
 		"POST /openApi/pushChannel/previewMapping",
 		"GET /openApi/collectorGroup/list",

@@ -231,6 +231,29 @@ func (ctr *OpenApiController) PushChannelStatus(c *gin.Context) {
 	c.JSON(200, response.Success(ctr.pushEngine.GetStatus()))
 }
 
+// PushChannelRecentMessages 某个推送通道最近推送的报文（管理平台统一监控）。
+//
+// 只读，数据来自推送引擎的**内存环形缓冲**：每个通道最多保留最近 100 条，
+// 载荷只保留 2 KiB 预览，记录随网关重启 / 热加载清空。不读时序库、不触达
+// 下游系统。通道不在引擎里时返回 active=false 与空数组，而不是 404 ——
+// 与内部接口 /push/recentMessages 的语义一致，调用方据此显示「未运行」。
+//
+// 载荷可能包含采集数据；X-Api-Key 持有者本就是受信管理者，接口不再额外脱敏。
+func (ctr *OpenApiController) PushChannelRecentMessages(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req dto.RecentPushMessagesDTO
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(200, appError.HandleErrorCtx(ctx, err))
+		return
+	}
+	if ctr.pushEngine == nil {
+		c.JSON(200, response.Success(newPushRecentMessagesVO(nil, false)))
+		return
+	}
+	msgs, active := ctr.pushEngine.RecentMessages(req.ChannelID, req.Limit)
+	c.JSON(200, response.Success(newPushRecentMessagesVO(msgs, active)))
+}
+
 // TestPushChannel 用调用方传来的类型 + 未保存的通道配置真实连接一次下游。
 //
 // 只探测：建立连接后立即断开，不落库、不改网关配置。会真实触达下游系统

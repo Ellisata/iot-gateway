@@ -33,6 +33,8 @@
 | v1.20 | 2026-11-16 | Added: push channel runtime status (4.22) — in-memory snapshot of the push engine with connection state, queue/spool depth, publish/write counters, last success and last error, for the management platform to aggregate per gateway. Read-only, does not touch downstreams; counters reset on restart | - |
 | v1.21 | 2026-11-21 | Point objects gain the bound thing-model property (`propertyId`/`propertyIdentifier`/`propertyName`/`propertyModelId`/`propertyModelName`, effective in both 4.4 and 4.5); all empty strings when no property is bound | - |
 | v1.22 | 2026-11-21 | 4.3 batch address labels gains the same five thing-model property fields, so all three read-only point endpoints use the same field set | - |
+| v1.23 | 2026-11-25 | A thing-model property's `kind` is now optional and descriptive only: it no longer participates in point binding validation and can be changed after binding; once bound to a point only `accessMode` remains locked (`41018`) | - |
+| v1.24 | 2026-11-27 | Added: push channel recent messages (4.23) — in-memory ring buffer of the push engine, latest 100 records per channel with a 2 KiB payload preview, for the management platform's channel monitor. Read-only, does not touch downstreams; cleared on restart / hot reload | - |
 
 ## Compatibility Commitment
 
@@ -1938,6 +1940,51 @@ No request parameters. `data` is an array (`[]` when there are no channels); eac
 
 - `running=true, connected=false` usually means the downstream is unreachable and the gateway keeps retrying;
 - Channels disabled or invalid on the gateway **do not appear in the array**; callers should display them as "not running";
+- Older gateways do not expose this endpoint and return 404; callers should prompt an upgrade.
+
+### 4.23 Push Channel Recent Messages (management platform channel monitor)
+
+> Read-only. Returns the push engine's **in-memory ring buffer**: each channel keeps
+> the latest 100 push records, the payload is a 2 KiB preview only, and records are
+> cleared on gateway restart / hot reload. It does not read the time-series store or
+> touch downstream systems. Payloads may contain collected data; like 4.22, this
+> endpoint should only be exposed to a trusted management platform.
+
+```
+GET /openApi/pushChannel/recentMessages?channelId=<channel id>&limit=<count>
+```
+
+| Parameter | Type | Required | Description |
+| --------- | ---- | -------- | ----------- |
+| `channelId` | string | Yes | Channel primary key, as returned in 4.22 `/openApi/pushChannel/status` |
+| `limit` | int | No | Maximum number of records (1~100); omitted = return the whole buffer |
+
+`data` is an object:
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `active` | bool | Whether the channel is currently in the push engine; `false` means disabled or being hot-reloaded |
+| `messages` | array | Recent records (newest first); `[]` when none |
+
+Fields of each `messages[]` item:
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `seq` | uint | Monotonically increasing sequence number, for a stable list key |
+| `time` | string | Publish completion time with millisecond precision, e.g. `2026-11-27 10:00:00.123` |
+| `target` | string | Target description (MQTT topic, HTTP URL, database / measurement, etc.) |
+| `deviceCode` | string | Device code for message channels; may be empty for aggregated time-series writes |
+| `groupCode` | string | Collector group code; empty when ungrouped or not a message channel |
+| `records` | int | Records in this delivery (time-series = written rows, OPC UA = updated points) |
+| `statusCode` | int | HTTP status code; always `0` for backends without that concept |
+| `durationMs` | int | Delivery duration in milliseconds |
+| `size` | int | Raw payload size in bytes (`payload` is only a preview) |
+| `payload` | string | Payload preview up to 2 KiB; for OPC UA it is a point=value preview |
+| `truncated` | bool | Whether `payload` was truncated |
+| `error` | string | Failure reason (empty = success) |
+| `fromDrain` | bool | Whether this record was replayed from the offline spool |
+
+- When the channel is not in the engine the response is `active=false` with `messages=[]`, **not 404**; callers should show "not running";
 - Older gateways do not expose this endpoint and return 404; callers should prompt an upgrade.
 
 ## 5. Error Code Reference

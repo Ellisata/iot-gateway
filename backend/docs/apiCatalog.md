@@ -23,6 +23,7 @@
 | v1.6 | 2026-11-09 | 设备 / 点位删除新增触发规则引用保护：被事件触发规则引用时返回 `40063` / `40064`，批量整批不删 |
 | v1.7 | 2026-11-11 | `/openApi` 新增配置同步接口（能力协商、五域只读、推送通道/告警 Webhook/运行开关/设备点位批量写），见 [openApi.md](openApi.md) 4.16 |
 | v1.8 | 2026-11-16 | `/openApi` 新增推送通道运行状态 `GET /openApi/pushChannel/status`（引擎内存快照，管理平台按网关聚合监控），见 [openApi.md](openApi.md) 4.22 |
+| v1.9 | 2026-11-27 | `/openApi` 新增推送通道最近报文 `GET /openApi/pushChannel/recentMessages`（引擎内存环形缓冲，最近 100 条 / 2 KiB 预览，管理平台通道监控），见 [openApi.md](openApi.md) 4.23 |
 
 ---
 
@@ -359,6 +360,7 @@ Agent 不应在无用户意图时自行调用。
 | POST | `/openApi/thingModel/batchDelete` | **物模型批量删除**（按 `code`，连带其属性） | Body: `codes`*[]（≤200） | `OpenApiThingModelBatchDeleteVO` |
 | POST | `/openApi/thingModelProperty/batchDelete` | **物模型属性批量删除**（按 `modelCode` + `identifier`） | Body: `items`*[]（≤200） | `OpenApiThingModelPropertyBatchDeleteVO` |
 | GET | `/openApi/pushChannel/status` | 推送通道运行状态（引擎内存快照，计数重启清零） | — | `[]ChannelStatusVO` |
+| GET | `/openApi/pushChannel/recentMessages` | 推送通道最近推送报文（引擎内存环形缓冲，最近 100 条 / 2 KiB 载荷预览） | `channelId`*, `limit`(1~100) | `PushRecentMessagesVO` |
 
 > 注意 `POST /openApi/device/names` 与 `POST /openApi/deviceAddress/labels` 虽是 POST，
 > 但**是纯查询、无副作用** —— 用 POST 是因为 ID 数组放在 Body 里（列表可能很长）。

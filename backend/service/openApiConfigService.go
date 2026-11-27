@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	openApiConfigVersion = "1.20"
+	openApiConfigVersion = "1.24"
 	cfgSyncVersion       = 1
 )
 

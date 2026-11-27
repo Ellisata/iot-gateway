@@ -37,6 +37,14 @@ func (ctr *PushController) RecentMessages(c *gin.Context) {
 		return
 	}
 	msgs, active := ctr.pushEngine.RecentMessages(req.ChannelID, req.Limit)
+	c.JSON(200, response.Success(newPushRecentMessagesVO(msgs, active)))
+}
+
+// newPushRecentMessagesVO 把引擎快照转成最近报文响应。
+//
+// 内部接口 /push/recentMessages 与开放接口 /openApi/pushChannel/recentMessages
+// 共用这一份转换，保证时间格式、载荷预览等字段口径不会两边漂移。
+func newPushRecentMessagesVO(msgs []push.RecentPushMessage, active bool) *vo.PushRecentMessagesVO {
 	out := &vo.PushRecentMessagesVO{
 		Active:   active,
 		Messages: make([]vo.PushRecentMessageVO, 0, len(msgs)),
@@ -63,7 +71,7 @@ func (ctr *PushController) RecentMessages(c *gin.Context) {
 			FromDrain:  m.FromDrain,
 		})
 	}
-	c.JSON(200, response.Success(out))
+	return out
 }
 
 // Refresh 热刷新推送配置（新增/修改/删除通道无需重启应用）
